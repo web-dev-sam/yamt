@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `f73c85c6` (local conflict check, plan §2 #149–#150: gitio's `merge_tree`, `remote_refs`, `missing_commits`; `yamt-merge-requests` `check.rs` and `readiness.rs`, `MergedPairs` in `MergeRequestState`, `ListMessage::Checked`, `Readiness::MergesCleanly`, `listMergeRequests(onPage, onChecked)`; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `8010d81f` (merge-request row details, plan §2 #151–#157: gitio's `Glab::post`; `yamt-merge-requests` `people.rs`, `labels.rs`, `picture.rs`, `rerequest.rs`, `ListedPage`; src-tauri `merge_requests/pictures.rs` (the `yamt-picture` scheme, `Pictures`), `rerequest_review`; `mergeRequests/` `people`, `labels`, `dueDate`; `ui/` `tooltip.ts`, `useHoverBox.ts`, `useHoverMenu.ts`, `mergeRequestDueDates.ts`, `mergeRequestRerequests.ts` and four `MergeRequest*.vue`; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 

@@ -7,8 +7,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Merge-request rows for reviewing. Each row starts with the author's picture ("Author: <name>" on hover) and shows
+  its first label in GitLab's colour with "+N" for the others (hover for them), and the assignees and reviewers as one
+  stack of pictures. Pictures come from the project's GitLab, through `glab`, or from Gravatar for people who uploaded
+  none; a picture that cannot load shows the person's initials. Hovering the stack lists assignees and reviewers with
+  each review's state (review requested, reviewed, approved, changes requested), and beside a reviewer who already
+  reviewed, "Re-request review" asks GitLab to request that review again. The approvals count's hover lists who
+  approved.
+- Due dates on merge requests, kept only on this computer per repository: set, change or clear one from the row's
+  calendar button. The row shows the date and the days left ("Due today", "7 days left", "1 day overdue" in red).
+  Rows with a due date come first, the soonest on top; the rest follow newest first.
+- Exclude filters: Shift+click on an assignee, reviewer or label value filters it out ("Assignee: not Me"); while
+  Shift is held each value shows a minus icon. Filters stored by an older yamt still read.
+
 ### Changed
 
+- The merge-request filters open on hover and close shortly after the pointer leaves; their values are sorted by
+  count, with "Me" and "None" first.
+- Every hover text on the merge-request page is yamt's own tooltip, shown after a short delay.
 - The merge-request list decides each open row's conflicts by merging the two commits GitLab shows on the user's
   machine, in the background, after GitLab's answers appear. A stale "has conflicts" or "still checking" from GitLab
   is corrected without opening the merge request, and a row GitLab calls mergeable that does conflict shows "Has
@@ -16,6 +34,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   checked the rest yet", with a dashed check icon. Branches, the working tree, the index and `FETCH_HEAD` are never
   touched; only missing commits are fetched, by name. Each pair of commits is merged once per run. Without a network
   or with git older than 2.38 every row keeps GitLab's answer.
+
+### Fixed
+
+- A merge request whose diff is empty shows "+0 −0 · 0 files" instead of no size.
 
 ## [0.6.5] - 2026-10-31
 

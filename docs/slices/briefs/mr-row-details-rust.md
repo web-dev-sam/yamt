@@ -130,9 +130,9 @@ pub(crate) async fn rerequest_review<R: Runtime>(window: WebviewWindow<R>, iid: 
     -> Result<RerequestReply, IpcError>;   // through blocking_reply, as open_merge_request
 pub(crate) const PICTURE_SCHEME: &str = "yamt-picture";
 const PICTURE_FETCHES: usize = 4;      // glab runs for pictures at once
-// MergeRequestState gains `pictures: Mutex<PictureShelf>` (offered: username → PictureAddress, the latest list's
-// wins; fetched: PictureAddress → Option<Picture>, failures kept as None) and the fetch gate; never locked together
-// with `pages` or `merged`, and never held across a glab run.
+// MergeRequestState gains `pictures: Pictures` (fix round #2119: one `Mutex<PictureShelf>` — offered: username →
+// PictureAddress, the latest list's wins; fetched: PictureAddress → Option<Picture>, failures kept as None — plus the
+// fetch gate's `Condvar`); never locked together with `pages` or `merged`, and never held across a glab run.
 ```
 
 The scheme answers `GET <scheme>://localhost/<username>` (and the Windows form `http://yamt-picture.localhost/<username>`,

@@ -109,6 +109,9 @@ only); opening the MR page itself in the browser; acting on an MR (approve, merg
 a timer; the merge window; GitHub; a key for the page; required approvals or total discussions ("not x/y"); naming
 the MR in the opened window's title or headers.
 
+Reopened by `request-mr-row-details.md` (plan §2 #151–#157): avatars, labels, assignees and reviewers on a row, and
+re-requesting a review on GitLab.
+
 ## Reopens (DR4: the owner's changed requirement)
 
 - **#94** "the compare window … never runs git": the compare window now looks for a repository in its start folder and
@@ -149,7 +152,9 @@ the MR in the opened window's title or headers.
   lives in a mount that goes when the first process ends [INFERENCE].
 - **No opener**: no plugin, crate or `xdg-open` call; capabilities `core:event:allow-listen`, `core:window:allow-destroy`
   (`src-tauri/capabilities/main.json`); CSP `connect-src 'self' ipc: http://ipc.localhost; img-src 'self' data:`
-  (`tauri.conf.json:14`) — the page reaches GitLab only through Rust; remote avatars would not load.
+  (`tauri.conf.json:14`) — the page reaches GitLab only through Rust; remote avatars would not load. (Since
+  `request-mr-row-details.md`, plan #152: `img-src` adds `yamt-picture:`, `http://yamt-picture.localhost` and
+  Gravatar's two hosts.)
 - **Headers**: one `SettingsButton.vue` per mounted view (`CompareView.vue:89`, `RangeView.vue:108`,
   `RangeApp.vue:133-141`; up to 16 range views, one per visited compare tab); no gear while the range window has not
   opened (`RangeApp.vue:123,134`). Settings is a screen in each store (`ui/screen.ts`, `settingsStore.ts:11-38`).

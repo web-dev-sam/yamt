@@ -39,7 +39,9 @@ Assignee button, Enter opens the checklist with focus on its first value, Space 
 closes with focus back on the button; Tab into a people box reaches each re-request button, Enter re-requests.
 
 **C. Real app.** The page brief's real-app steps (`--glab mr-row-details` on `scripts/local-conflicts-repo.sh
-<scratch>/rd`), plus: no CSP error in the app's log for the `yamt-picture:` pictures; the only `img` addresses on the
+<scratch>/rd`), plus: no CSP error in the app's log for the `yamt-picture:` pictures; anna's uploaded picture renders as
+an image, not initials (finding #2123: the scheme handler's only proof); the app log has the one WARN line for the
+scenario's unknown review state (#2123); the only `img` addresses on the
 page are `yamt-picture:` ones and the scenario's Gravatar address; a second opening of the page asks glab for no
 picture again (the fake log); post 1 (ben on !52) reads "Review requested" and its body names ben's global id; then
 "Re-request review" on chiara (approved) on !52 (post 2) shows its refusal sentence in the box, gone once the box closes; no fake-glab log line

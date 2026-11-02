@@ -1,1 +1,5 @@
-{}
+{
+  "MrRowDetailsRustR2": {
+    "owned": ["src-tauri/AGENTS.md"]
+  }
+}
