@@ -20,6 +20,7 @@ import type {
   ListEnd,
   LocalMerge,
   MergeRequestPage,
+  RerequestReply,
   ResolveReply,
 } from "./mergeRequestDomain";
 import type { MergeRequestSource } from "./MergeRequestSource";
@@ -122,24 +123,26 @@ test("the list holds every case the page filters and shows (catches a fixture th
     newest - 6 * hour,
     newest - 24 * hour,
   ]);
-  expect(rows.map((row) => [row.openDiscussions, row.approvals])).toEqual(
+  expect(rows.map((row) => [row.openDiscussions, row.approvedBy.length])).toEqual(
     Array.from({ length: 40 }, (_, at) => [at % 3, at % 4]),
   );
   expect(rows.filter((row) => row.draft).map((row) => row.iid)).toEqual([634, 627, 620, 613, 606]);
   expect(count((row) => row.draft !== row.title.startsWith("Draft: "))).toBe(0);
   expect(count((row) => row.assignees.length === 0)).toBe(10);
-  expect(count((row) => row.reviewers.length === 0)).toBe(14);
+  expect(count((row) => row.reviewers.length === 0)).toBe(13);
   expect(count((row) => row.labels.length === 0)).toBe(8);
-  expect(count((row) => row.labels.includes("bug"))).toBe(11);
+  expect(count((row) => row.labels.some((label) => label.title === "bug"))).toBe(11);
   expect(
-    rows.slice(0, 2).map(({ assignees, reviewers, labels }) => [assignees, reviewers, labels]),
+    rows
+      .slice(0, 2)
+      .map(({ assignees, reviewers, labels }) => [
+        assignees.map((person) => person.username),
+        reviewers.map(({ person, state }) => [person.username, state]),
+        labels.map((label) => label.title),
+      ]),
   ).toEqual([
-    [[{ username: "sam", name: "Sam Weller" }], [], ["backend", "bug"]],
-    [
-      [{ username: "anna", name: "Anna Berg" }],
-      [{ username: "dmitri", name: "Dmitri Volkov" }],
-      ["frontend"],
-    ],
+    [["sam"], [], ["backend", "bug"]],
+    [["anna"], [["dmitri", "reviewed"]], ["frontend"]],
   ]);
   expect(new Set(rows.map((row) => row.pipeline?.status ?? null))).toEqual(
     new Set(["passed", "failed", "running", "pending", "canceled", "skipped", "manual", null]),
@@ -179,7 +182,9 @@ test("the list holds every case the page filters and shows (catches a fixture th
 test("a second load of the list drops one label, so a checked label can stay at 0", async () => {
   const list = source("?mr=list");
   function labelsOf({ pages }: Listed): string[] {
-    return pages.flatMap((page) => page.rows.flatMap((row) => row.labels));
+    return pages.flatMap((page) =>
+      page.rows.flatMap((row) => row.labels.map((label) => label.title)),
+    );
   }
   expect(labelsOf(await listed(list))).toContain(DROPPED_LABEL);
   const second = labelsOf(await listed(list));
@@ -393,4 +398,67 @@ test("continuing another merge request, or with nothing started, answers ended",
   expect(await answered(mergeRequests.continueMergeRequest(iid(636)))).toEqual(ended);
   const stillClosed: LocalMerge = { kind: "merging", iid: 640, windowOpen: false };
   expect(await mergeRequests.findLocalMerge()).toEqual({ ok: true, value: stillClosed });
+});
+
+test.each<[string, RerequestReply]>([
+  [
+    "dmitri",
+    {
+      kind: "refused",
+      message: "You are not allowed to re-request a review on this merge request.",
+    },
+  ],
+  ["ben", { kind: "notReviewer" }],
+  [
+    "chiara",
+    {
+      kind: "requested",
+      reviewers: [
+        { person: { username: "chiara", name: "Chiara Rossi", picture: null }, state: "requested" },
+        {
+          person: { username: "dmitri", name: "Dmitri Volkov", picture: null },
+          state: "changesRequested",
+        },
+        {
+          person: {
+            username: "sam",
+            name: "Sam Weller",
+            picture: expect.stringMatching(/^data:image\/png;base64,/u),
+          },
+          state: "requested",
+        },
+      ],
+    },
+  ],
+])(
+  "re-requesting %s's review on !638 answers after 1,000 ms with its reply, and is logged",
+  async (username, reply) => {
+    vi.useFakeTimers();
+    const lines: string[] = [];
+    let replied: unknown = null;
+    void source("?mr=list", lines)
+      .rerequestReview(iid(638), username)
+      .then((result) => {
+        replied = result;
+      });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(replied).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(replied).toEqual({ ok: true, value: reply });
+    expect(lines).toEqual([`mergeRequests.fixture_rerequest {"iid":638,"username":"${username}"}`]);
+  },
+);
+
+test("re-requesting on a merge request the fixture never lists answers notReviewer", async () => {
+  vi.useFakeTimers();
+  expect(await answered(source("?mr=list").rerequestReview(iid(1), "chiara"))).toEqual({
+    ok: true,
+    value: { kind: "notReviewer" },
+  });
+});
+
+test("re-requesting on a row of the list's second page answers from that row (catches a lookup over the first page only)", async () => {
+  vi.useFakeTimers();
+  const replied = await answered(source("?mr=list").rerequestReview(iid(606), "anna"));
+  expect(replied.ok && replied.value.kind).toBe("requested");
 });

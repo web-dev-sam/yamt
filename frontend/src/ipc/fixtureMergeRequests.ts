@@ -6,17 +6,20 @@ import {
   FIXTURE_ME,
   FIXTURE_REPOSITORY,
   fixtureRows,
+  fixtureUploadedPicture,
   LOCAL_CHECKED,
   LOGGED_OUT_DETAIL,
   OPEN_REPLIES,
   PAGE_FAILED_MESSAGE,
   REFUSED_MESSAGE,
+  REFUSING_REVIEWER,
 } from "./fixtureMergeRequestData";
 import type { Log } from "./log";
 import {
   toCheckedRow,
   toMergeRequestPage,
   toOpenReply,
+  toRerequestReply,
   type CheckedRow,
   type ContinueMergeReply,
   type LocalMerge,
@@ -61,6 +64,8 @@ const MANY_PAGES = 5;
 const SLOW_PAGE_MS = 1000;
 const LOCAL_CHECK_MS = 1000;
 const OPEN_PAUSE_MS = 1000;
+const RE_REQUEST_PAUSE_MS = 1000;
+const REFUSED_REREQUEST = "You are not allowed to re-request a review on this merge request.";
 const LOADED: Generated.ListEnd = { kind: "loaded" };
 const CLEAN_IID = 632;
 const LOCAL_AHEAD_IID = 624;
@@ -93,7 +98,7 @@ function withoutDroppedLabel(
 ): Generated.MergeRequestRow[] {
   return rows.map((row) => ({
     ...row,
-    labels: row.labels.filter((label) => label !== DROPPED_LABEL),
+    labels: row.labels.filter((label) => label.title !== DROPPED_LABEL),
   }));
 }
 
@@ -162,6 +167,23 @@ function continueReply(localMerge: LocalMerge, iid: number): ContinueMergeReply 
   return { kind: "opened", branch: fixtureBranch(iid), target: FIXTURE_TARGET };
 }
 
+function rerequestReply(iid: number, username: string): Generated.RerequestReply {
+  if (username === REFUSING_REVIEWER) {
+    return { kind: "refused", message: REFUSED_REREQUEST };
+  }
+  const listed = fixtureRows(0, MANY_PAGE * MANY_PAGES).find((row) => row.iid === iid);
+  const reviewers = listed?.reviewers ?? [];
+  if (!reviewers.some((reviewer) => reviewer.person.username === username)) {
+    return { kind: "notReviewer" };
+  }
+  return {
+    kind: "requested",
+    reviewers: reviewers.map((reviewer) =>
+      reviewer.person.username === username ? { ...reviewer, state: "requested" } : reviewer,
+    ),
+  };
+}
+
 function localMergeScript(): Pick<
   MergeRequestSource,
   "resolveMergeRequest" | "continueMergeRequest" | "findLocalMerge"
@@ -190,6 +212,19 @@ function localMergeScript(): Pick<
   };
 }
 
+function rerequestScript(log: Log): Pick<MergeRequestSource, "rerequestReview"> {
+  return {
+    async rerequestReview(iid, username) {
+      log.info("mergeRequests.fixture_rerequest", { iid, username });
+      await pause(RE_REQUEST_PAUSE_MS);
+      return {
+        ok: true,
+        value: toRerequestReply(rerequestReply(iid, username), fixtureUploadedPicture),
+      };
+    },
+  };
+}
+
 /** `?mr=<script>` scripts GitLab's answers; without it the window has no GitLab project. */
 export function createFixtureMergeRequests(log: Log, search: string): MergeRequestSource {
   const script = shownScript(log, search);
@@ -212,7 +247,7 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
         if (script === "slow") {
           await pause(SLOW_PAGE_MS);
         }
-        onPage(toMergeRequestPage({ me: FIXTURE_ME, rows: [...rows] }));
+        onPage(toMergeRequestPage({ me: FIXTURE_ME, rows: [...rows] }, fixtureUploadedPicture));
       }
       if (script === "local") {
         checkLater(onChecked);
@@ -228,5 +263,6 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
       return { ok: true, value: { kind: "opened" } };
     },
     ...localMergeScript(),
+    ...rerequestScript(log),
   };
 }

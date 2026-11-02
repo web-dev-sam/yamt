@@ -72,14 +72,18 @@ export type {
   GitLabProject,
   ListEnd,
   LocalMerge,
+  Label,
   MergeRequestPage,
   MergeRequestRow,
   OpenReply,
   PageOpened,
+  Person,
   Readiness,
   Refusal,
+  RerequestReply,
   ResolveRefusal,
   ResolveReply,
+  Reviewer,
   Started,
 } from "./mergeRequestDomain";
 export type { MergeRequestSource } from "./MergeRequestSource";

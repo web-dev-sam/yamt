@@ -9,9 +9,9 @@ const KEY = "yamt.mergeRequests.filters";
 const REPOSITORY = "/home/sam/taskboard/.git";
 const OTHER_REPOSITORY = "/home/sam/other/.git";
 const FILTERS: Filters = {
-  assignee: [{ kind: "me" }],
-  reviewer: [{ kind: "person", username: "anna" }],
-  label: [{ kind: "none" }],
+  assignee: [{ value: { kind: "me" }, mode: "included" }],
+  reviewer: [{ value: { kind: "person", username: "anna" }, mode: "included" }],
+  label: [{ value: { kind: "none" }, mode: "included" }],
   draft: "ready",
 };
 const STORED_FILTERS = {
@@ -58,9 +58,34 @@ test("no filter at first; set filters are remembered under the repository", () =
   expect(stored(storage)).toEqual({ [REPOSITORY]: STORED_FILTERS });
 });
 
-test("filters written before are read back by a new window", () => {
+test("filters written before are read back by a new window: today's stored JSON reads as included", () => {
   const storage = memoryStorage({ [KEY]: JSON.stringify({ [REPOSITORY]: STORED_FILTERS }) });
   expect(createRememberedFilters(shallowRef(REPOSITORY), storage).filters.value).toEqual(FILTERS);
+});
+
+test("an excluded value is stored with not: and read back excluded beside included ones", () => {
+  const storage = memoryStorage();
+  const excluded: Filters = {
+    ...FILTERS,
+    assignee: [{ value: { kind: "me" }, mode: "excluded" }],
+    label: [
+      { value: { kind: "label", title: "frontend" }, mode: "included" },
+      { value: { kind: "none" }, mode: "excluded" },
+    ],
+  };
+  createRememberedFilters(shallowRef(REPOSITORY), storage).set(excluded);
+
+  expect(storage.items.get(KEY)).toBe(
+    JSON.stringify({
+      [REPOSITORY]: {
+        assignee: ["not:me"],
+        reviewer: ["user:anna"],
+        label: ["label:frontend", "not:none"],
+        draft: "ready",
+      },
+    }),
+  );
+  expect(createRememberedFilters(shallowRef(REPOSITORY), storage).filters.value).toEqual(excluded);
 });
 
 test("another repository's entry survives a write, as written", () => {
@@ -76,7 +101,7 @@ test("another repository's entry survives a write, as written", () => {
   repository.value = OTHER_REPOSITORY;
   expect(remembered.filters.value).toEqual({
     ...NO_FILTERS,
-    label: [{ kind: "label", title: "bug" }],
+    label: [{ value: { kind: "label", title: "bug" }, mode: "included" }],
   });
 });
 

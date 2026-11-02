@@ -8,6 +8,7 @@ import type {
   MergeRequestPage,
   OpenReply,
   PageOpened,
+  RerequestReply,
   ResolveReply,
 } from "./mergeRequestDomain";
 
@@ -26,4 +27,5 @@ export interface MergeRequestSource {
   resolveMergeRequest(iid: MergeRequestIid): Promise<SourceResult<ResolveReply>>;
   continueMergeRequest(iid: MergeRequestIid): Promise<SourceResult<ContinueMergeReply>>;
   findLocalMerge(): Promise<SourceResult<LocalMerge>>;
+  rerequestReview(iid: MergeRequestIid, username: string): Promise<SourceResult<RerequestReply>>;
 }

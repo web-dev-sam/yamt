@@ -1,0 +1,2327 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index c985ea7..b1e22cb 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -12,6 +12,8 @@ yamt's local conflict check (request `docs/slices/request-local-conflict-check.m
+ 
+ Resolving a merge request's conflicts (plan §2 #139–#143) adds three `MergeRequestSource` methods, passed through unchanged by `tauriMergeRequests.ts` (`tauriResolve.test.ts`): `resolveMergeRequest(iid)` → `ResolveReply`, `continueMergeRequest(iid)` → `ContinueMergeReply`, `findLocalMerge()` → `LocalMerge`. Fixture mode (`?mr=<script>`) answers a resolve after a second as an open does: !640 `started` with conflicts, !632 `started` clean, !624 `refused` `localAhead`, !616 `windowFailed` "yamt: not found", any other `started`, on `feature/fixture-<iid>` into `main`; `findLocalMerge` is `free` until a `started` or `windowFailed`, then `merging { iid, windowOpen: false }`; `continueMergeRequest` of that iid answers `opened` (after a second) and from then `windowOpen: true`, of any other iid `ended`. Fixture mode's operation also takes ?mergeRequest=created|moved|unchanged|detached|same (Continue answers ReadyToPush), ?clean (no file listed), ?push=rejected (the first push fails) and ?leftovers (Abort leaves two).
+ 
++A row's people (plan §2 #151–#156): the author, assignees, reviewers (with their `ReviewState`) and approvers (`approvedBy`, GitLab's order) are domain `Person`s whose `picture` is the one address the `<img>` loads: `toMergeRequestPage(raw, uploadedPicture)` and `toRerequestReply(raw, uploadedPicture)` turn an `uploaded` picture into `uploadedPicture(username)` (in the app `convertFileSrc(username, PICTURE_SCHEME)`, `tauriMergeRequests.ts`, `yamt-picture://localhost/<username>`, 404 when none), a `gravatar` one into Rust's checked address as sent, `none` into `null` (initials); no other address is built. Labels keep their colours (`null` when GitLab's are not hex) and rows `mayRerequest`. `rerequestReview(iid, username)` → `RerequestReply` (`requested` carries the row's reviewers now). Fixture mode: every row has an author (the next of `PEOPLE`), review states cycling requested, reviewed, approved, changes requested, `approvedBy` the first `index % 4` people, `mayRerequest` false on every 9th row from index 8; every 8th row from index 2 (!638, …) has three reviewers besides its assignee in three states (dmitri a done one on !638); label colours are CSS colour names (`docs` none); !635 has a zero size; pictures are `data:` addresses only (sam and anna load, ben's does not decode, chiara and dmitri none: `fixtureUploadedPicture` stands in for the scheme). Its `rerequestReview` answers after 1,000 ms and logs `mergeRequests.fixture_rerequest`: dmitri `refused`, a non-reviewer `notReviewer`, any other reviewer `requested` with that reviewer back at `requested`.
++
+ `localMergeDomain.ts` holds the merge window's aliases (MergeView, ReturnTo, Leftover, AbortReply, PushReply) over bindings; domain.ts's Listing and ChunkSource import from it.
+ 
+ `tauri.ts` `readClipboard(selection)` reads the clipboard through the shell, never through WebKit (plan §2 #99): GTK's text request, `null` for unreadable or no text; `main.ts` hands it to `ui/linuxPaste.ts` `takeLinuxPastes` on Linux. The fence (PM8, `scripts/clipboardFence.ts`) is on WebKit's clipboard reads: `clipboardData` and `navigator.clipboard.read`/`readText` outside `ui/linuxPaste.ts`. `keys.ts` holds both platform tests: `isMac` (CodeMirror's `Mod`) and `isLinux` (the one Linux rule, also behind `showsAntialiasing`).
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index a234bbf..91e419d 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -8,6 +8,7 @@ import type {
+   MergeRequestPage,
+   OpenReply,
+   PageOpened,
++  RerequestReply,
+   ResolveReply,
+ } from "./mergeRequestDomain";
+ 
+@@ -26,4 +27,5 @@ export interface MergeRequestSource {
+   resolveMergeRequest(iid: MergeRequestIid): Promise<SourceResult<ResolveReply>>;
+   continueMergeRequest(iid: MergeRequestIid): Promise<SourceResult<ContinueMergeReply>>;
+   findLocalMerge(): Promise<SourceResult<LocalMerge>>;
++  rerequestReview(iid: MergeRequestIid, username: string): Promise<SourceResult<RerequestReply>>;
+ }
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.test.ts b/frontend/src/ipc/fixtureMergeRequestData.test.ts
+index 46a0598..1460e06 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.test.ts
+@@ -1,7 +1,9 @@
+ import { expect, test } from "vitest";
+ 
++import { filtered, type Filters } from "../mergeRequests";
+ import type * as Generated from "./bindings";
+-import { fixtureRows, LOCAL_CHECKED } from "./fixtureMergeRequestData";
++import { fixtureRows, fixtureUploadedPicture, LOCAL_CHECKED } from "./fixtureMergeRequestData";
++import { toMergeRequestPage } from "./mergeRequestDomain";
+ 
+ const LISTED = 40;
+ 
+@@ -59,3 +61,100 @@ test("each locally checked row is a listed row whose readiness the check changes
+   }
+   expect(LOCAL_CHECKED.map((checked) => checked.iid)).toEqual([640, 638, 635]);
+ });
++
++test("the_owners_example_keeps_six_rows: Assignee not Me and Label frontend over ?mr=list's 40 rows", () => {
++  const { rows } = toMergeRequestPage(
++    { me: "sam", rows: fixtureRows(0, LISTED) },
++    fixtureUploadedPicture,
++  );
++  const filters: Filters = {
++    assignee: [{ value: { kind: "me" }, mode: "excluded" }],
++    reviewer: [],
++    label: [{ value: { kind: "label", title: "frontend" }, mode: "included" }],
++    draft: "all",
++  };
++  expect(filtered(rows, filters, "sam").map((row) => row.iid)).toEqual([
++    639, 627, 623, 619, 607, 603,
++  ]);
++});
++
++test("!635, the row ?mr=local finds merging cleanly, changes nothing: its size is zero", () => {
++  expect(rowOf(fixtureRows(0, LISTED), 635).size).toEqual({ additions: 0, deletions: 0, files: 0 });
++});
++
++test("every 8th row from index 2 stacks its assignee and three reviewers in three states, and dmitri is a done reviewer on a re-requestable one (catches a fixture without a +1)", () => {
++  const rows = fixtureRows(0, LISTED);
++  const stacked = rows.filter((row) => row.reviewers.length === 3);
++  expect(stacked.map((row) => row.iid)).toEqual([638, 630, 622, 614, 606]);
++  for (const row of stacked) {
++    const reviewers = row.reviewers.map((reviewer) => reviewer.person.username);
++    const assignees = row.assignees.map((person) => person.username);
++    expect(assignees).toHaveLength(1);
++    expect(reviewers.filter((username) => assignees.includes(username))).toEqual([]);
++    expect(new Set(row.reviewers.map((reviewer) => reviewer.state)).size).toBe(3);
++  }
++  expect(
++    stacked.some(
++      (row) =>
++        row.mayRerequest &&
++        row.reviewers.some(
++          (reviewer) => reviewer.person.username === "dmitri" && reviewer.state !== "requested",
++        ),
++    ),
++  ).toBe(true);
++});
++
++test("authors, review states, approvers and the re-request permission follow their cycles", () => {
++  const rows = fixtureRows(0, LISTED);
++  expect(rows.slice(0, 5).map((row) => row.author?.username)).toEqual([
++    "anna",
++    "ben",
++    "chiara",
++    "dmitri",
++    "sam",
++  ]);
++  expect(rows.slice(0, 2).map((row) => row.reviewers.map((reviewer) => reviewer.state))).toEqual([
++    [],
++    ["reviewed"],
++  ]);
++  expect(rowOf(rows, 636).reviewers.map((reviewer) => reviewer.state)).toEqual(["requested"]);
++  expect(rowOf(rows, 637).approvedBy.map((person) => person.username)).toEqual([
++    "sam",
++    "anna",
++    "ben",
++  ]);
++  expect(rows.filter((row) => !row.mayRerequest).map((row) => row.iid)).toEqual([
++    632, 623, 614, 605,
++  ]);
++});
++
++test("label colours are CSS colour names, and docs has none", () => {
++  const labels = fixtureRows(0, LISTED).flatMap((row) => row.labels);
++  const colours = new Map(labels.map((label) => [label.title, label.colors]));
++  expect(Object.fromEntries(colours)).toEqual({
++    backend: { background: "teal", text: "white" },
++    frontend: { background: "steelblue", text: "white" },
++    ui: { background: "gold", text: "black" },
++    docs: null,
++    bug: { background: "crimson", text: "white" },
++  });
++});
++
++test("no picture address outside data: (catches the fixture loading a remote picture)", () => {
++  const { rows } = toMergeRequestPage(
++    { me: "sam", rows: fixtureRows(0, LISTED) },
++    fixtureUploadedPicture,
++  );
++  const people = rows.flatMap((row) => [
++    ...(row.author === null ? [] : [row.author]),
++    ...row.assignees,
++    ...row.reviewers.map((reviewer) => reviewer.person),
++    ...row.approvedBy,
++  ]);
++  const pictures = new Map(people.map((person) => [person.username, person.picture]));
++  expect(people.every(({ picture }) => picture === null || picture.startsWith("data:"))).toBe(true);
++  expect(pictures.get("sam")).toMatch(/^data:image\/png;base64,iVBOR/u);
++  expect(pictures.get("anna")).toBe(pictures.get("sam"));
++  expect(pictures.get("ben")).toBe("data:image/png;base64,AAAA");
++  expect([pictures.get("chiara"), pictures.get("dmitri")]).toEqual([null, null]);
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.ts b/frontend/src/ipc/fixtureMergeRequestData.ts
+index 630a539..81e02a2 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.ts
+@@ -29,6 +29,14 @@ const ADDED_PER_ROW = 12;
+ const REMOVED_STEP = 5;
+ const REMOVED_CYCLE = 4;
+ const FILES_CYCLE = 6;
++const STACK_EVERY = 8;
++const STACK_AT = 2;
++const STACK_REVIEWERS = 3;
++const NO_REREQUEST_EVERY = 9;
++const APPROVERS_CYCLE = 4;
++const PNG_DATA =
++  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
++const BROKEN_PICTURE = "data:image/png;base64,AAAA";
+ 
+ const TITLES = [
+   "Snooze a reminder",
+@@ -44,15 +52,37 @@ const TITLES = [
+ ];
+ 
+ const PEOPLE: readonly Generated.Person[] = [
+-  { username: FIXTURE_ME, name: "Sam Weller" },
+-  { username: "anna", name: "Anna Berg" },
+-  { username: "ben", name: "Ben Okafor" },
+-  { username: "chiara", name: "Chiara Rossi" },
+-  { username: "dmitri", name: "Dmitri Volkov" },
++  { username: FIXTURE_ME, name: "Sam Weller", picture: { kind: "uploaded" } },
++  { username: "anna", name: "Anna Berg", picture: { kind: "gravatar", address: PNG_DATA } },
++  { username: "ben", name: "Ben Okafor", picture: { kind: "uploaded" } },
++  { username: "chiara", name: "Chiara Rossi", picture: { kind: "none" } },
++  { username: "dmitri", name: "Dmitri Volkov", picture: { kind: "none" } },
+ ];
+ 
++export const REFUSING_REVIEWER = "dmitri";
++
+ const LABELS = [DROPPED_LABEL, "frontend", "ui", "docs"];
+ 
++const LABEL_COLORS: Readonly<Record<string, Generated.LabelColors | null>> = {
++  [DROPPED_LABEL]: { background: "teal", text: "white" },
++  frontend: { background: "steelblue", text: "white" },
++  ui: { background: "gold", text: "black" },
++  docs: null,
++  bug: { background: "crimson", text: "white" },
++};
++
++const REVIEW_STATES: readonly Generated.ReviewState[] = [
++  "requested",
++  "reviewed",
++  "approved",
++  "changesRequested",
++];
++
++/** Stands in for `convertFileSrc` over the picture scheme: sam's loads, anyone else's does not (Rust's 404). */
++export function fixtureUploadedPicture(username: string): string {
++  return username === FIXTURE_ME ? PNG_DATA : BROKEN_PICTURE;
++}
++
+ const PIPELINES: readonly (Generated.CiStatus | null)[] = [
+   "failed",
+   "passed",
+@@ -128,12 +158,26 @@ function pipeline(index: number): Generated.Pipeline | null {
+   };
+ }
+ 
+-function labels(index: number): string[] {
++function labels(index: number): Generated.Label[] {
+   if (index % NO_LABEL_EVERY === NO_LABEL_EVERY - 1) {
+     return [];
+   }
+   const label = cycled(LABELS, index);
+-  return index % BUG_EVERY === 0 ? [label, "bug"] : [label];
++  const titles = index % BUG_EVERY === 0 ? [label, "bug"] : [label];
++  return titles.map((title) => ({ title, colors: LABEL_COLORS[title] ?? null }));
++}
++
++function reviewers(index: number): Generated.Reviewer[] {
++  if (index % STACK_EVERY === STACK_AT) {
++    return Array.from({ length: STACK_REVIEWERS }, (_, at) => ({
++      person: cycled(PEOPLE, index + at + 1),
++      state: cycled(REVIEW_STATES, index + at),
++    }));
++  }
++  if (index % BUG_EVERY === 0) {
++    return [];
++  }
++  return [{ person: cycled(PEOPLE, index + BUG_EVERY), state: cycled(REVIEW_STATES, index) }];
+ }
+ 
+ function readiness(index: number, draft: boolean): Generated.Readiness {
+@@ -148,6 +192,9 @@ function readiness(index: number, draft: boolean): Generated.Readiness {
+ }
+ 
+ function size(index: number): Generated.ChangeSize | null {
++  if (NEWEST_IID - index === CHECKING_IID) {
++    return { additions: 0, deletions: 0, files: 0 };
++  }
+   if (index % NO_SIZE_EVERY === NO_SIZE_EVERY - 1) {
+     return null;
+   }
+@@ -167,11 +214,13 @@ function row(index: number): Generated.MergeRequestRow {
+     title: draft ? `Draft: ${title}` : title,
+     createdAt: new Date(NEWEST_CREATED - index * index * CREATED_STEP_MS).toISOString(),
+     draft,
++    author: cycled(PEOPLE, index + 1),
+     assignees: index % NO_ASSIGNEE_EVERY === NO_ASSIGNEE_EVERY - 1 ? [] : [cycled(PEOPLE, index)],
+-    reviewers: index % BUG_EVERY === 0 ? [] : [cycled(PEOPLE, index + BUG_EVERY)],
++    reviewers: reviewers(index),
+     labels: labels(index),
+     openDiscussions: index % BUG_EVERY,
+-    approvals: index % NO_ASSIGNEE_EVERY,
++    approvedBy: PEOPLE.slice(0, index % APPROVERS_CYCLE),
++    mayRerequest: index % NO_REREQUEST_EVERY !== NO_REREQUEST_EVERY - 1,
+     pipeline: pipeline(index),
+     page: `${ORIGIN}/-/merge_requests/${iid}`,
+     size: size(index),
+diff --git a/frontend/src/ipc/fixtureMergeRequests.test.ts b/frontend/src/ipc/fixtureMergeRequests.test.ts
+index c6d4f55..4f018a5 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.test.ts
+@@ -20,6 +20,7 @@ import type {
+   ListEnd,
+   LocalMerge,
+   MergeRequestPage,
++  RerequestReply,
+   ResolveReply,
+ } from "./mergeRequestDomain";
+ import type { MergeRequestSource } from "./MergeRequestSource";
+@@ -122,24 +123,26 @@ test("the list holds every case the page filters and shows (catches a fixture th
+     newest - 6 * hour,
+     newest - 24 * hour,
+   ]);
+-  expect(rows.map((row) => [row.openDiscussions, row.approvals])).toEqual(
++  expect(rows.map((row) => [row.openDiscussions, row.approvedBy.length])).toEqual(
+     Array.from({ length: 40 }, (_, at) => [at % 3, at % 4]),
+   );
+   expect(rows.filter((row) => row.draft).map((row) => row.iid)).toEqual([634, 627, 620, 613, 606]);
+   expect(count((row) => row.draft !== row.title.startsWith("Draft: "))).toBe(0);
+   expect(count((row) => row.assignees.length === 0)).toBe(10);
+-  expect(count((row) => row.reviewers.length === 0)).toBe(14);
++  expect(count((row) => row.reviewers.length === 0)).toBe(13);
+   expect(count((row) => row.labels.length === 0)).toBe(8);
+-  expect(count((row) => row.labels.includes("bug"))).toBe(11);
++  expect(count((row) => row.labels.some((label) => label.title === "bug"))).toBe(11);
+   expect(
+-    rows.slice(0, 2).map(({ assignees, reviewers, labels }) => [assignees, reviewers, labels]),
++    rows
++      .slice(0, 2)
++      .map(({ assignees, reviewers, labels }) => [
++        assignees.map((person) => person.username),
++        reviewers.map(({ person, state }) => [person.username, state]),
++        labels.map((label) => label.title),
++      ]),
+   ).toEqual([
+-    [[{ username: "sam", name: "Sam Weller" }], [], ["backend", "bug"]],
+-    [
+-      [{ username: "anna", name: "Anna Berg" }],
+-      [{ username: "dmitri", name: "Dmitri Volkov" }],
+-      ["frontend"],
+-    ],
++    [["sam"], [], ["backend", "bug"]],
++    [["anna"], [["dmitri", "reviewed"]], ["frontend"]],
+   ]);
+   expect(new Set(rows.map((row) => row.pipeline?.status ?? null))).toEqual(
+     new Set(["passed", "failed", "running", "pending", "canceled", "skipped", "manual", null]),
+@@ -179,7 +182,9 @@ test("the list holds every case the page filters and shows (catches a fixture th
+ test("a second load of the list drops one label, so a checked label can stay at 0", async () => {
+   const list = source("?mr=list");
+   function labelsOf({ pages }: Listed): string[] {
+-    return pages.flatMap((page) => page.rows.flatMap((row) => row.labels));
++    return pages.flatMap((page) =>
++      page.rows.flatMap((row) => row.labels.map((label) => label.title)),
++    );
+   }
+   expect(labelsOf(await listed(list))).toContain(DROPPED_LABEL);
+   const second = labelsOf(await listed(list));
+@@ -394,3 +399,66 @@ test("continuing another merge request, or with nothing started, answers ended",
+   const stillClosed: LocalMerge = { kind: "merging", iid: 640, windowOpen: false };
+   expect(await mergeRequests.findLocalMerge()).toEqual({ ok: true, value: stillClosed });
+ });
++
++test.each<[string, RerequestReply]>([
++  [
++    "dmitri",
++    {
++      kind: "refused",
++      message: "You are not allowed to re-request a review on this merge request.",
++    },
++  ],
++  ["ben", { kind: "notReviewer" }],
++  [
++    "chiara",
++    {
++      kind: "requested",
++      reviewers: [
++        { person: { username: "chiara", name: "Chiara Rossi", picture: null }, state: "requested" },
++        {
++          person: { username: "dmitri", name: "Dmitri Volkov", picture: null },
++          state: "changesRequested",
++        },
++        {
++          person: {
++            username: "sam",
++            name: "Sam Weller",
++            picture: expect.stringMatching(/^data:image\/png;base64,/u),
++          },
++          state: "requested",
++        },
++      ],
++    },
++  ],
++])(
++  "re-requesting %s's review on !638 answers after 1,000 ms with its reply, and is logged",
++  async (username, reply) => {
++    vi.useFakeTimers();
++    const lines: string[] = [];
++    let replied: unknown = null;
++    void source("?mr=list", lines)
++      .rerequestReview(iid(638), username)
++      .then((result) => {
++        replied = result;
++      });
++    await vi.advanceTimersByTimeAsync(999);
++    expect(replied).toBeNull();
++    await vi.advanceTimersByTimeAsync(1);
++    expect(replied).toEqual({ ok: true, value: reply });
++    expect(lines).toEqual([`mergeRequests.fixture_rerequest {"iid":638,"username":"${username}"}`]);
++  },
++);
++
++test("re-requesting on a merge request the fixture never lists answers notReviewer", async () => {
++  vi.useFakeTimers();
++  expect(await answered(source("?mr=list").rerequestReview(iid(1), "chiara"))).toEqual({
++    ok: true,
++    value: { kind: "notReviewer" },
++  });
++});
++
++test("re-requesting on a row of the list's second page answers from that row (catches a lookup over the first page only)", async () => {
++  vi.useFakeTimers();
++  const replied = await answered(source("?mr=list").rerequestReview(iid(606), "anna"));
++  expect(replied.ok && replied.value.kind).toBe("requested");
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequests.ts b/frontend/src/ipc/fixtureMergeRequests.ts
+index 77c3b8a..f989894 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.ts
+@@ -6,17 +6,20 @@ import {
+   FIXTURE_ME,
+   FIXTURE_REPOSITORY,
+   fixtureRows,
++  fixtureUploadedPicture,
+   LOCAL_CHECKED,
+   LOGGED_OUT_DETAIL,
+   OPEN_REPLIES,
+   PAGE_FAILED_MESSAGE,
+   REFUSED_MESSAGE,
++  REFUSING_REVIEWER,
+ } from "./fixtureMergeRequestData";
+ import type { Log } from "./log";
+ import {
+   toCheckedRow,
+   toMergeRequestPage,
+   toOpenReply,
++  toRerequestReply,
+   type CheckedRow,
+   type ContinueMergeReply,
+   type LocalMerge,
+@@ -61,6 +64,8 @@ const MANY_PAGES = 5;
+ const SLOW_PAGE_MS = 1000;
+ const LOCAL_CHECK_MS = 1000;
+ const OPEN_PAUSE_MS = 1000;
++const RE_REQUEST_PAUSE_MS = 1000;
++const REFUSED_REREQUEST = "You are not allowed to re-request a review on this merge request.";
+ const LOADED: Generated.ListEnd = { kind: "loaded" };
+ const CLEAN_IID = 632;
+ const LOCAL_AHEAD_IID = 624;
+@@ -93,7 +98,7 @@ function withoutDroppedLabel(
+ ): Generated.MergeRequestRow[] {
+   return rows.map((row) => ({
+     ...row,
+-    labels: row.labels.filter((label) => label !== DROPPED_LABEL),
++    labels: row.labels.filter((label) => label.title !== DROPPED_LABEL),
+   }));
+ }
+ 
+@@ -162,6 +167,23 @@ function continueReply(localMerge: LocalMerge, iid: number): ContinueMergeReply
+   return { kind: "opened", branch: fixtureBranch(iid), target: FIXTURE_TARGET };
+ }
+ 
++function rerequestReply(iid: number, username: string): Generated.RerequestReply {
++  if (username === REFUSING_REVIEWER) {
++    return { kind: "refused", message: REFUSED_REREQUEST };
++  }
++  const listed = fixtureRows(0, MANY_PAGE * MANY_PAGES).find((row) => row.iid === iid);
++  const reviewers = listed?.reviewers ?? [];
++  if (!reviewers.some((reviewer) => reviewer.person.username === username)) {
++    return { kind: "notReviewer" };
++  }
++  return {
++    kind: "requested",
++    reviewers: reviewers.map((reviewer) =>
++      reviewer.person.username === username ? { ...reviewer, state: "requested" } : reviewer,
++    ),
++  };
++}
++
+ function localMergeScript(): Pick<
+   MergeRequestSource,
+   "resolveMergeRequest" | "continueMergeRequest" | "findLocalMerge"
+@@ -190,6 +212,19 @@ function localMergeScript(): Pick<
+   };
+ }
+ 
++function rerequestScript(log: Log): Pick<MergeRequestSource, "rerequestReview"> {
++  return {
++    async rerequestReview(iid, username) {
++      log.info("mergeRequests.fixture_rerequest", { iid, username });
++      await pause(RE_REQUEST_PAUSE_MS);
++      return {
++        ok: true,
++        value: toRerequestReply(rerequestReply(iid, username), fixtureUploadedPicture),
++      };
++    },
++  };
++}
++
+ /** `?mr=<script>` scripts GitLab's answers; without it the window has no GitLab project. */
+ export function createFixtureMergeRequests(log: Log, search: string): MergeRequestSource {
+   const script = shownScript(log, search);
+@@ -212,7 +247,7 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
+         if (script === "slow") {
+           await pause(SLOW_PAGE_MS);
+         }
+-        onPage(toMergeRequestPage({ me: FIXTURE_ME, rows: [...rows] }));
++        onPage(toMergeRequestPage({ me: FIXTURE_ME, rows: [...rows] }, fixtureUploadedPicture));
+       }
+       if (script === "local") {
+         checkLater(onChecked);
+@@ -228,5 +263,6 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
+       return { ok: true, value: { kind: "opened" } };
+     },
+     ...localMergeScript(),
++    ...rerequestScript(log),
+   };
+ }
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 2b8caa0..f1a5ca6 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -72,14 +72,18 @@ export type {
+   GitLabProject,
+   ListEnd,
+   LocalMerge,
++  Label,
+   MergeRequestPage,
+   MergeRequestRow,
+   OpenReply,
+   PageOpened,
++  Person,
+   Readiness,
+   Refusal,
++  RerequestReply,
+   ResolveRefusal,
+   ResolveReply,
++  Reviewer,
+   Started,
+ } from "./mergeRequestDomain";
+ export type { MergeRequestSource } from "./MergeRequestSource";
+diff --git a/frontend/src/ipc/mergeRequestDomain.test.ts b/frontend/src/ipc/mergeRequestDomain.test.ts
+index fe68690..e25d508 100644
+--- a/frontend/src/ipc/mergeRequestDomain.test.ts
++++ b/frontend/src/ipc/mergeRequestDomain.test.ts
+@@ -2,18 +2,34 @@ import { expect, test } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+ import { isMergeRequestIid, isWebPage } from "./domain";
+-import { toCheckedRow, toMergeRequestPage, toOpenReply } from "./mergeRequestDomain";
++import {
++  toCheckedRow,
++  toMergeRequestPage,
++  toOpenReply,
++  toRerequestReply,
++  type MergeRequestRow,
++} from "./mergeRequestDomain";
++
++const ANNA: Generated.Person = { username: "anna", name: "Anna Berg", picture: { kind: "none" } };
++const GRAVATAR =
++  "https://secure.gravatar.com/avatar/f660ab912ec121d1b1e928a0bb4bc61b?s=80&d=identicon";
++
++function uploadedPicture(username: string): string {
++  return `yamt-picture://localhost/${username}`;
++}
+ 
+ const ROW: Generated.MergeRequestRow = {
+   iid: 13,
+   title: "Snooze a reminder",
+   createdAt: "2026-10-28T09:30:00Z",
+   draft: false,
+-  assignees: [{ username: "anna", name: "Anna Berg" }],
++  author: null,
++  assignees: [ANNA],
+   reviewers: [],
+-  labels: ["frontend"],
++  labels: [{ title: "frontend", colors: { background: "steelblue", text: "white" } }],
+   openDiscussions: 1,
+-  approvals: 2,
++  approvedBy: [],
++  mayRerequest: true,
+   pipeline: {
+     status: "failed",
+     failedJobs: [
+@@ -37,30 +53,133 @@ function page(row: Partial<Generated.MergeRequestRow>): Generated.MergeRequestPa
+   return { me: "sam", rows: [{ ...ROW, ...row }] };
+ }
+ 
++function firstRow(row: Partial<Generated.MergeRequestRow>): MergeRequestRow {
++  const [converted] = toMergeRequestPage(page(row), uploadedPicture).rows;
++  if (converted === undefined) {
++    throw new Error("the page lost its row");
++  }
++  return converted;
++}
++
+ test("a page keeps me and every field, with createdAt in ms since 1970 (catches a time left as text)", () => {
+-  expect(toMergeRequestPage(page({}))).toEqual({
++  expect(toMergeRequestPage(page({}), uploadedPicture)).toEqual({
+     me: "sam",
+-    rows: [{ ...ROW, createdAt: Date.UTC(2026, 9, 28, 9, 30) }],
++    rows: [
++      { ...ROW, createdAt: Date.UTC(2026, 9, 28, 9, 30), assignees: [{ ...ANNA, picture: null }] },
++    ],
+   });
+-  expect(toMergeRequestPage({ me: null, rows: [] })).toEqual({ me: null, rows: [] });
++  expect(toMergeRequestPage({ me: null, rows: [] }, uploadedPicture)).toEqual({
++    me: null,
++    rows: [],
++  });
++});
++
++test("an_uploaded_picture_is_the_scheme_address_of_the_username, for the author, assignees, reviewers and approvers", () => {
++  const sam: Generated.Person = {
++    username: "sam",
++    name: "Sam Weller",
++    picture: { kind: "uploaded" },
++  };
++  const ben: Generated.Person = {
++    username: "ben",
++    name: "Ben Okafor",
++    picture: { kind: "uploaded" },
++  };
++  const row = firstRow({
++    author: sam,
++    assignees: [ben],
++    reviewers: [{ person: sam, state: "approved" }],
++    approvedBy: [ben],
++  });
++  expect(row.author?.picture).toBe("yamt-picture://localhost/sam");
++  expect(row.assignees.map((person) => person.picture)).toEqual(["yamt-picture://localhost/ben"]);
++  expect(row.reviewers).toEqual([
++    {
++      person: { username: "sam", name: "Sam Weller", picture: "yamt-picture://localhost/sam" },
++      state: "approved",
++    },
++  ]);
++  expect(row.approvedBy.map((person) => person.picture)).toEqual(["yamt-picture://localhost/ben"]);
++});
++
++test("a_gravatar_picture_is_rusts_address_unchanged (catches an address rebuilt in the window)", () => {
++  const gravatar: Generated.Person = { ...ANNA, picture: { kind: "gravatar", address: GRAVATAR } };
++  const row = firstRow({ author: gravatar, assignees: [gravatar] });
++  expect(row.author).toEqual({ username: "anna", name: "Anna Berg", picture: GRAVATAR });
++  expect(row.assignees[0]?.picture).toBe(GRAVATAR);
++});
++
++test("no_picture_is_null, and no author stays null", () => {
++  const row = firstRow({ author: ANNA, reviewers: [{ person: ANNA, state: "requested" }] });
++  expect(row.author?.picture).toBeNull();
++  expect(row.reviewers[0]?.person.picture).toBeNull();
++  expect(firstRow({ author: null }).author).toBeNull();
++});
++
++test("approvedBy keeps GitLab's order; label colours, a colourless label and mayRerequest pass through", () => {
++  const people = ["chiara", "anna", "ben"].map((username) => ({ ...ANNA, username }));
++  const labels: Generated.Label[] = [
++    { title: "bug", colors: { background: "crimson", text: "white" } },
++    { title: "docs", colors: null },
++  ];
++  const row = firstRow({ approvedBy: people, labels, mayRerequest: false });
++  expect(row.approvedBy.map((person) => person.username)).toEqual(["chiara", "anna", "ben"]);
++  expect(row.labels).toEqual(labels);
++  expect(row.mayRerequest).toBe(false);
++  expect(firstRow({ mayRerequest: true }).mayRerequest).toBe(true);
++});
++
++test("a requested reply's reviewers get their pictures like a row's; other replies pass unchanged", () => {
++  const sam: Generated.Person = {
++    username: "sam",
++    name: "Sam Weller",
++    picture: { kind: "uploaded" },
++  };
++  expect(
++    toRerequestReply(
++      {
++        kind: "requested",
++        reviewers: [
++          { person: sam, state: "requested" },
++          {
++            person: { ...ANNA, picture: { kind: "gravatar", address: GRAVATAR } },
++            state: "reviewed",
++          },
++        ],
++      },
++      uploadedPicture,
++    ),
++  ).toEqual({
++    kind: "requested",
++    reviewers: [
++      {
++        person: { username: "sam", name: "Sam Weller", picture: "yamt-picture://localhost/sam" },
++        state: "requested",
++      },
++      { person: { username: "anna", name: "Anna Berg", picture: GRAVATAR }, state: "reviewed" },
++    ],
++  });
++  const refused: Generated.RerequestReply = { kind: "refused", message: "not allowed" };
++  expect(toRerequestReply(refused, uploadedPicture)).toBe(refused);
+ });
+ 
+ test("a time with an offset is the same instant (catches a time read as local)", () => {
+-  const [row] = toMergeRequestPage(page({ createdAt: "2026-10-28T11:30:00+02:00" })).rows;
+-  expect(row?.createdAt).toBe(Date.UTC(2026, 9, 28, 9, 30));
++  expect(firstRow({ createdAt: "2026-10-28T11:30:00+02:00" }).createdAt).toBe(
++    Date.UTC(2026, 9, 28, 9, 30),
++  );
+ });
+ 
+ test.each(["", "yesterday", "2026-13-45T99:00:00Z"])(
+   "an unreadable time %j is refused with its field (catches NaN reaching the order)",
+   (createdAt) => {
+-    expect(() => toMergeRequestPage(page({ createdAt }))).toThrow(
++    expect(() => firstRow({ createdAt })).toThrow(
+       `rows[0].createdAt must be an ISO 8601 time, got "${createdAt}"`,
+     );
+   },
+ );
+ 
+ test.each([-1, 1.5, Number.NaN])("an iid %d is refused (catches an unchecked brand)", (iid) => {
+-  expect(() => toMergeRequestPage(page({ iid }))).toThrow("rows[0].iid must be");
++  expect(() => firstRow({ iid })).toThrow("rows[0].iid must be");
+   expect(isMergeRequestIid(iid)).toBe(false);
+ });
+ 
+@@ -89,7 +208,7 @@ test.each(["http://gitlab.example/x/-/jobs/1", "//evil/x", "/x/-/jobs/1", ""])(
+       failedJobs: [job],
+       moreFailedJobs: false,
+     };
+-    expect(() => toMergeRequestPage(page({ pipeline }))).toThrow(
++    expect(() => firstRow({ pipeline })).toThrow(
+       `rows[0].pipeline.failedJobs[0].page must be an https address, got "${address}"`,
+     );
+   },
+@@ -98,16 +217,16 @@ test.each(["http://gitlab.example/x/-/jobs/1", "//evil/x", "/x/-/jobs/1", ""])(
+ test.each(["http://gitlab.example/x/-/merge_requests/1", "//evil/x", "/x/-/merge_requests/1", ""])(
+   "a merge request page %j that is not https is refused like a job's",
+   (address) => {
+-    expect(() => toMergeRequestPage(page({ page: address }))).toThrow(
++    expect(() => firstRow({ page: address })).toThrow(
+       `rows[0].page must be an https address, got "${address}"`,
+     );
+   },
+ );
+ 
+ test("no pipeline and no page stay null", () => {
+-  const [row] = toMergeRequestPage(page({ pipeline: null, page: null })).rows;
+-  expect(row?.pipeline).toBeNull();
+-  expect(row?.page).toBeNull();
++  const row = firstRow({ pipeline: null, page: null });
++  expect(row.pipeline).toBeNull();
++  expect(row.page).toBeNull();
+ });
+ 
+ test("missingCommit names its short id in camelCase; other replies pass unchanged", () => {
+diff --git a/frontend/src/ipc/mergeRequestDomain.ts b/frontend/src/ipc/mergeRequestDomain.ts
+index 2338971..5463b5a 100644
+--- a/frontend/src/ipc/mergeRequestDomain.ts
++++ b/frontend/src/ipc/mergeRequestDomain.ts
+@@ -11,12 +11,35 @@ type Pipeline = {
+   readonly failedJobs: readonly FailedJob[];
+   readonly moreFailedJobs: boolean;
+ };
++export type Person = {
++  readonly username: string;
++  readonly name: string;
++  readonly picture: string | null;
++};
++export type Reviewer = { readonly person: Person; readonly state: Generated.ReviewState };
++export type Label = Readonly<Generated.Label>;
+ export type MergeRequestRow = Readonly<
+-  Omit<Generated.MergeRequestRow, "iid" | "createdAt" | "pipeline" | "page">
++  Omit<
++    Generated.MergeRequestRow,
++    | "iid"
++    | "createdAt"
++    | "pipeline"
++    | "page"
++    | "author"
++    | "assignees"
++    | "reviewers"
++    | "labels"
++    | "approvedBy"
++  >
+ > & {
+   readonly iid: MergeRequestIid;
+   /** Milliseconds since 1970, from GitLab's ISO 8601 time. */
+   readonly createdAt: number;
++  readonly author: Person | null;
++  readonly assignees: readonly Person[];
++  readonly reviewers: readonly Reviewer[];
++  readonly labels: readonly Label[];
++  readonly approvedBy: readonly Person[];
+   readonly pipeline: Pipeline | null;
+   readonly page: WebPage | null;
+ };
+@@ -37,6 +60,11 @@ export type ResolveReply = Readonly<Generated.ResolveReply>;
+ export type ContinueMergeReply = Readonly<Generated.ContinueMergeReply>;
+ export type CheckedRow = { readonly iid: MergeRequestIid; readonly readiness: Readiness };
+ export type LocalMerge = Readonly<Generated.LocalMerge>;
++export type RerequestReply =
++  | Readonly<Exclude<Generated.RerequestReply, { kind: "requested" }>>
++  | { readonly kind: "requested"; readonly reviewers: readonly Reviewer[] };
++
++type UploadedPicture = (username: string) => string;
+ 
+ function toWebPage(text: string, field: string): WebPage {
+   if (!isWebPage(text)) {
+@@ -64,19 +92,65 @@ function toPipeline(raw: Generated.Pipeline, field: string): Pipeline {
+   };
+ }
+ 
+-function toRow(raw: Generated.MergeRequestRow, index: number): MergeRequestRow {
++function toPerson(raw: Generated.Person, uploadedPicture: UploadedPicture): Person {
++  const { username, name, picture } = raw;
++  switch (picture.kind) {
++    case "uploaded":
++      return { username, name, picture: uploadedPicture(username) };
++    case "gravatar":
++      return { username, name, picture: picture.address };
++    case "none":
++      return { username, name, picture: null };
++    default: {
++      const _exhaustive: never = picture;
++      return _exhaustive;
++    }
++  }
++}
++
++function toReviewers(
++  raw: readonly Generated.Reviewer[],
++  uploadedPicture: UploadedPicture,
++): readonly Reviewer[] {
++  return raw.map(({ person, state }) => ({ person: toPerson(person, uploadedPicture), state }));
++}
++
++function toRow(
++  raw: Generated.MergeRequestRow,
++  index: number,
++  uploadedPicture: UploadedPicture,
++): MergeRequestRow {
+   const field = `rows[${index}]`;
++  function person(each: Generated.Person): Person {
++    return toPerson(each, uploadedPicture);
++  }
+   return {
+     ...raw,
+     iid: branded(raw.iid, isMergeRequestIid, `${field}.iid`),
+     createdAt: toTime(raw.createdAt, `${field}.createdAt`),
++    author: raw.author === null ? null : person(raw.author),
++    assignees: raw.assignees.map(person),
++    reviewers: toReviewers(raw.reviewers, uploadedPicture),
++    approvedBy: raw.approvedBy.map(person),
+     pipeline: raw.pipeline === null ? null : toPipeline(raw.pipeline, `${field}.pipeline`),
+     page: raw.page === null ? null : toWebPage(raw.page, `${field}.page`),
+   };
+ }
+ 
+-export function toMergeRequestPage(raw: Generated.MergeRequestPage): MergeRequestPage {
+-  return { me: raw.me, rows: raw.rows.map(toRow) };
++export function toMergeRequestPage(
++  raw: Generated.MergeRequestPage,
++  uploadedPicture: UploadedPicture,
++): MergeRequestPage {
++  return { me: raw.me, rows: raw.rows.map((row, index) => toRow(row, index, uploadedPicture)) };
++}
++
++export function toRerequestReply(
++  raw: Generated.RerequestReply,
++  uploadedPicture: UploadedPicture,
++): RerequestReply {
++  return raw.kind === "requested"
++    ? { kind: "requested", reviewers: toReviewers(raw.reviewers, uploadedPicture) }
++    : raw;
+ }
+ 
+ export function toCheckedRow(raw: Generated.CheckedRow): CheckedRow {
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index fd141de..21df406 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -3,7 +3,7 @@ import { beforeEach, expect, test, vi } from "vitest";
+ import type * as Generated from "./bindings";
+ import { isMergeRequestIid, isWebPage } from "./domain";
+ import type { CheckedRow, MergeRequestPage } from "./mergeRequestDomain";
+-import { createTauriMergeRequests } from "./tauriMergeRequests";
++import { createTauriMergeRequests, PICTURE_SCHEME } from "./tauriMergeRequests";
+ import { branded } from "./validate";
+ 
+ const commands = vi.hoisted(() => ({
+@@ -11,6 +11,7 @@ const commands = vi.hoisted(() => ({
+   listMergeRequests: vi.fn(),
+   openMergeRequest: vi.fn(),
+   openPage: vi.fn(),
++  rerequestReview: vi.fn(),
+ }));
+ 
+ vi.mock("./bindings", () => ({ commands }));
+@@ -19,6 +20,7 @@ vi.mock("@tauri-apps/api/core", () => ({
+   Channel: class {
+     constructor(readonly onmessage: (message: unknown) => void) {}
+   },
++  convertFileSrc: (path: string, protocol: string) => `${protocol}://localhost/${path}`,
+ }));
+ 
+ type MessageChannel = { onmessage: (message: Generated.ListMessage) => void };
+@@ -28,11 +30,18 @@ const ROW: Generated.MergeRequestRow = {
+   title: "Show overdue cards in red",
+   createdAt: "2026-10-29T08:00:00Z",
+   draft: false,
++  author: null,
+   assignees: [],
+-  reviewers: [{ username: "anna", name: "Anna Berg" }],
++  reviewers: [
++    {
++      person: { username: "anna", name: "Anna Berg", picture: { kind: "none" } },
++      state: "requested",
++    },
++  ],
+   labels: [],
+   openDiscussions: 0,
+-  approvals: 2,
++  approvedBy: [],
++  mayRerequest: true,
+   pipeline: null,
+   page: null,
+   size: null,
+@@ -106,7 +115,18 @@ test("each page from the channel reaches the callback converted, then the end me
+   );
+ 
+   expect(pages).toEqual([
+-    { me: "sam", rows: [{ ...ROW, createdAt: Date.UTC(2026, 9, 29, 8) }] },
++    {
++      me: "sam",
++      rows: [
++        {
++          ...ROW,
++          createdAt: Date.UTC(2026, 9, 29, 8),
++          reviewers: [
++            { person: { username: "anna", name: "Anna Berg", picture: null }, state: "requested" },
++          ],
++        },
++      ],
++    },
+     { me: "sam", rows: [] },
+   ]);
+   expect(ended).toEqual({ ok: true, value: { kind: "cut", limit: 500 } });
+@@ -211,6 +231,66 @@ test("opening passes the iid and camelCases a missing commit", async () => {
+   expect(reply).toEqual({ ok: true, value: { kind: "missingCommit", shortId: "531ea52" } });
+ });
+ 
++test("the_uploaded_picture_address_is_convertFileSrc_of_the_username_and_the_scheme, in a listed page", async () => {
++  const uploaded: Generated.Person = {
++    username: "ben",
++    name: "Ben Okafor",
++    picture: { kind: "uploaded" },
++  };
++  commands.listMergeRequests.mockImplementation(async (channel: MessageChannel) => {
++    channel.onmessage(page([{ ...ROW, author: uploaded }]));
++    channel.onmessage(end({ kind: "loaded" }));
++    return { status: "ok", data: null };
++  });
++  const pages: MergeRequestPage[] = [];
++
++  await createTauriMergeRequests().listMergeRequests((got) => pages.push(got), unchecked);
++
++  expect(PICTURE_SCHEME).toBe("yamt-picture");
++  expect(pages[0]?.rows[0]?.author?.picture).toBe("yamt-picture://localhost/ben");
++});
++
++test("rerequestReview calls the command with the iid and the username and converts the reply's reviewers", async () => {
++  const uploaded: Generated.Person = {
++    username: "ben",
++    name: "Ben Okafor",
++    picture: { kind: "uploaded" },
++  };
++  commands.rerequestReview.mockResolvedValue({
++    status: "ok",
++    data: { kind: "requested", reviewers: [{ person: uploaded, state: "requested" }] },
++  });
++
++  const reply = await createTauriMergeRequests().rerequestReview(
++    branded(52, isMergeRequestIid, "iid"),
++    "ben",
++  );
++
++  expect(commands.rerequestReview).toHaveBeenCalledWith(52, "ben");
++  expect(reply).toEqual({
++    ok: true,
++    value: {
++      kind: "requested",
++      reviewers: [
++        {
++          person: { username: "ben", name: "Ben Okafor", picture: "yamt-picture://localhost/ben" },
++          state: "requested",
++        },
++      ],
++    },
++  });
++});
++
++test("a refused re-request comes back as GitLab said it", async () => {
++  commands.rerequestReview.mockResolvedValue({
++    status: "ok",
++    data: { kind: "refused", message: "Reviewer not found" },
++  });
++  expect(
++    await createTauriMergeRequests().rerequestReview(branded(52, isMergeRequestIid, "iid"), "x"),
++  ).toEqual({ ok: true, value: { kind: "refused", message: "Reviewer not found" } });
++});
++
+ test("a page is passed as it came and its answer comes back", async () => {
+   const page = "https://gitlab.example/x/-/merge_requests/7";
+   if (!isWebPage(page)) {
+@@ -228,12 +308,14 @@ test("a page is passed as it came and its answer comes back", async () => {
+ test.each([
+   ["listMergeRequests", { kind: "WorkerStopped" }],
+   ["openMergeRequest", { kind: "WorkerStopped" }],
++  ["rerequestReview", { kind: "WorkerStopped" }],
+ ] as const)("a %s failure comes back unchanged", async (name, failure) => {
+   commands[name].mockResolvedValue({ status: "error", error: failure });
+   const source = createTauriMergeRequests();
+   const calls = {
+     listMergeRequests: () => source.listMergeRequests(() => undefined, unchecked),
+     openMergeRequest: () => source.openMergeRequest(branded(1, isMergeRequestIid, "iid")),
++    rerequestReview: () => source.rerequestReview(branded(1, isMergeRequestIid, "iid"), "anna"),
+   };
+   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
+ });
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index db0f047..5fc05ac 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -1,4 +1,4 @@
+-import { Channel } from "@tauri-apps/api/core";
++import { Channel, convertFileSrc } from "@tauri-apps/api/core";
+ 
+ import { commands, type ListMessage } from "./bindings";
+ import type { SourceResult } from "./domain";
+@@ -6,6 +6,7 @@ import {
+   toCheckedRow,
+   toMergeRequestPage,
+   toOpenReply,
++  toRerequestReply,
+   type CheckedRow,
+   type ListEnd,
+   type MergeRequestPage,
+@@ -13,6 +14,12 @@ import {
+ import type { MergeRequestSource } from "./MergeRequestSource";
+ import { converted, toResult } from "./tauri";
+ 
++export const PICTURE_SCHEME = "yamt-picture";
++
++function uploadedPicture(username: string): string {
++  return convertFileSrc(username, PICTURE_SCHEME);
++}
++
+ function listed(
+   onPage: (page: MergeRequestPage) => void,
+   onChecked: (row: CheckedRow) => void,
+@@ -40,7 +47,7 @@ function listed(
+         return;
+       }
+       try {
+-        onPage(toMergeRequestPage(message.page));
++        onPage(toMergeRequestPage(message.page, uploadedPicture));
+       } catch (error) {
+         fail(error);
+       }
+@@ -75,5 +82,10 @@ export function createTauriMergeRequests(): MergeRequestSource {
+     async findLocalMerge() {
+       return toResult(await commands.findLocalMerge());
+     },
++    async rerequestReview(iid, username) {
++      return converted(toResult(await commands.rerequestReview(iid, username)), (reply) =>
++        toRerequestReply(reply, uploadedPicture),
++      );
++    },
+   };
+ }
+diff --git a/frontend/src/ui/mergeRequestDueDates.test.ts b/frontend/src/ui/mergeRequestDueDates.test.ts
+new file mode 100644
+index 0000000..285c698
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestDueDates.test.ts
+@@ -0,0 +1,190 @@
++import type { StorageLike } from "@vueuse/core";
++import { afterEach, expect, test, vi } from "vitest";
++import { shallowRef } from "vue";
++
++import { isMergeRequestIid, type MergeRequestIid } from "../ipc";
++import type { CalendarDay } from "../mergeRequests";
++import { createDueDates } from "./mergeRequestDueDates";
++
++const KEY = "yamt.mergeRequests.dueDates";
++const REPOSITORY = "/home/sam/taskboard/.git";
++const OTHER_REPOSITORY = "/home/sam/other/.git";
++const NOV_5: CalendarDay = { year: 2026, month: 11, day: 5 };
++const DEC_24: CalendarDay = { year: 2026, month: 12, day: 24 };
++
++type MemoryStorage = StorageLike & { readonly items: Map<string, string> };
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function memoryStorage(initial: Record<string, unknown> = {}): MemoryStorage {
++  const items = new Map<string, string>(
++    Object.keys(initial).length === 0 ? [] : [[KEY, JSON.stringify(initial)]],
++  );
++  return {
++    items,
++    getItem: (key) => items.get(key) ?? null,
++    setItem: (key, value) => {
++      items.set(key, value);
++    },
++    removeItem: (key) => {
++      items.delete(key);
++    },
++  };
++}
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is not an iid`);
++  }
++  return value;
++}
++
++function stored(storage: MemoryStorage): string | undefined {
++  return storage.items.get(KEY);
++}
++
++test("a date is set, changed and cleared, and the storage holds exactly the dates as YYYY-MM-DD per repository", () => {
++  const storage = memoryStorage();
++  const due = createDueDates(shallowRef(REPOSITORY), storage);
++  expect(due.dates.value).toEqual(new Map());
++
++  due.set(iid(12), NOV_5);
++  expect(due.dates.value).toEqual(new Map([[12, NOV_5]]));
++  expect(stored(storage)).toBe(JSON.stringify({ [REPOSITORY]: { "12": "2026-11-05" } }));
++
++  due.set(iid(7), DEC_24);
++  due.set(iid(12), DEC_24);
++  expect(due.dates.value).toEqual(
++    new Map([
++      [7, DEC_24],
++      [12, DEC_24],
++    ]),
++  );
++  expect(stored(storage)).toBe(
++    JSON.stringify({ [REPOSITORY]: { "7": "2026-12-24", "12": "2026-12-24" } }),
++  );
++
++  due.set(iid(7), null);
++  expect(due.dates.value).toEqual(new Map([[12, DEC_24]]));
++  due.set(iid(12), null);
++  expect(due.dates.value).toEqual(new Map());
++  expect(stored(storage)).toBe("{}");
++});
++
++test("a_date_survives_a_new_instance_over_the_same_storage (the reload)", () => {
++  const storage = memoryStorage();
++  createDueDates(shallowRef(REPOSITORY), storage).set(iid(640), NOV_5);
++  expect(createDueDates(shallowRef(REPOSITORY), storage).dates.value).toEqual(
++    new Map([[640, NOV_5]]),
++  );
++});
++
++test("keep_only_drops_the_others_and_keeps_other_repositories", () => {
++  const storage = memoryStorage({
++    [REPOSITORY]: { "1": "2026-11-05", "2": "2026-12-24", "3": "2026-11-05" },
++    [OTHER_REPOSITORY]: { "1": "2026-12-24" },
++  });
++  const due = createDueDates(shallowRef(REPOSITORY), storage);
++
++  due.keepOnly(new Set([iid(2), iid(9)]));
++
++  expect(due.dates.value).toEqual(new Map([[2, DEC_24]]));
++  expect(stored(storage)).toBe(
++    JSON.stringify({
++      [OTHER_REPOSITORY]: { "1": "2026-12-24" },
++      [REPOSITORY]: { "2": "2026-12-24" },
++    }),
++  );
++});
++
++test("keeping none of a repository's dates removes its entry", () => {
++  const storage = memoryStorage({
++    [REPOSITORY]: { "1": "2026-11-05" },
++    [OTHER_REPOSITORY]: { "1": "2026-12-24" },
++  });
++  createDueDates(shallowRef(REPOSITORY), storage).keepOnly(new Set());
++  expect(stored(storage)).toBe(JSON.stringify({ [OTHER_REPOSITORY]: { "1": "2026-12-24" } }));
++});
++
++test("keeping every date writes nothing (catches a write per load)", () => {
++  const raw = { [REPOSITORY]: { "1": "2026-11-05", x: "2026-11-05" } };
++  const storage = memoryStorage(raw);
++  createDueDates(shallowRef(REPOSITORY), storage).keepOnly(new Set([iid(1)]));
++  expect(stored(storage)).toBe(JSON.stringify(raw));
++});
++
++test.each<[string, unknown]>([
++  [
++    "an iid that is not a decimal",
++    {
++      x: "2026-11-05",
++      "1.5": "2026-11-05",
++      "-1": "2026-11-05",
++      "": "2026-11-05",
++      " 4": "2026-11-05",
++    },
++  ],
++  [
++    "a day that is not a calendar day",
++    { "4": "2026-02-30", "5": "05/11/2026", "6": 20261105, "7": null, "8": ["2026-11-05"] },
++  ],
++  ["an entry that is not an object", "2026-11-05"],
++  ["an entry that is null", null],
++])("unreadable entries are dropped: %s", (_kind, entry) => {
++  const storage = memoryStorage({ [REPOSITORY]: entry });
++  const due = createDueDates(shallowRef(REPOSITORY), storage);
++  expect(due.dates.value).toEqual(new Map());
++
++  due.set(iid(8), NOV_5);
++  expect(stored(storage)).toBe(JSON.stringify({ [REPOSITORY]: { "8": "2026-11-05" } }));
++});
++
++test("a readable date beside unreadable ones is kept", () => {
++  const storage = memoryStorage({ [REPOSITORY]: { "3": "2026-11-05", "4": "soon" } });
++  expect(createDueDates(shallowRef(REPOSITORY), storage).dates.value).toEqual(
++    new Map([[3, NOV_5]]),
++  );
++});
++
++test("with no repository there are no dates and writes are ignored; the dates follow the repository", () => {
++  const storage = memoryStorage({
++    [REPOSITORY]: { "3": "2026-11-05" },
++    null: { "4": "2026-11-05" },
++  });
++  const repository = shallowRef<string | null>(null);
++  const due = createDueDates(repository, storage);
++  expect(due.dates.value).toEqual(new Map());
++
++  due.set(iid(1), DEC_24);
++  due.keepOnly(new Set());
++  expect(stored(storage)).toBe(
++    JSON.stringify({ [REPOSITORY]: { "3": "2026-11-05" }, null: { "4": "2026-11-05" } }),
++  );
++
++  repository.value = REPOSITORY;
++  expect(due.dates.value).toEqual(new Map([[3, NOV_5]]));
++  repository.value = OTHER_REPOSITORY;
++  expect(due.dates.value).toEqual(new Map());
++});
++
++test("a storage that throws on write keeps the date in memory and logs under the due dates' event", () => {
++  const warnings: string[] = [];
++  vi.spyOn(console, "warn").mockImplementation((line: string) => {
++    warnings.push(line);
++  });
++  const due = createDueDates(shallowRef(REPOSITORY), {
++    ...memoryStorage(),
++    setItem: () => {
++      throw new Error("quota exceeded");
++    },
++  });
++
++  due.set(iid(5), NOV_5);
++
++  expect(due.dates.value).toEqual(new Map([[5, NOV_5]]));
++  expect(warnings).toEqual([
++    '[warn] mergeRequests.due_dates_storage_failed {kind: "Unexpected", message: "quota exceeded"}',
++  ]);
++});
+diff --git a/frontend/src/ui/mergeRequestDueDates.ts b/frontend/src/ui/mergeRequestDueDates.ts
+new file mode 100644
+index 0000000..0db2df1
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestDueDates.ts
+@@ -0,0 +1,80 @@
++import type { StorageLike } from "@vueuse/core";
++import { computed, type ComputedRef, type Ref } from "vue";
++
++import { isMergeRequestIid, type MergeRequestIid } from "../ipc";
++import { byDueDate, calendarDayFrom, calendarDayText, type CalendarDay } from "../mergeRequests";
++import { storedRecord, type StoredRecord } from "./windowStorage";
++
++const STORAGE_KEY = "yamt.mergeRequests.dueDates";
++const DECIMAL = /^\d+$/u;
++
++type Dates = ReadonlyMap<MergeRequestIid, CalendarDay>;
++
++type Dated = { readonly iid: MergeRequestIid; readonly createdAt: number };
++
++export type DueDates = {
++  readonly dates: ComputedRef<Dates>;
++  set(iid: MergeRequestIid, day: CalendarDay | null): void;
++  keepOnly(iids: ReadonlySet<MergeRequestIid>): void;
++  datedFirst<R extends Dated>(rows: readonly R[]): readonly R[];
++};
++
++function datesFrom(stored: unknown): Dates {
++  const dates = new Map<MergeRequestIid, CalendarDay>();
++  if (typeof stored !== "object" || stored === null) {
++    return dates;
++  }
++  for (const [key, text] of Object.entries(stored)) {
++    const iid = Number(key);
++    const day = typeof text === "string" ? calendarDayFrom(text) : null;
++    if (DECIMAL.test(key) && isMergeRequestIid(iid) && day !== null) {
++      dates.set(iid, day);
++    }
++  }
++  return dates;
++}
++
++function write(byRepository: StoredRecord, at: string | null, next: Dates): void {
++  if (at === null) {
++    return;
++  }
++  if (next.size === 0) {
++    byRepository.remove(at);
++    return;
++  }
++  const entry = [...next].map(([iid, day]) => [String(iid), calendarDayText(day)]);
++  byRepository.set(at, Object.fromEntries(entry));
++}
++
++export function createDueDates(
++  repository: Readonly<Ref<string | null>>,
++  storage?: StorageLike,
++): DueDates {
++  const byRepository = storedRecord(STORAGE_KEY, "mergeRequests.due_dates_storage_failed", storage);
++  const dates = computed((): Dates => {
++    const at = repository.value;
++    return at === null ? new Map() : datesFrom(byRepository.entryAt(at));
++  });
++  return {
++    dates,
++    set: (iid, day) => {
++      const next = new Map(dates.value);
++      if (day === null) {
++        next.delete(iid);
++      } else {
++        next.set(iid, day);
++      }
++      write(byRepository, repository.value, next);
++    },
++    keepOnly: (iids) => {
++      const kept = [...dates.value].filter(([iid]) => iids.has(iid));
++      if (kept.length !== dates.value.size) {
++        write(byRepository, repository.value, new Map(kept));
++      }
++    },
++    datedFirst: (rows) => {
++      const due: ReadonlyMap<number, CalendarDay> = dates.value;
++      return byDueDate(rows, (iid) => due.get(iid) ?? null);
++    },
++  };
++}
+diff --git a/frontend/src/ui/mergeRequestFilters.test.ts b/frontend/src/ui/mergeRequestFilters.test.ts
+index 854b5f9..eb0ea84 100644
+--- a/frontend/src/ui/mergeRequestFilters.test.ts
++++ b/frontend/src/ui/mergeRequestFilters.test.ts
+@@ -9,9 +9,9 @@ const KEY = "yamt.mergeRequests.filters";
+ const REPOSITORY = "/home/sam/taskboard/.git";
+ const OTHER_REPOSITORY = "/home/sam/other/.git";
+ const FILTERS: Filters = {
+-  assignee: [{ kind: "me" }],
+-  reviewer: [{ kind: "person", username: "anna" }],
+-  label: [{ kind: "none" }],
++  assignee: [{ value: { kind: "me" }, mode: "included" }],
++  reviewer: [{ value: { kind: "person", username: "anna" }, mode: "included" }],
++  label: [{ value: { kind: "none" }, mode: "included" }],
+   draft: "ready",
+ };
+ const STORED_FILTERS = {
+@@ -58,11 +58,36 @@ test("no filter at first; set filters are remembered under the repository", () =
+   expect(stored(storage)).toEqual({ [REPOSITORY]: STORED_FILTERS });
+ });
+ 
+-test("filters written before are read back by a new window", () => {
++test("filters written before are read back by a new window: today's stored JSON reads as included", () => {
+   const storage = memoryStorage({ [KEY]: JSON.stringify({ [REPOSITORY]: STORED_FILTERS }) });
+   expect(createRememberedFilters(shallowRef(REPOSITORY), storage).filters.value).toEqual(FILTERS);
+ });
+ 
++test("an excluded value is stored with not: and read back excluded beside included ones", () => {
++  const storage = memoryStorage();
++  const excluded: Filters = {
++    ...FILTERS,
++    assignee: [{ value: { kind: "me" }, mode: "excluded" }],
++    label: [
++      { value: { kind: "label", title: "frontend" }, mode: "included" },
++      { value: { kind: "none" }, mode: "excluded" },
++    ],
++  };
++  createRememberedFilters(shallowRef(REPOSITORY), storage).set(excluded);
++
++  expect(storage.items.get(KEY)).toBe(
++    JSON.stringify({
++      [REPOSITORY]: {
++        assignee: ["not:me"],
++        reviewer: ["user:anna"],
++        label: ["label:frontend", "not:none"],
++        draft: "ready",
++      },
++    }),
++  );
++  expect(createRememberedFilters(shallowRef(REPOSITORY), storage).filters.value).toEqual(excluded);
++});
++
+ test("another repository's entry survives a write, as written", () => {
+   const others = { [OTHER_REPOSITORY]: { label: ["label:bug"] }, "/odd": "not filters" };
+   const storage = memoryStorage({ [KEY]: JSON.stringify(others) });
+@@ -76,7 +101,7 @@ test("another repository's entry survives a write, as written", () => {
+   repository.value = OTHER_REPOSITORY;
+   expect(remembered.filters.value).toEqual({
+     ...NO_FILTERS,
+-    label: [{ kind: "label", title: "bug" }],
++    label: [{ value: { kind: "label", title: "bug" }, mode: "included" }],
+   });
+ });
+ 
+diff --git a/frontend/src/ui/mergeRequestFilters.ts b/frontend/src/ui/mergeRequestFilters.ts
+index 228d398..f33c94e 100644
+--- a/frontend/src/ui/mergeRequestFilters.ts
++++ b/frontend/src/ui/mergeRequestFilters.ts
+@@ -1,15 +1,47 @@
+ import type { StorageLike } from "@vueuse/core";
+ import { computed, type Ref } from "vue";
+ 
+-import { filtersFrom, isFiltered, NO_FILTERS, storedFilters, type Filters } from "../mergeRequests";
++import type { MergeRequestRow } from "../ipc";
++import {
++  cleared,
++  clicked,
++  filtersFrom,
++  isFiltered,
++  labelChoices,
++  NO_FILTERS,
++  personChoices,
++  storedFilters,
++  withDraft,
++  type Choice,
++  type DraftFilter,
++  type Filters,
++  type LabelValue,
++  type ListFilter,
++  type PersonValue,
++} from "../mergeRequests";
+ import { storedRecord } from "./windowStorage";
+ 
+ const STORAGE_KEY = "yamt.mergeRequests.filters";
+ 
++export type Choices = Readonly<{
++  assignee: readonly Choice<PersonValue>[];
++  reviewer: readonly Choice<PersonValue>[];
++  label: readonly Choice<LabelValue>[];
++}>;
++
++export type FilterActions = {
++  click(filter: ListFilter, value: PersonValue | LabelValue, shift: boolean): void;
++  setDraft(draft: DraftFilter): void;
++  clear(filter: ListFilter): void;
++  clearAll(): void;
++};
++
++type RememberedFilters = { readonly filters: Readonly<Ref<Filters>>; set(next: Filters): void };
++
+ export function createRememberedFilters(
+   repository: Readonly<Ref<string | null>>,
+   storage?: StorageLike,
+-): { readonly filters: Readonly<Ref<Filters>>; set(next: Filters): void } {
++): RememberedFilters {
+   const byRepository = storedRecord(STORAGE_KEY, "mergeRequests.filters_storage_failed", storage);
+   const filters = computed((): Filters => {
+     const at = repository.value;
+@@ -30,3 +62,33 @@ export function createRememberedFilters(
+     },
+   };
+ }
++
++export function filterActions(remembered: RememberedFilters): FilterActions {
++  const { filters } = remembered;
++  return {
++    click: (filter, value, shift) => {
++      remembered.set(clicked(filters.value, filter, value, shift));
++    },
++    setDraft: (draft) => {
++      remembered.set(withDraft(filters.value, draft));
++    },
++    clear: (filter) => {
++      remembered.set(cleared(filters.value, filter));
++    },
++    clearAll: () => {
++      remembered.set(NO_FILTERS);
++    },
++  };
++}
++
++export function choicesOf(
++  rows: readonly MergeRequestRow[],
++  filters: Filters,
++  me: string | null,
++): Choices {
++  return {
++    assignee: personChoices(rows, "assignees", me, filters.assignee),
++    reviewer: personChoices(rows, "reviewers", me, filters.reviewer),
++    label: labelChoices(rows, filters.label),
++  };
++}
+diff --git a/frontend/src/ui/mergeRequestRerequests.test.ts b/frontend/src/ui/mergeRequestRerequests.test.ts
+new file mode 100644
+index 0000000..f56f303
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestRerequests.test.ts
+@@ -0,0 +1,175 @@
++import { expect, test } from "vitest";
++
++import {
++  createFixtureCompareSource,
++  isMergeRequestIid,
++  log,
++  type MergeRequestIid,
++  type MergeRequestSource,
++  type RerequestReply,
++  type Reviewer,
++  type SourceFailure,
++  type SourceResult,
++} from "../ipc";
++import { createRerequests, type RerequestAsk, type Rerequests } from "./mergeRequestRerequests";
++import type { Problem } from "./problem";
++
++type Ask = {
++  readonly iid: MergeRequestIid;
++  readonly username: string;
++  readonly answer: (result: SourceResult<RerequestReply>) => void;
++};
++
++type Rig = {
++  readonly slice: Rerequests;
++  readonly asks: Ask[];
++  readonly problems: Problem[];
++  readonly replaced: [MergeRequestIid, readonly Reviewer[]][];
++};
++
++const STOPPED: SourceFailure = { kind: "WorkerStopped" };
++const REVIEWERS: readonly Reviewer[] = [
++  { person: { username: "anna", name: "Anna Berg", picture: null }, state: "requested" },
++];
++const REFUSED: RerequestReply = { kind: "refused", message: "not allowed" };
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is not an iid`);
++  }
++  return value;
++}
++
++function rig(): Rig {
++  const asks: Ask[] = [];
++  const problems: Problem[] = [];
++  const replaced: [MergeRequestIid, readonly Reviewer[]][] = [];
++  const source: MergeRequestSource = {
++    ...createFixtureCompareSource(log, "", {}),
++    rerequestReview: (asked, username) =>
++      new Promise((resolve) => {
++        asks.push({ iid: asked, username, answer: resolve });
++      }),
++  };
++  const slice = createRerequests({
++    source,
++    report: (problem) => problems.push(problem),
++    replaced: (asked, reviewers) => replaced.push([asked, reviewers]),
++  });
++  return { slice, asks, problems, replaced };
++}
++
++function askAt(asks: readonly Ask[], index: number): Ask {
++  const found = asks[index];
++  if (found === undefined) {
++    throw new Error(`no ask ${index}; ${asks.length} made`);
++  }
++  return found;
++}
++
++function asksOf(live: Rig, value: number): ReadonlyMap<string, RerequestAsk> | undefined {
++  return live.slice.rerequests.value.get(iid(value));
++}
++
++test("a second click on the same reviewer while running asks once; another reviewer or row asks beside it", async () => {
++  const live = rig();
++  const first = live.slice.rerequestReview(iid(52), "anna");
++  await live.slice.rerequestReview(iid(52), "anna");
++  const other = live.slice.rerequestReview(iid(52), "ben");
++  const otherRow = live.slice.rerequestReview(iid(50), "anna");
++
++  expect(live.asks.map((ask) => [ask.iid, ask.username])).toEqual([
++    [52, "anna"],
++    [52, "ben"],
++    [50, "anna"],
++  ]);
++  expect(asksOf(live, 52)).toEqual(
++    new Map([
++      ["anna", { kind: "running" }],
++      ["ben", { kind: "running" }],
++    ]),
++  );
++  for (const ask of live.asks) {
++    ask.answer({ ok: true, value: { kind: "notOpen" } });
++  }
++  await Promise.all([first, other, otherRow]);
++});
++
++test("requested calls replaced with that row's reviewers and clears the ask (catches the row left running)", async () => {
++  const live = rig();
++  const asking = live.slice.rerequestReview(iid(52), "anna");
++  askAt(live.asks, 0).answer({ ok: true, value: { kind: "requested", reviewers: REVIEWERS } });
++  await asking;
++
++  expect(live.replaced).toEqual([[52, REVIEWERS]]);
++  expect(live.slice.rerequests.value.has(iid(52))).toBe(false);
++  expect(live.problems).toEqual([]);
++});
++
++test.each<RerequestReply>([
++  REFUSED,
++  { kind: "notReviewer" },
++  { kind: "notOpen" },
++  { kind: "glabMissing" },
++  { kind: "notLoggedIn", detail: "no token" },
++  { kind: "failed", message: "502" },
++])("a refusal %j stays until dismissed, and dismissing keeps a running ask", async (reply) => {
++  const live = rig();
++  const refused = live.slice.rerequestReview(iid(52), "anna");
++  askAt(live.asks, 0).answer({ ok: true, value: reply });
++  await refused;
++  expect(asksOf(live, 52)).toEqual(new Map([["anna", { kind: "refused", reply }]]));
++  expect(live.replaced).toEqual([]);
++
++  const running = live.slice.rerequestReview(iid(52), "ben");
++  live.slice.dismissRerequestRefusals(iid(52));
++  expect(asksOf(live, 52)).toEqual(new Map([["ben", { kind: "running" }]]));
++
++  askAt(live.asks, 1).answer({ ok: true, value: { kind: "notOpen" } });
++  await running;
++  live.slice.dismissRerequestRefusals(iid(52));
++  expect(live.slice.rerequests.value.has(iid(52))).toBe(false);
++});
++
++test("dismissing one row's refusals keeps another row's", async () => {
++  const live = rig();
++  const first = live.slice.rerequestReview(iid(52), "anna");
++  const second = live.slice.rerequestReview(iid(50), "anna");
++  askAt(live.asks, 0).answer({ ok: true, value: REFUSED });
++  askAt(live.asks, 1).answer({ ok: true, value: REFUSED });
++  await Promise.all([first, second]);
++
++  live.slice.dismissRerequestRefusals(iid(52));
++  expect(live.slice.rerequests.value.has(iid(52))).toBe(false);
++  expect(asksOf(live, 50)).toEqual(new Map([["anna", { kind: "refused", reply: REFUSED }]]));
++});
++
++test("the next ask for a refused reviewer replaces the refusal with running", async () => {
++  const live = rig();
++  const refused = live.slice.rerequestReview(iid(52), "anna");
++  askAt(live.asks, 0).answer({ ok: true, value: REFUSED });
++  await refused;
++
++  const again = live.slice.rerequestReview(iid(52), "anna");
++  expect(asksOf(live, 52)).toEqual(new Map([["anna", { kind: "running" }]]));
++  expect(live.asks).toHaveLength(2);
++  askAt(live.asks, 1).answer({ ok: true, value: { kind: "requested", reviewers: REVIEWERS } });
++  await again;
++  expect(live.slice.rerequests.value.has(iid(52))).toBe(false);
++});
++
++test("a source failure reports rerequestReview and clears the ask, keeping the row's other asks", async () => {
++  const live = rig();
++  const failing = live.slice.rerequestReview(iid(52), "anna");
++  const other = live.slice.rerequestReview(iid(52), "ben");
++  askAt(live.asks, 0).answer({ ok: false, failure: STOPPED });
++  await failing;
++
++  expect(live.problems).toEqual([
++    { action: "mergeRequests", step: "rerequestReview", cause: STOPPED },
++  ]);
++  expect(asksOf(live, 52)).toEqual(new Map([["ben", { kind: "running" }]]));
++  expect(live.replaced).toEqual([]);
++  askAt(live.asks, 1).answer({ ok: false, failure: STOPPED });
++  await other;
++});
+diff --git a/frontend/src/ui/mergeRequestRerequests.ts b/frontend/src/ui/mergeRequestRerequests.ts
+new file mode 100644
+index 0000000..aa6ac4e
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestRerequests.ts
+@@ -0,0 +1,82 @@
++import { shallowRef, type ShallowRef } from "vue";
++
++import type { MergeRequestIid, MergeRequestSource, RerequestReply, Reviewer } from "../ipc";
++import { setRow } from "./mergeRequestActions";
++import { attempt, type Problem } from "./problem";
++
++export type RerequestAsk =
++  | { readonly kind: "running" }
++  | {
++      readonly kind: "refused";
++      readonly reply: Exclude<RerequestReply, { readonly kind: "requested" }>;
++    };
++
++type Asks = ShallowRef<ReadonlyMap<MergeRequestIid, ReadonlyMap<string, RerequestAsk>>>;
++
++export type Rerequests = {
++  readonly rerequests: Readonly<Asks>;
++  rerequestReview(iid: MergeRequestIid, username: string): Promise<void>;
++  dismissRerequestRefusals(iid: MergeRequestIid): void;
++};
++
++type Deps = {
++  readonly source: MergeRequestSource;
++  readonly report: (problem: Problem) => void;
++  readonly replaced: (iid: MergeRequestIid, reviewers: readonly Reviewer[]) => void;
++};
++
++function setAsk(
++  asks: Asks,
++  iid: MergeRequestIid,
++  username: string,
++  ask: RerequestAsk | null,
++): void {
++  const row = new Map(asks.value.get(iid));
++  if (ask === null) {
++    row.delete(username);
++  } else {
++    row.set(username, ask);
++  }
++  setRow(asks, iid, row.size === 0 ? null : row);
++}
++
++async function rerequestReview(
++  deps: Deps,
++  asks: Asks,
++  iid: MergeRequestIid,
++  username: string,
++): Promise<void> {
++  if (asks.value.get(iid)?.get(username)?.kind === "running") {
++    return;
++  }
++  setAsk(asks, iid, username, { kind: "running" });
++  const outcome = await attempt(() => deps.source.rerequestReview(iid, username));
++  if (!outcome.ok) {
++    setAsk(asks, iid, username, null);
++    deps.report({ action: "mergeRequests", step: "rerequestReview", cause: outcome.cause });
++    return;
++  }
++  const reply = outcome.value;
++  if (reply.kind === "requested") {
++    deps.replaced(iid, reply.reviewers);
++    setAsk(asks, iid, username, null);
++    return;
++  }
++  setAsk(asks, iid, username, { kind: "refused", reply });
++}
++
++function dismissRefusals(asks: Asks, iid: MergeRequestIid): void {
++  const running = [...(asks.value.get(iid) ?? [])].filter(([, ask]) => ask.kind === "running");
++  setRow(asks, iid, running.length === 0 ? null : new Map(running));
++}
++
++export function createRerequests(deps: Deps): Rerequests {
++  const asks: Asks = shallowRef(new Map());
++  return {
++    rerequests: asks,
++    rerequestReview: (iid, username) => rerequestReview(deps, asks, iid, username),
++    dismissRerequestRefusals: (iid) => {
++      dismissRefusals(asks, iid);
++    },
++  };
++}
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index 9cdcd72..48983a0 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -16,7 +16,9 @@ import {
+   type MergeRequestSource,
+   type OpenReply,
+   type PageOpened,
++  type RerequestReply,
+   type ResolveReply,
++  type Reviewer,
+   type SourceFailure,
+   type SourceResult,
+   type WebPage,
+@@ -59,6 +61,7 @@ type Rig = {
+   readonly resolves: Asked<ResolveReply>[];
+   readonly continues: Asked<ContinueMergeReply>[];
+   readonly localMerges: LocalMerge[];
++  readonly rerequests: Asked<RerequestReply>[];
+   readonly storage: MemoryStorage;
+ };
+ 
+@@ -139,6 +142,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+   const resolves: Asked<ResolveReply>[] = [];
+   const continues: Asked<ContinueMergeReply>[] = [];
+   const localMerges: LocalMerge[] = [];
++  const rerequests: Asked<RerequestReply>[] = [];
+   const problems: Problem[] = [];
+   const source: MergeRequestSource = {
+     findGitLabProject: async () => ({ ok: true, value: { kind: "found", repository: REPOSITORY } }),
+@@ -163,6 +167,10 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+       const found = localMerges.shift() ?? FREE;
+       return { ok: true, value: found };
+     },
++    rerequestReview: (asked) =>
++      new Promise((resolve) => {
++        rerequests.push({ iid: asked, answer: resolve });
++      }),
+     ...edit,
+   };
+   const screen = shallowRef<Screen>({ kind: "files" });
+@@ -172,7 +180,18 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+     report: (problem) => problems.push(problem),
+     storage,
+   });
+-  return { slice, screen, problems, loads, opens, resolves, continues, localMerges, storage };
++  return {
++    slice,
++    screen,
++    problems,
++    loads,
++    opens,
++    resolves,
++    continues,
++    localMerges,
++    rerequests,
++    storage,
++  };
+ }
+ 
+ function loadAt(live: Rig, index: number): Load {
+@@ -537,7 +556,7 @@ test("filters narrow the shown rows and the choices, and are remembered through
+   await live.slice.findProject();
+   await loaded(live);
+ 
+-  live.slice.toggle("assignee", { kind: "me" });
++  live.slice.click("assignee", { kind: "me" }, false);
+   const mine = ROWS.filter((row) => row.assignees.some((person) => person.username === "sam"));
+   expect(iids(live.slice.shownRows.value)).toEqual(iids(mine));
+   expect(live.slice.summary.value).toBe(`${mine.length} of 40 merge requests`);
+@@ -545,11 +564,11 @@ test("filters narrow the shown rows and the choices, and are remembered through
+     value: { kind: "me" },
+     label: "Me",
+     count: mine.length,
+-    checked: true,
++    state: "included",
+   });
+   live.slice.setDraft("ready");
+-  live.slice.toggle("label", { kind: "none" });
+-  expect(live.slice.choices.value.label[0]?.checked).toBe(true);
++  live.slice.click("label", { kind: "none" }, false);
++  expect(live.slice.choices.value.label[0]?.state).toBe("included");
+   expect(live.slice.shownRows.value.every((row) => !row.draft && row.labels.length === 0)).toBe(
+     true,
+   );
+@@ -570,10 +589,28 @@ test("filters narrow the shown rows and the choices, and are remembered through
+   expect(storage.items.get("yamt.mergeRequests.filters")).toBe("{}");
+ });
+ 
++test("shift_click_excludes_and_the_filter_is_stored_with_not; a plain click on it turns it off", async () => {
++  const storage = memoryStorage();
++  const live = rig({}, storage);
++  await live.slice.findProject();
++  await loaded(live);
++
++  live.slice.click("assignee", { kind: "me" }, true);
++  live.slice.click("label", { kind: "label", title: "frontend" }, false);
++  expect(iids(live.slice.shownRows.value)).toEqual([639, 627, 623, 619, 607, 603]);
++  expect(live.slice.choices.value.assignee[0]?.state).toBe("excluded");
++  expect(JSON.parse(storage.items.get("yamt.mergeRequests.filters") ?? "null")).toEqual({
++    [REPOSITORY]: { assignee: ["not:me"], reviewer: [], label: ["label:frontend"], draft: "all" },
++  });
++
++  live.slice.click("assignee", { kind: "me" }, false);
++  expect(live.slice.filters.value.assignee).toEqual([]);
++});
++
+ test("without a GitLab project a filter is not remembered (catches filters stored under no repository)", async () => {
+   const live = rig();
+   await loaded(live);
+-  live.slice.toggle("assignee", { kind: "me" });
++  live.slice.click("assignee", { kind: "me" }, false);
+   expect(live.slice.filters.value.assignee).toEqual([]);
+   expect(live.storage.items.size).toBe(0);
+ });
+@@ -843,3 +880,135 @@ test("a failed local merge read is reported and keeps what was known", async ()
+   expect(live.slice.localMerge.value).toEqual(MERGING_640);
+   expect(live.problems).toEqual([{ action: "mergeRequests", step: "localMerge", cause: STOPPED }]);
+ });
++
++const NOV_5 = { year: 2026, month: 11, day: 5 };
++const DEC_24 = { year: 2026, month: 12, day: 24 };
++const DUE_KEY = "yamt.mergeRequests.dueDates";
++
++function storedDueDates(live: Rig): unknown {
++  return JSON.parse(live.storage.items.get(DUE_KEY) ?? "null");
++}
++
++async function dated(): Promise<Rig> {
++  const live = rig();
++  await live.slice.findProject();
++  await loaded(live);
++  live.slice.setDueDate(iid(640), NOV_5);
++  live.slice.setDueDate(iid(630), DEC_24);
++  return live;
++}
++
++test("a_complete_load_drops_due_dates_of_merge_requests_it_no_longer_lists, the first load and a swapped-in refresh alike", async () => {
++  const storage = memoryStorage();
++  storage.setItem(
++    DUE_KEY,
++    JSON.stringify({ [REPOSITORY]: { "1": "2026-11-05", "639": "2026-11-05" } }),
++  );
++  const first = rig({}, storage);
++  await first.slice.findProject();
++  expect([...first.slice.dueDates.value.keys()]).toEqual([1, 639]);
++  await loaded(first);
++  expect([...first.slice.dueDates.value.keys()]).toEqual([639]);
++
++  const live = await dated();
++  const reloading = live.slice.refresh();
++  loadAt(live, 1).send({ me: "sam", rows: ROWS.filter((row) => row.iid !== 640) });
++  expect([...live.slice.dueDates.value.keys()]).toEqual([630, 640]);
++  loadAt(live, 1).end(LOADED);
++  await reloading;
++  expect(live.slice.dueDates.value).toEqual(new Map([[630, DEC_24]]));
++  expect(storedDueDates(live)).toEqual({ [REPOSITORY]: { "630": "2026-12-24" } });
++});
++
++test.each<SourceResult<ListEnd>>([
++  { ok: true, value: { kind: "cut", limit: 500 } },
++  { ok: true, value: { kind: "failed", message: "502" } },
++  { ok: true, value: { kind: "glabMissing" } },
++  { ok: true, value: { kind: "notLoggedIn", detail: "no token" } },
++  { ok: false, failure: STOPPED },
++])("a_cut_or_failed_load_keeps_every_due_date: %j", async (result) => {
++  const live = await dated();
++  const reloading = live.slice.refresh();
++  loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(20) });
++  loadAt(live, 1).end(result);
++  await reloading;
++  expect([...live.slice.dueDates.value.keys()]).toEqual([630, 640]);
++  expect(storedDueDates(live)).toEqual({
++    [REPOSITORY]: { "630": "2026-12-24", "640": "2026-11-05" },
++  });
++});
++
++test("dated_rows_come_first_in_shown_rows, soonest first, and a cleared date puts its row back", async () => {
++  const live = await dated();
++  live.slice.setDueDate(iid(620), DEC_24);
++  expect(iids(live.slice.shownRows.value).slice(0, 5)).toEqual([640, 630, 620, 639, 638]);
++
++  live.slice.click("label", { kind: "label", title: "frontend" }, false);
++  expect(iids(live.slice.shownRows.value).slice(0, 2)).toEqual([639, 635]);
++  live.slice.clearAll();
++
++  live.slice.setDueDate(iid(640), null);
++  expect(iids(live.slice.shownRows.value).slice(0, 3)).toEqual([630, 620, 640]);
++  expect(live.slice.rows.value).toEqual(ROWS);
++});
++
++const RE_REQUESTED: readonly Reviewer[] = [
++  { person: { username: "chiara", name: "Chiara Rossi", picture: null }, state: "requested" },
++];
++
++function reviewersOf(rows: readonly MergeRequestRow[], value: number): readonly Reviewer[] {
++  return rows.find((row) => row.iid === value)?.reviewers ?? [];
++}
++
++test("a_rerequest_reply_replaces_that_rows_reviewers_in_rows_and_in_a_buffering_refresh", async () => {
++  const live = rig();
++  await loaded(live);
++  const reloading = live.slice.refresh();
++  loadAt(live, 1).send({ me: "sam", rows: ROWS });
++
++  const asking = live.slice.rerequestReview(iid(638), "chiara");
++  askedAt(live.rerequests, 0).answer({
++    ok: true,
++    value: { kind: "requested", reviewers: RE_REQUESTED },
++  });
++  await asking;
++  expect(reviewersOf(live.slice.rows.value, 638)).toEqual(RE_REQUESTED);
++  expect(live.slice.rows.value.filter((row) => row.iid !== 638)).toEqual(
++    ROWS.filter((row) => row.iid !== 638),
++  );
++
++  loadAt(live, 1).end(LOADED);
++  await reloading;
++  expect(reviewersOf(live.slice.rows.value, 638)).toEqual(RE_REQUESTED);
++  expect(live.slice.rerequests.value.size).toBe(0);
++});
++
++test("a re-request reply after a first load's end writes the rows only once (catches a finished load's buffer kept)", async () => {
++  const live = rig();
++  await loaded(live);
++  const asking = live.slice.rerequestReview(iid(630), "anna");
++  askedAt(live.rerequests, 0).answer({
++    ok: true,
++    value: { kind: "requested", reviewers: RE_REQUESTED },
++  });
++  await asking;
++  expect(reviewersOf(live.slice.rows.value, 630)).toEqual(RE_REQUESTED);
++
++  const reloading = live.slice.refresh();
++  loadAt(live, 1).send({ me: "sam", rows: ROWS });
++  loadAt(live, 1).end(LOADED);
++  await reloading;
++  expect(reviewersOf(live.slice.rows.value, 630)).toEqual(reviewersOf(ROWS, 630));
++});
++
++test("a refused re-request leaves the rows as they were", async () => {
++  const live = rig();
++  await loaded(live);
++  const asking = live.slice.rerequestReview(iid(638), "dmitri");
++  askedAt(live.rerequests, 0).answer({ ok: true, value: { kind: "notOpen" } });
++  await asking;
++  expect(live.slice.rows.value).toEqual(ROWS);
++  expect(live.slice.rerequests.value.get(iid(638))).toEqual(
++    new Map([["dmitri", { kind: "refused", reply: { kind: "notOpen" } }]]),
++  );
++});
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index f28755a..3f93b7d 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -10,33 +10,34 @@ import type {
+   MergeRequestRow,
+   MergeRequestSource,
+   OpenReply,
++  Reviewer,
+   WebPage,
+ } from "../ipc";
+ import {
+-  cleared,
+   filtered,
+-  labelChoices,
+   merged,
+-  NO_FILTERS,
+-  personChoices,
+   rechecked,
+   summaryText,
+-  toggled,
+-  withDraft,
+-  type Choice,
+-  type DraftFilter,
++  type CalendarDay,
+   type Filters,
+-  type LabelValue,
+-  type ListFilter,
+-  type PersonValue,
+ } from "../mergeRequests";
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
+-import { createRememberedFilters } from "./mergeRequestFilters";
++import { createDueDates, type DueDates } from "./mergeRequestDueDates";
++import {
++  choicesOf,
++  createRememberedFilters,
++  filterActions,
++  type Choices,
++  type FilterActions,
++} from "./mergeRequestFilters";
++import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
+ import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
+ import { attempt, type Problem } from "./problem";
+ import type { Screen } from "./screen";
+ 
++export type { RerequestAsk } from "./mergeRequestRerequests";
++
+ export type ListLoad =
+   | { readonly kind: "notLoaded" }
+   | { readonly kind: "loading"; readonly first: boolean }
+@@ -46,36 +47,30 @@ export type Opening =
+   | { readonly kind: "fetching" }
+   | { readonly kind: "refused"; readonly reply: Exclude<OpenReply, { readonly kind: "opened" }> };
+ 
+-type Choices = Readonly<{
+-  assignee: readonly Choice<PersonValue>[];
+-  reviewer: readonly Choice<PersonValue>[];
+-  label: readonly Choice<LabelValue>[];
+-}>;
+-
+-export type MergeRequests = RowActions & {
+-  readonly project: Readonly<ShallowRef<GitLabProject>>;
+-  readonly me: Readonly<ShallowRef<string | null>>;
+-  readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
+-  readonly listing: Readonly<ShallowRef<ListLoad>>;
+-  readonly failure: ComputedRef<string | null>;
+-  readonly filters: Readonly<Ref<Filters>>;
+-  readonly shownRows: ComputedRef<readonly MergeRequestRow[]>;
+-  readonly choices: ComputedRef<Choices>;
+-  readonly summary: ComputedRef<string>;
+-  readonly openings: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>>;
+-  readonly pageProblem: Readonly<ShallowRef<string | null>>;
+-  findProject(): Promise<void>;
+-  show(): void;
+-  close(): void;
+-  refresh(): Promise<void>;
+-  toggle(filter: ListFilter, value: PersonValue | LabelValue): void;
+-  setDraft(draft: DraftFilter): void;
+-  clear(filter: ListFilter): void;
+-  clearAll(): void;
+-  openChanges(iid: MergeRequestIid): Promise<void>;
+-  openPage(clicked: PageKind, page: WebPage): Promise<void>;
+-  dismissPageProblem(): void;
+-};
++export type MergeRequests = RowActions &
++  Rerequests &
++  FilterActions & {
++    readonly project: Readonly<ShallowRef<GitLabProject>>;
++    readonly me: Readonly<ShallowRef<string | null>>;
++    readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
++    readonly listing: Readonly<ShallowRef<ListLoad>>;
++    readonly failure: ComputedRef<string | null>;
++    readonly filters: Readonly<Ref<Filters>>;
++    readonly shownRows: ComputedRef<readonly MergeRequestRow[]>;
++    readonly choices: ComputedRef<Choices>;
++    readonly summary: ComputedRef<string>;
++    readonly dueDates: ComputedRef<ReadonlyMap<MergeRequestIid, CalendarDay>>;
++    readonly openings: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>>;
++    readonly pageProblem: Readonly<ShallowRef<string | null>>;
++    findProject(): Promise<void>;
++    show(): void;
++    close(): void;
++    refresh(): Promise<void>;
++    setDueDate(iid: MergeRequestIid, day: CalendarDay | null): void;
++    openChanges(iid: MergeRequestIid): Promise<void>;
++    openPage(clicked: PageKind, page: WebPage): Promise<void>;
++    dismissPageProblem(): void;
++  };
+ 
+ type Deps = {
+   readonly source: MergeRequestSource;
+@@ -88,14 +83,17 @@ type Load = { readonly buffered: boolean; buffer: readonly MergeRequestRow[]; me
+ 
+ type State = Deps & {
+   readonly project: ShallowRef<GitLabProject>;
++  readonly repository: ComputedRef<string | null>;
+   readonly me: ShallowRef<string | null>;
+   readonly rows: ShallowRef<readonly MergeRequestRow[]>;
+   readonly cut: ShallowRef<boolean>;
+   readonly listing: ShallowRef<ListLoad>;
+   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
+   readonly pageProblem: ShallowRef<string | null>;
++  readonly dueDates: DueDates;
+   readonly rowActions: RowActions;
+   shown: Load | null;
++  running: Load | null;
+ };
+ 
+ function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
+@@ -118,6 +116,9 @@ function ended(state: State, load: Load, end: ListEnd): void {
+     state.me.value = load.me;
+     state.shown = load;
+   }
++  if (end.kind === "loaded") {
++    state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
++  }
+   state.listing.value = { kind: "done", end, at: Date.now() };
+ }
+ 
+@@ -129,6 +130,19 @@ function checked(state: State, load: Load, row: CheckedRow): void {
+   }
+ }
+ 
++function rerequestsOf(state: State): Rerequests {
++  function replaced(iid: MergeRequestIid, reviewers: readonly Reviewer[]): void {
++    function withReviewers(rows: readonly MergeRequestRow[]): readonly MergeRequestRow[] {
++      return rows.map((row) => (row.iid === iid ? { ...row, reviewers } : row));
++    }
++    state.rows.value = withReviewers(state.rows.value);
++    if (state.running?.buffered === true) {
++      state.running.buffer = withReviewers(state.running.buffer);
++    }
++  }
++  return createRerequests({ source: state.source, report: state.report, replaced });
++}
++
+ async function load(state: State): Promise<void> {
+   const before = state.listing.value;
+   if (before.kind === "loading") {
+@@ -140,12 +154,14 @@ async function load(state: State): Promise<void> {
+     state.shown = running;
+   }
+   state.listing.value = { kind: "loading", first };
++  state.running = running;
+   const outcome = await attempt(() =>
+     state.source.listMergeRequests(
+       (page) => received(state, running, page),
+       (row) => checked(state, running, row),
+     ),
+   );
++  state.running = null;
+   if (outcome.ok) {
+     ended(state, running, outcome.value);
+     return;
+@@ -201,47 +217,24 @@ async function openPage(state: State, clicked: PageKind, page: WebPage): Promise
+ }
+ 
+ function createState(deps: Deps): State {
++  const project = shallowRef<GitLabProject>({ kind: "none" });
++  const repository = computed(() =>
++    project.value.kind === "found" ? project.value.repository : null,
++  );
+   return {
+     ...deps,
+-    project: shallowRef<GitLabProject>({ kind: "none" }),
++    project,
++    repository,
+     me: shallowRef<string | null>(null),
+     rows: shallowRef<readonly MergeRequestRow[]>([]),
+     cut: shallowRef(false),
+     listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
+     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
+     pageProblem: shallowRef<string | null>(null),
++    dueDates: createDueDates(repository, deps.storage),
+     rowActions: createRowActions(deps),
+     shown: null,
+-  };
+-}
+-
+-function choicesOf(rows: readonly MergeRequestRow[], filters: Filters, me: string | null): Choices {
+-  return {
+-    assignee: personChoices(rows, "assignees", me, filters.assignee),
+-    reviewer: personChoices(rows, "reviewers", me, filters.reviewer),
+-    label: labelChoices(rows, filters.label),
+-  };
+-}
+-
+-type RememberedFilters = ReturnType<typeof createRememberedFilters>;
+-
+-function filterActions(
+-  remembered: RememberedFilters,
+-): Pick<MergeRequests, "toggle" | "setDraft" | "clear" | "clearAll"> {
+-  const { filters } = remembered;
+-  return {
+-    toggle: (filter, value) => {
+-      remembered.set(toggled(filters.value, filter, value));
+-    },
+-    setDraft: (draft) => {
+-      remembered.set(withDraft(filters.value, draft));
+-    },
+-    clear: (filter) => {
+-      remembered.set(cleared(filters.value, filter));
+-    },
+-    clearAll: () => {
+-      remembered.set(NO_FILTERS);
+-    },
++    running: null,
+   };
+ }
+ 
+@@ -255,17 +248,25 @@ function listingOf(state: State): Pick<MergeRequests, "listing" | "failure"> {
+   };
+ }
+ 
++function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setDueDate"> {
++  return {
++    dueDates: dueDates.dates,
++    setDueDate: (iid, day) => {
++      dueDates.set(iid, day);
++    },
++  };
++}
++
+ export function createMergeRequests(deps: Deps): MergeRequests {
+   const state = createState(deps);
+-  const { project, me, rows } = state;
+-  const remembered = createRememberedFilters(
+-    computed(() => (project.value.kind === "found" ? project.value.repository : null)),
+-    deps.storage,
+-  );
++  const { me, rows } = state;
++  const remembered = createRememberedFilters(state.repository, deps.storage);
+   const { filters } = remembered;
+-  const shownRows = computed(() => filtered(rows.value, filters.value, me.value));
++  const shownRows = computed(() =>
++    state.dueDates.datedFirst(filtered(rows.value, filters.value, me.value)),
++  );
+   return {
+-    project,
++    project: state.project,
+     me,
+     rows,
+     ...listingOf(state),
+@@ -275,6 +276,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     summary: computed(() =>
+       summaryText(shownRows.value.length, rows.value.length, state.cut.value),
+     ),
++    ...dueDatesOf(state),
+     openings: state.openings,
+     pageProblem: state.pageProblem,
+     findProject: () => findProject(state),
+@@ -292,5 +294,6 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+       state.pageProblem.value = null;
+     },
+     ...state.rowActions,
++    ...rerequestsOf(state),
+   };
+ }
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 4f176e1..38c2923 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -44,7 +44,8 @@ export type MergeRequestStep =
+   | "mergeRequest"
+   | "resolve"
+   | "continue"
+-  | "localMerge";
++  | "localMerge"
++  | "rerequestReview";
+ 
+ export type Problem =
+   | { readonly action: "list"; readonly cause: ProblemCause }
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index 392d010..fbd141d 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -291,6 +291,7 @@ test.each([
+   ["resolve", "Could not resolve the merge request's conflicts: yamt's worker stopped; try again."],
+   ["continue", "Could not continue the merge request's merge: yamt's worker stopped; try again."],
+   ["localMerge", "Could not check for an unfinished merge: yamt's worker stopped; try again."],
++  ["rerequestReview", "Could not re-request the review: yamt's worker stopped; try again."],
+ ] as const)("a failed merge-request call at %s says what failed", (step, words) => {
+   expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
+ });
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 0d603f1..df60980 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -79,6 +79,7 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
+   resolve: "Could not resolve the merge request's conflicts",
+   continue: "Could not continue the merge request's merge",
+   localMerge: "Could not check for an unfinished merge",
++  rerequestReview: "Could not re-request the review",
+ };
+ 
+ const FIXED_ATTEMPT_WORDS: Readonly<

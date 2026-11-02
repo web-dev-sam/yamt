@@ -1,0 +1,6 @@
+just mutants HEAD: Stryker on 11 changed files, 1105 killed, 151 survived, 12 no-cov (most of them on lines this slice did not touch). Changed-line survivors found from the JSON report.
+src/ipc/fixtureMergeRequestData.ts:38-78 literals in PNG_DATA, PEOPLE, REFUSING_REVIEWER, LABEL_COLORS, REVIEW_STATES — gate-covered: module-level, not re-run under vitest (#732). Pinned by tests; a hand mutant fails the colours test.
+src/ipc/fixtureMergeRequests.ts:68 REFUSED_REREQUEST "" — gate-covered: a module-level constant (#732); the exact text is asserted in the dmitri case.
+src/ipc/tauriMergeRequests.ts:17 PICTURE_SCHEME "" — gate-covered: module-level (#732); the test asserts the constant and the converted address.
+src/ipc/mergeRequestDomain.ts:104 default branch NoCoverage — equivalent: the `never` exhaustiveness arm cannot be reached.
+src/ui/mergeRequestRerequests.ts:69 `?? []` → `["Stryker was here"]` NoCoverage — equivalent: a string entry's `ask.kind` is undefined, so it is filtered out and the row is still removed.

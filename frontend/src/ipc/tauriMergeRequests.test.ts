@@ -3,7 +3,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import type * as Generated from "./bindings";
 import { isMergeRequestIid, isWebPage } from "./domain";
 import type { CheckedRow, MergeRequestPage } from "./mergeRequestDomain";
-import { createTauriMergeRequests } from "./tauriMergeRequests";
+import { createTauriMergeRequests, PICTURE_SCHEME } from "./tauriMergeRequests";
 import { branded } from "./validate";
 
 const commands = vi.hoisted(() => ({
@@ -11,6 +11,7 @@ const commands = vi.hoisted(() => ({
   listMergeRequests: vi.fn(),
   openMergeRequest: vi.fn(),
   openPage: vi.fn(),
+  rerequestReview: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -19,6 +20,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   Channel: class {
     constructor(readonly onmessage: (message: unknown) => void) {}
   },
+  convertFileSrc: (path: string, protocol: string) => `${protocol}://localhost/${path}`,
 }));
 
 type MessageChannel = { onmessage: (message: Generated.ListMessage) => void };
@@ -28,11 +30,18 @@ const ROW: Generated.MergeRequestRow = {
   title: "Show overdue cards in red",
   createdAt: "2026-10-29T08:00:00Z",
   draft: false,
+  author: null,
   assignees: [],
-  reviewers: [{ username: "anna", name: "Anna Berg" }],
+  reviewers: [
+    {
+      person: { username: "anna", name: "Anna Berg", picture: { kind: "none" } },
+      state: "requested",
+    },
+  ],
   labels: [],
   openDiscussions: 0,
-  approvals: 2,
+  approvedBy: [],
+  mayRerequest: true,
   pipeline: null,
   page: null,
   size: null,
@@ -106,7 +115,18 @@ test("each page from the channel reaches the callback converted, then the end me
   );
 
   expect(pages).toEqual([
-    { me: "sam", rows: [{ ...ROW, createdAt: Date.UTC(2026, 9, 29, 8) }] },
+    {
+      me: "sam",
+      rows: [
+        {
+          ...ROW,
+          createdAt: Date.UTC(2026, 9, 29, 8),
+          reviewers: [
+            { person: { username: "anna", name: "Anna Berg", picture: null }, state: "requested" },
+          ],
+        },
+      ],
+    },
     { me: "sam", rows: [] },
   ]);
   expect(ended).toEqual({ ok: true, value: { kind: "cut", limit: 500 } });
@@ -211,6 +231,66 @@ test("opening passes the iid and camelCases a missing commit", async () => {
   expect(reply).toEqual({ ok: true, value: { kind: "missingCommit", shortId: "531ea52" } });
 });
 
+test("the_uploaded_picture_address_is_convertFileSrc_of_the_username_and_the_scheme, in a listed page", async () => {
+  const uploaded: Generated.Person = {
+    username: "ben",
+    name: "Ben Okafor",
+    picture: { kind: "uploaded" },
+  };
+  commands.listMergeRequests.mockImplementation(async (channel: MessageChannel) => {
+    channel.onmessage(page([{ ...ROW, author: uploaded }]));
+    channel.onmessage(end({ kind: "loaded" }));
+    return { status: "ok", data: null };
+  });
+  const pages: MergeRequestPage[] = [];
+
+  await createTauriMergeRequests().listMergeRequests((got) => pages.push(got), unchecked);
+
+  expect(PICTURE_SCHEME).toBe("yamt-picture");
+  expect(pages[0]?.rows[0]?.author?.picture).toBe("yamt-picture://localhost/ben");
+});
+
+test("rerequestReview calls the command with the iid and the username and converts the reply's reviewers", async () => {
+  const uploaded: Generated.Person = {
+    username: "ben",
+    name: "Ben Okafor",
+    picture: { kind: "uploaded" },
+  };
+  commands.rerequestReview.mockResolvedValue({
+    status: "ok",
+    data: { kind: "requested", reviewers: [{ person: uploaded, state: "requested" }] },
+  });
+
+  const reply = await createTauriMergeRequests().rerequestReview(
+    branded(52, isMergeRequestIid, "iid"),
+    "ben",
+  );
+
+  expect(commands.rerequestReview).toHaveBeenCalledWith(52, "ben");
+  expect(reply).toEqual({
+    ok: true,
+    value: {
+      kind: "requested",
+      reviewers: [
+        {
+          person: { username: "ben", name: "Ben Okafor", picture: "yamt-picture://localhost/ben" },
+          state: "requested",
+        },
+      ],
+    },
+  });
+});
+
+test("a refused re-request comes back as GitLab said it", async () => {
+  commands.rerequestReview.mockResolvedValue({
+    status: "ok",
+    data: { kind: "refused", message: "Reviewer not found" },
+  });
+  expect(
+    await createTauriMergeRequests().rerequestReview(branded(52, isMergeRequestIid, "iid"), "x"),
+  ).toEqual({ ok: true, value: { kind: "refused", message: "Reviewer not found" } });
+});
+
 test("a page is passed as it came and its answer comes back", async () => {
   const page = "https://gitlab.example/x/-/merge_requests/7";
   if (!isWebPage(page)) {
@@ -228,12 +308,14 @@ test("a page is passed as it came and its answer comes back", async () => {
 test.each([
   ["listMergeRequests", { kind: "WorkerStopped" }],
   ["openMergeRequest", { kind: "WorkerStopped" }],
+  ["rerequestReview", { kind: "WorkerStopped" }],
 ] as const)("a %s failure comes back unchanged", async (name, failure) => {
   commands[name].mockResolvedValue({ status: "error", error: failure });
   const source = createTauriMergeRequests();
   const calls = {
     listMergeRequests: () => source.listMergeRequests(() => undefined, unchecked),
     openMergeRequest: () => source.openMergeRequest(branded(1, isMergeRequestIid, "iid")),
+    rerequestReview: () => source.rerequestReview(branded(1, isMergeRequestIid, "iid"), "anna"),
   };
   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
 });

@@ -1,4 +1,4 @@
-import { Channel } from "@tauri-apps/api/core";
+import { Channel, convertFileSrc } from "@tauri-apps/api/core";
 
 import { commands, type ListMessage } from "./bindings";
 import type { SourceResult } from "./domain";
@@ -6,12 +6,19 @@ import {
   toCheckedRow,
   toMergeRequestPage,
   toOpenReply,
+  toRerequestReply,
   type CheckedRow,
   type ListEnd,
   type MergeRequestPage,
 } from "./mergeRequestDomain";
 import type { MergeRequestSource } from "./MergeRequestSource";
 import { converted, toResult } from "./tauri";
+
+export const PICTURE_SCHEME = "yamt-picture";
+
+function uploadedPicture(username: string): string {
+  return convertFileSrc(username, PICTURE_SCHEME);
+}
 
 function listed(
   onPage: (page: MergeRequestPage) => void,
@@ -40,7 +47,7 @@ function listed(
         return;
       }
       try {
-        onPage(toMergeRequestPage(message.page));
+        onPage(toMergeRequestPage(message.page, uploadedPicture));
       } catch (error) {
         fail(error);
       }
@@ -74,6 +81,11 @@ export function createTauriMergeRequests(): MergeRequestSource {
     },
     async findLocalMerge() {
       return toResult(await commands.findLocalMerge());
+    },
+    async rerequestReview(iid, username) {
+      return converted(toResult(await commands.rerequestReview(iid, username)), (reply) =>
+        toRerequestReply(reply, uploadedPicture),
+      );
     },
   };
 }

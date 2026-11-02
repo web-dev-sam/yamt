@@ -16,7 +16,9 @@ import {
   type MergeRequestSource,
   type OpenReply,
   type PageOpened,
+  type RerequestReply,
   type ResolveReply,
+  type Reviewer,
   type SourceFailure,
   type SourceResult,
   type WebPage,
@@ -59,6 +61,7 @@ type Rig = {
   readonly resolves: Asked<ResolveReply>[];
   readonly continues: Asked<ContinueMergeReply>[];
   readonly localMerges: LocalMerge[];
+  readonly rerequests: Asked<RerequestReply>[];
   readonly storage: MemoryStorage;
 };
 
@@ -139,6 +142,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
   const resolves: Asked<ResolveReply>[] = [];
   const continues: Asked<ContinueMergeReply>[] = [];
   const localMerges: LocalMerge[] = [];
+  const rerequests: Asked<RerequestReply>[] = [];
   const problems: Problem[] = [];
   const source: MergeRequestSource = {
     findGitLabProject: async () => ({ ok: true, value: { kind: "found", repository: REPOSITORY } }),
@@ -163,6 +167,10 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
       const found = localMerges.shift() ?? FREE;
       return { ok: true, value: found };
     },
+    rerequestReview: (asked) =>
+      new Promise((resolve) => {
+        rerequests.push({ iid: asked, answer: resolve });
+      }),
     ...edit,
   };
   const screen = shallowRef<Screen>({ kind: "files" });
@@ -172,7 +180,18 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
     report: (problem) => problems.push(problem),
     storage,
   });
-  return { slice, screen, problems, loads, opens, resolves, continues, localMerges, storage };
+  return {
+    slice,
+    screen,
+    problems,
+    loads,
+    opens,
+    resolves,
+    continues,
+    localMerges,
+    rerequests,
+    storage,
+  };
 }
 
 function loadAt(live: Rig, index: number): Load {
@@ -537,7 +556,7 @@ test("filters narrow the shown rows and the choices, and are remembered through 
   await live.slice.findProject();
   await loaded(live);
 
-  live.slice.toggle("assignee", { kind: "me" });
+  live.slice.click("assignee", { kind: "me" }, false);
   const mine = ROWS.filter((row) => row.assignees.some((person) => person.username === "sam"));
   expect(iids(live.slice.shownRows.value)).toEqual(iids(mine));
   expect(live.slice.summary.value).toBe(`${mine.length} of 40 merge requests`);
@@ -545,11 +564,11 @@ test("filters narrow the shown rows and the choices, and are remembered through 
     value: { kind: "me" },
     label: "Me",
     count: mine.length,
-    checked: true,
+    state: "included",
   });
   live.slice.setDraft("ready");
-  live.slice.toggle("label", { kind: "none" });
-  expect(live.slice.choices.value.label[0]?.checked).toBe(true);
+  live.slice.click("label", { kind: "none" }, false);
+  expect(live.slice.choices.value.label[0]?.state).toBe("included");
   expect(live.slice.shownRows.value.every((row) => !row.draft && row.labels.length === 0)).toBe(
     true,
   );
@@ -570,10 +589,28 @@ test("filters narrow the shown rows and the choices, and are remembered through 
   expect(storage.items.get("yamt.mergeRequests.filters")).toBe("{}");
 });
 
+test("shift_click_excludes_and_the_filter_is_stored_with_not; a plain click on it turns it off", async () => {
+  const storage = memoryStorage();
+  const live = rig({}, storage);
+  await live.slice.findProject();
+  await loaded(live);
+
+  live.slice.click("assignee", { kind: "me" }, true);
+  live.slice.click("label", { kind: "label", title: "frontend" }, false);
+  expect(iids(live.slice.shownRows.value)).toEqual([639, 627, 623, 619, 607, 603]);
+  expect(live.slice.choices.value.assignee[0]?.state).toBe("excluded");
+  expect(JSON.parse(storage.items.get("yamt.mergeRequests.filters") ?? "null")).toEqual({
+    [REPOSITORY]: { assignee: ["not:me"], reviewer: [], label: ["label:frontend"], draft: "all" },
+  });
+
+  live.slice.click("assignee", { kind: "me" }, false);
+  expect(live.slice.filters.value.assignee).toEqual([]);
+});
+
 test("without a GitLab project a filter is not remembered (catches filters stored under no repository)", async () => {
   const live = rig();
   await loaded(live);
-  live.slice.toggle("assignee", { kind: "me" });
+  live.slice.click("assignee", { kind: "me" }, false);
   expect(live.slice.filters.value.assignee).toEqual([]);
   expect(live.storage.items.size).toBe(0);
 });
@@ -842,4 +879,136 @@ test("a failed local merge read is reported and keeps what was known", async () 
   await live.slice.checkLocalMerge();
   expect(live.slice.localMerge.value).toEqual(MERGING_640);
   expect(live.problems).toEqual([{ action: "mergeRequests", step: "localMerge", cause: STOPPED }]);
+});
+
+const NOV_5 = { year: 2026, month: 11, day: 5 };
+const DEC_24 = { year: 2026, month: 12, day: 24 };
+const DUE_KEY = "yamt.mergeRequests.dueDates";
+
+function storedDueDates(live: Rig): unknown {
+  return JSON.parse(live.storage.items.get(DUE_KEY) ?? "null");
+}
+
+async function dated(): Promise<Rig> {
+  const live = rig();
+  await live.slice.findProject();
+  await loaded(live);
+  live.slice.setDueDate(iid(640), NOV_5);
+  live.slice.setDueDate(iid(630), DEC_24);
+  return live;
+}
+
+test("a_complete_load_drops_due_dates_of_merge_requests_it_no_longer_lists, the first load and a swapped-in refresh alike", async () => {
+  const storage = memoryStorage();
+  storage.setItem(
+    DUE_KEY,
+    JSON.stringify({ [REPOSITORY]: { "1": "2026-11-05", "639": "2026-11-05" } }),
+  );
+  const first = rig({}, storage);
+  await first.slice.findProject();
+  expect([...first.slice.dueDates.value.keys()]).toEqual([1, 639]);
+  await loaded(first);
+  expect([...first.slice.dueDates.value.keys()]).toEqual([639]);
+
+  const live = await dated();
+  const reloading = live.slice.refresh();
+  loadAt(live, 1).send({ me: "sam", rows: ROWS.filter((row) => row.iid !== 640) });
+  expect([...live.slice.dueDates.value.keys()]).toEqual([630, 640]);
+  loadAt(live, 1).end(LOADED);
+  await reloading;
+  expect(live.slice.dueDates.value).toEqual(new Map([[630, DEC_24]]));
+  expect(storedDueDates(live)).toEqual({ [REPOSITORY]: { "630": "2026-12-24" } });
+});
+
+test.each<SourceResult<ListEnd>>([
+  { ok: true, value: { kind: "cut", limit: 500 } },
+  { ok: true, value: { kind: "failed", message: "502" } },
+  { ok: true, value: { kind: "glabMissing" } },
+  { ok: true, value: { kind: "notLoggedIn", detail: "no token" } },
+  { ok: false, failure: STOPPED },
+])("a_cut_or_failed_load_keeps_every_due_date: %j", async (result) => {
+  const live = await dated();
+  const reloading = live.slice.refresh();
+  loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(20) });
+  loadAt(live, 1).end(result);
+  await reloading;
+  expect([...live.slice.dueDates.value.keys()]).toEqual([630, 640]);
+  expect(storedDueDates(live)).toEqual({
+    [REPOSITORY]: { "630": "2026-12-24", "640": "2026-11-05" },
+  });
+});
+
+test("dated_rows_come_first_in_shown_rows, soonest first, and a cleared date puts its row back", async () => {
+  const live = await dated();
+  live.slice.setDueDate(iid(620), DEC_24);
+  expect(iids(live.slice.shownRows.value).slice(0, 5)).toEqual([640, 630, 620, 639, 638]);
+
+  live.slice.click("label", { kind: "label", title: "frontend" }, false);
+  expect(iids(live.slice.shownRows.value).slice(0, 2)).toEqual([639, 635]);
+  live.slice.clearAll();
+
+  live.slice.setDueDate(iid(640), null);
+  expect(iids(live.slice.shownRows.value).slice(0, 3)).toEqual([630, 620, 640]);
+  expect(live.slice.rows.value).toEqual(ROWS);
+});
+
+const RE_REQUESTED: readonly Reviewer[] = [
+  { person: { username: "chiara", name: "Chiara Rossi", picture: null }, state: "requested" },
+];
+
+function reviewersOf(rows: readonly MergeRequestRow[], value: number): readonly Reviewer[] {
+  return rows.find((row) => row.iid === value)?.reviewers ?? [];
+}
+
+test("a_rerequest_reply_replaces_that_rows_reviewers_in_rows_and_in_a_buffering_refresh", async () => {
+  const live = rig();
+  await loaded(live);
+  const reloading = live.slice.refresh();
+  loadAt(live, 1).send({ me: "sam", rows: ROWS });
+
+  const asking = live.slice.rerequestReview(iid(638), "chiara");
+  askedAt(live.rerequests, 0).answer({
+    ok: true,
+    value: { kind: "requested", reviewers: RE_REQUESTED },
+  });
+  await asking;
+  expect(reviewersOf(live.slice.rows.value, 638)).toEqual(RE_REQUESTED);
+  expect(live.slice.rows.value.filter((row) => row.iid !== 638)).toEqual(
+    ROWS.filter((row) => row.iid !== 638),
+  );
+
+  loadAt(live, 1).end(LOADED);
+  await reloading;
+  expect(reviewersOf(live.slice.rows.value, 638)).toEqual(RE_REQUESTED);
+  expect(live.slice.rerequests.value.size).toBe(0);
+});
+
+test("a re-request reply after a first load's end writes the rows only once (catches a finished load's buffer kept)", async () => {
+  const live = rig();
+  await loaded(live);
+  const asking = live.slice.rerequestReview(iid(630), "anna");
+  askedAt(live.rerequests, 0).answer({
+    ok: true,
+    value: { kind: "requested", reviewers: RE_REQUESTED },
+  });
+  await asking;
+  expect(reviewersOf(live.slice.rows.value, 630)).toEqual(RE_REQUESTED);
+
+  const reloading = live.slice.refresh();
+  loadAt(live, 1).send({ me: "sam", rows: ROWS });
+  loadAt(live, 1).end(LOADED);
+  await reloading;
+  expect(reviewersOf(live.slice.rows.value, 630)).toEqual(reviewersOf(ROWS, 630));
+});
+
+test("a refused re-request leaves the rows as they were", async () => {
+  const live = rig();
+  await loaded(live);
+  const asking = live.slice.rerequestReview(iid(638), "dmitri");
+  askedAt(live.rerequests, 0).answer({ ok: true, value: { kind: "notOpen" } });
+  await asking;
+  expect(live.slice.rows.value).toEqual(ROWS);
+  expect(live.slice.rerequests.value.get(iid(638))).toEqual(
+    new Map([["dmitri", { kind: "refused", reply: { kind: "notOpen" } }]]),
+  );
 });

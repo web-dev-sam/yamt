@@ -291,6 +291,7 @@ test.each([
   ["resolve", "Could not resolve the merge request's conflicts: yamt's worker stopped; try again."],
   ["continue", "Could not continue the merge request's merge: yamt's worker stopped; try again."],
   ["localMerge", "Could not check for an unfinished merge: yamt's worker stopped; try again."],
+  ["rerequestReview", "Could not re-request the review: yamt's worker stopped; try again."],
 ] as const)("a failed merge-request call at %s says what failed", (step, words) => {
   expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
 });

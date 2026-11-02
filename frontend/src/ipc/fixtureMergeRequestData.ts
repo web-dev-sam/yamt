@@ -29,6 +29,14 @@ const ADDED_PER_ROW = 12;
 const REMOVED_STEP = 5;
 const REMOVED_CYCLE = 4;
 const FILES_CYCLE = 6;
+const STACK_EVERY = 8;
+const STACK_AT = 2;
+const STACK_REVIEWERS = 3;
+const NO_REREQUEST_EVERY = 9;
+const APPROVERS_CYCLE = 4;
+const PNG_DATA =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const BROKEN_PICTURE = "data:image/png;base64,AAAA";
 
 const TITLES = [
   "Snooze a reminder",
@@ -44,14 +52,36 @@ const TITLES = [
 ];
 
 const PEOPLE: readonly Generated.Person[] = [
-  { username: FIXTURE_ME, name: "Sam Weller" },
-  { username: "anna", name: "Anna Berg" },
-  { username: "ben", name: "Ben Okafor" },
-  { username: "chiara", name: "Chiara Rossi" },
-  { username: "dmitri", name: "Dmitri Volkov" },
+  { username: FIXTURE_ME, name: "Sam Weller", picture: { kind: "uploaded" } },
+  { username: "anna", name: "Anna Berg", picture: { kind: "gravatar", address: PNG_DATA } },
+  { username: "ben", name: "Ben Okafor", picture: { kind: "uploaded" } },
+  { username: "chiara", name: "Chiara Rossi", picture: { kind: "none" } },
+  { username: "dmitri", name: "Dmitri Volkov", picture: { kind: "none" } },
 ];
 
+export const REFUSING_REVIEWER = "dmitri";
+
 const LABELS = [DROPPED_LABEL, "frontend", "ui", "docs"];
+
+const LABEL_COLORS: Readonly<Record<string, Generated.LabelColors | null>> = {
+  [DROPPED_LABEL]: { background: "teal", text: "white" },
+  frontend: { background: "steelblue", text: "white" },
+  ui: { background: "gold", text: "black" },
+  docs: null,
+  bug: { background: "crimson", text: "white" },
+};
+
+const REVIEW_STATES: readonly Generated.ReviewState[] = [
+  "requested",
+  "reviewed",
+  "approved",
+  "changesRequested",
+];
+
+/** Stands in for `convertFileSrc` over the picture scheme: sam's loads, anyone else's does not (Rust's 404). */
+export function fixtureUploadedPicture(username: string): string {
+  return username === FIXTURE_ME ? PNG_DATA : BROKEN_PICTURE;
+}
 
 const PIPELINES: readonly (Generated.CiStatus | null)[] = [
   "failed",
@@ -128,12 +158,26 @@ function pipeline(index: number): Generated.Pipeline | null {
   };
 }
 
-function labels(index: number): string[] {
+function labels(index: number): Generated.Label[] {
   if (index % NO_LABEL_EVERY === NO_LABEL_EVERY - 1) {
     return [];
   }
   const label = cycled(LABELS, index);
-  return index % BUG_EVERY === 0 ? [label, "bug"] : [label];
+  const titles = index % BUG_EVERY === 0 ? [label, "bug"] : [label];
+  return titles.map((title) => ({ title, colors: LABEL_COLORS[title] ?? null }));
+}
+
+function reviewers(index: number): Generated.Reviewer[] {
+  if (index % STACK_EVERY === STACK_AT) {
+    return Array.from({ length: STACK_REVIEWERS }, (_, at) => ({
+      person: cycled(PEOPLE, index + at + 1),
+      state: cycled(REVIEW_STATES, index + at),
+    }));
+  }
+  if (index % BUG_EVERY === 0) {
+    return [];
+  }
+  return [{ person: cycled(PEOPLE, index + BUG_EVERY), state: cycled(REVIEW_STATES, index) }];
 }
 
 function readiness(index: number, draft: boolean): Generated.Readiness {
@@ -148,6 +192,9 @@ function readiness(index: number, draft: boolean): Generated.Readiness {
 }
 
 function size(index: number): Generated.ChangeSize | null {
+  if (NEWEST_IID - index === CHECKING_IID) {
+    return { additions: 0, deletions: 0, files: 0 };
+  }
   if (index % NO_SIZE_EVERY === NO_SIZE_EVERY - 1) {
     return null;
   }
@@ -167,11 +214,13 @@ function row(index: number): Generated.MergeRequestRow {
     title: draft ? `Draft: ${title}` : title,
     createdAt: new Date(NEWEST_CREATED - index * index * CREATED_STEP_MS).toISOString(),
     draft,
+    author: cycled(PEOPLE, index + 1),
     assignees: index % NO_ASSIGNEE_EVERY === NO_ASSIGNEE_EVERY - 1 ? [] : [cycled(PEOPLE, index)],
-    reviewers: index % BUG_EVERY === 0 ? [] : [cycled(PEOPLE, index + BUG_EVERY)],
+    reviewers: reviewers(index),
     labels: labels(index),
     openDiscussions: index % BUG_EVERY,
-    approvals: index % NO_ASSIGNEE_EVERY,
+    approvedBy: PEOPLE.slice(0, index % APPROVERS_CYCLE),
+    mayRerequest: index % NO_REREQUEST_EVERY !== NO_REREQUEST_EVERY - 1,
     pipeline: pipeline(index),
     page: `${ORIGIN}/-/merge_requests/${iid}`,
     size: size(index),

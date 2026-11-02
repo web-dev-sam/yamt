@@ -10,32 +10,33 @@ import type {
   MergeRequestRow,
   MergeRequestSource,
   OpenReply,
+  Reviewer,
   WebPage,
 } from "../ipc";
 import {
-  cleared,
   filtered,
-  labelChoices,
   merged,
-  NO_FILTERS,
-  personChoices,
   rechecked,
   summaryText,
-  toggled,
-  withDraft,
-  type Choice,
-  type DraftFilter,
+  type CalendarDay,
   type Filters,
-  type LabelValue,
-  type ListFilter,
-  type PersonValue,
 } from "../mergeRequests";
 import { RECHECK_PAUSE_MS } from "./glab";
 import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
-import { createRememberedFilters } from "./mergeRequestFilters";
+import { createDueDates, type DueDates } from "./mergeRequestDueDates";
+import {
+  choicesOf,
+  createRememberedFilters,
+  filterActions,
+  type Choices,
+  type FilterActions,
+} from "./mergeRequestFilters";
+import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
 import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
 import { attempt, type Problem } from "./problem";
 import type { Screen } from "./screen";
+
+export type { RerequestAsk } from "./mergeRequestRerequests";
 
 export type ListLoad =
   | { readonly kind: "notLoaded" }
@@ -46,36 +47,30 @@ export type Opening =
   | { readonly kind: "fetching" }
   | { readonly kind: "refused"; readonly reply: Exclude<OpenReply, { readonly kind: "opened" }> };
 
-type Choices = Readonly<{
-  assignee: readonly Choice<PersonValue>[];
-  reviewer: readonly Choice<PersonValue>[];
-  label: readonly Choice<LabelValue>[];
-}>;
-
-export type MergeRequests = RowActions & {
-  readonly project: Readonly<ShallowRef<GitLabProject>>;
-  readonly me: Readonly<ShallowRef<string | null>>;
-  readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
-  readonly listing: Readonly<ShallowRef<ListLoad>>;
-  readonly failure: ComputedRef<string | null>;
-  readonly filters: Readonly<Ref<Filters>>;
-  readonly shownRows: ComputedRef<readonly MergeRequestRow[]>;
-  readonly choices: ComputedRef<Choices>;
-  readonly summary: ComputedRef<string>;
-  readonly openings: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>>;
-  readonly pageProblem: Readonly<ShallowRef<string | null>>;
-  findProject(): Promise<void>;
-  show(): void;
-  close(): void;
-  refresh(): Promise<void>;
-  toggle(filter: ListFilter, value: PersonValue | LabelValue): void;
-  setDraft(draft: DraftFilter): void;
-  clear(filter: ListFilter): void;
-  clearAll(): void;
-  openChanges(iid: MergeRequestIid): Promise<void>;
-  openPage(clicked: PageKind, page: WebPage): Promise<void>;
-  dismissPageProblem(): void;
-};
+export type MergeRequests = RowActions &
+  Rerequests &
+  FilterActions & {
+    readonly project: Readonly<ShallowRef<GitLabProject>>;
+    readonly me: Readonly<ShallowRef<string | null>>;
+    readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
+    readonly listing: Readonly<ShallowRef<ListLoad>>;
+    readonly failure: ComputedRef<string | null>;
+    readonly filters: Readonly<Ref<Filters>>;
+    readonly shownRows: ComputedRef<readonly MergeRequestRow[]>;
+    readonly choices: ComputedRef<Choices>;
+    readonly summary: ComputedRef<string>;
+    readonly dueDates: ComputedRef<ReadonlyMap<MergeRequestIid, CalendarDay>>;
+    readonly openings: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>>;
+    readonly pageProblem: Readonly<ShallowRef<string | null>>;
+    findProject(): Promise<void>;
+    show(): void;
+    close(): void;
+    refresh(): Promise<void>;
+    setDueDate(iid: MergeRequestIid, day: CalendarDay | null): void;
+    openChanges(iid: MergeRequestIid): Promise<void>;
+    openPage(clicked: PageKind, page: WebPage): Promise<void>;
+    dismissPageProblem(): void;
+  };
 
 type Deps = {
   readonly source: MergeRequestSource;
@@ -88,14 +83,17 @@ type Load = { readonly buffered: boolean; buffer: readonly MergeRequestRow[]; me
 
 type State = Deps & {
   readonly project: ShallowRef<GitLabProject>;
+  readonly repository: ComputedRef<string | null>;
   readonly me: ShallowRef<string | null>;
   readonly rows: ShallowRef<readonly MergeRequestRow[]>;
   readonly cut: ShallowRef<boolean>;
   readonly listing: ShallowRef<ListLoad>;
   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
   readonly pageProblem: ShallowRef<string | null>;
+  readonly dueDates: DueDates;
   readonly rowActions: RowActions;
   shown: Load | null;
+  running: Load | null;
 };
 
 function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
@@ -118,6 +116,9 @@ function ended(state: State, load: Load, end: ListEnd): void {
     state.me.value = load.me;
     state.shown = load;
   }
+  if (end.kind === "loaded") {
+    state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
+  }
   state.listing.value = { kind: "done", end, at: Date.now() };
 }
 
@@ -127,6 +128,19 @@ function checked(state: State, load: Load, row: CheckedRow): void {
   } else {
     load.buffer = rechecked(load.buffer, row);
   }
+}
+
+function rerequestsOf(state: State): Rerequests {
+  function replaced(iid: MergeRequestIid, reviewers: readonly Reviewer[]): void {
+    function withReviewers(rows: readonly MergeRequestRow[]): readonly MergeRequestRow[] {
+      return rows.map((row) => (row.iid === iid ? { ...row, reviewers } : row));
+    }
+    state.rows.value = withReviewers(state.rows.value);
+    if (state.running?.buffered === true) {
+      state.running.buffer = withReviewers(state.running.buffer);
+    }
+  }
+  return createRerequests({ source: state.source, report: state.report, replaced });
 }
 
 async function load(state: State): Promise<void> {
@@ -140,12 +154,14 @@ async function load(state: State): Promise<void> {
     state.shown = running;
   }
   state.listing.value = { kind: "loading", first };
+  state.running = running;
   const outcome = await attempt(() =>
     state.source.listMergeRequests(
       (page) => received(state, running, page),
       (row) => checked(state, running, row),
     ),
   );
+  state.running = null;
   if (outcome.ok) {
     ended(state, running, outcome.value);
     return;
@@ -201,47 +217,24 @@ async function openPage(state: State, clicked: PageKind, page: WebPage): Promise
 }
 
 function createState(deps: Deps): State {
+  const project = shallowRef<GitLabProject>({ kind: "none" });
+  const repository = computed(() =>
+    project.value.kind === "found" ? project.value.repository : null,
+  );
   return {
     ...deps,
-    project: shallowRef<GitLabProject>({ kind: "none" }),
+    project,
+    repository,
     me: shallowRef<string | null>(null),
     rows: shallowRef<readonly MergeRequestRow[]>([]),
     cut: shallowRef(false),
     listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
     pageProblem: shallowRef<string | null>(null),
+    dueDates: createDueDates(repository, deps.storage),
     rowActions: createRowActions(deps),
     shown: null,
-  };
-}
-
-function choicesOf(rows: readonly MergeRequestRow[], filters: Filters, me: string | null): Choices {
-  return {
-    assignee: personChoices(rows, "assignees", me, filters.assignee),
-    reviewer: personChoices(rows, "reviewers", me, filters.reviewer),
-    label: labelChoices(rows, filters.label),
-  };
-}
-
-type RememberedFilters = ReturnType<typeof createRememberedFilters>;
-
-function filterActions(
-  remembered: RememberedFilters,
-): Pick<MergeRequests, "toggle" | "setDraft" | "clear" | "clearAll"> {
-  const { filters } = remembered;
-  return {
-    toggle: (filter, value) => {
-      remembered.set(toggled(filters.value, filter, value));
-    },
-    setDraft: (draft) => {
-      remembered.set(withDraft(filters.value, draft));
-    },
-    clear: (filter) => {
-      remembered.set(cleared(filters.value, filter));
-    },
-    clearAll: () => {
-      remembered.set(NO_FILTERS);
-    },
+    running: null,
   };
 }
 
@@ -255,17 +248,25 @@ function listingOf(state: State): Pick<MergeRequests, "listing" | "failure"> {
   };
 }
 
+function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setDueDate"> {
+  return {
+    dueDates: dueDates.dates,
+    setDueDate: (iid, day) => {
+      dueDates.set(iid, day);
+    },
+  };
+}
+
 export function createMergeRequests(deps: Deps): MergeRequests {
   const state = createState(deps);
-  const { project, me, rows } = state;
-  const remembered = createRememberedFilters(
-    computed(() => (project.value.kind === "found" ? project.value.repository : null)),
-    deps.storage,
-  );
+  const { me, rows } = state;
+  const remembered = createRememberedFilters(state.repository, deps.storage);
   const { filters } = remembered;
-  const shownRows = computed(() => filtered(rows.value, filters.value, me.value));
+  const shownRows = computed(() =>
+    state.dueDates.datedFirst(filtered(rows.value, filters.value, me.value)),
+  );
   return {
-    project,
+    project: state.project,
     me,
     rows,
     ...listingOf(state),
@@ -275,6 +276,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     summary: computed(() =>
       summaryText(shownRows.value.length, rows.value.length, state.cut.value),
     ),
+    ...dueDatesOf(state),
     openings: state.openings,
     pageProblem: state.pageProblem,
     findProject: () => findProject(state),
@@ -292,5 +294,6 @@ export function createMergeRequests(deps: Deps): MergeRequests {
       state.pageProblem.value = null;
     },
     ...state.rowActions,
+    ...rerequestsOf(state),
   };
 }

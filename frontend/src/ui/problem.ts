@@ -44,7 +44,8 @@ export type MergeRequestStep =
   | "mergeRequest"
   | "resolve"
   | "continue"
-  | "localMerge";
+  | "localMerge"
+  | "rerequestReview";
 
 export type Problem =
   | { readonly action: "list"; readonly cause: ProblemCause }

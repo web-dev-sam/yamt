@@ -79,6 +79,7 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
   resolve: "Could not resolve the merge request's conflicts",
   continue: "Could not continue the merge request's merge",
   localMerge: "Could not check for an unfinished merge",
+  rerequestReview: "Could not re-request the review",
 };
 
 const FIXED_ATTEMPT_WORDS: Readonly<
