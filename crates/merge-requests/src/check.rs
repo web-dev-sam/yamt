@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use yamt_gitio::{FETCH_TIMEOUT, MergeOutcome, MergeTreeRun, Oid, Repo};
 
-use crate::open::require_branch_name;
+use crate::open::{branch_ref, head_ref};
 use crate::page::count;
 use crate::readiness::GitLabMerge;
 use crate::remote::remote_for;
@@ -168,21 +169,14 @@ fn merge_tree_run(repo: &Repo) -> Result<MergeTreeRun, String> {
 fn remote_ref_patterns(rows: &[RowToCheck]) -> Vec<String> {
     let mut patterns = Vec::new();
     for row in rows.iter().filter(|row| row.head.is_some()) {
-        let pattern = branch_ref(&row.target_branch);
-        if require_branch_name(&row.target_branch).is_ok() && !patterns.contains(&pattern) {
+        if let Ok(pattern) = branch_ref(&row.target_branch)
+            && !patterns.contains(&pattern)
+        {
             patterns.push(pattern);
         }
     }
     patterns.push(HEAD_REFS.to_owned());
     patterns
-}
-
-fn branch_ref(branch: &str) -> String {
-    format!("refs/heads/{branch}")
-}
-
-fn head_ref(iid: MergeRequestIid) -> String {
-    format!("refs/merge-requests/{}/head", iid.0)
 }
 
 /// Each row with a head whose target tip and head ref the remote advertises, and whose head ref is GitLab's head;
@@ -195,7 +189,10 @@ fn paired_rows<'a>(
     let mut paired = Vec::new();
     for row in rows {
         let Some(head) = &row.head else { continue };
-        let target = advertised.get(branch_ref(&row.target_branch).as_bytes());
+        let Ok(target_ref) = branch_ref(&row.target_branch) else {
+            continue;
+        };
+        let target = advertised.get(target_ref.as_bytes());
         let head_ref = advertised.get(head_ref(row.iid).as_bytes());
         let (Some(target), Some(head_ref)) = (target, head_ref) else {
             continue;
@@ -278,10 +275,13 @@ fn refspecs_for(rows: &[PairedRow], missing: &HashSet<Oid>) -> Vec<String> {
     for (row, pair) in rows {
         let needed = [
             (&pair.target, branch_ref(&row.target_branch)),
-            (&pair.source, head_ref(row.iid)),
+            (&pair.source, Ok(head_ref(row.iid))),
         ];
         for (id, refspec) in needed {
-            if missing.contains(id) && !refspecs.contains(&refspec) {
+            if let Ok(refspec) = refspec
+                && missing.contains(id)
+                && !refspecs.contains(&refspec)
+            {
                 refspecs.push(refspec);
             }
         }
@@ -355,7 +355,11 @@ fn merged_in_finishing_order(
             while running < MERGES_AT_ONCE && phase_start.elapsed() < limit {
                 let Some(pair) = waiting.next() else { break };
                 let sender = sender.clone();
-                scope.spawn(move || sender.send((pair, merge(pair))));
+                scope.spawn(move || {
+                    let merged = panic::catch_unwind(AssertUnwindSafe(|| merge(pair)))
+                        .unwrap_or_else(|_| Err("merge-tree panicked".to_owned()));
+                    sender.send((pair, merged))
+                });
                 started += 1;
                 running += 1;
             }

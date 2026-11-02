@@ -112,6 +112,15 @@ pub(crate) fn require_branch_name(sent: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn branch_ref(branch: &str) -> Result<String, String> {
+    require_branch_name(branch)?;
+    Ok(format!("refs/heads/{branch}"))
+}
+
+pub(crate) fn head_ref(iid: MergeRequestIid) -> String {
+    format!("refs/merge-requests/{}/head", iid.0)
+}
+
 /// Fetches the merge request's head and its target branch from the project's remote, unless both commits are
 /// already in the repository.
 fn fetch_unless_local(
@@ -129,9 +138,8 @@ fn fetch_unless_local(
             project: full_path.to_owned(),
         });
     };
-    require_branch_name(&diff.target_branch).map_err(failed)?;
-    let head_ref = format!("refs/merge-requests/{}/head", iid.0);
-    let target_ref = format!("refs/heads/{}", diff.target_branch);
+    let target_ref = branch_ref(&diff.target_branch).map_err(failed)?;
+    let head_ref = head_ref(iid);
     let refspecs = [head_ref.as_str(), target_ref.as_str()];
     repo.fetch_without_refs(&remote.name, &refspecs, FETCH_TIMEOUT)
         .map_err(|message| OpenReply::FetchFailed { message })

@@ -38,9 +38,7 @@ dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
 git clone -q "$bare" "$dir"
 write src/board/colours.ts 'export const COLOURS = ["red", "green", "blue"] as const;\n'
-GIT_AUTHOR_NAME=yamt GIT_AUTHOR_EMAIL=yamt@example.invalid GIT_AUTHOR_DATE=2026-10-08T10:00:00+02:00 \
-    GIT_COMMITTER_NAME=yamt GIT_COMMITTER_EMAIL=yamt@example.invalid GIT_COMMITTER_DATE=2026-10-08T10:00:00+02:00 \
-    repo_git commit -q -m "Card colours"
+commit_at 2026-10-08T10:00:00+02:00 "Card colours"
 repo_git push -q origin HEAD:refs/merge-requests/45/head
 
 root=$(cd "$1" && pwd)

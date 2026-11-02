@@ -87,6 +87,17 @@ impl Setup {
         let head_ref = format!("refs/merge-requests/{iid}/head");
         git_ok(&self.root(), &[&bare, "update-ref", &head_ref, target]).unwrap();
     }
+
+    /// Deletes the object of the commit the fake GitLab's `refs/merge-requests/<iid>/head` names; the ref stays.
+    fn remove_head_commit(&self, iid: u32) {
+        let bare = self.root().join(BARE);
+        let git_dir = format!("--git-dir={}", bare.display());
+        let head_ref = format!("refs/merge-requests/{iid}/head");
+        let id = git_ok(&self.root(), &[&git_dir, "rev-parse", &head_ref]).unwrap();
+        let id = String::from_utf8(id).unwrap();
+        let (directory, file) = id.trim().split_at(2);
+        fs::remove_file(bare.join("objects").join(directory).join(file)).unwrap();
+    }
 }
 
 fn checked(iid: u32, readiness: Readiness) -> CheckedRow {
@@ -207,4 +218,21 @@ fn an_unreachable_remote_keeps_every_gitlab_answer() {
         bare.display()
     );
     assert_eq!(problem, ls_remote_line);
+}
+
+#[test]
+fn a_failed_fetch_keeps_only_the_rows_that_needed_it() {
+    let setup = Setup::new();
+    let lose_the_fork_commit = || setup.remove_head_commit(45);
+
+    let (rows, summary) = setup.load_with(&mut MergedPairs::default(), lose_the_fork_commit);
+
+    let without_45: Vec<CheckedRow> = table_rows()
+        .into_iter()
+        .filter(|row| row.iid != MergeRequestIid(45))
+        .collect();
+    assert_eq!(rows, without_45);
+    assert_eq!((summary.merges, summary.kept), (4, 2));
+    let problem = summary.problem.unwrap();
+    assert!(problem.starts_with("fetch: "), "{problem}");
 }

@@ -46,13 +46,6 @@ gitlink() {
     repo_git update-index --add --cacheinfo "160000,$2,$1"
 }
 
-# $1: date, $2: message. Commits what is staged with fixed names, so the commit id depends only on the script.
-commit_at() {
-    GIT_AUTHOR_NAME=yamt GIT_AUTHOR_EMAIL=yamt@example.invalid GIT_AUTHOR_DATE=$1 \
-        GIT_COMMITTER_NAME=yamt GIT_COMMITTER_EMAIL=yamt@example.invalid GIT_COMMITTER_DATE=$1 \
-        repo_git commit -q -m "$2"
-}
-
 mkdir -p "$dir"
 git -c init.defaultBranch=main init -q "$dir"
 

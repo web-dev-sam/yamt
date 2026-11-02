@@ -1,6 +1,6 @@
-# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh, lsp-servers.sh, operations-repo.sh and
-# range-repo.sh: the shared prelude for building a scripted repository in "$dir" without any user or system git config
-# (risk RK19).
+# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, local-conflicts-repo.sh, lsp-repo.sh,
+# lsp-servers.sh, mr-conflict-repo.sh, operations-repo.sh and range-repo.sh: the shared prelude for building a
+# scripted repository in "$dir" without any user or system git config (risk RK19).
 # GIT_CONFIG_GLOBAL needs git >= 2.32 (git-config(1), ENVIRONMENT).
 
 sandbox_name=$(basename "$0" .sh)
@@ -40,6 +40,13 @@ repo_git() {
     git -C "$dir" -c user.name=yamt -c user.email=yamt@example.invalid \
         -c commit.gpgsign=false -c core.autocrlf=false \
         -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null "$@"
+}
+
+# $1: date, $2: message. Commits what is staged with fixed names, so the commit id depends only on the script.
+commit_at() {
+    GIT_AUTHOR_NAME=yamt GIT_AUTHOR_EMAIL=yamt@example.invalid GIT_AUTHOR_DATE=$1 \
+        GIT_COMMITTER_NAME=yamt GIT_COMMITTER_EMAIL=yamt@example.invalid GIT_COMMITTER_DATE=$1 \
+        repo_git commit -q -m "$2"
 }
 
 # $1: path in the repo, $2: printf format giving the content (\r, \0 allowed). Stages the file.

@@ -6,6 +6,8 @@ use crate::Readiness;
 /// Far above a thread's start-up, far below a test's patience.
 const SLOW_MERGE: Duration = Duration::from_millis(150);
 const QUICK_MERGE: Duration = Duration::from_millis(10);
+/// Long enough to start two threads on a loaded runner, well below `SLOW_MERGE`.
+const SHORT_LIMIT: Duration = Duration::from_millis(50);
 
 fn oid(digit: char) -> Oid {
     Oid::parse(&digit.to_string().repeat(40)).unwrap()
@@ -133,7 +135,7 @@ fn no_merge_starts_once_the_limit_has_passed() {
         pair('1', 'd'),
     ];
 
-    let (finished, started) = scheduled(&pairs, QUICK_MERGE, &merge);
+    let (finished, started) = scheduled(&pairs, SHORT_LIMIT, &merge);
     assert_eq!((finished.len(), started), (2, 2));
 
     let (none, not_started) = scheduled(&pairs, Duration::ZERO, &merge);
@@ -152,6 +154,24 @@ fn a_failed_merge_comes_back_as_its_error() {
         results,
         [Err("merge-tree: not something we can merge".to_owned())]
     );
+}
+
+#[test]
+fn a_panicking_merge_comes_back_as_an_error_and_the_others_still_finish() {
+    let merge = |pair: &Pair| {
+        assert_ne!(pair.source, oid('a'), "merge-tree blew up");
+        Ok(MergeOutcome::Clean)
+    };
+    let mut results = Vec::new();
+    let mut on_merged = |pair: &Pair, merged| results.push((pair.clone(), merged));
+    let pairs = [pair('1', 'a'), pair('1', 'b')];
+
+    let started = merged_in_finishing_order(&pairs, MERGE_PHASE_LIMIT, &merge, &mut on_merged);
+
+    assert_eq!(started, 2);
+    assert_eq!(results.len(), 2);
+    assert!(results.contains(&(pair('1', 'a'), Err("merge-tree panicked".to_owned()))));
+    assert!(results.contains(&(pair('1', 'b'), Ok(MergeOutcome::Clean))));
 }
 
 #[test]

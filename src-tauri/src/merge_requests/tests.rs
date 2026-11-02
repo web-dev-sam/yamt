@@ -316,6 +316,7 @@ mod through_glab {
     fn two_checked_lists_on_path_s_glab() {
         let window = local_conflicts_window();
         list(&window);
+        forget_the_fork_commit(window.repo.path());
 
         let messages = list(&window);
 
@@ -325,6 +326,23 @@ mod through_glab {
             [["page", "end"].as_slice(), &checked].concat()
         );
         assert_eq!(checked_rows(&messages), scenario_rows());
+    }
+
+    /// Deletes !45's commit from the checkout and the fake GitLab, its ref kept: only a remembered merge can still
+    /// decide !45.
+    fn forget_the_fork_commit(root: &Path) {
+        let bare = root.join(".git/fake-gitlab.git");
+        let git_dir = format!("--git-dir={}", bare.display());
+        let id = git_ok(
+            root,
+            &[&git_dir, "rev-parse", "refs/merge-requests/45/head"],
+        )
+        .unwrap();
+        let id = String::from_utf8(id).unwrap();
+        let (directory, file) = id.trim().split_at(2);
+        for objects in [bare.join("objects"), root.join(".git/objects")] {
+            std::fs::remove_file(objects.join(directory).join(file)).unwrap();
+        }
     }
 
     #[test]
