@@ -17,8 +17,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reviewed, "Re-request review" asks GitLab to request that review again. The approvals count's hover lists who
   approved.
 - Due dates on merge requests, kept only on this computer per repository: set, change or clear one from the row's
-  calendar button. The row shows the date and the days left ("Due today", "7 days left", "1 day overdue" in red).
-  Rows with a due date come first, the soonest on top; the rest follow newest first.
+  calendar button, in yamt's own calendar (weeks from Monday, full keyboard use) or by typing the date day first.
+  Dates always read day-month-year (`03.11.2026`). The row shows the date and the days left ("Due today",
+  "7 days left", "1 day overdue" in red). Rows with a due date come first, the soonest on top; the rest follow newest
+  first.
 - Exclude filters: Shift+click on an assignee, reviewer or label value filters it out ("Assignee: not Me"); while
   Shift is held each value shows a minus icon. Filters stored by an older yamt still read.
 

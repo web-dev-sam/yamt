@@ -78,6 +78,17 @@ Local conflict check closed at `b9627505` (final pass, docs; only the owner's ch
 | 8   | verify (`briefs/mr-row-details-verify.md`): smoke after 6; final `just check`, WebKit, real app             | verifier     | done        | `MrRowDetailsFinal` at `3a9c9566`: `just check` pass (58 s, 3732 tests, map-check ok); B fixture dark+light all steps pass; C real app: anna `yamt-picture:` image, ben Gravatar, one WARN per load, no CSP error, only `mergeRequestReviewerRereview` written. Notes `MrRowDetailsFinal.md` |
 | 9   | owner check on the GitLab playground: pictures (uploaded and Gravatar), a re-request shows in GitLab        | human        | handed over | the verify brief's "Owner check" (`scripts/gitlab-playground.sh` adds "Empty change")                                                                                                                                                                                                        |
 
+## Due-date picker (session 44; owner #2138: "make it a custom shadcn looking one, no american format, always ddmmyyyy")
+
+Brief `briefs/mr-due-picker.md` (rules 1–5): yamt's own calendar box replaces the native date field; every shown date
+`DD.MM.YYYY`, typing day first only, weeks from Monday (orchestrator details, owner may veto). No product question open.
+
+| row | slice                                                                                        | owner       | status  | evidence                                                                                                                                                                                                                        |
+| --- | -------------------------------------------------------------------------------------------- | ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | picker (`briefs/mr-due-picker.md`): core calendar + `DD.MM.YYYY`, `MergeRequestCalendar.vue` | web-impl    | running | `81484732`; 3771 tests; WebKit dark+light (`/var/tmp/mr-due-picker/`); reviews fail → R1 `MrDuePickerR1` (#2139 created-at hover month-first, #2143 typed text lost, #2140 #2141 #2144; #2142 dropped). Notes `MrDuePicker*.md` |
+| 2   | docs keeper: tree/state rows, architecture due-date text                                     | docs-keeper | done    | `MrDuePickerDocs`: tree/state/map, architecture; map-check ok. Plan #156 by orchestrator. Notes `MrDuePickerDocs.md`                                                                                                            |
+| 3   | verify: `just check`, the brief's WebKit steps                                               | verifier    | todo    |                                                                                                                                                                                                                                 |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
