@@ -1,14 +1,17 @@
 //! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab,
-//! each one's changes prepared for a window of their own, its page or a failed job's opened in the browser.
+//! each row's conflicts checked by yamt's own merge of GitLab's two commits, each one's changes prepared for a window
+//! of their own, its page or a failed job's opened in the browser.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod check;
 mod detect;
 mod list;
 mod open;
 mod page;
 mod project;
 mod query;
+mod readiness;
 mod remote;
 mod resolve;
 mod web_page;
@@ -18,8 +21,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+pub use check::{CheckSummary, ConflictCheck, MergedPairs, check_conflicts};
 pub use detect::{GitLabRepository, gitlab_repository};
-pub use list::list_merge_requests;
+pub use list::{Listed, list_merge_requests};
 pub use open::prepare_open;
 pub use resolve::prepare_resolve;
 pub use web_page::open_page;
@@ -123,8 +127,8 @@ pub struct ChangeSize {
     pub files: u32,
 }
 
-/// Whether a merge request can be merged, GitLab's `detailedMergeStatus` folded with its `conflicts` flag: one
-/// state per row, a conflict first.
+/// Whether a merge request can be merged, GitLab's `detailedMergeStatus` folded with its `conflicts` flag, or with
+/// yamt's own merge of its two commits: one state per row, a conflict first.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Readiness {
@@ -144,6 +148,19 @@ pub enum Readiness {
         /// What blocks it.
         reason: BlockedReason,
     },
+    /// yamt's own merge of GitLab's two commits is clean, and GitLab's status says nothing of the other blockers:
+    /// it still checks, or keeps a conflict that hides them (request rule 3).
+    MergesCleanly,
+}
+
+/// A row's readiness once yamt merged GitLab's two commits itself; sent only when it differs from GitLab's answer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckedRow {
+    /// The row's merge request.
+    pub iid: MergeRequestIid,
+    /// Its readiness after the local merge.
+    pub readiness: Readiness,
 }
 
 /// What blocks a merge, GitLab's `DetailedMergeStatus` in the window's words.

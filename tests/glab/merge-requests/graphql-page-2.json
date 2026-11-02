@@ -20,6 +20,7 @@
             "detailedMergeStatus": "NEED_REBASE",
             "conflicts": false,
             "diffStats": null,
+            "targetBranch": "main",
             "sourceProjectId": 7,
             "targetProjectId": 7,
             "headPipeline": null
@@ -38,6 +39,7 @@
             "detailedMergeStatus": null,
             "conflicts": false,
             "diffStats": [{ "additions": 5, "deletions": 5 }],
+            "targetBranch": "main",
             "sourceProjectId": 12,
             "targetProjectId": 7,
             "headPipeline": {

@@ -107,6 +107,19 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
   `feature/colours` from the fork, !23 `feature/clean`, !29 `feature/merged`, !30 merged, !33
   `feature/x:refs/heads/main` and !34 `feature/due-dates` into `main:refs/heads/x`, branch names a fetch refspec
   would read as a ref to write.
+- `local-conflicts/` — the list's local conflict check (`crates/merge-requests/tests/local_conflicts.rs`, the
+  merge-request app tests in `src-tauri/src/merge_requests/tests.rs`) on `scripts/local-conflicts-repo.sh`'s
+  repository: logged in; `merge-requests/`'s project; user `sam`; one page, the last, from project 1 into `main`
+  unless said, each `diffHeadSha` a branch tip of `scripts/mr-conflict-repo.sh` and the fake GitLab's
+  `refs/merge-requests/<iid>/head` the same commit unless said. After the check: !41 (`CONFLICT`, conflicts;
+  `feature/clean`) merges clean → `mergesCleanly`; !42 (`MERGEABLE`; `feature/due-dates`) → `conflicts`; !43
+  (`CHECKING`; `feature/merged`) → `mergesCleanly`; !44 (`MERGEABLE`; `feature/clean`, its head ref at
+  `feature/due-dates`: a push in flight) keeps GitLab's answer (moving); !45 (`UNCHECKED`, from a fork, source
+  project 2; `c595b71`, the fork's commit, only in the head ref) is fetched → `mergesCleanly`; !46 (`NEED_REBASE`;
+  `feature/clean`) stays `needsRebase`; !47 (a draft, `DISCUSSIONS_NOT_RESOLVED`; `feature/due-dates`) →
+  `conflicts { also: [discussions, draft] }`; !48 (`CHECKING`, into `develop`; `feature/clean`) → `mergesCleanly`;
+  !49 (`PREPARING`, `diffHeadSha` null, no head ref) keeps GitLab's answer. The other recorded pages name
+  `targetBranch` but no `diffHeadSha`, so their rows are never checked.
 
 ## Fake browser opener
 

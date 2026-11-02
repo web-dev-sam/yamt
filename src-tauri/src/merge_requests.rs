@@ -8,8 +8,9 @@ use tauri::ipc::Channel;
 use tauri::{App, Manager, Runtime, State, WebviewWindow};
 use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
 use yamt_merge_requests::{
-    GitLabProject, GitLabRepository, Glab, ListEnd, MergeRequestIid, MergeRequestPage, OpenReply,
-    PageOpened, ResolveRefusal, WebPage, gitlab_repository, prepare_open, prepare_resolve,
+    CheckedRow, GitLabProject, GitLabRepository, Glab, ListEnd, MergeRequestIid, MergeRequestPage,
+    MergedPairs, OpenReply, PageOpened, ResolveRefusal, WebPage, check_conflicts,
+    gitlab_repository, prepare_open, prepare_resolve,
 };
 
 use crate::args::Ai;
@@ -22,14 +23,16 @@ const CLAIM_PROBE_INTERVAL: Duration = Duration::from_millis(50);
 /// Long enough for a cold start of the merge window up to its claim.
 const CLAIM_WAIT: Duration = Duration::from_secs(5);
 
-/// One message of a load, in order: every page, then its end. The end travels on the channel too: tauri 2.12.1
-/// delivers a channel message of 8 KiB of JSON or more by a later fetch (ipc/channel.rs
-/// `MAX_JSON_DIRECT_EXECUTE_THRESHOLD`), so a page could reach the window after the command's own answer.
+/// One message of a load, in order: every page, then its end, then each row the local conflict check changed. The
+/// end travels on the channel too: tauri 2.12.1 delivers a channel message of 8 KiB of JSON or more by a later fetch
+/// (ipc/channel.rs `MAX_JSON_DIRECT_EXECUTE_THRESHOLD`), so a page could reach the window after the command's own
+/// answer.
 #[derive(Clone, Debug, serde::Serialize, specta::Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum ListMessage {
     Page { page: MergeRequestPage },
     End { end: ListEnd },
+    Checked { row: CheckedRow },
 }
 
 /// What resolving a merge request's conflicts did (plan §2 #139): a merge started in this checkout and its
@@ -55,12 +58,15 @@ pub(crate) enum ContinueMergeReply {
 
 /// The window's GitLab project, found once at start, the folder pair locks live in, the window's `--ai` that "Show
 /// Diff" passes on, and every merge request's and failed job's page a list sent in this run: only those may be
-/// opened (plan §2 #128–#137); never locked together with another `Mutex`.
+/// opened (plan §2 #128–#137); `pages` is never locked together with another `Mutex`.
 pub(crate) struct MergeRequestState {
     gitlab: Option<GitLabRepository>,
     range_dir: PathBuf,
     ai: Ai,
     pages: Mutex<BTreeSet<WebPage>>,
+    /// The run's merged pairs; locked for a whole check, so a second load's check waits and then merges nothing
+    /// twice (rule 7); never locked together with `pages`.
+    merged: Mutex<MergedPairs>,
 }
 
 /// Looks for a GitLab project in `folder`'s repository, offline, and hands it to the app with the window's `ai`.
@@ -70,6 +76,7 @@ pub(crate) fn manage<R: Runtime>(app: &App<R>, folder: &Path, app_folder: &Path,
         range_dir: range_folder(app_folder),
         ai,
         pages: Mutex::new(BTreeSet::new()),
+        merged: Mutex::new(MergedPairs::default()),
     });
 }
 
@@ -98,18 +105,27 @@ fn send(channel: &Channel<ListMessage>, message: ListMessage) {
     }
 }
 
-/// Sends every page, then the end.
+/// Sends every page, then the end, then — when the list reached the project — each row the local conflict check
+/// changed; a `Checked` that does not reach the window is not logged (request rule 8: the check's one line per load).
 fn list(state: &MergeRequestState, glab: Option<&Glab>, channel: &Channel<ListMessage>) {
-    let end = match &state.gitlab {
-        Some(repository) => {
-            let on_page = |page| forward_page(state, channel, page);
-            yamt_merge_requests::list_merge_requests(repository, glab, &on_page)
-        }
-        None => ListEnd::Failed {
+    let Some(repository) = &state.gitlab else {
+        let end = ListEnd::Failed {
             message: NO_PROJECT.to_owned(),
-        },
+        };
+        send(channel, ListMessage::End { end });
+        return;
     };
-    send(channel, ListMessage::End { end });
+    let on_page = |page| forward_page(state, channel, page);
+    let listed = yamt_merge_requests::list_merge_requests(repository, glab, &on_page);
+    send(channel, ListMessage::End { end: listed.end });
+    let Some(check) = listed.to_check else {
+        return;
+    };
+    let mut merged = state.merged.lock().unwrap_or_else(PoisonError::into_inner);
+    let on_checked = |row| {
+        let _unlogged = channel.send(ListMessage::Checked { row });
+    };
+    check_conflicts(repository, &check, &mut merged, &on_checked);
 }
 
 fn opened(state: &MergeRequestState, glab: Option<&Glab>, iid: MergeRequestIid) -> OpenReply {

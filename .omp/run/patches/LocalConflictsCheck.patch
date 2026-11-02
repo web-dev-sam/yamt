@@ -1,0 +1,2344 @@
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+index c9ef645..f07b51c 100644
+--- a/crates/merge-requests/AGENTS.md
++++ b/crates/merge-requests/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, #138–#143; requests `docs/slices/request-merge-requests.md`, `docs/slices/request-mr-conflicts.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `Person`, `CiStatus` (seven, camelCase), `WebPage` (a string only `WebPage::job` and `WebPage::merge_request` make), `FailedJob`, `Pipeline`, `ChangeSize` (`additions`, `deletions`, `files`), `Readiness` `ready`/`conflicts { also }`/`needsRebase`/`checking`/`blocked { reason }`, `BlockedReason` (GitLab's seventeen blockers and `other { status }`), `MergeRequestRow` (`createdAt` as GitLab sent it, `openDiscussions` and `approvals` single numbers, `page` its GitLab page or `None`, `size` or `None`, `readiness`, `fromFork`), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed`, `ResolveRefusal` `notOpen`/`fromFork`/`noRemote`/`glabMissing`/`notLoggedIn`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC), `ResolveTarget` (`root`, `iid`, `remote`, `branch`, `target`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; `Glab` re-exported), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`logged_in_project`: `glab auth status` (logged out → `NoProject::NotLoggedIn`, failed → `NoProject::Failed`), then `glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https; `NoProject` turns into `ListEnd`, `OpenReply` and `ResolveRefusal` through `From`: the one prelude of listing, opening and resolving), `query.rs` (the list query, the details query and the branches query, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; the list's nodes ask `detailedMergeStatus conflicts diffStats { additions deletions } sourceProjectId targetProjectId` too — per-file `diffStats`, never `diffStatsSummary`: beside `diffStatsSummary` in a list, gitlab.com answers `detailedMergeStatus: CONFLICT` for merge requests that merge clean (measured 2026-10-31, `docs/slices/briefs/mr-diff-stats.md`); `details_args` and `branches_args`: `… -f fullPath=<path> -f iid=<n>`; the branches query asks `state sourceBranch targetBranch sourceProjectId targetProjectId`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; one list answer of a `Project` → `ParsedPage`: no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; approvals = `approvedBy` nodes; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; `readiness`: GitLab's 24 `DetailedMergeStatus` values folded (`MERGEABLE` ready, `CONFLICT` conflicts, `NEED_REBASE` needs rebase, `CHECKING`/`UNCHECKED`/`PREPARING`/`APPROVALS_SYNCING`/null checking, the other seventeen a `BlockedReason`, an unknown one `Other { status }` with a warning), then conflicts first (#1998): the `conflicts` flag or a `CONFLICT` status → `Conflicts { also }`, `also` the status's blocked reason, then `Draft` for a draft; `size` from `diffStats`: the sums of the entries' `additions` and `deletions`, `files` the number of entries (null or empty → `None`: GitLab sends no entries before it has computed the diff; each count saturating into `u32`, below 0 → 0); `is_from_fork`: `sourceProjectId != Some(targetProjectId)`, a deleted source project a fork; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `list.rs` (`list_merge_requests`: glab missing → `GlabMissing`, `logged_in_project`, then at most 5 pages, each one glab call sent to `on_page` as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info), `open.rs` (`prepare_open`: glab, `logged_in_project`, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target refused by `require_branch_name`, the crate's one rule for a branch name holding `:`); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `resolve.rs` (`prepare_resolve`: glab missing → `GlabMissing`, `logged_in_project`, the branches query asked afresh — no merge request or not `opened` → `NotOpen`, `is_from_fork` → `FromFork`, either branch refused by `require_branch_name` → `Failed`; `remote_for` → `NoRemote { project }`; nothing fetched or written), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments of `[A-Za-z0-9._~-]`, none empty or `..`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no Mutex, nothing cached. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query.rs` (each query one line with balanced braces; the branches argv exact; the list asks `diffStats`, never `diffStatsSummary`), `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher), `page/tests.rs` (over `tests/glab/merge-requests/`'s and `tests/glab/mr-conflicts/`'s recorded pages; every merge status as a table, conflicts first, sizes summed per file, saturating counts, forks); `tests/fake_glab/mod.rs` (the one fake-glab helper `tests/list.rs`, `tests/open.rs` and `tests/resolve.rs` share: `Fake` on a scenario, its log, `in_this_repository`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/resolve.rs` (`scripts/range-repo.sh`'s repository with the fake glab on `mr-conflicts/`: !21's branches and `origin` with the refs unchanged and the logged argv, !22 `FromFork`, !30 `NotOpen`, `NoRemote`, !33's `:` branch `Failed`, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
++Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, #138–#143, #149; requests `docs/slices/request-merge-requests.md`, `docs/slices/request-mr-conflicts.md`, `docs/slices/request-local-conflict-check.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `Person`, `CiStatus` (seven, camelCase), `WebPage` (a string only `WebPage::job` and `WebPage::merge_request` make), `FailedJob`, `Pipeline`, `ChangeSize` (`additions`, `deletions`, `files`), `Readiness` `ready`/`conflicts { also }`/`needsRebase`/`checking`/`blocked { reason }`/`mergesCleanly` (only from a clean local merge of a row GitLab calls conflicting or has not checked), `CheckedRow` (`iid`, `readiness`: a row the local check changed), `BlockedReason` (GitLab's seventeen blockers and `other { status }`), `MergeRequestRow` (`createdAt` as GitLab sent it, `openDiscussions` and `approvals` single numbers, `page` its GitLab page or `None`, `size` or `None`, `readiness`, `fromFork`), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed`, `ResolveRefusal` `notOpen`/`fromFork`/`noRemote`/`glabMissing`/`notLoggedIn`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC), `ResolveTarget` (`root`, `iid`, `remote`, `branch`, `target`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; `Glab` re-exported), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`logged_in_project`: `glab auth status` (logged out → `NoProject::NotLoggedIn`, failed → `NoProject::Failed`), then `glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https; `NoProject` turns into `ListEnd`, `OpenReply` and `ResolveRefusal` through `From`: the one prelude of listing, opening and resolving), `query.rs` (the list query, the details query and the branches query, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; the list's nodes ask `detailedMergeStatus conflicts diffStats { additions deletions } sourceProjectId targetProjectId targetBranch diffHeadSha` too — per-file `diffStats`, never `diffStatsSummary`: beside `diffStatsSummary` in a list, gitlab.com answers `detailedMergeStatus: CONFLICT` for merge requests that merge clean (measured 2026-10-31, `docs/slices/briefs/mr-diff-stats.md`); `details_args` and `branches_args`: `… -f fullPath=<path> -f iid=<n>`; the branches query asks `state sourceBranch targetBranch sourceProjectId targetProjectId`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; one list answer of a `Project` → `ParsedPage` (its rows and, beside each, its `RowToCheck`: iid, `targetBranch` (non-null in GitLab's schema), `diffHeadSha` as an `Oid` or none when null or no commit id, its `GitLabMerge`): no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; approvals = `approvedBy` nodes; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; a row's `readiness` is `GitLabMerge::readiness`; `size` from `diffStats`: the sums of the entries' `additions` and `deletions`, `files` the number of entries (null or empty → `None`: GitLab sends no entries before it has computed the diff; each count saturating into `u32`, below 0 → 0); `is_from_fork`: `sourceProjectId != Some(targetProjectId)`, a deleted source project a fork; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `readiness.rs` (the one fold, plan #138, #149: `GitLabMerge::read` folds GitLab's 24 `DetailedMergeStatus` values into `MergeStatus` (`MERGEABLE` mergeable, `CONFLICT` conflict, `NEED_REBASE` needs rebase, `CHECKING`/`UNCHECKED`/`PREPARING`/`APPROVALS_SYNCING`/null unchecked, the other seventeen a `BlockedReason`, an unknown one `Other { status }` with a warning) beside the `conflicts` and draft flags; `readiness`: GitLab's answer alone, conflicts first (#1998): the `conflicts` flag or a `CONFLICT` status → `Conflicts { also }`, `also` the status's blocked reason, then `Draft` for a draft; `readiness_after(MergeOutcome)`: design §2.1's table — a local conflict → `Conflicts { also }` whatever GitLab says, a clean merge → `ready` for mergeable, `mergesCleanly` for conflict or unchecked, else GitLab's status; the `conflicts` flag is not read), `check.rs` (`check_conflicts`, request rules 4–8, design §2.2: no row with a head → no git run; `Repo::version` → `MergeTreeRun::for_version` (none → stop); `remote_for` (none → stop); one `Repo::remote_refs` (`REMOTE_REFS_TIMEOUT` 20 s) of `refs/heads/<t>` for each distinct target of a row with a head (`require_branch_name` leaves a target holding `:` out) and `refs/merge-requests/*/head` (failed → stop); per row: no head, target or head ref not advertised → kept, head ref ≠ `diffHeadSha` → moving (rule 5), else the pair (target tip, head); pairs in `MergedPairs` sent at once (remembered); one `Repo::missing_commits` over the others' commits, then at most one `Repo::fetch_without_refs` (`FETCH_TIMEOUT`) of `refs/heads/<t>` for each missing tip and `refs/merge-requests/<iid>/head` for each missing head, deduplicated (failed → only the rows that needed it kept); `merged_in_finishing_order` merges the distinct pairs `MERGES_AT_ONCE` (2) at a time in scoped threads, `MERGE_TIMEOUT` 10 s each, none started after `MERGE_PHASE_LIMIT` 60 s, each outcome into `MergedPairs` and then every row of that pair sent through `on_checked` when `readiness_after` differs from `readiness`; `CheckSummary` (`rows`, `merges`, `fetched_refs`, `remembered`, `moving`, `kept` — every row counted once, the rest decided by a merge now — and `problem`, the first thing that went wrong) logged as one line, `info`, or `warn` with a problem; `ConflictCheck` (the project's `full_path`, every listed row's `RowToCheck`) made only by `list_merge_requests`; `MergedPairs` (target commit, source commit) → `MergeOutcome`, which the shell holds for the run), `list.rs` (`list_merge_requests` → `Listed { end, to_check }`: glab missing → `GlabMissing`, `logged_in_project`, then at most 5 pages, each one glab call sent to `on_page` as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info; `to_check` `None` when no project was reached, else the rows of every page sent), `open.rs` (`prepare_open`: glab, `logged_in_project`, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target refused by `require_branch_name`, the crate's one rule for a branch name holding `:`); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `resolve.rs` (`prepare_resolve`: glab missing → `GlabMissing`, `logged_in_project`, the branches query asked afresh — no merge request or not `opened` → `NotOpen`, `is_from_fork` → `FromFork`, either branch refused by `require_branch_name` → `Failed`; `remote_for` → `NoRemote { project }`; nothing fetched or written), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments of `[A-Za-z0-9._~-]`, none empty or `..`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no `Mutex`; the one memory across loads is the run's `MergedPairs`, which the shell holds and lends to `check_conflicts` (plan #149). Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query.rs` (each query one line with balanced braces; the branches argv exact; the list asks `diffStats`, never `diffStatsSummary`, and `targetBranch diffHeadSha`), `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher; the rows to check are the rows sent), `readiness.rs` (`readiness_after` over design §2.1's table, both `conflicts` flags, drafts), `check/tests.rs` (the summary's words with and without a problem; the merge scheduler: two at a time, finishing order, none started after the limit, a failed merge; a `:` target left out of `ls-remote`; pairing and moving rows; the fetch's refspecs; a row sent only when it changes), `page/tests.rs` (over `tests/glab/merge-requests/`'s and `tests/glab/mr-conflicts/`'s recorded pages; every merge status as a table, conflicts first, sizes summed per file, saturating counts, forks; each row's check input); `tests/fake_glab/mod.rs` (the one fake-glab helper the integration tests share: `Fake` on a scenario, its log, `in_this_repository`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`; only a load that reached the project has rows to check), `tests/local_conflicts.rs` (`scripts/local-conflicts-repo.sh`'s repository with the fake glab on `local-conflicts/`: the scenario's rows and summary, the moving row, a second load remembered with no fetch or merge, refs, status, `HEAD` and `FETCH_HEAD` byte-identical, an unreachable remote keeping every answer), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/resolve.rs` (`scripts/range-repo.sh`'s repository with the fake glab on `mr-conflicts/`: !21's branches and `origin` with the refs unchanged and the logged argv, !22 `FromFork`, !30 `NotOpen`, `NoRemote`, !33's `:` branch `Failed`, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
+diff --git a/crates/merge-requests/src/check.rs b/crates/merge-requests/src/check.rs
+new file mode 100644
+index 0000000..03c0369
+--- /dev/null
++++ b/crates/merge-requests/src/check.rs
+@@ -0,0 +1,376 @@
++use std::collections::{HashMap, HashSet};
++use std::fmt;
++use std::sync::mpsc;
++use std::thread;
++use std::time::{Duration, Instant};
++
++use yamt_gitio::{FETCH_TIMEOUT, MergeOutcome, MergeTreeRun, Oid, Repo};
++
++use crate::open::require_branch_name;
++use crate::page::count;
++use crate::readiness::GitLabMerge;
++use crate::remote::remote_for;
++use crate::{CheckedRow, GitLabRepository, MergeRequestIid};
++
++/// 18× the 1.1 s measured on gitlab.com (`docs/slices/briefs/local-conflicts-design.md` §2.2 "Numbers").
++const REMOTE_REFS_TIMEOUT: Duration = Duration::from_secs(20);
++const MERGE_TIMEOUT: Duration = Duration::from_secs(10);
++const MERGES_AT_ONCE: usize = 2;
++const MERGE_PHASE_LIMIT: Duration = Duration::from_secs(60);
++const HEAD_REFS: &str = "refs/merge-requests/*/head";
++
++/// One row of a load as the check needs it.
++#[derive(Debug, PartialEq, Eq)]
++pub(crate) struct RowToCheck {
++    pub iid: MergeRequestIid,
++    pub target_branch: String,
++    /// GitLab's `diffHeadSha`; `None` when GitLab sent none, or no commit id.
++    pub head: Option<Oid>,
++    pub gitlab: GitLabMerge,
++}
++
++/// The rows one load sent, as the check needs them (project path; per row its iid, target branch, `diffHeadSha`
++/// and GitLab's merge status); made only by `list_merge_requests`.
++pub struct ConflictCheck {
++    pub(crate) full_path: String,
++    pub(crate) rows: Vec<RowToCheck>,
++}
++
++/// The merges this app's run has done: (target commit, source commit) → outcome. Held by the shell for the run and
++/// lent to each check (architecture §3.9 as amended, plan #149); never cleared.
++#[derive(Debug, Default)]
++pub struct MergedPairs {
++    outcomes: HashMap<Pair, MergeOutcome>,
++}
++
++/// The two commits merged for a row: its target branch's tip and GitLab's head of the merge request.
++#[derive(Clone, Debug, PartialEq, Eq, Hash)]
++struct Pair {
++    target: Oid,
++    source: Oid,
++}
++
++/// A row whose two commits the remote advertises as GitLab names them.
++type PairedRow<'a> = (&'a RowToCheck, Pair);
++
++/// What one load's check did: its one log line and what the tests read. Every row is counted once in
++/// `remembered`, `moving`, `kept`, or (the rest) decided by a merge run now.
++#[derive(Clone, Debug, Default, PartialEq, Eq)]
++pub struct CheckSummary {
++    /// Rows in the check.
++    pub rows: u32,
++    /// `merge-tree` runs started.
++    pub merges: u32,
++    /// Refspecs in the one fetch; 0 without a fetch.
++    pub fetched_refs: u32,
++    /// Rows decided from `MergedPairs`.
++    pub remembered: u32,
++    /// Rows whose `refs/merge-requests/<iid>/head` is not GitLab's `diffHeadSha` (request rule 5).
++    pub moving: u32,
++    /// Other rows keeping GitLab's answer: no head, a ref not advertised, a failed, timed-out or unstarted merge, a
++    /// stopped check.
++    pub kept: u32,
++    /// The first thing that went wrong (git too old, no remote, ls-remote, fetch, a merge).
++    pub problem: Option<String>,
++}
++
++impl fmt::Display for CheckSummary {
++    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
++        write!(
++            formatter,
++            "{} rows: {} merges, {} refs fetched, {} remembered, {} moving, {} kept",
++            self.rows, self.merges, self.fetched_refs, self.remembered, self.moving, self.kept
++        )?;
++        match &self.problem {
++            Some(problem) => write!(formatter, "; {problem}"),
++            None => Ok(()),
++        }
++    }
++}
++
++/// Request rules 4–8 for one load: GitLab's commits only, one `ls-remote`, at most one fetch, merges two at a
++/// time; each row whose readiness changes goes to `on_checked` as soon as its pair is decided (on the calling
++/// thread). Writes no ref, no `FETCH_HEAD`, no index, no working tree; logs one line.
++pub fn check_conflicts(
++    repository: &GitLabRepository,
++    check: &ConflictCheck,
++    memory: &mut MergedPairs,
++    on_checked: &dyn Fn(CheckedRow),
++) -> CheckSummary {
++    let mut summary = CheckSummary {
++        rows: count(check.rows.len()),
++        ..CheckSummary::default()
++    };
++    let decided = match decided_rows(repository, check, memory, on_checked, &mut summary) {
++        Ok(decided) => decided,
++        Err(problem) => {
++            summary.problem = Some(problem);
++            0
++        }
++    };
++    summary.kept = summary.rows - summary.remembered - summary.moving - decided;
++    if summary.problem.is_some() {
++        tracing::warn!(%summary, "local conflict check");
++    } else {
++        tracing::info!(%summary, "local conflict check");
++    }
++    summary
++}
++
++/// Design §2.2 steps 1–8: how many rows a merge run now decided; `Err` is what stopped the check.
++fn decided_rows(
++    repository: &GitLabRepository,
++    check: &ConflictCheck,
++    memory: &mut MergedPairs,
++    on_checked: &dyn Fn(CheckedRow),
++    summary: &mut CheckSummary,
++) -> Result<u32, String> {
++    if check.rows.iter().all(|row| row.head.is_none()) {
++        return Ok(0);
++    }
++    let repo = repository.repo();
++    let run_kind = merge_tree_run(repo)?;
++    let remote = remote_for(repository.gitlab_remotes(), &check.full_path).ok_or_else(|| {
++        format!(
++            "no remote of the repository names the project {}",
++            check.full_path
++        )
++    })?;
++    let patterns = remote_ref_patterns(&check.rows);
++    let patterns: Vec<&str> = patterns.iter().map(String::as_str).collect();
++    let advertised = repo
++        .remote_refs(&remote.name, &patterns, REMOTE_REFS_TIMEOUT)
++        .map_err(|message| format!("ls-remote: {message}"))?;
++    let advertised: HashMap<Vec<u8>, Oid> = advertised
++        .into_iter()
++        .map(|found| (found.name, found.id))
++        .collect();
++    let paired = paired_rows(&check.rows, &advertised, summary);
++    let not_remembered = send_remembered(paired, memory, on_checked, summary);
++    let to_merge = fetched_unless_local(repo, &remote.name, not_remembered, summary)?;
++    Ok(merge_and_send(
++        repo, run_kind, &to_merge, memory, on_checked, summary,
++    ))
++}
++
++fn merge_tree_run(repo: &Repo) -> Result<MergeTreeRun, String> {
++    let version = repo.version().map_err(|error| error.to_string())?;
++    MergeTreeRun::for_version(version).ok_or_else(|| {
++        format!(
++            "git {}.{} cannot merge without a checkout (needs 2.38)",
++            version.major, version.minor
++        )
++    })
++}
++
++/// `refs/heads/<t>` once for each target of a row with a head, a target holding `:` left out, then every merge
++/// request's head ref.
++fn remote_ref_patterns(rows: &[RowToCheck]) -> Vec<String> {
++    let mut patterns = Vec::new();
++    for row in rows.iter().filter(|row| row.head.is_some()) {
++        let pattern = branch_ref(&row.target_branch);
++        if require_branch_name(&row.target_branch).is_ok() && !patterns.contains(&pattern) {
++            patterns.push(pattern);
++        }
++    }
++    patterns.push(HEAD_REFS.to_owned());
++    patterns
++}
++
++fn branch_ref(branch: &str) -> String {
++    format!("refs/heads/{branch}")
++}
++
++fn head_ref(iid: MergeRequestIid) -> String {
++    format!("refs/merge-requests/{}/head", iid.0)
++}
++
++/// Each row with a head whose target tip and head ref the remote advertises, and whose head ref is GitLab's head;
++/// a row whose head ref is another commit is counted `moving` (request rule 5).
++fn paired_rows<'a>(
++    rows: &'a [RowToCheck],
++    advertised: &HashMap<Vec<u8>, Oid>,
++    summary: &mut CheckSummary,
++) -> Vec<PairedRow<'a>> {
++    let mut paired = Vec::new();
++    for row in rows {
++        let Some(head) = &row.head else { continue };
++        let target = advertised.get(branch_ref(&row.target_branch).as_bytes());
++        let head_ref = advertised.get(head_ref(row.iid).as_bytes());
++        let (Some(target), Some(head_ref)) = (target, head_ref) else {
++            continue;
++        };
++        if head_ref != head {
++            summary.moving += 1;
++            continue;
++        }
++        let pair = Pair {
++            target: target.clone(),
++            source: head.clone(),
++        };
++        paired.push((row, pair));
++    }
++    paired
++}
++
++/// Sends each row whose pair `memory` holds, when its readiness changes; the others come back.
++fn send_remembered<'a>(
++    paired: Vec<PairedRow<'a>>,
++    memory: &MergedPairs,
++    on_checked: &dyn Fn(CheckedRow),
++    summary: &mut CheckSummary,
++) -> Vec<PairedRow<'a>> {
++    let mut not_remembered = Vec::new();
++    for (row, pair) in paired {
++        match memory.outcomes.get(&pair) {
++            Some(&outcome) => {
++                summary.remembered += 1;
++                send_if_changed(row, outcome, on_checked);
++            }
++            None => not_remembered.push((row, pair)),
++        }
++    }
++    not_remembered
++}
++
++/// The rows whose commits are all local after at most one fetch of the missing ones; a failed fetch drops only
++/// the rows that needed it. `Err` when git cannot tell which commits are local.
++fn fetched_unless_local<'a>(
++    repo: &Repo,
++    remote: &str,
++    rows: Vec<PairedRow<'a>>,
++    summary: &mut CheckSummary,
++) -> Result<Vec<PairedRow<'a>>, String> {
++    if rows.is_empty() {
++        return Ok(rows);
++    }
++    let mut ids = Vec::new();
++    for (_, pair) in &rows {
++        ids.extend([pair.target.clone(), pair.source.clone()]);
++    }
++    let missing = repo
++        .missing_commits(&ids)
++        .map_err(|error| error.to_string())?;
++    let missing: HashSet<Oid> = missing.into_iter().collect();
++    if missing.is_empty() {
++        return Ok(rows);
++    }
++    let refspecs = refspecs_for(&rows, &missing);
++    summary.fetched_refs = count(refspecs.len());
++    let refspecs: Vec<&str> = refspecs.iter().map(String::as_str).collect();
++    let Err(message) = repo.fetch_without_refs(remote, &refspecs, FETCH_TIMEOUT) else {
++        return Ok(rows);
++    };
++    summary.problem = Some(format!("fetch: {message}"));
++    Ok(with_local_commits(rows, &missing))
++}
++
++/// The rows neither of whose commits is `missing`.
++fn with_local_commits<'a>(rows: Vec<PairedRow<'a>>, missing: &HashSet<Oid>) -> Vec<PairedRow<'a>> {
++    let is_local =
++        |(_, pair): &PairedRow| !missing.contains(&pair.target) && !missing.contains(&pair.source);
++    rows.into_iter().filter(is_local).collect()
++}
++
++/// `refs/heads/<t>` for each missing target tip and `refs/merge-requests/<iid>/head` for each missing head, once.
++fn refspecs_for(rows: &[PairedRow], missing: &HashSet<Oid>) -> Vec<String> {
++    let mut refspecs = Vec::new();
++    for (row, pair) in rows {
++        let needed = [
++            (&pair.target, branch_ref(&row.target_branch)),
++            (&pair.source, head_ref(row.iid)),
++        ];
++        for (id, refspec) in needed {
++            if missing.contains(id) && !refspecs.contains(&refspec) {
++                refspecs.push(refspec);
++            }
++        }
++    }
++    refspecs
++}
++
++/// Merges each distinct pair, remembers its outcome and sends its rows whose readiness changes; how many rows the
++/// merges decided.
++fn merge_and_send(
++    repo: &Repo,
++    run_kind: MergeTreeRun,
++    rows: &[PairedRow],
++    memory: &mut MergedPairs,
++    on_checked: &dyn Fn(CheckedRow),
++    summary: &mut CheckSummary,
++) -> u32 {
++    let mut pairs: Vec<Pair> = Vec::new();
++    for (_, pair) in rows {
++        if !pairs.contains(pair) {
++            pairs.push(pair.clone());
++        }
++    }
++    let merge = |pair: &Pair| {
++        repo.merge_tree(&pair.target, &pair.source, run_kind, MERGE_TIMEOUT)
++            .map_err(|error| error.to_string())
++    };
++    let mut decided = 0;
++    let mut on_merged = |pair: &Pair, merged: Result<MergeOutcome, String>| match merged {
++        Ok(outcome) => {
++            memory.outcomes.insert(pair.clone(), outcome);
++            for (row, _) in rows.iter().filter(|(_, paired)| paired == pair) {
++                decided += 1;
++                send_if_changed(row, outcome, on_checked);
++            }
++        }
++        Err(problem) => {
++            summary.problem.get_or_insert(problem);
++        }
++    };
++    let started = merged_in_finishing_order(&pairs, MERGE_PHASE_LIMIT, &merge, &mut on_merged);
++    summary.merges = started;
++    decided
++}
++
++fn send_if_changed(row: &RowToCheck, merged: MergeOutcome, on_checked: &dyn Fn(CheckedRow)) {
++    let readiness = row.gitlab.readiness_after(merged);
++    if readiness != row.gitlab.readiness() {
++        on_checked(CheckedRow {
++            iid: row.iid,
++            readiness,
++        });
++    }
++}
++
++/// Runs `merge` on the pairs in order, `MERGES_AT_ONCE` at a time in scoped threads, none started once `limit` has
++/// passed; each result goes to `on_merged` on the calling thread as it finishes. How many merges started.
++fn merged_in_finishing_order(
++    pairs: &[Pair],
++    limit: Duration,
++    merge: &(dyn Fn(&Pair) -> Result<MergeOutcome, String> + Sync),
++    on_merged: &mut dyn FnMut(&Pair, Result<MergeOutcome, String>),
++) -> u32 {
++    let phase_start = Instant::now();
++    let (sender, finished) = mpsc::channel();
++    let mut waiting = pairs.iter();
++    let mut started = 0;
++    let mut running = 0;
++    thread::scope(|scope| {
++        loop {
++            while running < MERGES_AT_ONCE && phase_start.elapsed() < limit {
++                let Some(pair) = waiting.next() else { break };
++                let sender = sender.clone();
++                scope.spawn(move || sender.send((pair, merge(pair))));
++                started += 1;
++                running += 1;
++            }
++            if running == 0 {
++                break;
++            }
++            let Ok((pair, merged)) = finished.recv() else {
++                break;
++            };
++            running -= 1;
++            on_merged(pair, merged);
++        }
++    });
++    started
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/crates/merge-requests/src/check/tests.rs b/crates/merge-requests/src/check/tests.rs
+new file mode 100644
+index 0000000..0af51d9
+--- /dev/null
++++ b/crates/merge-requests/src/check/tests.rs
+@@ -0,0 +1,270 @@
++use std::sync::atomic::{AtomicUsize, Ordering};
++
++use super::*;
++use crate::Readiness;
++
++/// Far above a thread's start-up, far below a test's patience.
++const SLOW_MERGE: Duration = Duration::from_millis(150);
++const QUICK_MERGE: Duration = Duration::from_millis(10);
++
++fn oid(digit: char) -> Oid {
++    Oid::parse(&digit.to_string().repeat(40)).unwrap()
++}
++
++fn pair(target: char, source: char) -> Pair {
++    Pair {
++        target: oid(target),
++        source: oid(source),
++    }
++}
++
++fn row(iid: u32, target_branch: &str, head: Option<char>) -> RowToCheck {
++    RowToCheck {
++        iid: MergeRequestIid(iid),
++        target_branch: target_branch.to_owned(),
++        head: head.map(oid),
++        gitlab: GitLabMerge::read(Some("CHECKING"), false, false),
++    }
++}
++
++/// The pairs `on_merged` got, in its order, and how many merges started.
++fn scheduled(
++    pairs: &[Pair],
++    limit: Duration,
++    merge: &(dyn Fn(&Pair) -> Result<MergeOutcome, String> + Sync),
++) -> (Vec<Pair>, u32) {
++    let mut finished = Vec::new();
++    let mut on_merged = |pair: &Pair, _: Result<MergeOutcome, String>| finished.push(pair.clone());
++    let started = merged_in_finishing_order(pairs, limit, merge, &mut on_merged);
++    (finished, started)
++}
++
++#[test]
++fn a_summary_reads_as_its_counts_and_then_its_problem() {
++    let summary = CheckSummary {
++        rows: 9,
++        merges: 5,
++        fetched_refs: 1,
++        remembered: 0,
++        moving: 1,
++        kept: 1,
++        problem: None,
++    };
++    let words = "9 rows: 5 merges, 1 refs fetched, 0 remembered, 1 moving, 1 kept";
++    assert_eq!(summary.to_string(), words);
++
++    let stopped = CheckSummary {
++        problem: Some("ls-remote: fatal: no such remote".to_owned()),
++        ..summary
++    };
++    let with_problem = format!("{words}; ls-remote: fatal: no such remote");
++    assert_eq!(stopped.to_string(), with_problem);
++}
++
++#[test]
++fn merges_run_two_at_a_time_and_every_result_comes_back_with_its_pair() {
++    let running = AtomicUsize::new(0);
++    let most = AtomicUsize::new(0);
++    let merge = |pair: &Pair| {
++        let now = running.fetch_add(1, Ordering::SeqCst) + 1;
++        most.fetch_max(now, Ordering::SeqCst);
++        thread::sleep(QUICK_MERGE);
++        running.fetch_sub(1, Ordering::SeqCst);
++        Ok(outcome_of(pair))
++    };
++    let pairs = [
++        pair('1', 'a'),
++        pair('1', 'b'),
++        pair('2', 'a'),
++        pair('2', 'b'),
++        pair('3', 'c'),
++    ];
++    let mut results = Vec::new();
++    let mut on_merged = |pair: &Pair, merged| results.push((pair.clone(), merged));
++
++    let started = merged_in_finishing_order(&pairs, MERGE_PHASE_LIMIT, &merge, &mut on_merged);
++
++    assert_eq!((started, most.load(Ordering::SeqCst)), (5, MERGES_AT_ONCE));
++    assert_eq!(results.len(), pairs.len());
++    for pair in pairs {
++        let merged = (pair.clone(), Ok(outcome_of(&pair)));
++        assert!(results.contains(&merged), "{pair:?}: {results:?}");
++    }
++}
++
++/// What the fake merges of the scheduler tests answer: a conflict for the source `a`.
++fn outcome_of(pair: &Pair) -> MergeOutcome {
++    if pair.source == oid('a') {
++        MergeOutcome::Conflicts
++    } else {
++        MergeOutcome::Clean
++    }
++}
++
++#[test]
++fn results_arrive_in_finishing_order_not_in_the_order_given() {
++    let slow = pair('1', 'a');
++    let merge = |pair: &Pair| {
++        thread::sleep(if *pair == slow {
++            SLOW_MERGE
++        } else {
++            QUICK_MERGE
++        });
++        Ok(MergeOutcome::Clean)
++    };
++    let pairs = [slow.clone(), pair('1', 'b'), pair('1', 'c')];
++
++    let (finished, started) = scheduled(&pairs, MERGE_PHASE_LIMIT, &merge);
++
++    assert_eq!(started, 3);
++    assert_eq!(finished, [pair('1', 'b'), pair('1', 'c'), slow]);
++}
++
++#[test]
++fn no_merge_starts_once_the_limit_has_passed() {
++    let merge = |_: &Pair| {
++        thread::sleep(SLOW_MERGE);
++        Ok(MergeOutcome::Clean)
++    };
++    let pairs = [
++        pair('1', 'a'),
++        pair('1', 'b'),
++        pair('1', 'c'),
++        pair('1', 'd'),
++    ];
++
++    let (finished, started) = scheduled(&pairs, QUICK_MERGE, &merge);
++    assert_eq!((finished.len(), started), (2, 2));
++
++    let (none, not_started) = scheduled(&pairs, Duration::ZERO, &merge);
++    assert_eq!((none, not_started), (Vec::new(), 0));
++}
++
++#[test]
++fn a_failed_merge_comes_back_as_its_error() {
++    let merge = |_: &Pair| Err("merge-tree: not something we can merge".to_owned());
++    let mut results = Vec::new();
++    let mut on_merged = |_: &Pair, merged| results.push(merged);
++
++    merged_in_finishing_order(&[pair('1', 'a')], MERGE_PHASE_LIMIT, &merge, &mut on_merged);
++
++    assert_eq!(
++        results,
++        [Err("merge-tree: not something we can merge".to_owned())]
++    );
++}
++
++#[test]
++fn each_target_is_asked_once_a_target_holding_a_colon_or_of_a_row_without_a_head_never() {
++    let rows = [
++        row(1, "main", Some('a')),
++        row(2, "main:refs/heads/x", Some('b')),
++        row(3, "develop", Some('c')),
++        row(4, "main", Some('d')),
++        row(5, "release", None),
++    ];
++
++    let patterns = remote_ref_patterns(&rows);
++
++    assert_eq!(
++        patterns,
++        [
++            "refs/heads/main",
++            "refs/heads/develop",
++            "refs/merge-requests/*/head"
++        ]
++    );
++}
++
++#[test]
++fn a_row_is_paired_only_when_its_target_and_head_ref_are_advertised_and_the_head_ref_is_gitlab_s_head()
++ {
++    let rows = [
++        row(1, "main", Some('a')),
++        row(2, "main", Some('b')),
++        row(3, "gone", Some('c')),
++        row(4, "main", Some('d')),
++        row(5, "main", None),
++    ];
++    let advertised = HashMap::from([
++        (b"refs/heads/main".to_vec(), oid('1')),
++        (b"refs/merge-requests/1/head".to_vec(), oid('a')),
++        (b"refs/merge-requests/2/head".to_vec(), oid('e')),
++        (b"refs/merge-requests/3/head".to_vec(), oid('c')),
++        (b"refs/merge-requests/5/head".to_vec(), oid('f')),
++    ]);
++    let mut summary = CheckSummary::default();
++
++    let paired = paired_rows(&rows, &advertised, &mut summary);
++
++    let paired: Vec<(u32, Pair)> = paired
++        .into_iter()
++        .map(|(row, pair)| (row.iid.0, pair))
++        .collect();
++    assert_eq!(paired, [(1, pair('1', 'a'))]);
++    assert_eq!(summary.moving, 1);
++}
++
++#[test]
++fn only_missing_commits_are_fetched_each_by_its_ref_once() {
++    let rows = [
++        row(1, "main", Some('a')),
++        row(2, "main", Some('b')),
++        row(3, "develop", Some('a')),
++    ];
++    let paired: Vec<PairedRow> = vec![
++        (&rows[0], pair('1', 'a')),
++        (&rows[1], pair('1', 'b')),
++        (&rows[2], pair('2', 'a')),
++    ];
++    let missing = HashSet::from([oid('1'), oid('a')]);
++
++    let refspecs = refspecs_for(&paired, &missing);
++
++    let expected = [
++        "refs/heads/main",
++        "refs/merge-requests/1/head",
++        "refs/merge-requests/3/head",
++    ];
++    assert_eq!(refspecs, expected);
++}
++
++#[test]
++fn after_a_failed_fetch_only_rows_whose_two_commits_are_local_stay() {
++    let rows = [
++        row(1, "main", Some('a')),
++        row(2, "develop", Some('b')),
++        row(3, "main", Some('c')),
++    ];
++    let paired: Vec<PairedRow> = vec![
++        (&rows[0], pair('1', 'a')),
++        (&rows[1], pair('2', 'b')),
++        (&rows[2], pair('1', 'c')),
++    ];
++    let missing = HashSet::from([oid('2'), oid('c')]);
++
++    let local = with_local_commits(paired, &missing);
++
++    let local: Vec<u32> = local.into_iter().map(|(row, _)| row.iid.0).collect();
++    assert_eq!(local, [1]);
++}
++
++#[test]
++fn a_row_is_sent_only_when_the_merge_changes_its_readiness() {
++    let (sender, sent) = mpsc::channel();
++    let on_checked = |row: CheckedRow| sender.send(row).unwrap();
++    let ready = RowToCheck {
++        gitlab: GitLabMerge::read(Some("MERGEABLE"), false, false),
++        ..row(1, "main", Some('a'))
++    };
++
++    send_if_changed(&ready, MergeOutcome::Clean, &on_checked);
++    send_if_changed(&ready, MergeOutcome::Conflicts, &on_checked);
++
++    let conflicts = Readiness::Conflicts { also: Vec::new() };
++    let expected = CheckedRow {
++        iid: MergeRequestIid(1),
++        readiness: conflicts,
++    };
++    assert_eq!(sent.try_iter().collect::<Vec<_>>(), [expected]);
++}
+diff --git a/crates/merge-requests/src/lib.rs b/crates/merge-requests/src/lib.rs
+index 70f1fdd..ab26555 100644
+--- a/crates/merge-requests/src/lib.rs
++++ b/crates/merge-requests/src/lib.rs
+@@ -1,14 +1,17 @@
+ //! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab,
+-//! each one's changes prepared for a window of their own, its page or a failed job's opened in the browser.
++//! each row's conflicts checked by yamt's own merge of GitLab's two commits, each one's changes prepared for a window
++//! of their own, its page or a failed job's opened in the browser.
+ #![forbid(unsafe_code)]
+ #![warn(missing_docs)]
+ 
++mod check;
+ mod detect;
+ mod list;
+ mod open;
+ mod page;
+ mod project;
+ mod query;
++mod readiness;
+ mod remote;
+ mod resolve;
+ mod web_page;
+@@ -18,8 +21,9 @@ use std::path::PathBuf;
+ use serde::{Deserialize, Serialize};
+ use specta::Type;
+ 
++pub use check::{CheckSummary, ConflictCheck, MergedPairs, check_conflicts};
+ pub use detect::{GitLabRepository, gitlab_repository};
+-pub use list::list_merge_requests;
++pub use list::{Listed, list_merge_requests};
+ pub use open::prepare_open;
+ pub use resolve::prepare_resolve;
+ pub use web_page::open_page;
+@@ -123,8 +127,8 @@ pub struct ChangeSize {
+     pub files: u32,
+ }
+ 
+-/// Whether a merge request can be merged, GitLab's `detailedMergeStatus` folded with its `conflicts` flag: one
+-/// state per row, a conflict first.
++/// Whether a merge request can be merged, GitLab's `detailedMergeStatus` folded with its `conflicts` flag, or with
++/// yamt's own merge of its two commits: one state per row, a conflict first.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ #[serde(tag = "kind", rename_all = "camelCase")]
+ pub enum Readiness {
+@@ -144,6 +148,19 @@ pub enum Readiness {
+         /// What blocks it.
+         reason: BlockedReason,
+     },
++    /// yamt's own merge of GitLab's two commits is clean, and GitLab's status says nothing of the other blockers:
++    /// it still checks, or keeps a conflict that hides them (request rule 3).
++    MergesCleanly,
++}
++
++/// A row's readiness once yamt merged GitLab's two commits itself; sent only when it differs from GitLab's answer.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct CheckedRow {
++    /// The row's merge request.
++    pub iid: MergeRequestIid,
++    /// Its readiness after the local merge.
++    pub readiness: Readiness,
+ }
+ 
+ /// What blocks a merge, GitLab's `DetailedMergeStatus` in the window's words.
+diff --git a/crates/merge-requests/src/list.rs b/crates/merge-requests/src/list.rs
+index 79cc954..68b7989 100644
+--- a/crates/merge-requests/src/list.rs
++++ b/crates/merge-requests/src/list.rs
+@@ -1,5 +1,6 @@
+ use yamt_gitio::Glab;
+ 
++use crate::check::{ConflictCheck, RowToCheck};
+ use crate::page::{ParsedPage, parsed};
+ use crate::project::logged_in_project;
+ use crate::query::list_args;
+@@ -7,20 +8,32 @@ use crate::{GitLabRepository, ListEnd, MAX_MERGE_REQUESTS, MergeRequestPage, PAG
+ 
+ const MAX_PAGES: u32 = MAX_MERGE_REQUESTS / PAGE_SIZE;
+ 
++/// How a load ended, and the rows it sent, for the local check.
++pub struct Listed {
++    /// How the load ended.
++    pub end: ListEnd,
++    /// `None` when no project was reached (no glab, logged out, no project); else every row of every page sent.
++    pub to_check: Option<ConflictCheck>,
++}
++
+ /// The project's open merge requests, newest created first: each page goes to `on_page` as it arrives, one glab call
+ /// (and one deadline) per page, at most `MAX_MERGE_REQUESTS`.
+ pub fn list_merge_requests(
+     repository: &GitLabRepository,
+     glab: Option<&Glab>,
+     on_page: &dyn Fn(MergeRequestPage),
+-) -> ListEnd {
++) -> Listed {
++    let unreached = |end| Listed {
++        end,
++        to_check: None,
++    };
+     let Some(glab) = glab else {
+-        return ListEnd::GlabMissing;
++        return unreached(ListEnd::GlabMissing);
+     };
+     let root = repository.root();
+     let project = match logged_in_project(glab, root) {
+         Ok(project) => project,
+-        Err(refused) => return refused.into(),
++        Err(refused) => return unreached(refused.into()),
+     };
+     let mut fetch = |after: Option<&str>| {
+         let args = list_args(&project.full_path, after);
+@@ -28,19 +41,29 @@ pub fn list_merge_requests(
+         let json = glab.get(root, &args)?;
+         parsed(&json, &project)
+     };
+-    pages(&mut fetch, on_page)
++    let (end, rows) = pages(&mut fetch, on_page);
++    let to_check = ConflictCheck {
++        full_path: project.full_path,
++        rows,
++    };
++    Listed {
++        end,
++        to_check: Some(to_check),
++    }
+ }
+ 
+ /// Fetches page after page, each after the cursor the one before ended at; the pages sent stay whatever comes next.
++/// Returns the end and the check inputs of every row sent.
+ fn pages(
+     fetch: &mut dyn FnMut(Option<&str>) -> Result<ParsedPage, String>,
+     on_page: &dyn Fn(MergeRequestPage),
+-) -> ListEnd {
++) -> (ListEnd, Vec<RowToCheck>) {
++    let mut to_check = Vec::new();
+     let mut after: Option<String> = None;
+     for number in 1..=MAX_PAGES {
+         let page = match fetch(after.as_deref()) {
+             Ok(page) => page,
+-            Err(message) => return ListEnd::Failed { message },
++            Err(message) => return (ListEnd::Failed { message }, to_check),
+         };
+         if let (1, Some(complexity)) = (number, page.complexity) {
+             tracing::info!(
+@@ -53,14 +76,16 @@ fn pages(
+             me: page.me,
+             rows: page.rows,
+         });
++        to_check.extend(page.to_check);
+         match page.next {
+             Some(cursor) => after = Some(cursor),
+-            None => return ListEnd::Loaded,
++            None => return (ListEnd::Loaded, to_check),
+         }
+     }
+-    ListEnd::Cut {
++    let end = ListEnd::Cut {
+         limit: MAX_MERGE_REQUESTS,
+-    }
++    };
++    (end, to_check)
+ }
+ 
+ #[cfg(test)]
+@@ -68,6 +93,7 @@ mod tests {
+     use std::sync::mpsc;
+ 
+     use super::*;
++    use crate::readiness::GitLabMerge;
+     use crate::{MergeRequestIid, MergeRequestRow, Readiness};
+ 
+     fn row(iid: u32) -> MergeRequestRow {
+@@ -96,15 +122,23 @@ mod tests {
+         if fails_at == Some(number) {
+             return Err(format!("page {number} failed"));
+         }
++        let to_check = RowToCheck {
++            iid: MergeRequestIid(number),
++            target_branch: "main".to_owned(),
++            head: None,
++            gitlab: GitLabMerge::read(None, false, false),
++        };
+         Ok(ParsedPage {
+             me: Some("sam".to_owned()),
+             rows: vec![row(number)],
++            to_check: vec![to_check],
+             next: (number < last).then(|| format!("cursor-{}", number + 1)),
+             complexity: None,
+         })
+     }
+ 
+-    /// The end, each cursor asked with, and the merge requests sent, page by page.
++    /// The end, each cursor asked with, and the merge requests sent, page by page; checks that the rows to check are
++    /// exactly the rows sent.
+     fn listed(last: u32, fails_at: Option<u32>) -> (ListEnd, Vec<Option<String>>, Vec<Vec<u32>>) {
+         let mut asked = Vec::new();
+         let (sender, sent) = mpsc::channel();
+@@ -116,8 +150,11 @@ mod tests {
+             let iids = page.rows.iter().map(|row| row.iid.0).collect();
+             sender.send(iids).unwrap();
+         };
+-        let end = pages(&mut fetch, &on_page);
+-        (end, asked, sent.try_iter().collect())
++        let (end, to_check) = pages(&mut fetch, &on_page);
++        let sent: Vec<Vec<u32>> = sent.try_iter().collect();
++        let checked: Vec<u32> = to_check.iter().map(|row| row.iid.0).collect();
++        assert_eq!(checked, sent.concat());
++        (end, asked, sent)
+     }
+ 
+     #[test]
+diff --git a/crates/merge-requests/src/page.rs b/crates/merge-requests/src/page.rs
+index 4977fab..ba0e8b5 100644
+--- a/crates/merge-requests/src/page.rs
++++ b/crates/merge-requests/src/page.rs
+@@ -1,11 +1,13 @@
+ use serde::Deserialize;
+ use serde::de::DeserializeOwned;
+ use serde::de::IgnoredAny;
++use yamt_gitio::Oid;
+ 
++use crate::check::RowToCheck;
+ use crate::project::Project;
++use crate::readiness::GitLabMerge;
+ use crate::{
+-    BlockedReason, ChangeSize, CiStatus, FailedJob, MergeRequestIid, MergeRequestRow, Person,
+-    Pipeline, Readiness, WebPage,
++    ChangeSize, CiStatus, FailedJob, MergeRequestIid, MergeRequestRow, Person, Pipeline, WebPage,
+ };
+ 
+ const NO_DATA: &str = "GitLab's answer holds no data";
+@@ -16,6 +18,8 @@ const NO_CURSOR: &str = "GitLab says more merge requests follow, but sent no cur
+ pub(crate) struct ParsedPage {
+     pub me: Option<String>,
+     pub rows: Vec<MergeRequestRow>,
++    /// Each row as the local conflict check needs it, in the same order.
++    pub to_check: Vec<RowToCheck>,
+     /// The cursor of the next page; `None` on the last.
+     pub next: Option<String>,
+     pub complexity: Option<Complexity>,
+@@ -95,6 +99,8 @@ struct Node {
+     detailed_merge_status: Option<String>,
+     conflicts: bool,
+     diff_stats: Option<Vec<FileStats>>,
++    target_branch: String,
++    diff_head_sha: Option<String>,
+     source_project_id: Option<i64>,
+     target_project_id: i64,
+ }
+@@ -138,12 +144,16 @@ pub(crate) fn parsed(json: &[u8], project: &Project) -> Result<ParsedPage, Strin
+         .and_then(|found| found.merge_requests)
+         .ok_or(NO_PROJECT)?;
+     let mut rows = Vec::new();
++    let mut to_check = Vec::new();
+     for node in merge_requests.nodes {
+-        rows.push(row(node, project)?);
++        let (row, row_to_check) = row(node, project)?;
++        rows.push(row);
++        to_check.push(row_to_check);
+     }
+     Ok(ParsedPage {
+         me: data.current_user.map(|user| user.username),
+         rows,
++        to_check,
+         next: next_cursor(merge_requests.page_info)?,
+         complexity: data.query_complexity,
+     })
+@@ -167,16 +177,16 @@ fn next_cursor(page_info: PageInfo) -> Result<Option<String>, String> {
+     }
+ }
+ 
+-fn row(node: Node, project: &Project) -> Result<MergeRequestRow, String> {
+-    let iid = node
+-        .iid
+-        .parse()
+-        .map_err(|_| format!("GitLab sent {:?} as a merge request number", node.iid))?;
+-    let iid = MergeRequestIid(iid);
++/// The row the window shows and, beside it, what the local check needs; a `diffHeadSha` that is no commit id is no
++/// head.
++fn row(node: Node, project: &Project) -> Result<(MergeRequestRow, RowToCheck), String> {
++    let iid = merge_request_iid(&node.iid)?;
+     let origin = project.web_origin.as_deref();
+     let page = origin.and_then(|origin| WebPage::merge_request(origin, &project.web_path, iid));
+     let labels = listed(node.labels).into_iter().map(|label| label.title);
+-    Ok(MergeRequestRow {
++    let status = node.detailed_merge_status.as_deref();
++    let gitlab = GitLabMerge::read(status, node.conflicts, node.draft);
++    let row = MergeRequestRow {
+         iid,
+         title: node.title,
+         created_at: node.created_at,
+@@ -192,13 +202,23 @@ fn row(node: Node, project: &Project) -> Result<MergeRequestRow, String> {
+         pipeline: node.head_pipeline.map(|found| pipeline(found, origin)),
+         page,
+         size: change_size(node.diff_stats.as_deref().unwrap_or_default()),
+-        readiness: readiness(
+-            node.detailed_merge_status.as_deref(),
+-            node.conflicts,
+-            node.draft,
+-        ),
++        readiness: gitlab.readiness(),
+         from_fork: is_from_fork(node.source_project_id, node.target_project_id),
+-    })
++    };
++    let to_check = RowToCheck {
++        iid,
++        target_branch: node.target_branch,
++        head: node.diff_head_sha.and_then(|sha| Oid::parse(&sha).ok()),
++        gitlab,
++    };
++    Ok((row, to_check))
++}
++
++fn merge_request_iid(sent: &str) -> Result<MergeRequestIid, String> {
++    let iid = sent
++        .parse()
++        .map_err(|_| format!("GitLab sent {sent:?} as a merge request number"))?;
++    Ok(MergeRequestIid(iid))
+ }
+ 
+ fn listed<T>(connection: Option<Nodes<T>>) -> Vec<T> {
+@@ -218,7 +238,7 @@ fn saturated(sent: i64) -> u32 {
+     u32::try_from(sent.max(0)).unwrap_or(u32::MAX)
+ }
+ 
+-fn count(length: usize) -> u32 {
++pub(crate) fn count(length: usize) -> u32 {
+     u32::try_from(length).unwrap_or(u32::MAX)
+ }
+ 
+@@ -293,67 +313,5 @@ fn ci_status(status: &str) -> CiStatus {
+     }
+ }
+ 
+-/// The row's one readiness: GitLab's merge status alone, unless the merge request conflicts (its `conflicts` flag
+-/// or a `CONFLICT` status). A conflict comes first, with what else blocks the merge (request rule 2, #1998): the
+-/// status's blocked reason, then `Draft` for a draft — GitLab never merges one, whatever its status says.
+-fn readiness(status: Option<&str>, conflicts: bool, draft: bool) -> Readiness {
+-    let folded = status.map_or(Readiness::Checking, merge_status);
+-    if !conflicts && !matches!(folded, Readiness::Conflicts { .. }) {
+-        return folded;
+-    }
+-    let mut also = match folded {
+-        Readiness::Blocked { reason } => vec![reason],
+-        Readiness::Ready
+-        | Readiness::Conflicts { .. }
+-        | Readiness::NeedsRebase
+-        | Readiness::Checking => Vec::new(),
+-    };
+-    if draft && !also.contains(&BlockedReason::Draft) {
+-        also.push(BlockedReason::Draft);
+-    }
+-    Readiness::Conflicts { also }
+-}
+-
+-/// GitLab's `DetailedMergeStatus` (GraphQL reference) as a readiness; an unknown one blocks, in GitLab's word.
+-fn merge_status(status: &str) -> Readiness {
+-    match status {
+-        "MERGEABLE" => Readiness::Ready,
+-        "CONFLICT" => Readiness::Conflicts { also: Vec::new() },
+-        "NEED_REBASE" => Readiness::NeedsRebase,
+-        "CHECKING" | "UNCHECKED" | "PREPARING" | "APPROVALS_SYNCING" => Readiness::Checking,
+-        blocking => Readiness::Blocked {
+-            reason: blocked_reason(blocking),
+-        },
+-    }
+-}
+-
+-fn blocked_reason(status: &str) -> BlockedReason {
+-    match status {
+-        "DRAFT_STATUS" => BlockedReason::Draft,
+-        "DISCUSSIONS_NOT_RESOLVED" => BlockedReason::Discussions,
+-        "NOT_APPROVED" => BlockedReason::Approvals,
+-        "CI_MUST_PASS" => BlockedReason::PipelineMustPass,
+-        "CI_STILL_RUNNING" => BlockedReason::PipelineRunning,
+-        "REQUESTED_CHANGES" => BlockedReason::ChangesRequested,
+-        "BLOCKED_STATUS" => BlockedReason::Dependencies,
+-        "EXTERNAL_STATUS_CHECKS" => BlockedReason::StatusChecks,
+-        "JIRA_ASSOCIATION" => BlockedReason::JiraIssue,
+-        "LOCKED_LFS_FILES" => BlockedReason::LockedFiles,
+-        "LOCKED_PATHS" => BlockedReason::LockedPaths,
+-        "MERGE_TIME" => BlockedReason::MergeTime,
+-        "NOT_OPEN" => BlockedReason::NotOpen,
+-        "COMMITS_STATUS" => BlockedReason::SourceBranch,
+-        "SECURITY_POLICIES_VIOLATIONS" => BlockedReason::SecurityPolicies,
+-        "SECURITY_POLICY_PIPELINE_CHECK" => BlockedReason::SecurityPipelines,
+-        "TITLE_NOT_MATCHING" => BlockedReason::TitleRule,
+-        unknown => {
+-            tracing::warn!(status = unknown, "unknown merge status, shown as blocked");
+-            BlockedReason::Other {
+-                status: unknown.to_owned(),
+-            }
+-        }
+-    }
+-}
+-
+ #[cfg(test)]
+ mod tests;
+diff --git a/crates/merge-requests/src/page/tests.rs b/crates/merge-requests/src/page/tests.rs
+index e00a2b5..0659cc1 100644
+--- a/crates/merge-requests/src/page/tests.rs
++++ b/crates/merge-requests/src/page/tests.rs
+@@ -1,6 +1,7 @@
+ use serde_json::{Value, json};
+ 
+ use super::*;
++use crate::{BlockedReason, Readiness};
+ 
+ const ORIGIN: &str = "https://gitlab.example";
+ const FULL_PATH: &str = "taskboard/taskboard";
+@@ -65,13 +66,17 @@ fn snooze_a_reminder() -> MergeRequestRow {
+ /// A node with GitLab's non-null fields, then `fields` over them.
+ fn node_with(fields: &Value) -> Value {
+     let mut node = json!({ "iid": "4", "title": "t", "createdAt": "2026-01-01T00:00:00Z", "draft": false,
+-        "conflicts": false, "sourceProjectId": 1, "targetProjectId": 1 });
++        "conflicts": false, "targetBranch": "main", "sourceProjectId": 1, "targetProjectId": 1 });
+     for (name, value) in fields.as_object().unwrap() {
+         node[name] = value.clone();
+     }
+     node
+ }
+ 
++fn readiness(status: Option<&str>, conflicts: bool, draft: bool) -> Readiness {
++    GitLabMerge::read(status, conflicts, draft).readiness()
++}
++
+ fn row_with(fields: &Value) -> MergeRequestRow {
+     let page = last_page_of(&json!([node_with(fields)])).unwrap();
+     page.rows.into_iter().next().unwrap()
+@@ -379,6 +384,43 @@ fn a_negative_count_is_0_a_huge_sum_saturates_and_another_or_no_source_project_i
+     assert!(row_with(&json!({ "sourceProjectId": null })).from_fork);
+ }
+ 
++#[test]
++fn each_row_s_check_input_holds_its_target_its_head_and_gitlab_s_answer_and_an_odd_head_is_none() {
++    let head = "68075ed9dc8296e9f4c67b6917d879bb0b90d163";
++    let nodes = json!([
++        node_with(
++            &json!({ "iid": "5", "targetBranch": "develop", "diffHeadSha": head,
++            "detailedMergeStatus": "CONFLICT" })
++        ),
++        node_with(&json!({ "iid": "6", "diffHeadSha": "68075ed" })),
++        node_with(&json!({ "iid": "7", "diffHeadSha": null })),
++    ]);
++
++    let page = last_page_of(&nodes).unwrap();
++
++    let expected = [
++        RowToCheck {
++            iid: MergeRequestIid(5),
++            target_branch: "develop".to_owned(),
++            head: Some(Oid::parse(head).unwrap()),
++            gitlab: GitLabMerge::read(Some("CONFLICT"), false, false),
++        },
++        RowToCheck {
++            iid: MergeRequestIid(6),
++            target_branch: "main".to_owned(),
++            head: None,
++            gitlab: GitLabMerge::read(None, false, false),
++        },
++        RowToCheck {
++            iid: MergeRequestIid(7),
++            target_branch: "main".to_owned(),
++            head: None,
++            gitlab: GitLabMerge::read(None, false, false),
++        },
++    ];
++    assert_eq!(page.to_check, expected);
++}
++
+ #[test]
+ fn the_mr_conflicts_scenario_s_page_folds_as_its_readme_says() {
+     use BlockedReason::{Draft, PipelineMustPass};
+diff --git a/crates/merge-requests/src/query.rs b/crates/merge-requests/src/query.rs
+index 9a9e9eb..e8d8e76 100644
+--- a/crates/merge-requests/src/query.rs
++++ b/crates/merge-requests/src/query.rs
+@@ -13,9 +13,11 @@ const BRANCHES_QUERY: &str = "query MergeRequestBranches($fullPath: ID!, $iid: S
+      state sourceBranch targetBranch sourceProjectId targetProjectId } } }";
+ 
+ /// One page of the project's open merge requests, newest created first, each with its latest pipeline's failed
+-/// jobs (the latest run of each), its merge status and size; 130 of GitLab's complexity limit of 250, measured on
+-/// gitlab.com on 2026-10-31 (`docs/slices/briefs/mr-diff-stats.md`; `.omp/run/notes/MrOverviewDesign.md` §2.2,
+-/// `docs/slices/briefs/mr-conflicts-design.md` §1). One line, so the fake glab logs each call on one line.
++/// jobs (the latest run of each), its merge status and size, and its target branch and head commit for the local
++/// conflict check; 130 of GitLab's complexity limit of 250, measured on gitlab.com on 2026-10-31 before the last two
++/// (`docs/slices/briefs/mr-diff-stats.md`; `.omp/run/notes/MrOverviewDesign.md` §2.2,
++/// `docs/slices/briefs/mr-conflicts-design.md` §1, `docs/slices/briefs/local-conflicts-design.md` §1). One line, so
++/// the fake glab logs each call on one line.
+ fn list_query() -> String {
+     format!(
+         "query MergeRequestPage($fullPath: ID!, $first: Int!, $after: String) {{ \
+@@ -32,7 +34,7 @@ fn list_query() -> String {
+          approvedBy {{ nodes {{ username }} }} \
+          resolvableDiscussionsCount resolvedDiscussionsCount \
+          detailedMergeStatus conflicts diffStats {{ additions deletions }} \
+-         sourceProjectId targetProjectId \
++         sourceProjectId targetProjectId targetBranch diffHeadSha \
+          headPipeline {{ status \
+          jobs(statuses: [FAILED], retried: false, first: {MAX_FAILED_JOBS}) {{ \
+          pageInfo {{ hasNextPage }} nodes {{ name allowFailure webPath stage {{ name }} }} }} }} \
+@@ -93,7 +95,8 @@ mod tests {
+         assert_eq!(query.matches('{').count(), query.matches('}').count());
+         assert!(query.contains("first: 50)"), "{query}");
+         let merge_fields = "resolvedDiscussionsCount detailedMergeStatus conflicts \
+-             diffStats { additions deletions } sourceProjectId targetProjectId headPipeline";
++             diffStats { additions deletions } sourceProjectId targetProjectId targetBranch diffHeadSha \
++             headPipeline";
+         assert!(query.contains(merge_fields), "{query}");
+     }
+ 
+diff --git a/crates/merge-requests/src/readiness.rs b/crates/merge-requests/src/readiness.rs
+new file mode 100644
+index 0000000..9b88436
+--- /dev/null
++++ b/crates/merge-requests/src/readiness.rs
+@@ -0,0 +1,243 @@
++use yamt_gitio::MergeOutcome;
++
++use crate::{BlockedReason, Readiness};
++
++/// What GitLab says of a merge request's merge, read once per row.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct GitLabMerge {
++    status: MergeStatus,
++    conflicts: bool,
++    draft: bool,
++}
++
++/// GitLab's `DetailedMergeStatus` (GraphQL reference) in five.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) enum MergeStatus {
++    Mergeable,
++    Conflict,
++    NeedsRebase,
++    /// GitLab has not decided yet: `CHECKING`, `UNCHECKED`, `PREPARING`, `APPROVALS_SYNCING`, or no status.
++    Unchecked,
++    Blocked(BlockedReason),
++}
++
++impl GitLabMerge {
++    /// A row's merge status, `conflicts` flag and draft flag as GitLab sent them; an unknown status blocks, in
++    /// GitLab's word, with a warning.
++    pub(crate) fn read(status: Option<&str>, conflicts: bool, draft: bool) -> GitLabMerge {
++        GitLabMerge {
++            status: status.map_or(MergeStatus::Unchecked, merge_status),
++            conflicts,
++            draft,
++        }
++    }
++
++    /// GitLab's answer alone: its merge status, unless the merge request conflicts (its `conflicts` flag or a
++    /// `CONFLICT` status). A conflict comes first, with what else blocks the merge (request rule 2, #1998).
++    pub(crate) fn readiness(&self) -> Readiness {
++        if self.conflicts {
++            return self.conflicting();
++        }
++        match &self.status {
++            MergeStatus::Mergeable => Readiness::Ready,
++            MergeStatus::Conflict => self.conflicting(),
++            MergeStatus::NeedsRebase => Readiness::NeedsRebase,
++            MergeStatus::Unchecked => Readiness::Checking,
++            MergeStatus::Blocked(reason) => Readiness::Blocked {
++                reason: reason.clone(),
++            },
++        }
++    }
++
++    /// The readiness once yamt merged GitLab's two commits itself (request rules 2 and 3): its own merge decides
++    /// the conflict, GitLab's `conflicts` flag is not read, and GitLab's status keeps the other blockers. A clean
++    /// merge GitLab calls conflicting or has not checked is `MergesCleanly`, never `Ready`.
++    pub(crate) fn readiness_after(&self, merged: MergeOutcome) -> Readiness {
++        match merged {
++            MergeOutcome::Conflicts => self.conflicting(),
++            MergeOutcome::Clean => match &self.status {
++                MergeStatus::Mergeable => Readiness::Ready,
++                MergeStatus::Conflict | MergeStatus::Unchecked => Readiness::MergesCleanly,
++                MergeStatus::NeedsRebase => Readiness::NeedsRebase,
++                MergeStatus::Blocked(reason) => Readiness::Blocked {
++                    reason: reason.clone(),
++                },
++            },
++        }
++    }
++
++    /// A conflict with the status's blocked reason, then `Draft` for a draft: GitLab never merges one, whatever its
++    /// status says.
++    fn conflicting(&self) -> Readiness {
++        let mut also = match &self.status {
++            MergeStatus::Blocked(reason) => vec![reason.clone()],
++            MergeStatus::Mergeable
++            | MergeStatus::Conflict
++            | MergeStatus::NeedsRebase
++            | MergeStatus::Unchecked => Vec::new(),
++        };
++        if self.draft && !also.contains(&BlockedReason::Draft) {
++            also.push(BlockedReason::Draft);
++        }
++        Readiness::Conflicts { also }
++    }
++}
++
++fn merge_status(status: &str) -> MergeStatus {
++    match status {
++        "MERGEABLE" => MergeStatus::Mergeable,
++        "CONFLICT" => MergeStatus::Conflict,
++        "NEED_REBASE" => MergeStatus::NeedsRebase,
++        "CHECKING" | "UNCHECKED" | "PREPARING" | "APPROVALS_SYNCING" => MergeStatus::Unchecked,
++        blocking => MergeStatus::Blocked(blocked_reason(blocking)),
++    }
++}
++
++fn blocked_reason(status: &str) -> BlockedReason {
++    match status {
++        "DRAFT_STATUS" => BlockedReason::Draft,
++        "DISCUSSIONS_NOT_RESOLVED" => BlockedReason::Discussions,
++        "NOT_APPROVED" => BlockedReason::Approvals,
++        "CI_MUST_PASS" => BlockedReason::PipelineMustPass,
++        "CI_STILL_RUNNING" => BlockedReason::PipelineRunning,
++        "REQUESTED_CHANGES" => BlockedReason::ChangesRequested,
++        "BLOCKED_STATUS" => BlockedReason::Dependencies,
++        "EXTERNAL_STATUS_CHECKS" => BlockedReason::StatusChecks,
++        "JIRA_ASSOCIATION" => BlockedReason::JiraIssue,
++        "LOCKED_LFS_FILES" => BlockedReason::LockedFiles,
++        "LOCKED_PATHS" => BlockedReason::LockedPaths,
++        "MERGE_TIME" => BlockedReason::MergeTime,
++        "NOT_OPEN" => BlockedReason::NotOpen,
++        "COMMITS_STATUS" => BlockedReason::SourceBranch,
++        "SECURITY_POLICIES_VIOLATIONS" => BlockedReason::SecurityPolicies,
++        "SECURITY_POLICY_PIPELINE_CHECK" => BlockedReason::SecurityPipelines,
++        "TITLE_NOT_MATCHING" => BlockedReason::TitleRule,
++        unknown => {
++            tracing::warn!(status = unknown, "unknown merge status, shown as blocked");
++            BlockedReason::Other {
++                status: unknown.to_owned(),
++            }
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use BlockedReason::{Discussions, Draft};
++    use MergeOutcome::{Clean, Conflicts};
++
++    fn merge(status: MergeStatus, conflicts: bool, draft: bool) -> GitLabMerge {
++        GitLabMerge {
++            status,
++            conflicts,
++            draft,
++        }
++    }
++
++    fn conflicts(also: &[BlockedReason]) -> Readiness {
++        Readiness::Conflicts {
++            also: also.to_vec(),
++        }
++    }
++
++    fn blocked(reason: BlockedReason) -> Readiness {
++        Readiness::Blocked { reason }
++    }
++
++    /// Design §2.1's table: each status, then what a local conflict and a local clean merge give, for a row that is
++    /// not a draft.
++    fn after_table() -> [(MergeStatus, Readiness, Readiness); 5] {
++        [
++            (MergeStatus::Mergeable, conflicts(&[]), Readiness::Ready),
++            (
++                MergeStatus::Conflict,
++                conflicts(&[]),
++                Readiness::MergesCleanly,
++            ),
++            (
++                MergeStatus::NeedsRebase,
++                conflicts(&[]),
++                Readiness::NeedsRebase,
++            ),
++            (
++                MergeStatus::Unchecked,
++                conflicts(&[]),
++                Readiness::MergesCleanly,
++            ),
++            (
++                MergeStatus::Blocked(Discussions),
++                conflicts(&[Discussions]),
++                blocked(Discussions),
++            ),
++        ]
++    }
++
++    #[test]
++    fn the_local_merge_decides_the_conflict_and_gitlab_s_status_the_rest_whatever_its_conflicts_flag()
++     {
++        for (status, on_conflicts, on_clean) in after_table() {
++            for flag in [false, true] {
++                let merge = merge(status.clone(), flag, false);
++                assert_eq!(merge.readiness_after(Conflicts), on_conflicts, "{merge:?}");
++                assert_eq!(merge.readiness_after(Clean), on_clean, "{merge:?}");
++            }
++        }
++    }
++
++    #[test]
++    fn a_draft_s_local_conflict_ends_in_draft_once_and_a_clean_draft_keeps_gitlab_s_answer() {
++        let statuses = [
++            (
++                MergeStatus::Mergeable,
++                conflicts(&[Draft]),
++                Readiness::Ready,
++            ),
++            (
++                MergeStatus::Conflict,
++                conflicts(&[Draft]),
++                Readiness::MergesCleanly,
++            ),
++            (
++                MergeStatus::NeedsRebase,
++                conflicts(&[Draft]),
++                Readiness::NeedsRebase,
++            ),
++            (
++                MergeStatus::Unchecked,
++                conflicts(&[Draft]),
++                Readiness::MergesCleanly,
++            ),
++            (
++                MergeStatus::Blocked(Discussions),
++                conflicts(&[Discussions, Draft]),
++                blocked(Discussions),
++            ),
++            (
++                MergeStatus::Blocked(Draft),
++                conflicts(&[Draft]),
++                blocked(Draft),
++            ),
++        ];
++        for (status, on_conflicts, on_clean) in statuses {
++            for flag in [false, true] {
++                let merge = merge(status.clone(), flag, true);
++                assert_eq!(merge.readiness_after(Conflicts), on_conflicts, "{merge:?}");
++                assert_eq!(merge.readiness_after(Clean), on_clean, "{merge:?}");
++            }
++        }
++    }
++
++    #[test]
++    fn a_missing_status_is_unchecked_and_an_unknown_one_blocks_in_gitlab_s_word() {
++        assert_eq!(
++            GitLabMerge::read(None, false, true).status,
++            MergeStatus::Unchecked
++        );
++        let unknown = GitLabMerge::read(Some("MERGE_TRAIN_STUCK"), true, false);
++        let other = BlockedReason::Other {
++            status: "MERGE_TRAIN_STUCK".to_owned(),
++        };
++        assert_eq!(unknown, merge(MergeStatus::Blocked(other), true, false));
++    }
++}
+diff --git a/crates/merge-requests/tests/list.rs b/crates/merge-requests/tests/list.rs
+index f74a8ab..62efaa2 100644
+--- a/crates/merge-requests/tests/list.rs
++++ b/crates/merge-requests/tests/list.rs
+@@ -40,10 +40,28 @@ fn gitlab_repo() -> (TempDir, GitLabRepository) {
+ fn listed(repository: &GitLabRepository, glab: Option<&Glab>) -> (ListEnd, Vec<MergeRequestPage>) {
+     let (sender, sent) = mpsc::channel();
+     let on_page = |page: MergeRequestPage| sender.send(page).unwrap();
+-    let end = list_merge_requests(repository, glab, &on_page);
++    let end = list_merge_requests(repository, glab, &on_page).end;
+     (end, sent.try_iter().collect())
+ }
+ 
++/// Whether a load on `scenario`'s fake glab (none for `None`) hands rows to the local check.
++fn has_rows_to_check(repository: &GitLabRepository, scenario: Option<&str>) -> bool {
++    let fake = scenario.map(Fake::new);
++    let glab = fake.as_ref().map(|fake| &fake.glab);
++    let listed = list_merge_requests(repository, glab, &|_| {});
++    listed.to_check.is_some()
++}
++
++#[test]
++fn only_a_load_that_reached_the_project_hands_rows_to_the_check() {
++    let (_repo, repository) = gitlab_repo();
++
++    assert!(has_rows_to_check(&repository, Some("merge-requests")));
++    assert!(!has_rows_to_check(&repository, None));
++    assert!(!has_rows_to_check(&repository, Some("logged-out")));
++    assert!(!has_rows_to_check(&repository, Some("lined-up")));
++}
++
+ fn iids(page: &MergeRequestPage) -> Vec<u32> {
+     page.rows.iter().map(|row| row.iid.0).collect()
+ }
+diff --git a/crates/merge-requests/tests/local_conflicts.rs b/crates/merge-requests/tests/local_conflicts.rs
+new file mode 100644
+index 0000000..4993be4
+--- /dev/null
++++ b/crates/merge-requests/tests/local_conflicts.rs
+@@ -0,0 +1,210 @@
++#![cfg(test)]
++#![cfg(unix)]
++
++mod fake_glab;
++
++use std::fs;
++use std::path::PathBuf;
++use std::process::Command;
++use std::sync::mpsc;
++
++use yamt_conflict_repo::{TempDir, git_ok};
++use yamt_merge_requests::{
++    BlockedReason, CheckSummary, CheckedRow, GitLabRepository, ListEnd, MergeRequestIid,
++    MergedPairs, Readiness, check_conflicts, gitlab_repository, list_merge_requests,
++};
++
++use fake_glab::{Fake, in_this_repository};
++
++const BARE: &str = ".git/fake-gitlab.git";
++const FEATURE_CLEAN: &str = "refs/heads/feature/clean";
++
++/// `scripts/local-conflicts-repo.sh`'s repository with the fake glab on the `local-conflicts/` scenario.
++struct Setup {
++    repo: TempDir,
++    fake: Fake,
++}
++
++impl Setup {
++    fn new() -> Setup {
++        let repo = tempfile::tempdir().unwrap();
++        let built = Command::new(in_this_repository("scripts/local-conflicts-repo.sh"))
++            .arg(repo.path().join("lc"))
++            .output()
++            .unwrap();
++        assert!(built.status.success(), "{built:?}");
++        Setup {
++            repo,
++            fake: Fake::new("local-conflicts"),
++        }
++    }
++
++    fn root(&self) -> PathBuf {
++        self.repo.path().join("lc")
++    }
++
++    fn repository(&self) -> GitLabRepository {
++        gitlab_repository(&self.root()).unwrap()
++    }
++
++    /// One load: the list, then the check with `memory`; the rows the check sent, by iid, and its summary.
++    fn load(&self, memory: &mut MergedPairs) -> (Vec<CheckedRow>, CheckSummary) {
++        self.load_with(memory, || {})
++    }
++
++    /// As `load`, with `between` run after the list and before the check.
++    fn load_with(
++        &self,
++        memory: &mut MergedPairs,
++        between: impl FnOnce(),
++    ) -> (Vec<CheckedRow>, CheckSummary) {
++        let repository = self.repository();
++        let listed = list_merge_requests(&repository, Some(&self.fake.glab), &|_| {});
++        assert_eq!(listed.end, ListEnd::Loaded);
++        between();
++        let (sender, sent) = mpsc::channel();
++        let on_checked = |row| sender.send(row).unwrap();
++        let summary = check_conflicts(&repository, &listed.to_check.unwrap(), memory, &on_checked);
++        let mut rows: Vec<CheckedRow> = sent.try_iter().collect();
++        rows.sort_by_key(|row| row.iid);
++        (rows, summary)
++    }
++
++    /// What the check must leave as it was: every ref, the status, HEAD's bytes and whether `FETCH_HEAD` exists.
++    fn untouched(&self) -> (Vec<u8>, Vec<u8>, Vec<u8>, bool) {
++        let root = self.root();
++        (
++            git_ok(&root, &["for-each-ref"]).unwrap(),
++            git_ok(&root, &["status", "--porcelain"]).unwrap(),
++            fs::read(root.join(".git/HEAD")).unwrap(),
++            root.join(".git/FETCH_HEAD").exists(),
++        )
++    }
++
++    /// Points the fake GitLab's `refs/merge-requests/<iid>/head` at `target`.
++    fn move_head_ref(&self, iid: u32, target: &str) {
++        let bare = format!("--git-dir={}", self.root().join(BARE).display());
++        let head_ref = format!("refs/merge-requests/{iid}/head");
++        git_ok(&self.root(), &[&bare, "update-ref", &head_ref, target]).unwrap();
++    }
++}
++
++fn checked(iid: u32, readiness: Readiness) -> CheckedRow {
++    CheckedRow {
++        iid: MergeRequestIid(iid),
++        readiness,
++    }
++}
++
++fn conflicts(also: &[BlockedReason]) -> Readiness {
++    Readiness::Conflicts {
++        also: also.to_vec(),
++    }
++}
++
++/// The scenario table's "sent after the check" column (`tests/glab/README.md`), by iid.
++fn table_rows() -> Vec<CheckedRow> {
++    use BlockedReason::{Discussions, Draft};
++    vec![
++        checked(41, Readiness::MergesCleanly),
++        checked(42, conflicts(&[])),
++        checked(43, Readiness::MergesCleanly),
++        checked(45, Readiness::MergesCleanly),
++        checked(47, conflicts(&[Discussions, Draft])),
++        checked(48, Readiness::MergesCleanly),
++    ]
++}
++
++#[test]
++fn the_local_merge_decides_conflicts_and_gitlab_the_rest() {
++    let setup = Setup::new();
++
++    let (rows, summary) = setup.load(&mut MergedPairs::default());
++
++    assert_eq!(rows, table_rows());
++    let expected = CheckSummary {
++        rows: 9,
++        merges: 5,
++        fetched_refs: 1,
++        remembered: 0,
++        moving: 1,
++        kept: 1,
++        problem: None,
++    };
++    assert_eq!(summary, expected);
++    let argv = setup.fake.logged("argv: ");
++    let calls = "the list's three glab calls, none of the check's";
++    assert_eq!(argv.len(), 3, "{calls}: {argv:?}");
++}
++
++#[test]
++fn a_head_ref_ahead_of_gitlabs_head_keeps_gitlabs_answer() {
++    let setup = Setup::new();
++    let mut memory = MergedPairs::default();
++
++    let (rows, summary) = setup.load(&mut memory);
++
++    assert!(
++        rows.iter().all(|row| row.iid != MergeRequestIid(44)),
++        "{rows:?}"
++    );
++    assert_eq!(summary.moving, 1);
++
++    setup.move_head_ref(44, FEATURE_CLEAN);
++    let (rows, summary) = setup.load(&mut memory);
++
++    assert_eq!(rows, table_rows());
++    assert_eq!((summary.moving, summary.remembered), (0, 8));
++}
++
++#[test]
++fn a_second_load_with_the_same_pairs_merges_and_fetches_nothing() {
++    let setup = Setup::new();
++    let mut memory = MergedPairs::default();
++    setup.load(&mut memory);
++
++    let (rows, summary) = setup.load(&mut memory);
++
++    assert_eq!(rows, table_rows());
++    let expected = CheckSummary {
++        rows: 9,
++        merges: 0,
++        fetched_refs: 0,
++        remembered: 7,
++        moving: 1,
++        kept: 1,
++        problem: None,
++    };
++    assert_eq!(summary, expected);
++}
++
++#[test]
++fn the_check_leaves_refs_status_head_and_fetch_head_byte_identical() {
++    let setup = Setup::new();
++    let before = setup.untouched();
++    let mut memory = MergedPairs::default();
++
++    setup.load(&mut memory);
++    setup.load(&mut memory);
++
++    assert_eq!(setup.untouched(), before);
++    assert!(!before.3, "FETCH_HEAD before the first load");
++}
++
++#[test]
++fn an_unreachable_remote_keeps_every_gitlab_answer() {
++    let setup = Setup::new();
++    let bare = setup.root().join(BARE);
++    let move_bare_away = || fs::rename(&bare, setup.root().join(".git/moved.git")).unwrap();
++
++    let (rows, summary) = setup.load_with(&mut MergedPairs::default(), move_bare_away);
++
++    assert_eq!(rows, []);
++    assert_eq!((summary.merges, summary.kept), (0, 9));
++    let problem = summary.problem.unwrap();
++    let ls_remote_line = format!(
++        "ls-remote: fatal: '{}' does not appear to be a git repository",
++        bare.display()
++    );
++    assert_eq!(problem, ls_remote_line);
++}
+diff --git a/scripts/local-conflicts-repo.sh b/scripts/local-conflicts-repo.sh
+new file mode 100755
+index 0000000..658e753
+--- /dev/null
++++ b/scripts/local-conflicts-repo.sh
+@@ -0,0 +1,49 @@
++#!/usr/bin/env bash
++# Usage: scripts/local-conflicts-repo.sh <dir>
++# Builds the smoke repository of the merge-request list's local conflict check (plan §2 #149): the repository of
++# scripts/mr-conflict-repo.sh, whose fake GitLab (the bare `.git/fake-gitlab.git`) also holds
++# `refs/merge-requests/<iid>/head` for !41–!48 of tests/glab/local-conflicts (none for !49; !44's points at
++# feature/due-dates while GitLab names feature/clean, a push in flight), and !45's head: a commit from a fork, based on
++# main's tip and adding src/board/colours.ts, made in a throwaway clone and pushed only to that ref, so no branch and
++# not the checkout holds it. Names and dates are fixed, so the commit ids never change: tests/glab/local-conflicts
++# uses them. Prints the command that opens the merge-request page. Uses no user or system git config (risk RK19).
++set -euo pipefail
++# shellcheck source=scripts/git-sandbox.sh
++source "$(dirname "$0")/git-sandbox.sh"
++
++[ $# -eq 1 ] || die "usage: $0 <dir>"
++
++"$(dirname "$0")/mr-conflict-repo.sh" "$1" >/dev/null
++isolate_git_config
++
++bare="$(cd "$1" && pwd)/.git/fake-gitlab.git"
++bare_git() {
++    git --git-dir="$bare" "$@"
++}
++
++# $1: iid, $2: the branch its head ref points at.
++head_ref() {
++    bare_git update-ref "refs/merge-requests/$1/head" "refs/heads/$2"
++}
++
++head_ref 41 feature/clean
++head_ref 42 feature/due-dates
++head_ref 43 feature/merged
++head_ref 44 feature/due-dates
++head_ref 46 feature/clean
++head_ref 47 feature/due-dates
++head_ref 48 feature/clean
++
++dir=$(mktemp -d)
++trap 'rm -rf "$dir"' EXIT
++git clone -q "$bare" "$dir"
++write src/board/colours.ts 'export const COLOURS = ["red", "green", "blue"] as const;\n'
++GIT_AUTHOR_NAME=yamt GIT_AUTHOR_EMAIL=yamt@example.invalid GIT_AUTHOR_DATE=2026-10-08T10:00:00+02:00 \
++    GIT_COMMITTER_NAME=yamt GIT_COMMITTER_EMAIL=yamt@example.invalid GIT_COMMITTER_DATE=2026-10-08T10:00:00+02:00 \
++    repo_git commit -q -m "Card colours"
++repo_git push -q origin HEAD:refs/merge-requests/45/head
++
++root=$(cd "$1" && pwd)
++echo "local-conflicts-repo: $root is on develop; GitLab holds the head refs of !41–!48, !45's only there."
++echo "Open its merge-request page with:"
++echo "cd $root && yamt --diff"
+diff --git a/src-tauri/src/merge_requests.rs b/src-tauri/src/merge_requests.rs
+index 0593617..9998cb8 100644
+--- a/src-tauri/src/merge_requests.rs
++++ b/src-tauri/src/merge_requests.rs
+@@ -8,8 +8,9 @@ use tauri::ipc::Channel;
+ use tauri::{App, Manager, Runtime, State, WebviewWindow};
+ use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
+ use yamt_merge_requests::{
+-    GitLabProject, GitLabRepository, Glab, ListEnd, MergeRequestIid, MergeRequestPage, OpenReply,
+-    PageOpened, ResolveRefusal, WebPage, gitlab_repository, prepare_open, prepare_resolve,
++    CheckedRow, GitLabProject, GitLabRepository, Glab, ListEnd, MergeRequestIid, MergeRequestPage,
++    MergedPairs, OpenReply, PageOpened, ResolveRefusal, WebPage, check_conflicts,
++    gitlab_repository, prepare_open, prepare_resolve,
+ };
+ 
+ use crate::args::Ai;
+@@ -22,14 +23,16 @@ const CLAIM_PROBE_INTERVAL: Duration = Duration::from_millis(50);
+ /// Long enough for a cold start of the merge window up to its claim.
+ const CLAIM_WAIT: Duration = Duration::from_secs(5);
+ 
+-/// One message of a load, in order: every page, then its end. The end travels on the channel too: tauri 2.12.1
+-/// delivers a channel message of 8 KiB of JSON or more by a later fetch (ipc/channel.rs
+-/// `MAX_JSON_DIRECT_EXECUTE_THRESHOLD`), so a page could reach the window after the command's own answer.
++/// One message of a load, in order: every page, then its end, then each row the local conflict check changed. The
++/// end travels on the channel too: tauri 2.12.1 delivers a channel message of 8 KiB of JSON or more by a later fetch
++/// (ipc/channel.rs `MAX_JSON_DIRECT_EXECUTE_THRESHOLD`), so a page could reach the window after the command's own
++/// answer.
+ #[derive(Clone, Debug, serde::Serialize, specta::Type)]
+ #[serde(tag = "kind", rename_all = "camelCase")]
+ pub(crate) enum ListMessage {
+     Page { page: MergeRequestPage },
+     End { end: ListEnd },
++    Checked { row: CheckedRow },
+ }
+ 
+ /// What resolving a merge request's conflicts did (plan §2 #139): a merge started in this checkout and its
+@@ -55,12 +58,15 @@ pub(crate) enum ContinueMergeReply {
+ 
+ /// The window's GitLab project, found once at start, the folder pair locks live in, the window's `--ai` that "Show
+ /// Diff" passes on, and every merge request's and failed job's page a list sent in this run: only those may be
+-/// opened (plan §2 #128–#137); never locked together with another `Mutex`.
++/// opened (plan §2 #128–#137); `pages` is never locked together with another `Mutex`.
+ pub(crate) struct MergeRequestState {
+     gitlab: Option<GitLabRepository>,
+     range_dir: PathBuf,
+     ai: Ai,
+     pages: Mutex<BTreeSet<WebPage>>,
++    /// The run's merged pairs; locked for a whole check, so a second load's check waits and then merges nothing
++    /// twice (rule 7); never locked together with `pages`.
++    merged: Mutex<MergedPairs>,
+ }
+ 
+ /// Looks for a GitLab project in `folder`'s repository, offline, and hands it to the app with the window's `ai`.
+@@ -70,6 +76,7 @@ pub(crate) fn manage<R: Runtime>(app: &App<R>, folder: &Path, app_folder: &Path,
+         range_dir: range_folder(app_folder),
+         ai,
+         pages: Mutex::new(BTreeSet::new()),
++        merged: Mutex::new(MergedPairs::default()),
+     });
+ }
+ 
+@@ -98,18 +105,27 @@ fn send(channel: &Channel<ListMessage>, message: ListMessage) {
+     }
+ }
+ 
+-/// Sends every page, then the end.
++/// Sends every page, then the end, then — when the list reached the project — each row the local conflict check
++/// changed; a `Checked` that does not reach the window is not logged (request rule 8: the check's one line per load).
+ fn list(state: &MergeRequestState, glab: Option<&Glab>, channel: &Channel<ListMessage>) {
+-    let end = match &state.gitlab {
+-        Some(repository) => {
+-            let on_page = |page| forward_page(state, channel, page);
+-            yamt_merge_requests::list_merge_requests(repository, glab, &on_page)
+-        }
+-        None => ListEnd::Failed {
++    let Some(repository) = &state.gitlab else {
++        let end = ListEnd::Failed {
+             message: NO_PROJECT.to_owned(),
+-        },
++        };
++        send(channel, ListMessage::End { end });
++        return;
+     };
+-    send(channel, ListMessage::End { end });
++    let on_page = |page| forward_page(state, channel, page);
++    let listed = yamt_merge_requests::list_merge_requests(repository, glab, &on_page);
++    send(channel, ListMessage::End { end: listed.end });
++    let Some(check) = listed.to_check else {
++        return;
++    };
++    let mut merged = state.merged.lock().unwrap_or_else(PoisonError::into_inner);
++    let on_checked = |row| {
++        let _unlogged = channel.send(ListMessage::Checked { row });
++    };
++    check_conflicts(repository, &check, &mut merged, &on_checked);
+ }
+ 
+ fn opened(state: &MergeRequestState, glab: Option<&Glab>, iid: MergeRequestIid) -> OpenReply {
+diff --git a/src-tauri/src/merge_requests/tests.rs b/src-tauri/src/merge_requests/tests.rs
+index 67ef6d6..5f11cd3 100644
+--- a/src-tauri/src/merge_requests/tests.rs
++++ b/src-tauri/src/merge_requests/tests.rs
+@@ -130,6 +130,9 @@ mod through_glab {
+     const FAKE_OPEN_LOG: &str = "YAMT_FAKE_OPEN_LOG";
+     const LIST_TEST: &str = "merge_requests::tests::through_glab::a_list_on_path_s_glab";
+     const PAGES_TEST: &str = "merge_requests::tests::through_glab::pages_on_path_s_opener";
++    const CHECKED_TEST: &str = "merge_requests::tests::through_glab::a_checked_list_on_path_s_glab";
++    const SECOND_CHECK_TEST: &str =
++        "merge_requests::tests::through_glab::two_checked_lists_on_path_s_glab";
+     const LISTED_JOB: &str = "https://gitlab.example/taskboard/taskboard/-/jobs/302";
+     const UNLISTED_JOB: &str = "https://gitlab.example/taskboard/taskboard/-/jobs/999";
+     const LISTED_MERGE_REQUEST: &str =
+@@ -156,6 +159,51 @@ mod through_glab {
+         open_window_in(repo)
+     }
+ 
++    /// A window on `scripts/local-conflicts-repo.sh`'s repository, whose `origin` is the fake GitLab's project.
++    fn local_conflicts_window() -> MergeRequestWindow {
++        let repo = TempDir::new().unwrap();
++        let built = Command::new(in_this_repository("scripts/local-conflicts-repo.sh"))
++            .arg(repo.path())
++            .output()
++            .unwrap();
++        assert!(built.status.success(), "{built:?}");
++        open_window_in(repo)
++    }
++
++    /// The `checked` rows of a load, by iid.
++    fn checked_rows(messages: &[Value]) -> Vec<Value> {
++        let mut rows: Vec<Value> = messages
++            .iter()
++            .filter(|message| message["kind"] == "checked")
++            .map(|message| message["row"].clone())
++            .collect();
++        rows.sort_by_key(|row| row["iid"].as_u64());
++        rows
++    }
++
++    /// The scenario `local-conflicts`' rows the check changes (`tests/glab/README.md`).
++    fn scenario_rows() -> Vec<Value> {
++        let merges_cleanly = json!({ "kind": "mergesCleanly" });
++        let conflicts = json!({ "kind": "conflicts", "also": [] });
++        let blocked_conflicts = json!({ "kind": "conflicts", "also": [{ "kind": "discussions" }, { "kind": "draft" }] });
++        let row = |iid: u32, readiness: &Value| json!({ "iid": iid, "readiness": readiness });
++        vec![
++            row(41, &merges_cleanly),
++            row(42, &conflicts),
++            row(43, &merges_cleanly),
++            row(45, &merges_cleanly),
++            row(47, &blocked_conflicts),
++            row(48, &merges_cleanly),
++        ]
++    }
++
++    fn kinds(messages: &[Value]) -> Vec<&str> {
++        messages
++            .iter()
++            .map(|message| message["kind"].as_str().unwrap())
++            .collect()
++    }
++
+     /// Runs `test` in a child whose PATH starts with the committed fake glab on the scenario `tests/glab/<scenario>`
+     /// and the fake xdg-open, their logs in a folder of this test's.
+     pub(super) fn run_with_fakes(test: &str, scenario: &str) {
+@@ -235,6 +283,50 @@ mod through_glab {
+         assert_eq!(messages[0]["page"]["me"], "sam");
+     }
+ 
++    #[test]
++    fn a_load_sends_its_pages_then_its_end_then_the_checked_rows() {
++        run_with_fakes(CHECKED_TEST, "local-conflicts");
++    }
++
++    #[test]
++    #[ignore = "run by a_load_sends_its_pages_then_its_end_then_the_checked_rows"]
++    fn a_checked_list_on_path_s_glab() {
++        let window = local_conflicts_window();
++
++        let messages = list(&window);
++
++        let checked = ["checked"; 6];
++        assert_eq!(
++            kinds(&messages),
++            [["page", "end"].as_slice(), &checked].concat()
++        );
++        let shown: Vec<u64> = iids(&messages[0]["page"]);
++        assert_eq!(shown, [49, 48, 47, 46, 45, 44, 43, 42, 41]);
++        assert_eq!(messages[1]["end"], json!({ "kind": "loaded" }));
++        assert_eq!(checked_rows(&messages), scenario_rows());
++    }
++
++    #[test]
++    fn a_second_load_sends_the_same_checked_rows() {
++        run_with_fakes(SECOND_CHECK_TEST, "local-conflicts");
++    }
++
++    #[test]
++    #[ignore = "run by a_second_load_sends_the_same_checked_rows"]
++    fn two_checked_lists_on_path_s_glab() {
++        let window = local_conflicts_window();
++        list(&window);
++
++        let messages = list(&window);
++
++        let checked = ["checked"; 6];
++        assert_eq!(
++            kinds(&messages),
++            [["page", "end"].as_slice(), &checked].concat()
++        );
++        assert_eq!(checked_rows(&messages), scenario_rows());
++    }
++
+     #[test]
+     fn only_a_page_a_list_sent_is_handed_to_the_browser() {
+         run_with_fakes(PAGES_TEST, "merge-requests");
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index 0cca010..9575309 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -107,6 +107,19 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
+   `feature/colours` from the fork, !23 `feature/clean`, !29 `feature/merged`, !30 merged, !33
+   `feature/x:refs/heads/main` and !34 `feature/due-dates` into `main:refs/heads/x`, branch names a fetch refspec
+   would read as a ref to write.
++- `local-conflicts/` — the list's local conflict check (`crates/merge-requests/tests/local_conflicts.rs`, the
++  merge-request app tests in `src-tauri/src/merge_requests/tests.rs`) on `scripts/local-conflicts-repo.sh`'s
++  repository: logged in; `merge-requests/`'s project; user `sam`; one page, the last, from project 1 into `main`
++  unless said, each `diffHeadSha` a branch tip of `scripts/mr-conflict-repo.sh` and the fake GitLab's
++  `refs/merge-requests/<iid>/head` the same commit unless said. After the check: !41 (`CONFLICT`, conflicts;
++  `feature/clean`) merges clean → `mergesCleanly`; !42 (`MERGEABLE`; `feature/due-dates`) → `conflicts`; !43
++  (`CHECKING`; `feature/merged`) → `mergesCleanly`; !44 (`MERGEABLE`; `feature/clean`, its head ref at
++  `feature/due-dates`: a push in flight) keeps GitLab's answer (moving); !45 (`UNCHECKED`, from a fork, source
++  project 2; `c595b71`, the fork's commit, only in the head ref) is fetched → `mergesCleanly`; !46 (`NEED_REBASE`;
++  `feature/clean`) stays `needsRebase`; !47 (a draft, `DISCUSSIONS_NOT_RESOLVED`; `feature/due-dates`) →
++  `conflicts { also: [discussions, draft] }`; !48 (`CHECKING`, into `develop`; `feature/clean`) → `mergesCleanly`;
++  !49 (`PREPARING`, `diffHeadSha` null, no head ref) keeps GitLab's answer. The other recorded pages name
++  `targetBranch` but no `diffHeadSha`, so their rows are never checked.
+ 
+ ## Fake browser opener
+ 
+diff --git a/tests/glab/local-conflicts/graphql-page-1.json b/tests/glab/local-conflicts/graphql-page-1.json
+new file mode 100644
+index 0000000..8fc5bf1
+--- /dev/null
++++ b/tests/glab/local-conflicts/graphql-page-1.json
+@@ -0,0 +1,193 @@
++{
++  "data": {
++    "queryComplexity": { "score": 121, "limit": 250 },
++    "currentUser": { "username": "sam" },
++    "project": {
++      "mergeRequests": {
++        "pageInfo": { "hasNextPage": false, "endCursor": null },
++        "nodes": [
++          {
++            "iid": "49",
++            "title": "Board search",
++            "createdAt": "2026-11-01T16:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": null,
++            "detailedMergeStatus": "PREPARING",
++            "conflicts": false,
++            "diffStats": [],
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "48",
++            "title": "Card labels on develop",
++            "createdAt": "2026-11-01T15:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [{ "username": "lee", "name": "Lee Park" }] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": null,
++            "detailedMergeStatus": "CHECKING",
++            "conflicts": false,
++            "diffStats": [{ "additions": 1, "deletions": 0 }],
++            "targetBranch": "develop",
++            "diffHeadSha": "68075ed9dc8296e9f4c67b6917d879bb0b90d163",
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "47",
++            "title": "Draft: Due dates, discussed",
++            "createdAt": "2026-11-01T14:00:00Z",
++            "draft": true,
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
++            "reviewers": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 2,
++            "resolvedDiscussionsCount": 1,
++            "headPipeline": null,
++            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
++            "conflicts": false,
++            "diffStats": [{ "additions": 6, "deletions": 0 }, { "additions": 2, "deletions": 1 }],
++            "targetBranch": "main",
++            "diffHeadSha": "aa8054168b1a7f9ab70f7bbbf61be68ec3f4ec2a",
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "46",
++            "title": "Card labels, behind",
++            "createdAt": "2026-11-01T13:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": null,
++            "detailedMergeStatus": "NEED_REBASE",
++            "conflicts": false,
++            "diffStats": [{ "additions": 1, "deletions": 0 }],
++            "targetBranch": "main",
++            "diffHeadSha": "68075ed9dc8296e9f4c67b6917d879bb0b90d163",
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "45",
++            "title": "Card colours",
++            "createdAt": "2026-11-01T12:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "ui" }] },
++            "assignees": { "nodes": [] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": null,
++            "detailedMergeStatus": "UNCHECKED",
++            "conflicts": false,
++            "diffStats": [{ "additions": 1, "deletions": 0 }],
++            "targetBranch": "main",
++            "diffHeadSha": "c595b71028b328604101e0925b39d1a5eafc7bc9",
++            "sourceProjectId": 2,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "44",
++            "title": "Card labels, pushed again",
++            "createdAt": "2026-11-01T11:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": null,
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "diffStats": [{ "additions": 1, "deletions": 0 }],
++            "targetBranch": "main",
++            "diffHeadSha": "68075ed9dc8296e9f4c67b6917d879bb0b90d163",
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "43",
++            "title": "Notes on priorities",
++            "createdAt": "2026-11-01T10:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "docs" }] },
++            "assignees": { "nodes": [] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": null,
++            "detailedMergeStatus": "CHECKING",
++            "conflicts": false,
++            "diffStats": [{ "additions": 1, "deletions": 0 }],
++            "targetBranch": "main",
++            "diffHeadSha": "02326dc71adb2acd31afeea86f0de84ce8512d44",
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "42",
++            "title": "Due dates on cards",
++            "createdAt": "2026-11-01T09:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": null,
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "diffStats": [{ "additions": 6, "deletions": 0 }, { "additions": 2, "deletions": 1 }],
++            "targetBranch": "main",
++            "diffHeadSha": "aa8054168b1a7f9ab70f7bbbf61be68ec3f4ec2a",
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "41",
++            "title": "Card labels",
++            "createdAt": "2026-11-01T08:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [{ "username": "lee", "name": "Lee Park" }] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": null,
++            "detailedMergeStatus": "CONFLICT",
++            "conflicts": true,
++            "diffStats": [{ "additions": 1, "deletions": 0 }],
++            "targetBranch": "main",
++            "diffHeadSha": "68075ed9dc8296e9f4c67b6917d879bb0b90d163",
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/tests/glab/local-conflicts/project.json b/tests/glab/local-conflicts/project.json
+new file mode 100644
+index 0000000..d591a82
+--- /dev/null
++++ b/tests/glab/local-conflicts/project.json
+@@ -0,0 +1 @@
++{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example/taskboard/taskboard"}
+diff --git a/tests/glab/merge-requests-timeout/graphql-page-1.json b/tests/glab/merge-requests-timeout/graphql-page-1.json
+index f9f5c6c..b27b891 100644
+--- a/tests/glab/merge-requests-timeout/graphql-page-1.json
++++ b/tests/glab/merge-requests-timeout/graphql-page-1.json
+@@ -20,6 +20,7 @@
+             "detailedMergeStatus": "CI_MUST_PASS",
+             "conflicts": false,
+             "diffStats": [{ "additions": 20, "deletions": 4 }, { "additions": 20, "deletions": 3 }, { "additions": 16, "deletions": 2 }, { "additions": 8, "deletions": 0 }],
++            "targetBranch": "main",
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": {
+@@ -62,6 +63,7 @@
+             "detailedMergeStatus": "MERGEABLE",
+             "conflicts": false,
+             "diffStats": [{ "additions": 24, "deletions": 2 }, { "additions": 6, "deletions": 0 }],
++            "targetBranch": "main",
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": {
+@@ -83,6 +85,7 @@
+             "detailedMergeStatus": "DRAFT_STATUS",
+             "conflicts": true,
+             "diffStats": [{ "additions": 40, "deletions": 12 }, { "additions": 30, "deletions": 10 }, { "additions": 20, "deletions": 8 }, { "additions": 15, "deletions": 5 }, { "additions": 10, "deletions": 3 }, { "additions": 5, "deletions": 2 }],
++            "targetBranch": "main",
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": {
+diff --git a/tests/glab/merge-requests/graphql-page-1.json b/tests/glab/merge-requests/graphql-page-1.json
+index f9f5c6c..b27b891 100644
+--- a/tests/glab/merge-requests/graphql-page-1.json
++++ b/tests/glab/merge-requests/graphql-page-1.json
+@@ -20,6 +20,7 @@
+             "detailedMergeStatus": "CI_MUST_PASS",
+             "conflicts": false,
+             "diffStats": [{ "additions": 20, "deletions": 4 }, { "additions": 20, "deletions": 3 }, { "additions": 16, "deletions": 2 }, { "additions": 8, "deletions": 0 }],
++            "targetBranch": "main",
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": {
+@@ -62,6 +63,7 @@
+             "detailedMergeStatus": "MERGEABLE",
+             "conflicts": false,
+             "diffStats": [{ "additions": 24, "deletions": 2 }, { "additions": 6, "deletions": 0 }],
++            "targetBranch": "main",
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": {
+@@ -83,6 +85,7 @@
+             "detailedMergeStatus": "DRAFT_STATUS",
+             "conflicts": true,
+             "diffStats": [{ "additions": 40, "deletions": 12 }, { "additions": 30, "deletions": 10 }, { "additions": 20, "deletions": 8 }, { "additions": 15, "deletions": 5 }, { "additions": 10, "deletions": 3 }, { "additions": 5, "deletions": 2 }],
++            "targetBranch": "main",
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": {
+diff --git a/tests/glab/merge-requests/graphql-page-2.json b/tests/glab/merge-requests/graphql-page-2.json
+index 2143b7b..c85cef3 100644
+--- a/tests/glab/merge-requests/graphql-page-2.json
++++ b/tests/glab/merge-requests/graphql-page-2.json
+@@ -20,6 +20,7 @@
+             "detailedMergeStatus": "NEED_REBASE",
+             "conflicts": false,
+             "diffStats": null,
++            "targetBranch": "main",
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": null
+@@ -38,6 +39,7 @@
+             "detailedMergeStatus": null,
+             "conflicts": false,
+             "diffStats": [{ "additions": 5, "deletions": 5 }],
++            "targetBranch": "main",
+             "sourceProjectId": 12,
+             "targetProjectId": 7,
+             "headPipeline": {
+diff --git a/tests/glab/mr-conflicts/graphql-page-1.json b/tests/glab/mr-conflicts/graphql-page-1.json
+index a87d277..437aa64 100644
+--- a/tests/glab/mr-conflicts/graphql-page-1.json
++++ b/tests/glab/mr-conflicts/graphql-page-1.json
+@@ -24,6 +24,7 @@
+             "detailedMergeStatus": "CI_MUST_PASS",
+             "conflicts": true,
+             "diffStats": [{ "additions": 30, "deletions": 5 }, { "additions": 20, "deletions": 4 }, { "additions": 12, "deletions": 2 }, { "additions": 8, "deletions": 1 }, { "additions": 5, "deletions": 0 }],
++            "targetBranch": "main",
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -42,6 +43,7 @@
+             "detailedMergeStatus": "DRAFT_STATUS",
+             "conflicts": true,
+             "diffStats": [{ "additions": 90, "deletions": 1 }, { "additions": 50, "deletions": 1 }, { "additions": 30, "deletions": 1 }, { "additions": 20, "deletions": 0 }, { "additions": 10, "deletions": 0 }, { "additions": 6, "deletions": 0 }, { "additions": 4, "deletions": 0 }],
++            "targetBranch": "main",
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -63,6 +65,7 @@
+             "detailedMergeStatus": "CONFLICT",
+             "conflicts": true,
+             "diffStats": [{ "additions": 8, "deletions": 1 }],
++            "targetBranch": "main",
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -84,6 +87,7 @@
+             "detailedMergeStatus": "MERGE_TRAIN_STUCK",
+             "conflicts": false,
+             "diffStats": [{ "additions": 30, "deletions": 4 }, { "additions": 10, "deletions": 2 }, { "additions": 4, "deletions": 0 }],
++            "targetBranch": "main",
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -105,6 +109,7 @@
+             "detailedMergeStatus": "MERGEABLE",
+             "conflicts": false,
+             "diffStats": [],
++            "targetBranch": "main",
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -123,6 +128,7 @@
+             "detailedMergeStatus": "UNCHECKED",
+             "conflicts": false,
+             "diffStats": [{ "additions": 25, "deletions": 0 }, { "additions": 6, "deletions": 0 }],
++            "targetBranch": "main",
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -144,6 +150,7 @@
+             "detailedMergeStatus": "DRAFT_STATUS",
+             "conflicts": false,
+             "diffStats": [{ "additions": 18, "deletions": 2 }],
++            "targetBranch": "main",
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -165,6 +172,7 @@
+             "detailedMergeStatus": "NEED_REBASE",
+             "conflicts": false,
+             "diffStats": [{ "additions": 50, "deletions": 10 }, { "additions": 30, "deletions": 8 }, { "additions": 10, "deletions": 3 }, { "additions": 6, "deletions": 1 }],
++            "targetBranch": "main",
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -186,6 +194,7 @@
+             "detailedMergeStatus": "CONFLICT",
+             "conflicts": true,
+             "diffStats": [{ "additions": 30, "deletions": 8 }, { "additions": 16, "deletions": 4 }, { "additions": 6, "deletions": 2 }],
++            "targetBranch": "main",
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -207,6 +216,7 @@
+             "detailedMergeStatus": "CONFLICT",
+             "conflicts": true,
+             "diffStats": [{ "additions": 20, "deletions": 6 }, { "additions": 7, "deletions": 3 }],
++            "targetBranch": "main",
+             "sourceProjectId": 2,
+             "targetProjectId": 1
+           },
+@@ -228,6 +238,7 @@
+             "detailedMergeStatus": "CONFLICT",
+             "conflicts": true,
+             "diffStats": [{ "additions": 40, "deletions": 12 }, { "additions": 30, "deletions": 10 }, { "additions": 20, "deletions": 8 }, { "additions": 15, "deletions": 5 }, { "additions": 10, "deletions": 3 }, { "additions": 5, "deletions": 2 }],
++            "targetBranch": "main",
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           }

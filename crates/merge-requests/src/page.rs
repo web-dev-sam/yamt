@@ -1,11 +1,13 @@
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde::de::IgnoredAny;
+use yamt_gitio::Oid;
 
+use crate::check::RowToCheck;
 use crate::project::Project;
+use crate::readiness::GitLabMerge;
 use crate::{
-    BlockedReason, ChangeSize, CiStatus, FailedJob, MergeRequestIid, MergeRequestRow, Person,
-    Pipeline, Readiness, WebPage,
+    ChangeSize, CiStatus, FailedJob, MergeRequestIid, MergeRequestRow, Person, Pipeline, WebPage,
 };
 
 const NO_DATA: &str = "GitLab's answer holds no data";
@@ -16,6 +18,8 @@ const NO_CURSOR: &str = "GitLab says more merge requests follow, but sent no cur
 pub(crate) struct ParsedPage {
     pub me: Option<String>,
     pub rows: Vec<MergeRequestRow>,
+    /// Each row as the local conflict check needs it, in the same order.
+    pub to_check: Vec<RowToCheck>,
     /// The cursor of the next page; `None` on the last.
     pub next: Option<String>,
     pub complexity: Option<Complexity>,
@@ -95,6 +99,8 @@ struct Node {
     detailed_merge_status: Option<String>,
     conflicts: bool,
     diff_stats: Option<Vec<FileStats>>,
+    target_branch: String,
+    diff_head_sha: Option<String>,
     source_project_id: Option<i64>,
     target_project_id: i64,
 }
@@ -138,12 +144,16 @@ pub(crate) fn parsed(json: &[u8], project: &Project) -> Result<ParsedPage, Strin
         .and_then(|found| found.merge_requests)
         .ok_or(NO_PROJECT)?;
     let mut rows = Vec::new();
+    let mut to_check = Vec::new();
     for node in merge_requests.nodes {
-        rows.push(row(node, project)?);
+        let (row, row_to_check) = row(node, project)?;
+        rows.push(row);
+        to_check.push(row_to_check);
     }
     Ok(ParsedPage {
         me: data.current_user.map(|user| user.username),
         rows,
+        to_check,
         next: next_cursor(merge_requests.page_info)?,
         complexity: data.query_complexity,
     })
@@ -167,16 +177,16 @@ fn next_cursor(page_info: PageInfo) -> Result<Option<String>, String> {
     }
 }
 
-fn row(node: Node, project: &Project) -> Result<MergeRequestRow, String> {
-    let iid = node
-        .iid
-        .parse()
-        .map_err(|_| format!("GitLab sent {:?} as a merge request number", node.iid))?;
-    let iid = MergeRequestIid(iid);
+/// The row the window shows and, beside it, what the local check needs; a `diffHeadSha` that is no commit id is no
+/// head.
+fn row(node: Node, project: &Project) -> Result<(MergeRequestRow, RowToCheck), String> {
+    let iid = merge_request_iid(&node.iid)?;
     let origin = project.web_origin.as_deref();
     let page = origin.and_then(|origin| WebPage::merge_request(origin, &project.web_path, iid));
     let labels = listed(node.labels).into_iter().map(|label| label.title);
-    Ok(MergeRequestRow {
+    let status = node.detailed_merge_status.as_deref();
+    let gitlab = GitLabMerge::read(status, node.conflicts, node.draft);
+    let row = MergeRequestRow {
         iid,
         title: node.title,
         created_at: node.created_at,
@@ -192,13 +202,23 @@ fn row(node: Node, project: &Project) -> Result<MergeRequestRow, String> {
         pipeline: node.head_pipeline.map(|found| pipeline(found, origin)),
         page,
         size: change_size(node.diff_stats.as_deref().unwrap_or_default()),
-        readiness: readiness(
-            node.detailed_merge_status.as_deref(),
-            node.conflicts,
-            node.draft,
-        ),
+        readiness: gitlab.readiness(),
         from_fork: is_from_fork(node.source_project_id, node.target_project_id),
-    })
+    };
+    let to_check = RowToCheck {
+        iid,
+        target_branch: node.target_branch,
+        head: node.diff_head_sha.and_then(|sha| Oid::parse(&sha).ok()),
+        gitlab,
+    };
+    Ok((row, to_check))
+}
+
+fn merge_request_iid(sent: &str) -> Result<MergeRequestIid, String> {
+    let iid = sent
+        .parse()
+        .map_err(|_| format!("GitLab sent {sent:?} as a merge request number"))?;
+    Ok(MergeRequestIid(iid))
 }
 
 fn listed<T>(connection: Option<Nodes<T>>) -> Vec<T> {
@@ -218,7 +238,7 @@ fn saturated(sent: i64) -> u32 {
     u32::try_from(sent.max(0)).unwrap_or(u32::MAX)
 }
 
-fn count(length: usize) -> u32 {
+pub(crate) fn count(length: usize) -> u32 {
     u32::try_from(length).unwrap_or(u32::MAX)
 }
 
@@ -289,68 +309,6 @@ fn ci_status(status: &str) -> CiStatus {
                 "unknown pipeline status, shown as pending"
             );
             CiStatus::Pending
-        }
-    }
-}
-
-/// The row's one readiness: GitLab's merge status alone, unless the merge request conflicts (its `conflicts` flag
-/// or a `CONFLICT` status). A conflict comes first, with what else blocks the merge (request rule 2, #1998): the
-/// status's blocked reason, then `Draft` for a draft — GitLab never merges one, whatever its status says.
-fn readiness(status: Option<&str>, conflicts: bool, draft: bool) -> Readiness {
-    let folded = status.map_or(Readiness::Checking, merge_status);
-    if !conflicts && !matches!(folded, Readiness::Conflicts { .. }) {
-        return folded;
-    }
-    let mut also = match folded {
-        Readiness::Blocked { reason } => vec![reason],
-        Readiness::Ready
-        | Readiness::Conflicts { .. }
-        | Readiness::NeedsRebase
-        | Readiness::Checking => Vec::new(),
-    };
-    if draft && !also.contains(&BlockedReason::Draft) {
-        also.push(BlockedReason::Draft);
-    }
-    Readiness::Conflicts { also }
-}
-
-/// GitLab's `DetailedMergeStatus` (GraphQL reference) as a readiness; an unknown one blocks, in GitLab's word.
-fn merge_status(status: &str) -> Readiness {
-    match status {
-        "MERGEABLE" => Readiness::Ready,
-        "CONFLICT" => Readiness::Conflicts { also: Vec::new() },
-        "NEED_REBASE" => Readiness::NeedsRebase,
-        "CHECKING" | "UNCHECKED" | "PREPARING" | "APPROVALS_SYNCING" => Readiness::Checking,
-        blocking => Readiness::Blocked {
-            reason: blocked_reason(blocking),
-        },
-    }
-}
-
-fn blocked_reason(status: &str) -> BlockedReason {
-    match status {
-        "DRAFT_STATUS" => BlockedReason::Draft,
-        "DISCUSSIONS_NOT_RESOLVED" => BlockedReason::Discussions,
-        "NOT_APPROVED" => BlockedReason::Approvals,
-        "CI_MUST_PASS" => BlockedReason::PipelineMustPass,
-        "CI_STILL_RUNNING" => BlockedReason::PipelineRunning,
-        "REQUESTED_CHANGES" => BlockedReason::ChangesRequested,
-        "BLOCKED_STATUS" => BlockedReason::Dependencies,
-        "EXTERNAL_STATUS_CHECKS" => BlockedReason::StatusChecks,
-        "JIRA_ASSOCIATION" => BlockedReason::JiraIssue,
-        "LOCKED_LFS_FILES" => BlockedReason::LockedFiles,
-        "LOCKED_PATHS" => BlockedReason::LockedPaths,
-        "MERGE_TIME" => BlockedReason::MergeTime,
-        "NOT_OPEN" => BlockedReason::NotOpen,
-        "COMMITS_STATUS" => BlockedReason::SourceBranch,
-        "SECURITY_POLICIES_VIOLATIONS" => BlockedReason::SecurityPolicies,
-        "SECURITY_POLICY_PIPELINE_CHECK" => BlockedReason::SecurityPipelines,
-        "TITLE_NOT_MATCHING" => BlockedReason::TitleRule,
-        unknown => {
-            tracing::warn!(status = unknown, "unknown merge status, shown as blocked");
-            BlockedReason::Other {
-                status: unknown.to_owned(),
-            }
         }
     }
 }

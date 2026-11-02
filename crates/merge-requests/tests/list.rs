@@ -40,8 +40,26 @@ fn gitlab_repo() -> (TempDir, GitLabRepository) {
 fn listed(repository: &GitLabRepository, glab: Option<&Glab>) -> (ListEnd, Vec<MergeRequestPage>) {
     let (sender, sent) = mpsc::channel();
     let on_page = |page: MergeRequestPage| sender.send(page).unwrap();
-    let end = list_merge_requests(repository, glab, &on_page);
+    let end = list_merge_requests(repository, glab, &on_page).end;
     (end, sent.try_iter().collect())
+}
+
+/// Whether a load on `scenario`'s fake glab (none for `None`) hands rows to the local check.
+fn has_rows_to_check(repository: &GitLabRepository, scenario: Option<&str>) -> bool {
+    let fake = scenario.map(Fake::new);
+    let glab = fake.as_ref().map(|fake| &fake.glab);
+    let listed = list_merge_requests(repository, glab, &|_| {});
+    listed.to_check.is_some()
+}
+
+#[test]
+fn only_a_load_that_reached_the_project_hands_rows_to_the_check() {
+    let (_repo, repository) = gitlab_repo();
+
+    assert!(has_rows_to_check(&repository, Some("merge-requests")));
+    assert!(!has_rows_to_check(&repository, None));
+    assert!(!has_rows_to_check(&repository, Some("logged-out")));
+    assert!(!has_rows_to_check(&repository, Some("lined-up")));
 }
 
 fn iids(page: &MergeRequestPage) -> Vec<u32> {

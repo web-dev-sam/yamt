@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 
 use super::*;
+use crate::{BlockedReason, Readiness};
 
 const ORIGIN: &str = "https://gitlab.example";
 const FULL_PATH: &str = "taskboard/taskboard";
@@ -65,11 +66,15 @@ fn snooze_a_reminder() -> MergeRequestRow {
 /// A node with GitLab's non-null fields, then `fields` over them.
 fn node_with(fields: &Value) -> Value {
     let mut node = json!({ "iid": "4", "title": "t", "createdAt": "2026-01-01T00:00:00Z", "draft": false,
-        "conflicts": false, "sourceProjectId": 1, "targetProjectId": 1 });
+        "conflicts": false, "targetBranch": "main", "sourceProjectId": 1, "targetProjectId": 1 });
     for (name, value) in fields.as_object().unwrap() {
         node[name] = value.clone();
     }
     node
+}
+
+fn readiness(status: Option<&str>, conflicts: bool, draft: bool) -> Readiness {
+    GitLabMerge::read(status, conflicts, draft).readiness()
 }
 
 fn row_with(fields: &Value) -> MergeRequestRow {
@@ -377,6 +382,43 @@ fn a_negative_count_is_0_a_huge_sum_saturates_and_another_or_no_source_project_i
     assert!(!counted.from_fork);
     assert!(row_with(&json!({ "sourceProjectId": 2, "targetProjectId": 1 })).from_fork);
     assert!(row_with(&json!({ "sourceProjectId": null })).from_fork);
+}
+
+#[test]
+fn each_row_s_check_input_holds_its_target_its_head_and_gitlab_s_answer_and_an_odd_head_is_none() {
+    let head = "68075ed9dc8296e9f4c67b6917d879bb0b90d163";
+    let nodes = json!([
+        node_with(
+            &json!({ "iid": "5", "targetBranch": "develop", "diffHeadSha": head,
+            "detailedMergeStatus": "CONFLICT" })
+        ),
+        node_with(&json!({ "iid": "6", "diffHeadSha": "68075ed" })),
+        node_with(&json!({ "iid": "7", "diffHeadSha": null })),
+    ]);
+
+    let page = last_page_of(&nodes).unwrap();
+
+    let expected = [
+        RowToCheck {
+            iid: MergeRequestIid(5),
+            target_branch: "develop".to_owned(),
+            head: Some(Oid::parse(head).unwrap()),
+            gitlab: GitLabMerge::read(Some("CONFLICT"), false, false),
+        },
+        RowToCheck {
+            iid: MergeRequestIid(6),
+            target_branch: "main".to_owned(),
+            head: None,
+            gitlab: GitLabMerge::read(None, false, false),
+        },
+        RowToCheck {
+            iid: MergeRequestIid(7),
+            target_branch: "main".to_owned(),
+            head: None,
+            gitlab: GitLabMerge::read(None, false, false),
+        },
+    ];
+    assert_eq!(page.to_check, expected);
 }
 
 #[test]

@@ -130,6 +130,9 @@ mod through_glab {
     const FAKE_OPEN_LOG: &str = "YAMT_FAKE_OPEN_LOG";
     const LIST_TEST: &str = "merge_requests::tests::through_glab::a_list_on_path_s_glab";
     const PAGES_TEST: &str = "merge_requests::tests::through_glab::pages_on_path_s_opener";
+    const CHECKED_TEST: &str = "merge_requests::tests::through_glab::a_checked_list_on_path_s_glab";
+    const SECOND_CHECK_TEST: &str =
+        "merge_requests::tests::through_glab::two_checked_lists_on_path_s_glab";
     const LISTED_JOB: &str = "https://gitlab.example/taskboard/taskboard/-/jobs/302";
     const UNLISTED_JOB: &str = "https://gitlab.example/taskboard/taskboard/-/jobs/999";
     const LISTED_MERGE_REQUEST: &str =
@@ -154,6 +157,51 @@ mod through_glab {
             .unwrap();
         assert!(built.status.success(), "{built:?}");
         open_window_in(repo)
+    }
+
+    /// A window on `scripts/local-conflicts-repo.sh`'s repository, whose `origin` is the fake GitLab's project.
+    fn local_conflicts_window() -> MergeRequestWindow {
+        let repo = TempDir::new().unwrap();
+        let built = Command::new(in_this_repository("scripts/local-conflicts-repo.sh"))
+            .arg(repo.path())
+            .output()
+            .unwrap();
+        assert!(built.status.success(), "{built:?}");
+        open_window_in(repo)
+    }
+
+    /// The `checked` rows of a load, by iid.
+    fn checked_rows(messages: &[Value]) -> Vec<Value> {
+        let mut rows: Vec<Value> = messages
+            .iter()
+            .filter(|message| message["kind"] == "checked")
+            .map(|message| message["row"].clone())
+            .collect();
+        rows.sort_by_key(|row| row["iid"].as_u64());
+        rows
+    }
+
+    /// The scenario `local-conflicts`' rows the check changes (`tests/glab/README.md`).
+    fn scenario_rows() -> Vec<Value> {
+        let merges_cleanly = json!({ "kind": "mergesCleanly" });
+        let conflicts = json!({ "kind": "conflicts", "also": [] });
+        let blocked_conflicts = json!({ "kind": "conflicts", "also": [{ "kind": "discussions" }, { "kind": "draft" }] });
+        let row = |iid: u32, readiness: &Value| json!({ "iid": iid, "readiness": readiness });
+        vec![
+            row(41, &merges_cleanly),
+            row(42, &conflicts),
+            row(43, &merges_cleanly),
+            row(45, &merges_cleanly),
+            row(47, &blocked_conflicts),
+            row(48, &merges_cleanly),
+        ]
+    }
+
+    fn kinds(messages: &[Value]) -> Vec<&str> {
+        messages
+            .iter()
+            .map(|message| message["kind"].as_str().unwrap())
+            .collect()
     }
 
     /// Runs `test` in a child whose PATH starts with the committed fake glab on the scenario `tests/glab/<scenario>`
@@ -233,6 +281,50 @@ mod through_glab {
             .collect();
         assert_eq!(sent, [vec![13, 12, 11], vec![9, 8]]);
         assert_eq!(messages[0]["page"]["me"], "sam");
+    }
+
+    #[test]
+    fn a_load_sends_its_pages_then_its_end_then_the_checked_rows() {
+        run_with_fakes(CHECKED_TEST, "local-conflicts");
+    }
+
+    #[test]
+    #[ignore = "run by a_load_sends_its_pages_then_its_end_then_the_checked_rows"]
+    fn a_checked_list_on_path_s_glab() {
+        let window = local_conflicts_window();
+
+        let messages = list(&window);
+
+        let checked = ["checked"; 6];
+        assert_eq!(
+            kinds(&messages),
+            [["page", "end"].as_slice(), &checked].concat()
+        );
+        let shown: Vec<u64> = iids(&messages[0]["page"]);
+        assert_eq!(shown, [49, 48, 47, 46, 45, 44, 43, 42, 41]);
+        assert_eq!(messages[1]["end"], json!({ "kind": "loaded" }));
+        assert_eq!(checked_rows(&messages), scenario_rows());
+    }
+
+    #[test]
+    fn a_second_load_sends_the_same_checked_rows() {
+        run_with_fakes(SECOND_CHECK_TEST, "local-conflicts");
+    }
+
+    #[test]
+    #[ignore = "run by a_second_load_sends_the_same_checked_rows"]
+    fn two_checked_lists_on_path_s_glab() {
+        let window = local_conflicts_window();
+        list(&window);
+
+        let messages = list(&window);
+
+        let checked = ["checked"; 6];
+        assert_eq!(
+            kinds(&messages),
+            [["page", "end"].as_slice(), &checked].concat()
+        );
+        assert_eq!(checked_rows(&messages), scenario_rows());
     }
 
     #[test]

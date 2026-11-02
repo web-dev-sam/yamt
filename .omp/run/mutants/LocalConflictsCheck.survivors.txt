@@ -1,0 +1,2 @@
+just mutants HEAD → 84 mutants: 64 caught, 17 unviable, 1 missed, 2 timeout (a timeout means the mutant hangs, so the tests catch it)
+crates/merge-requests/src/check.rs:355 replace < with <= in merged_in_finishing_order (`phase_start.elapsed() < limit`) — equivalent: they differ only when elapsed equals the limit to the nanosecond; no test can hit that instant.

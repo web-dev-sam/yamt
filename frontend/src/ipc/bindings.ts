@@ -178,6 +178,14 @@ export type ChangeSize = {
 	files: number,
 };
 
+/**  A row's readiness once yamt merged GitLab's two commits itself; sent only when it differs from GitLab's answer. */
+export type CheckedRow = {
+	/**  The row's merge request. */
+	iid: MergeRequestIid,
+	/**  Its readiness after the local merge. */
+	readiness: Readiness,
+};
+
 /**  What the checkout holds now; `Changed` lists at least one file or ref, or has `head_moved`. */
 export type CheckoutLook = { kind: "Missing" } | { kind: "Clean" } | { kind: "Changed"; folder: string; files: string[]; 
 /**  The AI's branches and stash (plan §2 #122): the clone starts with none. */
@@ -491,11 +499,12 @@ detail: string } |
 message: string };
 
 /**
- *  One message of a load, in order: every page, then its end. The end travels on the channel too: tauri 2.12.1
- *  delivers a channel message of 8 KiB of JSON or more by a later fetch (ipc/channel.rs
- *  `MAX_JSON_DIRECT_EXECUTE_THRESHOLD`), so a page could reach the window after the command's own answer.
+ *  One message of a load, in order: every page, then its end, then each row the local conflict check changed. The
+ *  end travels on the channel too: tauri 2.12.1 delivers a channel message of 8 KiB of JSON or more by a later fetch
+ *  (ipc/channel.rs `MAX_JSON_DIRECT_EXECUTE_THRESHOLD`), so a page could reach the window after the command's own
+ *  answer.
  */
-export type ListMessage = { kind: "page"; page: MergeRequestPage } | { kind: "end"; end: ListEnd };
+export type ListMessage = { kind: "page"; page: MergeRequestPage } | { kind: "end"; end: ListEnd } | { kind: "checked"; row: CheckedRow };
 
 /**  The files of the stop as git sees them, or `MovedOn`: git is at another stop, the next list opens it. */
 export type Listing = { kind: "Files"; files: FileEntry[]; disk_changes: DiskChange[]; operation: OperationView | null; sides: SideNames; 
@@ -846,8 +855,8 @@ export type RangeStart = {
 };
 
 /**
- *  Whether a merge request can be merged, GitLab's `detailedMergeStatus` folded with its `conflicts` flag: one
- *  state per row, a conflict first.
+ *  Whether a merge request can be merged, GitLab's `detailedMergeStatus` folded with its `conflicts` flag, or with
+ *  yamt's own merge of its two commits: one state per row, a conflict first.
  */
 export type Readiness = 
 /**  It can be merged. */
@@ -863,7 +872,12 @@ also: BlockedReason[] } |
 /**  Something other than a conflict blocks it. */
 { kind: "blocked"; 
 /**  What blocks it. */
-reason: BlockedReason };
+reason: BlockedReason } | 
+/**
+ *  yamt's own merge of GitLab's two commits is clean, and GitLab's status says nothing of the other blockers:
+ *  it still checks, or keeps a conflict that hides them (request rule 3).
+ */
+{ kind: "mergesCleanly" };
 
 /**  Why a start changed nothing (or, for `GitRefused` with leftovers, could not put everything back). */
 export type Refusal = 

@@ -13,9 +13,11 @@ const BRANCHES_QUERY: &str = "query MergeRequestBranches($fullPath: ID!, $iid: S
      state sourceBranch targetBranch sourceProjectId targetProjectId } } }";
 
 /// One page of the project's open merge requests, newest created first, each with its latest pipeline's failed
-/// jobs (the latest run of each), its merge status and size; 130 of GitLab's complexity limit of 250, measured on
-/// gitlab.com on 2026-10-31 (`docs/slices/briefs/mr-diff-stats.md`; `.omp/run/notes/MrOverviewDesign.md` §2.2,
-/// `docs/slices/briefs/mr-conflicts-design.md` §1). One line, so the fake glab logs each call on one line.
+/// jobs (the latest run of each), its merge status and size, and its target branch and head commit for the local
+/// conflict check; 130 of GitLab's complexity limit of 250, measured on gitlab.com on 2026-10-31 before the last two
+/// (`docs/slices/briefs/mr-diff-stats.md`; `.omp/run/notes/MrOverviewDesign.md` §2.2,
+/// `docs/slices/briefs/mr-conflicts-design.md` §1, `docs/slices/briefs/local-conflicts-design.md` §1). One line, so
+/// the fake glab logs each call on one line.
 fn list_query() -> String {
     format!(
         "query MergeRequestPage($fullPath: ID!, $first: Int!, $after: String) {{ \
@@ -32,7 +34,7 @@ fn list_query() -> String {
          approvedBy {{ nodes {{ username }} }} \
          resolvableDiscussionsCount resolvedDiscussionsCount \
          detailedMergeStatus conflicts diffStats {{ additions deletions }} \
-         sourceProjectId targetProjectId \
+         sourceProjectId targetProjectId targetBranch diffHeadSha \
          headPipeline {{ status \
          jobs(statuses: [FAILED], retried: false, first: {MAX_FAILED_JOBS}) {{ \
          pageInfo {{ hasNextPage }} nodes {{ name allowFailure webPath stage {{ name }} }} }} }} \
@@ -93,7 +95,8 @@ mod tests {
         assert_eq!(query.matches('{').count(), query.matches('}').count());
         assert!(query.contains("first: 50)"), "{query}");
         let merge_fields = "resolvedDiscussionsCount detailedMergeStatus conflicts \
-             diffStats { additions deletions } sourceProjectId targetProjectId headPipeline";
+             diffStats { additions deletions } sourceProjectId targetProjectId targetBranch diffHeadSha \
+             headPipeline";
         assert!(query.contains(merge_fields), "{query}");
     }
 

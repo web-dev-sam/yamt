@@ -24,6 +24,7 @@
             "detailedMergeStatus": "CI_MUST_PASS",
             "conflicts": true,
             "diffStats": [{ "additions": 30, "deletions": 5 }, { "additions": 20, "deletions": 4 }, { "additions": 12, "deletions": 2 }, { "additions": 8, "deletions": 1 }, { "additions": 5, "deletions": 0 }],
+            "targetBranch": "main",
             "sourceProjectId": 1,
             "targetProjectId": 1
           },
@@ -42,6 +43,7 @@
             "detailedMergeStatus": "DRAFT_STATUS",
             "conflicts": true,
             "diffStats": [{ "additions": 90, "deletions": 1 }, { "additions": 50, "deletions": 1 }, { "additions": 30, "deletions": 1 }, { "additions": 20, "deletions": 0 }, { "additions": 10, "deletions": 0 }, { "additions": 6, "deletions": 0 }, { "additions": 4, "deletions": 0 }],
+            "targetBranch": "main",
             "sourceProjectId": 1,
             "targetProjectId": 1
           },
@@ -63,6 +65,7 @@
             "detailedMergeStatus": "CONFLICT",
             "conflicts": true,
             "diffStats": [{ "additions": 8, "deletions": 1 }],
+            "targetBranch": "main",
             "sourceProjectId": 1,
             "targetProjectId": 1
           },
@@ -84,6 +87,7 @@
             "detailedMergeStatus": "MERGE_TRAIN_STUCK",
             "conflicts": false,
             "diffStats": [{ "additions": 30, "deletions": 4 }, { "additions": 10, "deletions": 2 }, { "additions": 4, "deletions": 0 }],
+            "targetBranch": "main",
             "sourceProjectId": 1,
             "targetProjectId": 1
           },
@@ -105,6 +109,7 @@
             "detailedMergeStatus": "MERGEABLE",
             "conflicts": false,
             "diffStats": [],
+            "targetBranch": "main",
             "sourceProjectId": 1,
             "targetProjectId": 1
           },
@@ -123,6 +128,7 @@
             "detailedMergeStatus": "UNCHECKED",
             "conflicts": false,
             "diffStats": [{ "additions": 25, "deletions": 0 }, { "additions": 6, "deletions": 0 }],
+            "targetBranch": "main",
             "sourceProjectId": 1,
             "targetProjectId": 1
           },
@@ -144,6 +150,7 @@
             "detailedMergeStatus": "DRAFT_STATUS",
             "conflicts": false,
             "diffStats": [{ "additions": 18, "deletions": 2 }],
+            "targetBranch": "main",
             "sourceProjectId": 1,
             "targetProjectId": 1
           },
@@ -165,6 +172,7 @@
             "detailedMergeStatus": "NEED_REBASE",
             "conflicts": false,
             "diffStats": [{ "additions": 50, "deletions": 10 }, { "additions": 30, "deletions": 8 }, { "additions": 10, "deletions": 3 }, { "additions": 6, "deletions": 1 }],
+            "targetBranch": "main",
             "sourceProjectId": 1,
             "targetProjectId": 1
           },
@@ -186,6 +194,7 @@
             "detailedMergeStatus": "CONFLICT",
             "conflicts": true,
             "diffStats": [{ "additions": 30, "deletions": 8 }, { "additions": 16, "deletions": 4 }, { "additions": 6, "deletions": 2 }],
+            "targetBranch": "main",
             "sourceProjectId": 1,
             "targetProjectId": 1
           },
@@ -207,6 +216,7 @@
             "detailedMergeStatus": "CONFLICT",
             "conflicts": true,
             "diffStats": [{ "additions": 20, "deletions": 6 }, { "additions": 7, "deletions": 3 }],
+            "targetBranch": "main",
             "sourceProjectId": 2,
             "targetProjectId": 1
           },
@@ -228,6 +238,7 @@
             "detailedMergeStatus": "CONFLICT",
             "conflicts": true,
             "diffStats": [{ "additions": 40, "deletions": 12 }, { "additions": 30, "deletions": 10 }, { "additions": 20, "deletions": 8 }, { "additions": 15, "deletions": 5 }, { "additions": 10, "deletions": 3 }, { "additions": 5, "deletions": 2 }],
+            "targetBranch": "main",
             "sourceProjectId": 1,
             "targetProjectId": 1
           }
