@@ -1,0 +1,2 @@
+just mutants HEAD: dry run stopped on the expected ui failures. Same stryker run with --ignorePatterns for the 2 ui tests: dueDate.ts 57 killed, 8 survived
+

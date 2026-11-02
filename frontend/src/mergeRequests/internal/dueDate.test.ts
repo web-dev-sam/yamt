@@ -104,14 +104,22 @@ test("calendarDayText writes the stored form with padded parts and reads back", 
   expect(calendarDayFrom(calendarDayText(day("2026-11-09")))).toEqual(day("2026-11-09"));
 });
 
-test("compareDays orders days across months and years", () => {
-  expect(compareDays(day("2026-12-31"), day("2027-01-01"))).toBeLessThan(0);
-  expect(compareDays(day("2027-01-01"), day("2026-12-31"))).toBeGreaterThan(0);
+test("compareDays counts the whole days between two days across months, years and leap days", () => {
+  expect(compareDays(day("2026-12-31"), day("2027-01-01"))).toBe(-1);
+  expect(compareDays(day("2027-01-01"), day("2026-12-31"))).toBe(1);
   expect(compareDays(day("2026-11-09"), day("2026-11-09"))).toBe(0);
-  expect(compareDays(day("2026-01-31"), day("2026-02-01"))).toBeLessThan(0);
+  expect(compareDays(day("2026-03-01"), day("2026-01-31"))).toBe(29);
+  expect(compareDays(day("2028-03-01"), day("2028-02-28"))).toBe(2);
 });
 
-test("dueDateText reads the day in English, medium style, whatever the time zone", () => {
+test("dueDateText reads the day in English, medium style, whatever the time zone", async () => {
   expect(dueDateText(day("2026-11-09"))).toBe("Nov 9, 2026");
   expect(dueDateText(day("2027-01-01"))).toBe("Jan 1, 2027");
+  vi.stubEnv("TZ", "America/Los_Angeles");
+  vi.resetModules();
+  // The formatter takes the process zone when the module loads, so it loads again west of UTC.
+  const west = await import("../index");
+  vi.stubEnv("TZ", "Europe/Berlin");
+  expect(west.dueDateText(day("2026-11-09"))).toBe("Nov 9, 2026");
+  expect(west.dueDateText(day("2027-01-01"))).toBe("Jan 1, 2027");
 });

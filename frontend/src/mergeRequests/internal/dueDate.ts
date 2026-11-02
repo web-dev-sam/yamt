@@ -35,7 +35,7 @@ export function calendarDayText({ year, month, day }: CalendarDay): string {
 }
 
 export function compareDays(a: CalendarDay, b: CalendarDay): number {
-  return utcMidnight(a).getTime() - utcMidnight(b).getTime();
+  return (utcMidnight(a).getTime() - utcMidnight(b).getTime()) / DAY_MS;
 }
 
 export function dueDateText(day: CalendarDay): string {
@@ -45,7 +45,7 @@ export function dueDateText(day: CalendarDay): string {
 export function daysLeft(day: CalendarDay, now: number): number {
   const local = new Date(now);
   const today = { year: local.getFullYear(), month: local.getMonth() + 1, day: local.getDate() };
-  return compareDays(day, today) / DAY_MS;
+  return compareDays(day, today);
 }
 
 export function daysLeftText(days: number): { readonly text: string; readonly overdue: boolean } {

@@ -1,0 +1,67 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index c080b55..13e9676 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -6,7 +6,7 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ 
+ `internal/`: `filters` (the filter types, `passes`, `stateOf`, `clicked` and the other edits, `filterLabel` "Assignee: not Me, anna"), `choices`, `order`, `summary`, `relativeTime`, `ciBox`, `stored`, `size` (`sizeParts` `{ added "+120", removed "−40", files "6 files" }` with U+2212, the row colours them green, red, text colour; `sizeTitle`), `readiness` (`readinessText`, "Has conflicts. Also blocked: " and the reasons joined by "; ", GitLab's own word quoted for `other`; `readinessIcon`), `rowAction` (the row's Resolve or Continue, first match wins: Continue on the merging row whatever its readiness, disabled while its window is open; no button unless conflicts; a fork, then another unfinished merge, disable Resolve; then running). Every file has its `*.test.ts` (node), each test named for the bug it catches.
+ 
+-`dueDate`: `CalendarDay` (month 1–12) made by `calendarDayFrom` from `"YYYY-MM-DD"` naming a real day, written back by `calendarDayText`; `daysLeft` counts calendar days from the local day of now (UTC day numbers, never milliseconds, so midnight, month ends and daylight-saving days count once); `daysLeftText` "Due today", "1 day left", "n days left", "1 day overdue", "n days overdue"; `dueDateText` English medium ("Nov 9, 2026").
++`dueDate`: `CalendarDay` (month 1–12) made by `calendarDayFrom` from `"YYYY-MM-DD"` naming a real day, written back by `calendarDayText`; `compareDays` gives the whole days from one day to another (negative when the first is earlier); `daysLeft` is `compareDays` from the local day of now (both days at UTC midnight, so midnight, month ends and daylight-saving days count once); `daysLeftText` "Due today", "1 day left", "n days left", "1 day overdue", "n days overdue"; `dueDateText` English medium ("Nov 9, 2026") read in UTC, so every zone shows the stored day.
+ 
+ `people`: `peopleStack` (assignees, then reviewers not assigned; `STACK_SHOWN` 3, the rest as `more`), `displayName` (the username when the name is blank), `initials` (first letters of two words), `pictureHue` (0–359 from the username), `reviewStateText`, `reviewDone` (reviewed, approved or changes requested: GitLab's "Re-request review" applies), `authorText`, `approversText` (one name per line; "No approvals"), `NO_PEOPLE_TEXT`.
+ 
+diff --git a/frontend/src/mergeRequests/internal/dueDate.test.ts b/frontend/src/mergeRequests/internal/dueDate.test.ts
+index 692631c..053843c 100644
+--- a/frontend/src/mergeRequests/internal/dueDate.test.ts
++++ b/frontend/src/mergeRequests/internal/dueDate.test.ts
+@@ -104,14 +104,22 @@ test("calendarDayText writes the stored form with padded parts and reads back",
+   expect(calendarDayFrom(calendarDayText(day("2026-11-09")))).toEqual(day("2026-11-09"));
+ });
+ 
+-test("compareDays orders days across months and years", () => {
+-  expect(compareDays(day("2026-12-31"), day("2027-01-01"))).toBeLessThan(0);
+-  expect(compareDays(day("2027-01-01"), day("2026-12-31"))).toBeGreaterThan(0);
++test("compareDays counts the whole days between two days across months, years and leap days", () => {
++  expect(compareDays(day("2026-12-31"), day("2027-01-01"))).toBe(-1);
++  expect(compareDays(day("2027-01-01"), day("2026-12-31"))).toBe(1);
+   expect(compareDays(day("2026-11-09"), day("2026-11-09"))).toBe(0);
+-  expect(compareDays(day("2026-01-31"), day("2026-02-01"))).toBeLessThan(0);
++  expect(compareDays(day("2026-03-01"), day("2026-01-31"))).toBe(29);
++  expect(compareDays(day("2028-03-01"), day("2028-02-28"))).toBe(2);
+ });
+ 
+-test("dueDateText reads the day in English, medium style, whatever the time zone", () => {
++test("dueDateText reads the day in English, medium style, whatever the time zone", async () => {
+   expect(dueDateText(day("2026-11-09"))).toBe("Nov 9, 2026");
+   expect(dueDateText(day("2027-01-01"))).toBe("Jan 1, 2027");
++  vi.stubEnv("TZ", "America/Los_Angeles");
++  vi.resetModules();
++  // The formatter takes the process zone when the module loads, so it loads again west of UTC.
++  const west = await import("../index");
++  vi.stubEnv("TZ", "Europe/Berlin");
++  expect(west.dueDateText(day("2026-11-09"))).toBe("Nov 9, 2026");
++  expect(west.dueDateText(day("2027-01-01"))).toBe("Jan 1, 2027");
+ });
+diff --git a/frontend/src/mergeRequests/internal/dueDate.ts b/frontend/src/mergeRequests/internal/dueDate.ts
+index c2f6546..10290e6 100644
+--- a/frontend/src/mergeRequests/internal/dueDate.ts
++++ b/frontend/src/mergeRequests/internal/dueDate.ts
+@@ -35,7 +35,7 @@ export function calendarDayText({ year, month, day }: CalendarDay): string {
+ }
+ 
+ export function compareDays(a: CalendarDay, b: CalendarDay): number {
+-  return utcMidnight(a).getTime() - utcMidnight(b).getTime();
++  return (utcMidnight(a).getTime() - utcMidnight(b).getTime()) / DAY_MS;
+ }
+ 
+ export function dueDateText(day: CalendarDay): string {
+@@ -45,7 +45,7 @@ export function dueDateText(day: CalendarDay): string {
+ export function daysLeft(day: CalendarDay, now: number): number {
+   const local = new Date(now);
+   const today = { year: local.getFullYear(), month: local.getMonth() + 1, day: local.getDate() };
+-  return compareDays(day, today) / DAY_MS;
++  return compareDays(day, today);
+ }
+ 
+ export function daysLeftText(days: number): { readonly text: string; readonly overdue: boolean } {
