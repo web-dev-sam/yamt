@@ -125,6 +125,9 @@ mod rerequest;
 #[cfg(unix)]
 mod job_log;
 
+#[cfg(unix)]
+mod discussions;
+
 mod csp;
 
 #[cfg(unix)]

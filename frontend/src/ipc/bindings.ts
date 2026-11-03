@@ -27,6 +27,7 @@ export const commands = {
 	setServerSwitch: (current: StoredSettings, server: string, on: boolean) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_server_switch", { current, server, on })),
 	setAddedServers: (current: StoredSettings, added: AddedServer[]) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_added_servers", { current, added })),
 	setAgent: (current: StoredSettings, agent: AgentSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_agent", { current, agent })),
+	setDiscussionDetails: (current: StoredSettings, details: DiscussionDetails) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_discussion_details", { current, details })),
 	serversContext: () => __TAURI_INVOKE<ServerContext>("servers_context"),
 	startServer: (command: ServerCommand, events: Channel<HostEvent>) => __TAURI_INVOKE<StartReply>("start_server", { command, events }),
 	sendToServer: (run: RunId, message: string) => __TAURI_INVOKE<void>("send_to_server", { run, message }),
@@ -83,6 +84,7 @@ export const commands = {
 	findLocalMerge: () => typedError<LocalMerge, IpcError>(__TAURI_INVOKE("find_local_merge")),
 	rerequestReview: (iid: MergeRequestIid, username: string) => typedError<RerequestReply, IpcError>(__TAURI_INVOKE("rerequest_review", { iid, username })),
 	readJobLog: (page: WebPage) => typedError<JobLogReply, IpcError>(__TAURI_INVOKE("read_job_log", { page })),
+	readDiscussions: (iids: MergeRequestIid[]) => typedError<RowDiscussions[], IpcError>(__TAURI_INVOKE("read_discussions", { iids })),
 };
 
 /* Types */
@@ -325,6 +327,52 @@ export type DifferenceWords = {
 	/**  Right compared with left. */
 	right: SideWordChanges<RightLine>,
 };
+
+/**
+ *  When the merge-request page reads each row's open discussions: as the list arrives, on the first hover of a
+ *  row's count, or never.
+ */
+export type DiscussionDetails = "full" | "lazy" | "off";
+
+/**  A note as the window shows it. */
+export type DiscussionNote = {
+	/**  Who wrote it; `None` for a deleted user. */
+	author: Person | null,
+	/**  When it was written: GitLab's ISO 8601 time, as sent. */
+	createdAt: string,
+	/**  Its raw body. */
+	text: string,
+	/**  Its page on GitLab; `None` when GitLab's `url` is not the one it builds for this note. */
+	page: WebPage | null,
+};
+
+/**  Where a discussion is. */
+export type DiscussionPlace = 
+/**  On the merge request itself: the last person's note has no `position`. */
+{ kind: "overview" } | 
+/**  On the diff: `filePath`, and `newLine`, else `oldLine` (both may be null). */
+{ kind: "file"; 
+/**  The file's path. */
+path: string; 
+/**  The line, on the new side when it has one. */
+line: number | null };
+
+/**  How asking for a merge request's open discussions ended. */
+export type DiscussionsAnswer = 
+/**  Its resolvable, unresolved discussions, in GitLab's order. */
+{ kind: "open"; 
+/**  The discussions. */
+discussions: OpenDiscussion[] } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first line, which names the instance. */
+detail: string } | 
+/**  glab failed, timed out or answered something unexpected, in glab's or yamt's words. */
+{ kind: "failed"; 
+/**  What went wrong. */
+message: string };
 
 export type DiskChange = {
 	path: string,
@@ -744,6 +792,14 @@ message: string };
 /**  Why the file on disk cannot be shown as the middle text. */
 export type NotText = "Deleted" | "Binary" | "NonUtf8" | "TooLarge" | "Link" | "Directory";
 
+/**  An open discussion: where it is and its last note written by a person (system notes skipped). */
+export type OpenDiscussion = {
+	/**  Where the discussion is. */
+	place: DiscussionPlace,
+	/**  Its last note written by a person. */
+	last: DiscussionNote,
+};
+
 /**  How asking to open a merge request's changes ended. */
 export type OpenReply = 
 /**  A new window shows them. */
@@ -1053,6 +1109,14 @@ export type Reviewer = {
 /**  0-based line index in the right text of a 2-way compare. */
 export type RightLine = number;
 
+/**  One merge request's open discussions, or why they were not read. */
+export type RowDiscussions = {
+	/**  The merge request. */
+	iid: MergeRequestIid,
+	/**  Its open discussions, or why there are none to show. */
+	answer: DiscussionsAnswer,
+};
+
 export type RunId = number;
 
 /**  One text file's two sides as `RangeFile::Texts` holds them, with the lines that differ. */
@@ -1172,6 +1236,7 @@ export type StoredSettings = {
 	keys: { [key in string]: string[] },
 	languageServers: LanguageServerSettings,
 	agent: AgentSettings,
+	discussionDetails: DiscussionDetails,
 };
 
 /**  One tab as the window lists it. */
@@ -1304,8 +1369,8 @@ export type Waiting =
 { kind: "Remembered" };
 
 /**
- *  The address of a page on the project's GitLab that this window may open in the browser: a failed job's log or
- *  a merge request; only `WebPage::job` and `WebPage::merge_request` make one.
+ *  The address of a page on the project's GitLab that this window may open in the browser: a failed job's log, a
+ *  merge request or a note on one; only `WebPage::job`, `WebPage::merge_request` and `WebPage::note` make one.
  */
 export type WebPage = string;
 

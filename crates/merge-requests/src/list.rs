@@ -119,7 +119,7 @@ fn pages(
 }
 
 /// The pictures by username, the last one of each.
-fn one_per_username(pictures: Vec<OfferedPicture>) -> Vec<OfferedPicture> {
+pub(crate) fn one_per_username(pictures: Vec<OfferedPicture>) -> Vec<OfferedPicture> {
     let mut addresses = BTreeMap::new();
     for picture in pictures {
         addresses.insert(picture.username, picture.address);

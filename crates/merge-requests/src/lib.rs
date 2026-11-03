@@ -1,11 +1,13 @@
 //! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab,
 //! each row's conflicts checked by yamt's own merge of GitLab's two commits, each one's changes prepared for a window
-//! of their own, its page or a failed job's opened in the browser, a failed job's log read.
+//! of their own, its page or a failed job's opened in the browser, a failed job's log read, each row's open
+//! discussions read with their last person's note.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 mod check;
 mod detect;
+mod discussions;
 mod job_log;
 mod labels;
 mod list;
@@ -28,6 +30,10 @@ use specta::Type;
 
 pub use check::{CheckSummary, ConflictCheck, MergedPairs, check_conflicts};
 pub use detect::{GitLabRepository, gitlab_repository};
+pub use discussions::{
+    DISCUSSION_BATCH, DiscussionNote, DiscussionPlace, DiscussionsAnswer, OpenDiscussion,
+    ReadDiscussions, RowDiscussions, read_discussions, unread_discussions,
+};
 pub use job_log::{JobLog, JobLogReply, MAX_LOG_BYTES, read_job_log};
 pub use labels::{Label, LabelColors};
 pub use list::{Listed, ListedPage, OfferedPicture, list_merge_requests};
@@ -86,8 +92,8 @@ pub enum CiStatus {
     Manual,
 }
 
-/// The address of a page on the project's GitLab that this window may open in the browser: a failed job's log or
-/// a merge request; only `WebPage::job` and `WebPage::merge_request` make one.
+/// The address of a page on the project's GitLab that this window may open in the browser: a failed job's log, a
+/// merge request or a note on one; only `WebPage::job`, `WebPage::merge_request` and `WebPage::note` make one.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
 pub struct WebPage(String);
 

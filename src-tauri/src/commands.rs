@@ -36,6 +36,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         settings::set_server_switch::<tauri::Wry>,
         settings::set_added_servers::<tauri::Wry>,
         settings::set_agent::<tauri::Wry>,
+        settings::set_discussion_details::<tauri::Wry>,
         servers::servers_context,
         servers::start_server,
         servers::send_to_server,
@@ -81,6 +82,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         merge_requests::find_local_merge::<tauri::Wry>,
         merge_requests::rerequest_review::<tauri::Wry>,
         merge_requests::read_job_log::<tauri::Wry>,
+        merge_requests::read_discussions::<tauri::Wry>,
     ])
 }
 

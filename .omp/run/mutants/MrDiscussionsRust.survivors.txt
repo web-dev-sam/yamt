@@ -1,0 +1,2 @@
+just mutants HEAD: 53 mutants, 1 missed, 30 caught, 22 unviable (an earlier run's `+=`→`*=` survivor is now killed by the query-count test)
+crates/merge-requests/src/discussions.rs:318 replace log_read with () — wiring: only the tracing::info! line. No log capture in the crate (no tracing-subscriber dev-dep, SP6); the Tally test pins its counts.

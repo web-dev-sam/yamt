@@ -121,9 +121,19 @@ post() {
 	reply "$scenario/post-$number" '201 Created'
 }
 
-# A merge request's details with a field iid=<n>; else a page of the list: the first without a field after, the
-# n-th for after=page-<n>.
+# Merge requests' discussions with a field iids=<JSON array>: graphql-discussions-<the iids joined by "-">, with
+# -after-<cursor> for a field discussionsAfter. Else a merge request's details with a field iid=<n>; else a page of
+# the list: the first without a field after, the n-th for after=page-<n>.
 graphql() {
+	iids=$(field iids)
+	if [ -n "$iids" ]; then
+		name=$(printf '%s' "$iids" | sed 's/[][" ]//g; s/,/-/g')
+		after=$(field discussionsAfter)
+		if [ -n "$after" ]; then
+			name="$name-after-$after"
+		fi
+		reply "$scenario/graphql-discussions-$name" '200 OK'
+	fi
 	iid=$(field iid)
 	if [ -n "$iid" ]; then
 		reply "$scenario/graphql-merge-request-$iid" '200 OK'

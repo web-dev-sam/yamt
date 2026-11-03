@@ -7,13 +7,14 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
-use crate::{AgentSettings, Error, LanguageServerSettings, StoredSettings};
+use crate::{AgentSettings, DiscussionDetails, Error, LanguageServerSettings, StoredSettings};
 
 const THEME: &str = "theme";
 const ANTIALIASING: &str = "antialiasing";
 const KEYS: &str = "keys";
 const LANGUAGE_SERVERS: &str = "languageServers";
 const AGENT: &str = "agent";
+const DISCUSSION_DETAILS: &str = "discussionDetails";
 
 /// Linux's MAXSYMLINKS (`include/linux/namei.h`): more links in a row than this is a cycle.
 const MAX_LINK_HOPS: usize = 40;
@@ -54,6 +55,10 @@ impl Loaded {
         }
         if let Some(agent) = agent_entry(path, self.stored.agent)? {
             entries.insert(AGENT.to_owned(), agent);
+        }
+        if self.stored.discussion_details != DiscussionDetails::default() {
+            let details = Value::from(self.stored.discussion_details.name());
+            entries.insert(DISCUSSION_DETAILS.to_owned(), details);
         }
         Ok(entries)
     }
@@ -108,6 +113,7 @@ fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
         keys: entry(path, KEYS, others.remove(KEYS))?,
         language_servers: entry(path, LANGUAGE_SERVERS, others.remove(LANGUAGE_SERVERS))?,
         agent: entry::<AgentSettings>(path, AGENT, others.remove(AGENT))?.without_empty_command(),
+        discussion_details: entry(path, DISCUSSION_DETAILS, others.remove(DISCUSSION_DETAILS))?,
     };
     Ok(Loaded { others, stored })
 }

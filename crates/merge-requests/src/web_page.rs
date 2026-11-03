@@ -6,6 +6,7 @@ use crate::{MergeRequestIid, PageOpened, WebPage};
 pub(crate) const HTTPS: &str = "https://";
 const JOBS_SEGMENT: &str = "/-/jobs/";
 const MERGE_REQUESTS_SEGMENT: &str = "/-/merge_requests/";
+const NOTE_ANCHOR: &str = "#note_";
 const PARENT_SEGMENT: &str = "..";
 #[cfg(target_os = "macos")]
 const OPENER: &str = "/usr/bin/open";
@@ -39,6 +40,21 @@ impl WebPage {
     ) -> Option<WebPage> {
         let tail = format!("{MERGE_REQUESTS_SEGMENT}{}", iid.0);
         project_page(origin, web_path, &tail)
+    }
+
+    /// GitLab's address of a note on merge request `iid`: `url` exactly `WebPage::merge_request(origin, web_path,
+    /// iid)` followed by `#note_<digits>`, as GitLab builds it (`merge_request_url(noteable, anchor: dom_id(note))`,
+    /// `lib/gitlab/url_builder.rb`); any other address → `None`.
+    pub(crate) fn note(
+        origin: &str,
+        web_path: &str,
+        iid: MergeRequestIid,
+        url: &str,
+    ) -> Option<WebPage> {
+        let merge_request = WebPage::merge_request(origin, web_path, iid)?;
+        let anchor = url.strip_prefix(merge_request.as_str())?;
+        let note = anchor.strip_prefix(NOTE_ANCHOR)?;
+        is_number(note).then(|| WebPage(url.to_owned()))
     }
 
     /// The page's address.
@@ -227,6 +243,44 @@ mod tests {
         for web_path in web_paths {
             assert_eq!(merge_request(ORIGIN, web_path), None, "{web_path}");
         }
+    }
+
+    #[test]
+    fn a_note_url_is_a_page_only_as_gitlab_builds_it() {
+        let note = |web_path: &str, url: &str| {
+            WebPage::note(ORIGIN, web_path, IID, url).map(|page| page.as_str().to_owned())
+        };
+        let gitlab_s = "https://gitlab.example/a/b/-/merge_requests/12#note_4131301160";
+        assert_eq!(note("/a/b", gitlab_s).as_deref(), Some(gitlab_s));
+        let under_sub_path = "https://gitlab.example/gitlab/a/b/-/merge_requests/12#note_7";
+        assert_eq!(
+            note("/gitlab/a/b", under_sub_path).as_deref(),
+            Some(under_sub_path)
+        );
+        let refused = [
+            "https://evil.example/a/b/-/merge_requests/12#note_1",
+            "http://gitlab.example/a/b/-/merge_requests/12#note_1",
+            "https://gitlab.example/a/c/-/merge_requests/12#note_1",
+            "https://gitlab.example/a/b/-/merge_requests/120#note_1",
+            "https://gitlab.example/a/b/-/merge_requests/1#note_1",
+            "https://gitlab.example/a/b/-/merge_requests/12#note_",
+            "https://gitlab.example/a/b/-/merge_requests/12#note_1a",
+            "https://gitlab.example/a/b/-/merge_requests/12#note_-1",
+            "https://gitlab.example/a/b/-/merge_requests/12#note_1/x",
+            "https://gitlab.example/a/b/-/merge_requests/12#note_1?x=1",
+            "https://gitlab.example/a/b/-/merge_requests/12",
+            "https://gitlab.example/a/b/-/merge_requests/12#",
+            "https://gitlab.example/a/b/-/merge_requests/12#diff_1",
+            "https://gitlab.example/a/b/-/merge_requests/12/#note_1",
+            "",
+        ];
+        for url in refused {
+            assert_eq!(note("/a/b", url), None, "{url}");
+        }
+        let missing_sub_path = "https://gitlab.example/a/b/-/merge_requests/12#note_1";
+        assert_eq!(note("/gitlab/a/b", missing_sub_path), None);
+        let elsewhere = WebPage::note("http://gitlab.example", "/a/b", IID, gitlab_s);
+        assert_eq!(elsewhere, None);
     }
 
     fn program_and_args(command: &Command) -> Vec<&std::ffi::OsStr> {

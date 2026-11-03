@@ -32,8 +32,9 @@ test ever runs a file it has just written (ETXTBSY).
 | `post-<n>.err` | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body") |
 | `post-<n>.exit` | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout |
 | `post-<n>.sleep` | seconds to wait before answering (a post that hangs) |
-| `graphql-page-<n>.json` | `glab api graphql` without `--input -` and without a field `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`) |
-| `graphql-merge-request-<iid>.json` | `glab api graphql` without `--input -`, with a field `iid=<iid>` |
+| `graphql-page-<n>.json` | `glab api graphql` without `--input -` and without a field `iids` or `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`) |
+| `graphql-discussions-<iids>.json` | `glab api graphql` without `--input -`, with a field `iids=<JSON array>` (the discussions query): `<iids>` is the array without its quotes, brackets and spaces, its commas as `-` (`iids=["82","81"]` → `graphql-discussions-82-81`); with a field `discussionsAfter=<cursor>`, `graphql-discussions-<iids>-after-<cursor>` |
+| `graphql-merge-request-<iid>.json` | `glab api graphql` without `--input -` and without a field `iids`, with a field `iid=<iid>` |
 | `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`) |
 | `pictures/<path>` | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found` |
 | `pictures/<path>.sleep` | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists |
@@ -45,6 +46,10 @@ is given twice) and, as glab does, sends a POST when a field or `--input` is giv
 whose file is missing, or any other endpoint, answers `404 Not Found` with the body `{"message":"404 Not Found"}`.
 A POST or GraphQL call whose `.json` is missing, or an `after` not of the form `page-<n>`, exits 2. Any other glab
 command exits 2 with "fake glab: unknown command".
+
+`-F iids=["82","81"]` sends a JSON array of strings as the variable, measured on glab 1.126.0 against gitlab.com on
+2026-11-03 (`mergeRequests(iids: $iids)` answered all 20 merge requests of a 20-string array). The fake keeps the
+field as written.
 
 ## What the fake prints, as glab 1.124.0 does
 
@@ -162,6 +167,22 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   25th), its first line naming `FIRST LINE OF THE LONG LOG`, its last a red failure line; `305.log` is empty; there
   is no `304.log` (404); `310.log` is a short fork log (`FORK LOG: …`), `312.log` a short coloured log with `fail`.
   `.gitattributes` keeps every byte (`* -text`).
+- `mr-discussions/` — each row's open discussions (`crates/merge-requests/tests/discussions.rs`, the discussions app
+  tests in `src-tauri/src/merge_requests/tests/discussions.rs`): logged in; `merge-requests/`'s project; user `sam`;
+  one page, the last, with the list query's fields (`queryComplexity` 170 of 250); no `diffHeadSha`. !82 (3 open: 4
+  resolvable, 1 resolved), !81 (1), !80 (0), !79 (1), !78 (1). The batch `graphql-discussions-82-81-79-78.json`
+  (`queryComplexity` 58 of 250, as gitlab.com scored 20 merge requests on 2026-11-03): !82 holds, in order, (a) a diff
+  discussion on `src/board/card.ts` line 12: anna's comment, a system note "changed this line in version 2 of the
+  diff", then sam's reply (note 103); (b) a diff discussion on `src/board/dueDates.ts`, old line 6 only: ben's
+  comment, then a system note last; (c) an Overview discussion by anna whose `url` is `https://evil.example/x#note_1`
+  (no page); (d) a resolved discussion; (e) a system-only "added 2 commits" (`resolvable: false`); (f) chiara's
+  non-resolvable comment. !81: one Overview discussion, ben's note 201, its body `Please **check** <b>THIS</b> & that`
+  on three lines with a `<script>` line. !79: page 1 holds only two resolved discussions and names `hasNextPage: true,
+  endCursor: "d-2"`; `graphql-discussions-79-after-d-2.json` holds the open one (sam, `src/board/search.ts` line 3).
+  !78 is absent from the batch's answer. `graphql-discussions-81.json` answers !81 alone (a lazy ask, score 32);
+  `graphql-discussions-77.err` and `.exit` (1) fail before any answer with a deadline line. Avatars: anna's uploaded
+  `/uploads/-/system/user/avatar/2/avatar.png` (`pictures/`, `mr-row-details/`'s PNG), ben's Gravatar as in
+  `mr-row-details/`; every other `url` is `https://gitlab.example/taskboard/taskboard/-/merge_requests/<iid>#note_<n>`.
 
 ## Fake browser opener
 

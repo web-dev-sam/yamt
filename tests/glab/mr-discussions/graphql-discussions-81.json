@@ -1,0 +1,40 @@
+{
+  "data": {
+    "queryComplexity": { "score": 32, "limit": 250 },
+    "project": {
+      "mergeRequests": {
+        "nodes": [
+          {
+            "iid": "81",
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-81" },
+              "nodes": [
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "ben",
+                          "name": "Ben Okafor",
+                          "avatarUrl": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon"
+                        },
+                        "body": "Please **check** <b>THIS</b> & that\non a dark theme\n<script>alert(1)</script>",
+                        "createdAt": "2026-11-02T10:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/81#note_201",
+                        "position": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

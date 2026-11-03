@@ -67,6 +67,29 @@ impl Antialiasing {
     }
 }
 
+/// When the merge-request page reads each row's open discussions: as the list arrives, on the first hover of a
+/// row's count, or never.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum DiscussionDetails {
+    #[default]
+    Full,
+    Lazy,
+    Off,
+}
+
+impl DiscussionDetails {
+    /// The spelling in the settings file.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            DiscussionDetails::Full => "full",
+            DiscussionDetails::Lazy => "lazy",
+            DiscussionDetails::Off => "off",
+        }
+    }
+}
+
 /// What the window holds and sends: `keys` = action id → key strings, only for actions whose
 /// keys differ from the defaults (the window knows the defaults; Rust never does).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -77,6 +100,8 @@ pub struct StoredSettings {
     #[serde(rename = "languageServers")]
     pub language_servers: LanguageServerSettings,
     pub agent: AgentSettings,
+    #[serde(rename = "discussionDetails")]
+    pub discussion_details: DiscussionDetails,
 }
 
 /// The AI agent the window starts and its first message; `None` = the window's default.
@@ -186,6 +211,16 @@ pub fn set_antialiasing(
     antialiasing: Antialiasing,
 ) -> Result<SettingsRead, Error> {
     change(places, current, |stored| stored.antialiasing = antialiasing)
+}
+
+pub fn set_discussion_details(
+    places: &Places,
+    current: &StoredSettings,
+    details: DiscussionDetails,
+) -> Result<SettingsRead, Error> {
+    change(places, current, |stored| {
+        stored.discussion_details = details;
+    })
 }
 
 pub fn set_keys(
@@ -344,6 +379,28 @@ mod tests {
                 serde_json::Value::from(antialiasing.name())
             );
         }
+    }
+
+    #[test]
+    fn discussion_details_cross_the_ipc_spelled_as_in_the_file() {
+        for details in [
+            DiscussionDetails::Full,
+            DiscussionDetails::Lazy,
+            DiscussionDetails::Off,
+        ] {
+            let sent = serde_json::Value::from(details.name());
+            assert_eq!(serde_json::to_value(details).unwrap(), sent);
+            let read: DiscussionDetails = serde_json::from_value(sent).unwrap();
+            assert_eq!(read, details);
+        }
+        let stored = StoredSettings {
+            discussion_details: DiscussionDetails::Lazy,
+            ..StoredSettings::default()
+        };
+        let sent = serde_json::to_value(&stored).unwrap();
+        assert_eq!(sent["discussionDetails"], "lazy");
+        let read: StoredSettings = serde_json::from_value(sent).unwrap();
+        assert_eq!(read, stored);
     }
 
     #[test]

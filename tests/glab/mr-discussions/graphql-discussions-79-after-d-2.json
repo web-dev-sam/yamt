@@ -1,0 +1,36 @@
+{
+  "data": {
+    "queryComplexity": { "score": 32, "limit": 250 },
+    "project": {
+      "mergeRequests": {
+        "nodes": [
+          {
+            "iid": "79",
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-3" },
+              "nodes": [
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+                        "body": "Search titles only, for now?",
+                        "createdAt": "2026-10-31T10:20:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_303",
+                        "position": { "filePath": "src/board/search.ts", "newLine": 3, "oldLine": 3 }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

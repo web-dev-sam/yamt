@@ -1,5 +1,6 @@
 use serde_json::json;
 
+use crate::discussions::{DISCUSSIONS_PER_PAGE, NOTES_READ};
 use crate::{MAX_FAILED_JOBS, MergeRequestIid, PAGE_SIZE};
 
 /// A merge request's state, target branch and the two commits of its diff, asked afresh on each open so a push
@@ -95,6 +96,50 @@ pub(crate) fn branches_args(full_path: &str, iid: MergeRequestIid) -> Vec<String
 /// `glab api graphql` for merge request `iid`'s state and reviewers.
 pub(crate) fn reviewers_args(full_path: &str, iid: MergeRequestIid) -> Vec<String> {
     merge_request_args(REVIEWERS_QUERY, full_path, iid)
+}
+
+/// The open discussions of the merge requests `$iids`, each with its last notes, read by `read_discussions`
+/// (`docs/slices/briefs/mr-discussions-design.md` §1.1, §1.2): 58 of GitLab's limit of 250 for 20 merge requests,
+/// measured on gitlab.com on 2026-11-03. One line, so the fake glab logs each call on one line.
+fn discussions_query() -> String {
+    format!(
+        "query MergeRequestDiscussions($fullPath: ID!, $iids: [String!], $first: Int!, $discussionsAfter: String) {{ \
+         queryComplexity {{ score limit }} \
+         project(fullPath: $fullPath) {{ mergeRequests(iids: $iids, first: $first) {{ nodes {{ iid \
+         discussions(first: {DISCUSSIONS_PER_PAGE}, after: $discussionsAfter) {{ \
+         pageInfo {{ hasNextPage endCursor }} nodes {{ \
+         resolvable resolved \
+         notes(last: {NOTES_READ}) {{ pageInfo {{ hasPreviousPage }} nodes {{ \
+         system author {{ username name avatarUrl }} body createdAt url position {{ filePath newLine oldLine }} \
+         }} }} }} }} }} }} }} }}"
+    )
+}
+
+/// `glab api graphql` for the open discussions of `iids`, from the discussions after `after` when given:
+/// `-F iids=<a JSON array of strings> -F first=<their count>`.
+pub(crate) fn discussions_args(
+    full_path: &str,
+    iids: &[MergeRequestIid],
+    after: Option<&str>,
+) -> Vec<String> {
+    let numbers: Vec<String> = iids.iter().map(|iid| iid.0.to_string()).collect();
+    let mut args = vec![
+        "api".to_owned(),
+        "graphql".to_owned(),
+        "-f".to_owned(),
+        format!("query={}", discussions_query()),
+        "-f".to_owned(),
+        format!("fullPath={full_path}"),
+        "-F".to_owned(),
+        format!("iids={}", json!(numbers)),
+        "-F".to_owned(),
+        format!("first={}", iids.len()),
+    ];
+    if let Some(cursor) = after {
+        args.push("-f".to_owned());
+        args.push(format!("discussionsAfter={cursor}"));
+    }
+    args
 }
 
 /// The JSON body asking the reviewer with global id `user_id` (`gid://gitlab/User/<n>`) for their review of merge
@@ -234,5 +279,34 @@ mod tests {
             "iid=21",
         ];
         assert_eq!(args, expected);
+    }
+
+    #[test]
+    fn the_discussions_query_is_one_line_as_designed_and_its_argv_is_exact() {
+        let query = "query=query MergeRequestDiscussions($fullPath: ID!, $iids: [String!], $first: Int!, \
+             $discussionsAfter: String) { queryComplexity { score limit } project(fullPath: $fullPath) { \
+             mergeRequests(iids: $iids, first: $first) { nodes { iid discussions(first: 100, after: \
+             $discussionsAfter) { pageInfo { hasNextPage endCursor } nodes { resolvable resolved notes(last: 20) { \
+             pageInfo { hasPreviousPage } nodes { system author { username name avatarUrl } body createdAt url \
+             position { filePath newLine oldLine } } } } } } } } }";
+        assert_eq!(query.matches('{').count(), query.matches('}').count());
+        let iids = [MergeRequestIid(82), MergeRequestIid(7)];
+
+        let batch = discussions_args("taskboard/taskboard", &iids, None);
+        let later = discussions_args("taskboard/taskboard", &iids[..1], Some("d-2"));
+
+        let common = [
+            "api",
+            "graphql",
+            "-f",
+            query,
+            "-f",
+            "fullPath=taskboard/taskboard",
+        ];
+        let batch_fields = ["-F", r#"iids=["82","7"]"#, "-F", "first=2"];
+        assert_eq!(batch, [common.as_slice(), &batch_fields].concat());
+        let later_fields = ["-F", r#"iids=["82"]"#, "-F", "first=1"];
+        let after = ["-f", "discussionsAfter=d-2"];
+        assert_eq!(later, [common.as_slice(), &later_fields, &after].concat());
     }
 }

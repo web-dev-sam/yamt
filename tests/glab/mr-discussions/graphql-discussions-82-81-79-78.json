@@ -1,0 +1,228 @@
+{
+  "data": {
+    "queryComplexity": { "score": 58, "limit": 250 },
+    "project": {
+      "mergeRequests": {
+        "nodes": [
+          {
+            "iid": "82",
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-82" },
+              "nodes": [
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Should a card without a due date sort last?",
+                        "createdAt": "2026-11-03T10:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_101",
+                        "position": { "filePath": "src/board/card.ts", "newLine": 12, "oldLine": null }
+                      },
+                      {
+                        "system": true,
+                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+                        "body": "changed this line in [version 2 of the diff](/taskboard/taskboard/-/merge_requests/82/diffs?diff_id=2&start_sha=1732ffd14f9df9ea3b85433dc1fbacbc2260fe85#a1_12_12)",
+                        "createdAt": "2026-11-03T11:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_102",
+                        "position": { "filePath": "src/board/card.ts", "newLine": 12, "oldLine": null }
+                      },
+                      {
+                        "system": false,
+                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+                        "body": "Yes, done in the second commit.",
+                        "createdAt": "2026-11-03T11:05:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_103",
+                        "position": { "filePath": "src/board/card.ts", "newLine": 12, "oldLine": null }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "ben",
+                          "name": "Ben Okafor",
+                          "avatarUrl": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon"
+                        },
+                        "body": "This removed line still has a caller.",
+                        "createdAt": "2026-11-03T10:10:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_104",
+                        "position": { "filePath": "src/board/dueDates.ts", "newLine": null, "oldLine": 6 }
+                      },
+                      {
+                        "system": true,
+                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+                        "body": "changed this line in [version 2 of the diff](/taskboard/taskboard/-/merge_requests/82/diffs?diff_id=2&start_sha=1732ffd14f9df9ea3b85433dc1fbacbc2260fe85#b2_6_6)",
+                        "createdAt": "2026-11-03T11:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_105",
+                        "position": { "filePath": "src/board/dueDates.ts", "newLine": null, "oldLine": 6 }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Please add a screenshot to the description.",
+                        "createdAt": "2026-11-03T10:20:00Z",
+                        "url": "https://evil.example/x#note_1",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "resolvable": true,
+                  "resolved": true,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "ben", "name": "Ben Okafor", "avatarUrl": null },
+                        "body": "A typo in the title.",
+                        "createdAt": "2026-11-03T10:30:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_106",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "resolvable": false,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": true,
+                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+                        "body": "added 2 commits",
+                        "createdAt": "2026-11-03T11:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_107",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "resolvable": false,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "chiara", "name": "Chiara Rossi", "avatarUrl": null },
+                        "body": "Looks good to me.",
+                        "createdAt": "2026-11-03T11:30:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_108",
+                        "position": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "iid": "81",
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-81" },
+              "nodes": [
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "ben",
+                          "name": "Ben Okafor",
+                          "avatarUrl": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon"
+                        },
+                        "body": "Please **check** <b>THIS</b> & that\non a dark theme\n<script>alert(1)</script>",
+                        "createdAt": "2026-11-02T10:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/81#note_201",
+                        "position": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "iid": "79",
+            "discussions": {
+              "pageInfo": { "hasNextPage": true, "endCursor": "d-2" },
+              "nodes": [
+                {
+                  "resolvable": true,
+                  "resolved": true,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+                        "body": "Rename the search box.",
+                        "createdAt": "2026-10-31T10:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_301",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "resolvable": true,
+                  "resolved": true,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+                        "body": "Debounce the input.",
+                        "createdAt": "2026-10-31T10:10:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_302",
+                        "position": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

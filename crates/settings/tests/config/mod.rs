@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use tempfile::TempDir;
 use yamt_settings::{
-    AgentSettings, Antialiasing, LanguageServerSettings, Places, StoredSettings, Theme,
+    AgentSettings, Antialiasing, DiscussionDetails, LanguageServerSettings, Places, StoredSettings,
+    Theme,
 };
 
 pub struct Config {
@@ -73,5 +74,6 @@ pub fn light_with_apply() -> StoredSettings {
         keys: keys(&[("apply", &["Mod-Enter"]), ("ignore", &[])]),
         language_servers: LanguageServerSettings::default(),
         agent: AgentSettings::default(),
+        discussion_details: DiscussionDetails::Full,
     }
 }

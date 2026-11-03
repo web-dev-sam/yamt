@@ -10,7 +10,8 @@ use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
 use yamt_merge_requests::{
     CheckedRow, GitLabProject, GitLabRepository, Glab, JobLogReply, ListEnd, ListedPage,
     MergeRequestIid, MergeRequestPage, MergedPairs, OpenReply, PageOpened, RerequestReply,
-    ResolveRefusal, WebPage, check_conflicts, gitlab_repository, prepare_open, prepare_resolve,
+    ResolveRefusal, RowDiscussions, WebPage, check_conflicts, gitlab_repository, prepare_open,
+    prepare_resolve,
 };
 
 use crate::args::Ai;
@@ -18,6 +19,7 @@ use crate::ipc_error::{IpcError, blocking_reply};
 use crate::range::range_folder;
 use crate::second_window;
 
+mod discussions;
 mod job_logs;
 mod pictures;
 
@@ -311,6 +313,22 @@ pub(crate) async fn read_job_log<R: Runtime>(
             &window.state(),
             Glab::find().as_ref(),
             &page,
+        ))
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn read_discussions<R: Runtime>(
+    window: WebviewWindow<R>,
+    iids: Vec<MergeRequestIid>,
+) -> Result<Vec<RowDiscussions>, IpcError> {
+    blocking_reply(move || {
+        Ok(discussions::discussions_reply(
+            &window.state(),
+            Glab::find().as_ref(),
+            &iids,
         ))
     })
     .await

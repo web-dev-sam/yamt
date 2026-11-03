@@ -73,16 +73,16 @@ struct ProjectNode {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Connection<T> {
-    page_info: PageInfo,
-    nodes: Vec<T>,
+pub(crate) struct Connection<T> {
+    pub page_info: PageInfo,
+    pub nodes: Vec<T>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PageInfo {
-    has_next_page: bool,
-    end_cursor: Option<String>,
+pub(crate) struct PageInfo {
+    pub has_next_page: bool,
+    pub end_cursor: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -237,7 +237,7 @@ fn row(
     Ok((row, to_check))
 }
 
-fn merge_request_iid(sent: &str) -> Result<MergeRequestIid, String> {
+pub(crate) fn merge_request_iid(sent: &str) -> Result<MergeRequestIid, String> {
     let iid = sent
         .parse()
         .map_err(|_| format!("GitLab sent {sent:?} as a merge request number"))?;

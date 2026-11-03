@@ -1,0 +1,2566 @@
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+index e9cbe1b..ac49743 100644
+--- a/crates/merge-requests/AGENTS.md
++++ b/crates/merge-requests/AGENTS.md
+@@ -1,3 +1,5 @@
+-Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, #138–#143, #149, #151–#153; requests `docs/slices/request-merge-requests.md`, `docs/slices/request-mr-conflicts.md`, `docs/slices/request-local-conflict-check.md`, `docs/slices/request-mr-row-details.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `CiStatus` (seven, camelCase), `WebPage` (a string only `WebPage::job` and `WebPage::merge_request` make), `FailedJob`, `Pipeline`, `ChangeSize` (`additions`, `deletions`, `files`), `Readiness` `ready`/`conflicts { also }`/`needsRebase`/`checking`/`blocked { reason }`/`mergesCleanly` (only from a clean local merge of a row GitLab calls conflicting or has not checked), `CheckedRow` (`iid`, `readiness`: a row the local check changed), `BlockedReason` (GitLab's seventeen blockers and `other { status }`), `MergeRequestRow` (`createdAt` as GitLab sent it, `author` or `None`, `assignees`, `reviewers` (`Reviewer`s), `labels` (`Label`s, GitLab's order), `openDiscussions` a single number, `approvedBy` (people; the approvals count is its length), `mayRerequest` (GitLab's `userPermissions.updateMergeRequest`), `page` its GitLab page or `None`, `size` or `None`, `readiness`, `fromFork`), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed`, `ResolveRefusal` `notOpen`/`fromFork`/`noRemote`/`glabMissing`/`notLoggedIn`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC), `ResolveTarget` (`root`, `iid`, `remote`, `branch`, `target`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; every module's public types re-exported; `Glab` re-exported), `people.rs` (the IPC types `Person` (`username`, `name`, `picture`), `PersonPicture` `uploaded`/`gravatar { address }`/`none`, `ReviewState` `requested`/`reviewed`/`approved`/`changesRequested`, `Reviewer` (`person`, `state`); the query nodes `UserNode` (`name` defaults to empty: older recorded pages name approvers by username only) and `ReviewerNode`; `People`: turns nodes into people through `avatar_source`, collecting each uploaded picture as an `OfferedPicture` and each unknown review state; the one fold of the review state (GitLab's `uncollapsed_reviewer_list.vue` order): `approved: true` → approved whatever the state, else `UNREVIEWED`/`REVIEW_STARTED`/null/missing → requested, `REVIEWED`/`UNAPPROVED` → reviewed, `APPROVED` → approved, `REQUESTED_CHANGES` → changes requested, any other text requested and warned of once per load (`warn_unknown_review_state`); `is_awaiting_review`: the fold says requested), `labels.rs` (the IPC types `Label` (`title`, `colors`) and `LabelColors` (`background`, `text`); `label`: both colours `#` then 3 or 6 hex digits, else no colours), `picture.rs` (`avatar_source(origin, avatar_url)`, the only maker of `PictureAddress` (an uploaded avatar's `https` address on the project's GitLab, never sent to the window) and `GravatarAddress` (IPC, a string): a path starting `/`, or an address of the project's https `origin` (same host and port), whose path is `(/segment)*/uploads/-/system/user/avatar/<digits>/<file>` (`web_page.rs`' segment rule, no `..`), an optional query of `[A-Za-z0-9=&._-]` → uploaded (none off https); `https://secure.gravatar.com` or `https://www.gravatar.com` + `/avatar/<32 or 64 hex digits>` + an optional query of `[A-Za-z0-9=&%._-]` → Gravatar; anything else (`http`, another host or port, a custom Gravatar host such as Libravatar, null) → none; `ImageKind` PNG/JPEG/GIF/WebP by the first bytes and its `mime`; `Picture` (`kind`, `bytes`); `fetch_picture`: `glab api <address>` with stdin closed (`Glab::get`), refused above `MAX_PICTURE_BYTES` (1 MiB) or when not one of the four kinds), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`logged_in_project`: `glab auth status` (logged out → `NoProject::NotLoggedIn`, failed → `NoProject::Failed`), then `glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https; `NoProject` turns into `ListEnd`, `OpenReply`, `ResolveRefusal` and `RerequestReply` through `From`: the one prelude of listing, opening, resolving and re-requesting), `query.rs` (the list query, the details query, the branches query, the reviewers query and the re-request mutation, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; the list's nodes ask `author { username name avatarUrl }`, `avatarUrl` on assignees, reviewers and approvers, approvers' `name`, reviewers' `mergeRequestInteraction { approved reviewState }`, `userPermissions { updateMergeRequest }`, labels' `color textColor`, and `detailedMergeStatus conflicts diffStats { additions deletions } diffRefs { baseSha } sourceProjectId targetProjectId targetBranch diffHeadSha` — per-file `diffStats`, never `diffStatsSummary`: beside `diffStatsSummary` in a list, gitlab.com answers `detailedMergeStatus: CONFLICT` for merge requests that merge clean (measured 2026-10-31, `docs/slices/briefs/mr-diff-stats.md`); 170 of 250 on gitlab.com on 2026-11-02, the statuses unchanged by the new fields; `details_args`, `branches_args` and `reviewers_args`: `… -f fullPath=<path> -f iid=<n>`; the branches query asks `state sourceBranch targetBranch sourceProjectId targetProjectId`, the reviewers query `state reviewers { nodes { id username name avatarUrl mergeRequestInteraction { approved reviewState } } }`; `rerequest_body`: `{"query": <mergeRequestReviewerRereview mutation>, "variables": {"projectPath", "iid", "userId"}}` built by `serde_json`, the reviewer's global id a variable, sent with `GRAPHQL_BODY_ARGS` `api graphql --input -`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; one list answer of a `Project` → `ParsedPage` (its rows and, beside each, its `RowToCheck`: iid, `targetBranch` (non-null in GitLab's schema), `diffHeadSha` as an `Oid` or none when null or no commit id, its `GitLabMerge`; the pictures its people offered, in the order named; the unknown review states): no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; people through `People`, labels through `label`; `may_rerequest` false when `userPermissions` is missing; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; a row's `readiness` is `GitLabMerge::readiness`; `size` from `diffStats`: the sums of the entries' `additions` and `deletions`, `files` the number of entries, whatever `diffRefs` says; no entries and `diffRefs` set → zero (an empty diff); no entries and `diffRefs` null or missing → `None` (GitLab sends `[]` both for an empty diff and one not computed yet, design `mr-row-details-design.md` §1.4); each count saturating into `u32`, below 0 → 0; `is_from_fork`: `sourceProjectId != Some(targetProjectId)`, a deleted source project a fork; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `readiness.rs` (the one fold, plan #138, #149: `GitLabMerge::read` folds GitLab's 24 `DetailedMergeStatus` values into `MergeStatus` (`MERGEABLE` mergeable, `CONFLICT` conflict, `NEED_REBASE` needs rebase, `CHECKING`/`UNCHECKED`/`PREPARING`/`APPROVALS_SYNCING`/null unchecked, the other seventeen a `BlockedReason`, an unknown one `Other { status }` with a warning) beside the `conflicts` and draft flags; `readiness`: GitLab's answer alone, conflicts first (#1998): the `conflicts` flag or a `CONFLICT` status → `Conflicts { also }`, `also` the status's blocked reason, then `Draft` for a draft; `readiness_after(MergeOutcome)`: design §2.1's table — a local conflict → `Conflicts { also }` whatever GitLab says, a clean merge → `ready` for mergeable, `mergesCleanly` for conflict or unchecked, else GitLab's status; the `conflicts` flag is not read), `check.rs` (`check_conflicts`, request rules 4–8, design §2.2: no row with a head → no git run; `Repo::version` → `MergeTreeRun::for_version` (none → stop); `remote_for` (none → stop); one `Repo::remote_refs` (`REMOTE_REFS_TIMEOUT` 20 s) of `refs/heads/<t>` for each distinct target of a row with a head (`require_branch_name` leaves a target holding `:` out) and `refs/merge-requests/*/head` (failed → stop); per row: no head, target or head ref not advertised → kept, head ref ≠ `diffHeadSha` → moving (rule 5), else the pair (target tip, head); pairs in `MergedPairs` sent at once (remembered); one `Repo::missing_commits` over the others' commits, then at most one `Repo::fetch_without_refs` (`FETCH_TIMEOUT`) of `refs/heads/<t>` for each missing tip and `refs/merge-requests/<iid>/head` for each missing head, deduplicated (failed → only the rows that needed it kept); `merged_in_finishing_order` merges the distinct pairs `MERGES_AT_ONCE` (2) at a time in scoped threads, `MERGE_TIMEOUT` 10 s each, none started after `MERGE_PHASE_LIMIT` 60 s, each outcome into `MergedPairs` and then every row of that pair sent through `on_checked` when `readiness_after` differs from `readiness`; `CheckSummary` (`rows`, `merges`, `fetched_refs`, `remembered`, `moving`, `kept` — every row counted once, the rest decided by a merge now — and `problem`, the first thing that went wrong) logged as one line, `info`, or `warn` with a problem; `ConflictCheck` (the project's `full_path`, every listed row's `RowToCheck`) made only by `list_merge_requests`; `MergedPairs` (target commit, source commit) → `MergeOutcome`, which the shell holds for the run), `list.rs` (`list_merge_requests` → `Listed { end, to_check }`: glab missing → `GlabMissing`, `logged_in_project`, then at most 5 pages, each one glab call sent to `on_page` as a `ListedPage` (`page`: what the window sees; `pictures`: the page's `OfferedPicture`s (`username`, `address`), one per username, the last named winning) as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info; each unknown review state warned of once per load; `to_check` `None` when no project was reached, else the rows of every page sent), `rerequest.rs` (`RerequestReply` `requested { reviewers }`/`notReviewer`/`notOpen`/`glabMissing`/`notLoggedIn`/`refused`/`failed`; `rerequest_review`, plan #153, the crate's only write: glab missing → `GlabMissing`, `logged_in_project`, the reviewers query asked afresh (no merge request or not `opened` → `NotOpen`), the username not among them → `NotReviewer` (no write: nothing adds a reviewer), their fresh state requested → `Requested` with the fresh reviewers (no write: no second notification), else the Rereview mutation with their global id through `Glab::run` with the body on stdin: glab failing, timing out or exiting non-zero → `Failed` in glab's last stderr line, GitLab's top-level `errors` → `Failed { first }`, the payload's `errors` → `Refused { first }`, else `Requested` with the reviewers it answered; one `info` line per request naming the iid and the outcome's kind), `open.rs` (`prepare_open`: glab, `logged_in_project`, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target refused by `require_branch_name`, the crate's one rule for a branch name holding `:`); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `resolve.rs` (`prepare_resolve`: glab missing → `GlabMissing`, `logged_in_project`, the branches query asked afresh — no merge request or not `opened` → `NotOpen`, `is_from_fork` → `FromFork`, either branch refused by `require_branch_name` → `Failed`; `remote_for` → `NoRemote { project }`; nothing fetched or written), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments checked by `is_path_segment` (`[A-Za-z0-9._~-]`, none empty or `..`), the rule `picture.rs` reuses; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no `Mutex`; the one memory across loads is the run's `MergedPairs`, which the shell holds and lends to `check_conflicts` (plan #149); the shell holds the offered pictures. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query.rs` (each query one line with balanced braces; the branches and reviewers argv exact; the list asks `diffStats`, never `diffStatsSummary`, `diffRefs`, `targetBranch diffHeadSha` and the people's fields; the re-request body exact, the id a variable), `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher; the rows to check are the rows sent; one picture per username, the last; each unknown review state new once), `picture/tests.rs` (both address kinds against every look-alike: `http`, another host or port, `..`, other paths, custom hosts, odd queries; the four image kinds by their first bytes, anything else refused; 1 MiB the largest), `rerequest.rs` (glab's failure words, a top-level error against the payload's own, the logged kind of each reply), `readiness.rs` (`readiness_after` over design §2.1's table, both `conflicts` flags, drafts), `check/tests.rs` (the summary's words with and without a problem; the merge scheduler: two at a time, finishing order, none started after the limit, a failed merge; a `:` target left out of `ls-remote`; pairing and moving rows; the fetch's refspecs; a row sent only when it changes), `page/tests.rs` (over `tests/glab/merge-requests/`'s and `tests/glab/mr-conflicts/`'s recorded pages; every merge status as a table, conflicts first, sizes summed per file, an empty diff with `diffRefs` zero, without it no size, saturating counts, forks; each row's check input; the review-state fold, `approved` first; approvers by name; label colours; a null author; the permission; offered pictures); `tests/fake_glab/mod.rs` (the one fake-glab helper the integration tests share: `Fake` on a scenario, its log and post counter, `in_this_repository`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`, `mr-row-details/`: whole rows with people, pictures, states and label colours, the offered pictures anna and sam only, no Gravatar address ever through glab; only a load that reached the project has rows to check), `tests/rerequest.rs` (`mr-row-details/`: the exact body by global id, no write for someone no longer a reviewer or still awaited, the Rereview mutation the only write, a mutation error as `Refused`, a merged merge request `NotOpen`, glab missing or logged out), `tests/picture.rs` (`mr-row-details/`: a listed picture byte for byte through glab), `tests/local_conflicts.rs` (`scripts/local-conflicts-repo.sh`'s repository with the fake glab on `local-conflicts/`: the scenario's rows and summary, the moving row, a second load remembered with no fetch or merge, refs, status, `HEAD` and `FETCH_HEAD` byte-identical, an unreachable remote keeping every answer), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/resolve.rs` (`scripts/range-repo.sh`'s repository with the fake glab on `mr-conflicts/`: !21's branches and `origin` with the refs unchanged and the logged argv, !22 `FromFork`, !30 `NotOpen`, `NoRemote`, !33's `:` branch `Failed`, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
++Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, #138–#143, #149, #151–#153; requests `docs/slices/request-merge-requests.md`, `docs/slices/request-mr-conflicts.md`, `docs/slices/request-local-conflict-check.md`, `docs/slices/request-mr-row-details.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `CiStatus` (seven, camelCase), `WebPage` (a string only `WebPage::job`, `WebPage::merge_request` and `WebPage::note` make), `FailedJob`, `Pipeline`, `ChangeSize` (`additions`, `deletions`, `files`), `Readiness` `ready`/`conflicts { also }`/`needsRebase`/`checking`/`blocked { reason }`/`mergesCleanly` (only from a clean local merge of a row GitLab calls conflicting or has not checked), `CheckedRow` (`iid`, `readiness`: a row the local check changed), `BlockedReason` (GitLab's seventeen blockers and `other { status }`), `MergeRequestRow` (`createdAt` as GitLab sent it, `author` or `None`, `assignees`, `reviewers` (`Reviewer`s), `labels` (`Label`s, GitLab's order), `openDiscussions` a single number, `approvedBy` (people; the approvals count is its length), `mayRerequest` (GitLab's `userPermissions.updateMergeRequest`), `page` its GitLab page or `None`, `size` or `None`, `readiness`, `fromFork`), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed`, `ResolveRefusal` `notOpen`/`fromFork`/`noRemote`/`glabMissing`/`notLoggedIn`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC), `ResolveTarget` (`root`, `iid`, `remote`, `branch`, `target`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; every module's public types re-exported; `Glab` re-exported), `people.rs` (the IPC types `Person` (`username`, `name`, `picture`), `PersonPicture` `uploaded`/`gravatar { address }`/`none`, `ReviewState` `requested`/`reviewed`/`approved`/`changesRequested`, `Reviewer` (`person`, `state`); the query nodes `UserNode` (`name` defaults to empty: older recorded pages name approvers by username only) and `ReviewerNode`; `People`: turns nodes into people through `avatar_source`, collecting each uploaded picture as an `OfferedPicture` and each unknown review state; the one fold of the review state (GitLab's `uncollapsed_reviewer_list.vue` order): `approved: true` → approved whatever the state, else `UNREVIEWED`/`REVIEW_STARTED`/null/missing → requested, `REVIEWED`/`UNAPPROVED` → reviewed, `APPROVED` → approved, `REQUESTED_CHANGES` → changes requested, any other text requested and warned of once per load (`warn_unknown_review_state`); `is_awaiting_review`: the fold says requested), `labels.rs` (the IPC types `Label` (`title`, `colors`) and `LabelColors` (`background`, `text`); `label`: both colours `#` then 3 or 6 hex digits, else no colours), `picture.rs` (`avatar_source(origin, avatar_url)`, the only maker of `PictureAddress` (an uploaded avatar's `https` address on the project's GitLab, never sent to the window) and `GravatarAddress` (IPC, a string): a path starting `/`, or an address of the project's https `origin` (same host and port), whose path is `(/segment)*/uploads/-/system/user/avatar/<digits>/<file>` (`web_page.rs`' segment rule, no `..`), an optional query of `[A-Za-z0-9=&._-]` → uploaded (none off https); `https://secure.gravatar.com` or `https://www.gravatar.com` + `/avatar/<32 or 64 hex digits>` + an optional query of `[A-Za-z0-9=&%._-]` → Gravatar; anything else (`http`, another host or port, a custom Gravatar host such as Libravatar, null) → none; `ImageKind` PNG/JPEG/GIF/WebP by the first bytes and its `mime`; `Picture` (`kind`, `bytes`); `fetch_picture`: `glab api <address>` with stdin closed (`Glab::get`), refused above `MAX_PICTURE_BYTES` (1 MiB) or when not one of the four kinds), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`logged_in_project`: `glab auth status` (logged out → `NoProject::NotLoggedIn`, failed → `NoProject::Failed`), then `glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https; `NoProject` turns into `ListEnd`, `OpenReply`, `ResolveRefusal`, `RerequestReply`, `JobLogReply` and `DiscussionsAnswer` through `From`: the one prelude of listing, opening, resolving, re-requesting, reading a log and reading discussions), `query.rs` (the list query, the details query, the branches query, the reviewers query and the re-request mutation, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; the list's nodes ask `author { username name avatarUrl }`, `avatarUrl` on assignees, reviewers and approvers, approvers' `name`, reviewers' `mergeRequestInteraction { approved reviewState }`, `userPermissions { updateMergeRequest }`, labels' `color textColor`, and `detailedMergeStatus conflicts diffStats { additions deletions } diffRefs { baseSha } sourceProjectId targetProjectId targetBranch diffHeadSha` — per-file `diffStats`, never `diffStatsSummary`: beside `diffStatsSummary` in a list, gitlab.com answers `detailedMergeStatus: CONFLICT` for merge requests that merge clean (measured 2026-10-31, `docs/slices/briefs/mr-diff-stats.md`); 170 of 250 on gitlab.com on 2026-11-02, the statuses unchanged by the new fields; `details_args`, `branches_args` and `reviewers_args`: `… -f fullPath=<path> -f iid=<n>`; the branches query asks `state sourceBranch targetBranch sourceProjectId targetProjectId`, the reviewers query `state reviewers { nodes { id username name avatarUrl mergeRequestInteraction { approved reviewState } } }`; `rerequest_body`: `{"query": <mergeRequestReviewerRereview mutation>, "variables": {"projectPath", "iid", "userId"}}` built by `serde_json`, the reviewer's global id a variable, sent with `GRAPHQL_BODY_ARGS` `api graphql --input -`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; one list answer of a `Project` → `ParsedPage` (its rows and, beside each, its `RowToCheck`: iid, `targetBranch` (non-null in GitLab's schema), `diffHeadSha` as an `Oid` or none when null or no commit id, its `GitLabMerge`; the pictures its people offered, in the order named; the unknown review states): no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; people through `People`, labels through `label`; `may_rerequest` false when `userPermissions` is missing; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; a row's `readiness` is `GitLabMerge::readiness`; `size` from `diffStats`: the sums of the entries' `additions` and `deletions`, `files` the number of entries, whatever `diffRefs` says; no entries and `diffRefs` set → zero (an empty diff); no entries and `diffRefs` null or missing → `None` (GitLab sends `[]` both for an empty diff and one not computed yet, design `mr-row-details-design.md` §1.4); each count saturating into `u32`, below 0 → 0; `is_from_fork`: `sourceProjectId != Some(targetProjectId)`, a deleted source project a fork; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `readiness.rs` (the one fold, plan #138, #149: `GitLabMerge::read` folds GitLab's 24 `DetailedMergeStatus` values into `MergeStatus` (`MERGEABLE` mergeable, `CONFLICT` conflict, `NEED_REBASE` needs rebase, `CHECKING`/`UNCHECKED`/`PREPARING`/`APPROVALS_SYNCING`/null unchecked, the other seventeen a `BlockedReason`, an unknown one `Other { status }` with a warning) beside the `conflicts` and draft flags; `readiness`: GitLab's answer alone, conflicts first (#1998): the `conflicts` flag or a `CONFLICT` status → `Conflicts { also }`, `also` the status's blocked reason, then `Draft` for a draft; `readiness_after(MergeOutcome)`: design §2.1's table — a local conflict → `Conflicts { also }` whatever GitLab says, a clean merge → `ready` for mergeable, `mergesCleanly` for conflict or unchecked, else GitLab's status; the `conflicts` flag is not read), `check.rs` (`check_conflicts`, request rules 4–8, design §2.2: no row with a head → no git run; `Repo::version` → `MergeTreeRun::for_version` (none → stop); `remote_for` (none → stop); one `Repo::remote_refs` (`REMOTE_REFS_TIMEOUT` 20 s) of `refs/heads/<t>` for each distinct target of a row with a head (`require_branch_name` leaves a target holding `:` out) and `refs/merge-requests/*/head` (failed → stop); per row: no head, target or head ref not advertised → kept, head ref ≠ `diffHeadSha` → moving (rule 5), else the pair (target tip, head); pairs in `MergedPairs` sent at once (remembered); one `Repo::missing_commits` over the others' commits, then at most one `Repo::fetch_without_refs` (`FETCH_TIMEOUT`) of `refs/heads/<t>` for each missing tip and `refs/merge-requests/<iid>/head` for each missing head, deduplicated (failed → only the rows that needed it kept); `merged_in_finishing_order` merges the distinct pairs `MERGES_AT_ONCE` (2) at a time in scoped threads, `MERGE_TIMEOUT` 10 s each, none started after `MERGE_PHASE_LIMIT` 60 s, each outcome into `MergedPairs` and then every row of that pair sent through `on_checked` when `readiness_after` differs from `readiness`; `CheckSummary` (`rows`, `merges`, `fetched_refs`, `remembered`, `moving`, `kept` — every row counted once, the rest decided by a merge now — and `problem`, the first thing that went wrong) logged as one line, `info`, or `warn` with a problem; `ConflictCheck` (the project's `full_path`, every listed row's `RowToCheck`) made only by `list_merge_requests`; `MergedPairs` (target commit, source commit) → `MergeOutcome`, which the shell holds for the run), `list.rs` (`list_merge_requests` → `Listed { end, to_check }`: glab missing → `GlabMissing`, `logged_in_project`, then at most 5 pages, each one glab call sent to `on_page` as a `ListedPage` (`page`: what the window sees; `pictures`: the page's `OfferedPicture`s (`username`, `address`), one per username, the last named winning) as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info; each unknown review state warned of once per load; `to_check` `None` when no project was reached, else the rows of every page sent), `rerequest.rs` (`RerequestReply` `requested { reviewers }`/`notReviewer`/`notOpen`/`glabMissing`/`notLoggedIn`/`refused`/`failed`; `rerequest_review`, plan #153, the crate's only write: glab missing → `GlabMissing`, `logged_in_project`, the reviewers query asked afresh (no merge request or not `opened` → `NotOpen`), the username not among them → `NotReviewer` (no write: nothing adds a reviewer), their fresh state requested → `Requested` with the fresh reviewers (no write: no second notification), else the Rereview mutation with their global id through `Glab::run` with the body on stdin: glab failing, timing out or exiting non-zero → `Failed` in glab's last stderr line, GitLab's top-level `errors` → `Failed { first }`, the payload's `errors` → `Refused { first }`, else `Requested` with the reviewers it answered; one `info` line per request naming the iid and the outcome's kind), `open.rs` (`prepare_open`: glab, `logged_in_project`, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target refused by `require_branch_name`, the crate's one rule for a branch name holding `:`); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `resolve.rs` (`prepare_resolve`: glab missing → `GlabMissing`, `logged_in_project`, the branches query asked afresh — no merge request or not `opened` → `NotOpen`, `is_from_fork` → `FromFork`, either branch refused by `require_branch_name` → `Failed`; `remote_for` → `NoRemote { project }`; nothing fetched or written), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments checked by `is_path_segment` (`[A-Za-z0-9._~-]`, none empty or `..`), the rule `picture.rs` reuses; `WebPage::note`: GitLab's `url` only when it is exactly `WebPage::merge_request`'s address followed by `#note_<digits>`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no `Mutex`; the one memory across loads is the run's `MergedPairs`, which the shell holds and lends to `check_conflicts` (plan #149); the shell holds the offered pictures. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query.rs` (each query one line with balanced braces; the branches and reviewers argv exact; the list asks `diffStats`, never `diffStatsSummary`, `diffRefs`, `targetBranch diffHeadSha` and the people's fields; the re-request body exact, the id a variable), `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher; the rows to check are the rows sent; one picture per username, the last; each unknown review state new once), `picture/tests.rs` (both address kinds against every look-alike: `http`, another host or port, `..`, other paths, custom hosts, odd queries; the four image kinds by their first bytes, anything else refused; 1 MiB the largest), `rerequest.rs` (glab's failure words, a top-level error against the payload's own, the logged kind of each reply), `readiness.rs` (`readiness_after` over design §2.1's table, both `conflicts` flags, drafts), `check/tests.rs` (the summary's words with and without a problem; the merge scheduler: two at a time, finishing order, none started after the limit, a failed merge; a `:` target left out of `ls-remote`; pairing and moving rows; the fetch's refspecs; a row sent only when it changes), `page/tests.rs` (over `tests/glab/merge-requests/`'s and `tests/glab/mr-conflicts/`'s recorded pages; every merge status as a table, conflicts first, sizes summed per file, an empty diff with `diffRefs` zero, without it no size, saturating counts, forks; each row's check input; the review-state fold, `approved` first; approvers by name; label colours; a null author; the permission; offered pictures); `tests/fake_glab/mod.rs` (the one fake-glab helper the integration tests share: `Fake` on a scenario, its log and post counter, `in_this_repository`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`, `mr-row-details/`: whole rows with people, pictures, states and label colours, the offered pictures anna and sam only, no Gravatar address ever through glab; only a load that reached the project has rows to check), `tests/rerequest.rs` (`mr-row-details/`: the exact body by global id, no write for someone no longer a reviewer or still awaited, the Rereview mutation the only write, a mutation error as `Refused`, a merged merge request `NotOpen`, glab missing or logged out), `tests/picture.rs` (`mr-row-details/`: a listed picture byte for byte through glab), `tests/local_conflicts.rs` (`scripts/local-conflicts-repo.sh`'s repository with the fake glab on `local-conflicts/`: the scenario's rows and summary, the moving row, a second load remembered with no fetch or merge, refs, status, `HEAD` and `FETCH_HEAD` byte-identical, an unreachable remote keeping every answer), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/resolve.rs` (`scripts/range-repo.sh`'s repository with the fake glab on `mr-conflicts/`: !21's branches and `origin` with the refs unchanged and the logged argv, !22 `FromFork`, !30 `NotOpen`, `NoRemote`, !33's `:` branch `Failed`, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
+ 
+ A failed job's log (plan §2 #158, request `docs/slices/request-ci-job-log.md`, design `docs/slices/briefs/ci-job-log-design.md` §1.1–1.3): `job_log.rs` (the IPC types `JobLog` (`text`, `cut`) and `JobLogReply` `log { log }`/`notOffered`/`noLog`/`glabMissing`/`notLoggedIn`/`failed`; `MAX_LOG_BYTES` 500 KiB, GitLab's `Stream::LIMIT_SIZE`; `read_job_log`: glab missing → `GlabMissing`, a page that is not `…/-/jobs/<digits>` (`WebPage::job_parts`, the one split `WebPage::job` shares) → `NotOffered` before any glab run, `logged_in_project`, then `trace_route` — `projects/<the page's own project path, "/" as "%2F">/jobs/<n>/trace`, the path after the project's origin and without the sub-path GitLab is installed under (`web_path` minus `/<full_path>`), so a fork's job is asked from the fork; another origin or an odd path → `NotOffered` — read whole through `Glab::get` (no `Range`, no `byte_offset`); empty → `NoLog`, glab's line ending in `(HTTP 404)` → `NoLog`, any other failure → `Failed` in glab's words; `tail`: GitLab's `Stream#limit` — over `MAX_LOG_BYTES` the last 512,000 bytes from just after their first `\n` (the line the cut lands in dropped, even a whole one; no `\n` → empty), `cut`; then lossy UTF-8; one `info` line per call naming the page, the outcome's kind, the bytes read and `cut`, never the text; nothing kept here: the shell keeps the run's logs). Tests: `job_log.rs` (the cut at, over and on a line start or break, no line break, lossy bytes, the route for the project, a fork, a sub-path with and without it in the page, look-alike origins and paths, 404 against glab's other words, each logged kind), `tests/job_log.rs` (`ci-job-log/`: 302 byte for byte, 303 cut at a line start, 310 by the fork's path, 304 and 305 `NoLog`, glab missing, logged out, a merge-request page or another GitLab's job page asking no trace).
++
++Each row's open discussions (plan §2 #162, #163; request `docs/slices/request-mr-discussions.md`, design `docs/slices/briefs/mr-discussions-design.md` option A, §1.1, §1.2, §1.5, §1.8): `discussions.rs` (the IPC types `RowDiscussions` (`iid`, `answer`), `DiscussionsAnswer` `open { discussions }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, `OpenDiscussion` (`place`, `last`), `DiscussionPlace` `overview`/`file { path, line }` (`newLine`, else `oldLine`), `DiscussionNote` (`author` through `People::person`, `createdAt` as sent, `text` the raw body, `page`); the shell's `ReadDiscussions { rows, pictures }`; `DISCUSSION_BATCH` 20 merge requests per glab call (100 took 22.22 s, past glab's deadline), `DISCUSSIONS_PER_PAGE` 100, `NOTES_READ` 20, `MAX_DISCUSSION_PAGES` 10; `read_discussions`: the first 20 distinct iids in the asked order, nothing (and no glab run) for none; glab missing → each `GlabMissing`, `logged_in_project` refused → each `NotLoggedIn`/`Failed` (`From<NoProject>`), one `discussions_args` call for the batch (`-F iids=<JSON array> -F first=<count>`), its failure or GraphQL `errors` → each `Failed`; per row: `hasNextPage` → the same query for that iid alone with `-f discussionsAfter=<endCursor>`, at most 10 pages (more → "more than 1,000 discussions"), a failing later page or an iid the answer does not name fails that row alone; open = `resolvable && !resolved`; the last note with `system: false` of `notes(last: 20)` (a bot's note counts), none with `hasPreviousPage` → the row `Failed`, none without → left out; a note's `url` is a page only through `WebPage::note` (the merge request's page plus `#note_<digits>`); uploaded pictures one per username (`list.rs` `one_per_username`); one `info` line per call: asked, answered, failed, queries and the batch's `queryComplexity`, never a name, a body or an address; `unread_discussions`: the same cut, each `Failed`), `discussions/answer.rs` (GitLab's answer of the discussions query as parsed, `parsed_batch`: each merge request's discussions by iid, through `graphql_data`). The query is `query.rs` `discussions_query` (design §1.1, one line; 58 of 250 for 20 merge requests on gitlab.com). Tests: `discussions/tests.rs` (system notes after and between replies, resolved and unresolvable left out, the places, twenty system notes with earlier ones, a missing iid, GraphQL errors and a failed call, the batch cut, pictures once per username, ten and eleven pages, a failing later page, no cursor, foreign note urls), `web_page.rs` (`a_note_url_is_a_page_only_as_gitlab_builds_it`), `tests/discussions.rs` (`mr-discussions/`: !82's three in order, !81 alone in one call, !79's later page, markup kept, 77's glab failure, glab missing, logged out, an empty ask).
+diff --git a/crates/merge-requests/src/discussions.rs b/crates/merge-requests/src/discussions.rs
+new file mode 100644
+index 0000000..7967504
+--- /dev/null
++++ b/crates/merge-requests/src/discussions.rs
+@@ -0,0 +1,335 @@
++use std::path::Path;
++
++use serde::Serialize;
++use specta::Type;
++use yamt_gitio::Glab;
++
++use crate::list::one_per_username;
++use crate::page::{Complexity, Connection};
++use crate::people::People;
++use crate::project::{Project, logged_in_project};
++use crate::query::discussions_args;
++use crate::{GitLabRepository, MergeRequestIid, OfferedPicture, Person, WebPage};
++
++use answer::{DiscussionNode, NoteNode, parsed_batch};
++
++mod answer;
++
++/// Merge requests read in one glab call: 20 took 4.47 s on gitlab-org/gitlab, 100 took 22.22 s, past glab's 20 s
++/// deadline (orchestrator, measured 2026-11-03).
++pub const DISCUSSION_BATCH: usize = 20;
++/// GitLab's largest page of a connection without a page size of its own (`default_max_page_size`).
++pub(crate) const DISCUSSIONS_PER_PAGE: u32 = 100;
++/// The last notes read per discussion: GitLab scores `notes(last: 20)` as `notes(last: 1)`.
++pub(crate) const NOTES_READ: u32 = 20;
++const MAX_DISCUSSION_PAGES: u32 = 10;
++const TOO_MANY_DISCUSSIONS: &str = "more than 1,000 discussions";
++const NO_CURSOR: &str = "GitLab says more discussions follow, but sent no cursor for them";
++
++/// One merge request's open discussions, or why they were not read.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct RowDiscussions {
++    /// The merge request.
++    pub iid: MergeRequestIid,
++    /// Its open discussions, or why there are none to show.
++    pub answer: DiscussionsAnswer,
++}
++
++/// How asking for a merge request's open discussions ended.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DiscussionsAnswer {
++    /// Its resolvable, unresolved discussions, in GitLab's order.
++    Open {
++        /// The discussions.
++        discussions: Vec<OpenDiscussion>,
++    },
++    /// glab is not found on PATH.
++    GlabMissing,
++    /// `glab auth status` failed.
++    NotLoggedIn {
++        /// glab's first line, which names the instance.
++        detail: String,
++    },
++    /// glab failed, timed out or answered something unexpected, in glab's or yamt's words.
++    Failed {
++        /// What went wrong.
++        message: String,
++    },
++}
++
++/// An open discussion: where it is and its last note written by a person (system notes skipped).
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct OpenDiscussion {
++    /// Where the discussion is.
++    pub place: DiscussionPlace,
++    /// Its last note written by a person.
++    pub last: DiscussionNote,
++}
++
++/// Where a discussion is.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DiscussionPlace {
++    /// On the merge request itself: the last person's note has no `position`.
++    Overview,
++    /// On the diff: `filePath`, and `newLine`, else `oldLine` (both may be null).
++    File {
++        /// The file's path.
++        path: String,
++        /// The line, on the new side when it has one.
++        line: Option<u32>,
++    },
++}
++
++/// A note as the window shows it.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct DiscussionNote {
++    /// Who wrote it; `None` for a deleted user.
++    pub author: Option<Person>,
++    /// When it was written: GitLab's ISO 8601 time, as sent.
++    pub created_at: String,
++    /// Its raw body.
++    pub text: String,
++    /// Its page on GitLab; `None` when GitLab's `url` is not the one it builds for this note.
++    pub page: Option<WebPage>,
++}
++
++/// What the shell gets: the rows answered, and the uploaded pictures of their authors (one per username).
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct ReadDiscussions {
++    /// One per merge request answered, in the asked order.
++    pub rows: Vec<RowDiscussions>,
++    /// The uploaded pictures of the notes' authors, one per username.
++    pub pictures: Vec<OfferedPicture>,
++}
++
++/// Asks GitLab for the discussions of `iids` (all of them, or one merge request's after a cursor).
++type Fetch<'a> = dyn FnMut(&[MergeRequestIid], Option<&str>) -> Result<Vec<u8>, String> + 'a;
++
++/// What one call did, for its log line.
++#[derive(Default)]
++struct Tally {
++    queries: u32,
++    complexity: Option<Complexity>,
++}
++
++/// Answers the first `DISCUSSION_BATCH` distinct iids of `iids`, in their order, each once; nothing only for an empty
++/// `iids` (then no glab run). The batch is one glab call; a merge request with more discussions than one page asks
++/// for its later pages alone. A failure of the login, the project or the batch's call answers each row with it; a
++/// failure of one merge request's discussions answers that row alone.
++#[must_use]
++pub fn read_discussions(
++    repository: &GitLabRepository,
++    glab: Option<&Glab>,
++    iids: &[MergeRequestIid],
++) -> ReadDiscussions {
++    let asked = batch(iids);
++    let mut tally = Tally::default();
++    let read = if asked.is_empty() {
++        ReadDiscussions {
++            rows: Vec::new(),
++            pictures: Vec::new(),
++        }
++    } else {
++        through_glab(repository.root(), glab, &asked, &mut tally)
++    };
++    log_read(&read, &tally);
++    read
++}
++
++/// The same batch cut, each `Failed { message }`: for a window without a GitLab project, and for a failed call.
++#[must_use]
++pub fn unread_discussions(iids: &[MergeRequestIid], message: &str) -> Vec<RowDiscussions> {
++    let failed = DiscussionsAnswer::Failed {
++        message: message.to_owned(),
++    };
++    unanswered(&batch(iids), &failed).rows
++}
++
++/// The first `DISCUSSION_BATCH` distinct iids, in their order.
++fn batch(iids: &[MergeRequestIid]) -> Vec<MergeRequestIid> {
++    let mut batch = Vec::new();
++    for &iid in iids {
++        if batch.len() == DISCUSSION_BATCH {
++            break;
++        }
++        if !batch.contains(&iid) {
++            batch.push(iid);
++        }
++    }
++    batch
++}
++
++fn unanswered(asked: &[MergeRequestIid], answer: &DiscussionsAnswer) -> ReadDiscussions {
++    let row = |&iid| RowDiscussions {
++        iid,
++        answer: answer.clone(),
++    };
++    ReadDiscussions {
++        rows: asked.iter().map(row).collect(),
++        pictures: Vec::new(),
++    }
++}
++
++fn through_glab(
++    root: &Path,
++    glab: Option<&Glab>,
++    asked: &[MergeRequestIid],
++    tally: &mut Tally,
++) -> ReadDiscussions {
++    let Some(glab) = glab else {
++        return unanswered(asked, &DiscussionsAnswer::GlabMissing);
++    };
++    let project = match logged_in_project(glab, root) {
++        Ok(project) => project,
++        Err(refused) => return unanswered(asked, &refused.into()),
++    };
++    let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| {
++        tally.queries += 1;
++        let args = discussions_args(&project.full_path, iids, after);
++        let args: Vec<&str> = args.iter().map(String::as_str).collect();
++        glab.get(root, &args)
++    };
++    let (read, complexity) = answered(asked, &project, &mut fetch);
++    tally.complexity = complexity;
++    read
++}
++
++/// Each asked row from the batch's answer and its later pages; a failing batch fails each row.
++fn answered(
++    asked: &[MergeRequestIid],
++    project: &Project,
++    fetch: &mut Fetch,
++) -> (ReadDiscussions, Option<Complexity>) {
++    let first = match fetch(asked, None).and_then(|json| parsed_batch(&json)) {
++        Ok(first) => first,
++        Err(message) => {
++            let failed = DiscussionsAnswer::Failed { message };
++            return (unanswered(asked, &failed), None);
++        }
++    };
++    let mut found = first.merge_requests;
++    let mut people = People::new(project.web_origin.as_deref());
++    let mut rows = Vec::new();
++    for &iid in asked {
++        let notes = found
++            .remove(&iid)
++            .ok_or_else(|| not_sent(iid))
++            .and_then(|discussions| every_discussion(iid, discussions, fetch))
++            .and_then(last_persons_notes);
++        let answer = match notes {
++            Ok(notes) => DiscussionsAnswer::Open {
++                discussions: notes
++                    .into_iter()
++                    .map(|note| open_discussion(note, iid, project, &mut people))
++                    .collect(),
++            },
++            Err(message) => DiscussionsAnswer::Failed { message },
++        };
++        rows.push(RowDiscussions { iid, answer });
++    }
++    let pictures = one_per_username(people.pictures);
++    (ReadDiscussions { rows, pictures }, first.complexity)
++}
++
++fn not_sent(iid: MergeRequestIid) -> String {
++    format!("GitLab sent no merge request !{}", iid.0)
++}
++
++/// `first` and each later page of merge request `iid`'s discussions, at most `MAX_DISCUSSION_PAGES` pages.
++fn every_discussion(
++    iid: MergeRequestIid,
++    first: Connection<DiscussionNode>,
++    fetch: &mut Fetch,
++) -> Result<Vec<DiscussionNode>, String> {
++    let mut discussions = first.nodes;
++    let mut page_info = first.page_info;
++    let mut pages = 1;
++    while page_info.has_next_page {
++        if pages == MAX_DISCUSSION_PAGES {
++            return Err(TOO_MANY_DISCUSSIONS.to_owned());
++        }
++        let cursor = page_info.end_cursor.ok_or(NO_CURSOR)?;
++        let mut later = fetch(&[iid], Some(&cursor)).and_then(|json| parsed_batch(&json))?;
++        let page = later
++            .merge_requests
++            .remove(&iid)
++            .ok_or_else(|| not_sent(iid))?;
++        discussions.extend(page.nodes);
++        page_info = page.page_info;
++        pages += 1;
++    }
++    Ok(discussions)
++}
++
++/// The last note written by a person of each open discussion, in GitLab's order; a discussion whose notes read are
++/// all GitLab's own fails when earlier notes exist, and is left out when none do (GitLab never makes it resolvable).
++fn last_persons_notes(discussions: Vec<DiscussionNode>) -> Result<Vec<NoteNode>, String> {
++    let mut notes = Vec::new();
++    for discussion in discussions {
++        if !discussion.resolvable || discussion.resolved {
++            continue;
++        }
++        let earlier = discussion.notes.page_info.has_previous_page;
++        let mut read = discussion.notes.nodes.into_iter().rev();
++        match read.find(|note| !note.system) {
++            Some(note) => notes.push(note),
++            None if earlier => {
++                return Err(format!(
++                    "a discussion's last {NOTES_READ} notes are all GitLab's own; yamt reads no further"
++                ));
++            }
++            None => {}
++        }
++    }
++    Ok(notes)
++}
++
++fn open_discussion(
++    note: NoteNode,
++    iid: MergeRequestIid,
++    project: &Project,
++    people: &mut People,
++) -> OpenDiscussion {
++    let place = match note.position {
++        None => DiscussionPlace::Overview,
++        Some(position) => DiscussionPlace::File {
++            path: position.file_path,
++            line: position.new_line.or(position.old_line),
++        },
++    };
++    let address = project.web_origin.as_deref().zip(note.url.as_deref());
++    let page = address.and_then(|(origin, url)| WebPage::note(origin, &project.web_path, iid, url));
++    let last = DiscussionNote {
++        author: note.author.map(|author| people.person(author)),
++        created_at: note.created_at,
++        text: note.body,
++        page,
++    };
++    OpenDiscussion { place, last }
++}
++
++/// Counts and GitLab's score only: never a name, a body or an address.
++fn log_read(read: &ReadDiscussions, tally: &Tally) {
++    let answered = read
++        .rows
++        .iter()
++        .filter(|row| matches!(row.answer, DiscussionsAnswer::Open { .. }))
++        .count();
++    tracing::info!(
++        asked = read.rows.len(),
++        answered,
++        failed = read.rows.len() - answered,
++        queries = tally.queries,
++        score = tally.complexity.map(|complexity| complexity.score),
++        limit = tally.complexity.map(|complexity| complexity.limit),
++        "read merge requests' open discussions"
++    );
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/crates/merge-requests/src/discussions/answer.rs b/crates/merge-requests/src/discussions/answer.rs
+new file mode 100644
+index 0000000..346aed9
+--- /dev/null
++++ b/crates/merge-requests/src/discussions/answer.rs
+@@ -0,0 +1,89 @@
++use std::collections::BTreeMap;
++
++use serde::Deserialize;
++
++use crate::MergeRequestIid;
++use crate::page::{Complexity, Connection, NO_PROJECT, Nodes, graphql_data, merge_request_iid};
++use crate::people::UserNode;
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct Data {
++    query_complexity: Option<Complexity>,
++    project: Option<ProjectNode>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct ProjectNode {
++    merge_requests: Option<Nodes<MergeRequestNode>>,
++}
++
++#[derive(Deserialize)]
++struct MergeRequestNode {
++    iid: String,
++    discussions: Connection<DiscussionNode>,
++}
++
++#[derive(Deserialize)]
++pub(super) struct DiscussionNode {
++    pub resolvable: bool,
++    pub resolved: bool,
++    pub notes: NoteConnection,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub(super) struct NoteConnection {
++    pub page_info: NotesPageInfo,
++    pub nodes: Vec<NoteNode>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub(super) struct NotesPageInfo {
++    pub has_previous_page: bool,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub(super) struct NoteNode {
++    pub system: bool,
++    pub author: Option<UserNode>,
++    pub body: String,
++    pub created_at: String,
++    pub url: Option<String>,
++    pub position: Option<PositionNode>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub(super) struct PositionNode {
++    pub file_path: String,
++    pub new_line: Option<u32>,
++    pub old_line: Option<u32>,
++}
++
++/// One GraphQL answer of the discussions query: each merge request's discussions by iid.
++pub(super) struct Batch {
++    pub complexity: Option<Complexity>,
++    pub merge_requests: BTreeMap<MergeRequestIid, Connection<DiscussionNode>>,
++}
++
++/// `Err` holds GitLab's first error, or what yamt could not read.
++pub(super) fn parsed_batch(json: &[u8]) -> Result<Batch, String> {
++    let data: Data = graphql_data(json)?;
++    let nodes = data
++        .project
++        .and_then(|found| found.merge_requests)
++        .ok_or(NO_PROJECT)?
++        .nodes;
++    let mut merge_requests = BTreeMap::new();
++    for node in nodes {
++        merge_requests.insert(merge_request_iid(&node.iid)?, node.discussions);
++    }
++    Ok(Batch {
++        complexity: data.query_complexity,
++        merge_requests,
++    })
++}
+diff --git a/crates/merge-requests/src/discussions/tests.rs b/crates/merge-requests/src/discussions/tests.rs
+new file mode 100644
+index 0000000..203d4fd
+--- /dev/null
++++ b/crates/merge-requests/src/discussions/tests.rs
+@@ -0,0 +1,423 @@
++use serde_json::{Value, json};
++
++use super::*;
++use crate::page::NO_PROJECT;
++use crate::picture::{AvatarSource, avatar_source};
++
++const ORIGIN: &str = "https://gitlab.example";
++const ANNA_S_AVATAR: &str = "/uploads/-/system/user/avatar/2/avatar.png";
++
++fn project() -> Project {
++    Project {
++        full_path: "taskboard/taskboard".to_owned(),
++        web_path: "/taskboard/taskboard".to_owned(),
++        web_origin: Some(ORIGIN.to_owned()),
++    }
++}
++
++fn iids(numbers: &[u32]) -> Vec<MergeRequestIid> {
++    numbers
++        .iter()
++        .map(|&number| MergeRequestIid(number))
++        .collect()
++}
++
++/// A person's note on the merge request itself, its body naming its author and `n`.
++fn comment(username: &str, n: u32) -> Value {
++    json!({
++        "system": false,
++        "author": { "username": username, "name": format!("{username} name"), "avatarUrl": null },
++        "body": format!("{username} {n}"),
++        "createdAt": format!("2026-11-03T10:00:0{n}Z"),
++        "url": format!("https://gitlab.example/taskboard/taskboard/-/merge_requests/1#note_{n}"),
++        "position": null,
++    })
++}
++
++fn system_note(n: u32) -> Value {
++    let mut note = comment("pusher", n);
++    note["system"] = json!(true);
++    note
++}
++
++fn on_file(mut note: Value, new_line: Option<u32>, old_line: Option<u32>) -> Value {
++    note["position"] =
++        json!({ "filePath": "src/card.ts", "newLine": new_line, "oldLine": old_line });
++    note
++}
++
++fn discussion(resolvable: bool, resolved: bool, notes: &[Value], earlier: bool) -> Value {
++    json!({
++        "resolvable": resolvable,
++        "resolved": resolved,
++        "notes": { "pageInfo": { "hasPreviousPage": earlier }, "nodes": notes },
++    })
++}
++
++fn open(notes: &[Value]) -> Value {
++    discussion(true, false, notes, false)
++}
++
++fn merge_request(iid: u32, discussions: &[Value], next: Option<&str>) -> Value {
++    json!({
++        "iid": iid.to_string(),
++        "discussions": {
++            "pageInfo": { "hasNextPage": next.is_some(), "endCursor": next },
++            "nodes": discussions,
++        },
++    })
++}
++
++fn answer(merge_requests: &[Value]) -> Vec<u8> {
++    let data = json!({
++        "queryComplexity": { "score": 58, "limit": 250 },
++        "project": { "mergeRequests": { "nodes": merge_requests } },
++    });
++    json!({ "data": data }).to_string().into_bytes()
++}
++
++/// The rows `answered` gives for `asked` when the batch's call answers `batch` and no later page is asked.
++fn rows_for(asked: &[u32], batch: &[Value]) -> Vec<RowDiscussions> {
++    let mut fetch = |_: &[MergeRequestIid], after: Option<&str>| {
++        assert_eq!(after, None);
++        Ok(answer(batch))
++    };
++    answered(&iids(asked), &project(), &mut fetch).0.rows
++}
++
++/// The open discussions of the one row asked.
++fn open_of(batch: &[Value]) -> Vec<OpenDiscussion> {
++    let rows = rows_for(&[1], batch);
++    let [row] = rows.as_slice() else {
++        panic!("not one row: {rows:?}");
++    };
++    let DiscussionsAnswer::Open { discussions } = &row.answer else {
++        panic!("not open: {row:?}");
++    };
++    discussions.clone()
++}
++
++fn texts(discussions: &[OpenDiscussion]) -> Vec<&str> {
++    discussions
++        .iter()
++        .map(|open| open.last.text.as_str())
++        .collect()
++}
++
++fn failed(message: &str) -> DiscussionsAnswer {
++    DiscussionsAnswer::Failed {
++        message: message.to_owned(),
++    }
++}
++
++#[test]
++fn a_system_note_after_the_last_reply_is_skipped() {
++    let notes = [comment("anna", 1), comment("ben", 2), system_note(3)];
++
++    let discussions = open_of(&[merge_request(1, &[open(&notes)], None)]);
++
++    assert_eq!(texts(&discussions), ["ben 2"]);
++}
++
++#[test]
++fn a_system_note_between_replies_is_skipped() {
++    let notes = [
++        on_file(comment("anna", 1), Some(4), None),
++        on_file(system_note(2), Some(4), None),
++        on_file(comment("sam", 3), Some(4), None),
++    ];
++
++    let discussions = open_of(&[merge_request(1, &[open(&notes)], None)]);
++
++    assert_eq!(texts(&discussions), ["sam 3"]);
++    let last = &discussions[0].last;
++    let author = last.author.as_ref().map(|person| person.username.as_str());
++    assert_eq!(author, Some("sam"));
++    assert_eq!(last.created_at, "2026-11-03T10:00:03Z");
++    let page = last.page.as_ref().map(WebPage::as_str);
++    let address = "https://gitlab.example/taskboard/taskboard/-/merge_requests/1#note_3";
++    assert_eq!(page, Some(address));
++}
++
++#[test]
++fn resolved_and_unresolvable_discussions_are_left_out() {
++    let discussions = [
++        discussion(true, true, &[comment("anna", 1)], false),
++        discussion(false, false, &[comment("ben", 2)], false),
++        discussion(false, false, &[system_note(3)], false),
++        open(&[comment("chiara", 4)]),
++        discussion(false, true, &[comment("dmitri", 5)], false),
++    ];
++
++    let open = open_of(&[merge_request(1, &discussions, None)]);
++
++    assert_eq!(texts(&open), ["chiara 4"]);
++}
++
++#[test]
++fn a_note_without_position_is_the_overview() {
++    let open = open_of(&[merge_request(1, &[open(&[comment("anna", 1)])], None)]);
++
++    assert_eq!(open[0].place, DiscussionPlace::Overview);
++}
++
++#[test]
++fn a_diff_place_takes_the_new_line_else_the_old() {
++    let discussions = [
++        open(&[on_file(comment("anna", 1), Some(4), Some(3))]),
++        open(&[on_file(comment("anna", 2), None, Some(3))]),
++        open(&[on_file(comment("anna", 3), None, None)]),
++    ];
++
++    let open = open_of(&[merge_request(1, &discussions, None)]);
++
++    let file = |line| DiscussionPlace::File {
++        path: "src/card.ts".to_owned(),
++        line,
++    };
++    let places: Vec<&DiscussionPlace> = open.iter().map(|open| &open.place).collect();
++    assert_eq!(places, [&file(Some(4)), &file(Some(3)), &file(None)]);
++}
++
++#[test]
++fn twenty_system_notes_with_earlier_ones_fail_the_row() {
++    let system_notes: Vec<Value> = (1..=20).map(system_note).collect();
++    let cut = discussion(true, false, &system_notes, true);
++    let whole = discussion(true, false, &system_notes, false);
++    let batch = [
++        merge_request(1, &[open(&[comment("anna", 1)]), cut], None),
++        merge_request(2, &[whole, open(&[comment("ben", 2)])], None),
++    ];
++
++    let rows = rows_for(&[1, 2], &batch);
++
++    let message = "a discussion's last 20 notes are all GitLab's own; yamt reads no further";
++    assert_eq!(rows[0].answer, failed(message));
++    let DiscussionsAnswer::Open { discussions } = &rows[1].answer else {
++        panic!("not open: {:?}", rows[1]);
++    };
++    assert_eq!(texts(discussions), ["ben 2"]);
++}
++
++#[test]
++fn an_iid_gitlab_does_not_name_fails_alone() {
++    let batch = [merge_request(82, &[open(&[comment("anna", 1)])], None)];
++
++    let rows = rows_for(&[82, 78], &batch);
++
++    assert!(matches!(rows[0].answer, DiscussionsAnswer::Open { .. }));
++    assert_eq!(rows[1].iid, MergeRequestIid(78));
++    assert_eq!(rows[1].answer, failed("GitLab sent no merge request !78"));
++}
++
++#[test]
++fn graphql_errors_fail_each_row_of_the_batch() {
++    let refused = json!({ "data": null, "errors": [{ "message": "Field 'x' doesn't exist" }] });
++    let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(refused.to_string().into_bytes());
++
++    let (read, complexity) = answered(&iids(&[2, 1]), &project(), &mut fetch);
++
++    let answer = failed("Field 'x' doesn't exist");
++    let expected = [
++        RowDiscussions {
++            iid: MergeRequestIid(2),
++            answer: answer.clone(),
++        },
++        RowDiscussions {
++            iid: MergeRequestIid(1),
++            answer,
++        },
++    ];
++    assert_eq!(read.rows, expected);
++    assert_eq!(complexity, None);
++}
++
++#[test]
++fn a_failed_batch_call_fails_each_row_with_glab_s_words() {
++    let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Err("glab: timed out".to_owned());
++
++    let (read, _) = answered(&iids(&[2, 1]), &project(), &mut fetch);
++
++    let answers: Vec<&DiscussionsAnswer> = read.rows.iter().map(|row| &row.answer).collect();
++    assert_eq!(answers, [&failed("glab: timed out"); 2]);
++}
++
++#[test]
++fn the_batch_answers_gitlab_s_complexity() {
++    let mut fetch =
++        |_: &[MergeRequestIid], _: Option<&str>| Ok(answer(&[merge_request(1, &[], None)]));
++
++    let (_, complexity) = answered(&iids(&[1]), &project(), &mut fetch);
++
++    let measured = Complexity {
++        score: 58,
++        limit: 250,
++    };
++    assert_eq!(complexity, Some(measured));
++}
++
++#[test]
++fn the_batch_is_the_first_twenty_distinct_iids_in_order() {
++    let mut asked = vec![5, 3, 5];
++    asked.extend(100..130);
++
++    let cut = batch(&iids(&asked));
++
++    let mut expected = vec![5, 3];
++    expected.extend(100..118);
++    assert_eq!(cut, iids(&expected));
++    assert_eq!(batch(&iids(&[2, 2, 2])), iids(&[2]));
++    let unread = unread_discussions(&iids(&asked), "no project");
++    let unread_iids: Vec<MergeRequestIid> = unread.iter().map(|row| row.iid).collect();
++    assert_eq!(unread_iids, iids(&expected));
++    assert!(unread.iter().all(|row| row.answer == failed("no project")));
++}
++
++#[test]
++fn an_uploaded_avatar_is_offered_once_per_username() {
++    let mut anna = comment("anna", 1);
++    anna["author"]["avatarUrl"] = json!(ANNA_S_AVATAR);
++    let mut ben = comment("ben", 2);
++    ben["author"]["avatarUrl"] = json!("https://secure.gravatar.com/avatar/00?s=80&d=identicon");
++    let batch = [
++        merge_request(1, &[open(&[anna.clone()]), open(&[ben])], None),
++        merge_request(2, &[open(&[anna])], None),
++    ];
++    let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(answer(&batch));
++
++    let (read, _) = answered(&iids(&[1, 2]), &project(), &mut fetch);
++
++    let AvatarSource::Uploaded(address) = avatar_source(Some(ORIGIN), Some(ANNA_S_AVATAR)) else {
++        panic!("{ANNA_S_AVATAR} is no uploaded avatar");
++    };
++    let username = "anna".to_owned();
++    assert_eq!(read.pictures, [OfferedPicture { username, address }]);
++}
++
++/// Merge request 1's discussions over `pages` pages, each holding one open discussion `n` and naming `d-<n+1>` as
++/// the next but the last; the rows and every cursor asked after.
++fn paged(pages: u32) -> (Vec<RowDiscussions>, Vec<Option<String>>) {
++    let page = |n: u32| {
++        let next = (n < pages).then(|| format!("d-{}", n + 1));
++        answer(&[merge_request(
++            1,
++            &[open(&[comment("anna", n)])],
++            next.as_deref(),
++        )])
++    };
++    let mut asked = Vec::new();
++    let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| {
++        asked.push(after.map(str::to_owned));
++        let n = after.map_or(1, |cursor| cursor["d-".len()..].parse().unwrap());
++        if n > 1 {
++            assert_eq!(iids, [MergeRequestIid(1)]);
++        }
++        Ok(page(n))
++    };
++    let rows = answered(&iids(&[1]), &project(), &mut fetch).0.rows;
++    (rows, asked)
++}
++
++#[test]
++fn later_discussion_pages_are_read_up_to_the_tenth() {
++    let (rows, asked) = paged(10);
++
++    let DiscussionsAnswer::Open { discussions } = &rows[0].answer else {
++        panic!("not open: {rows:?}");
++    };
++    assert_eq!(discussions.len(), 10);
++    assert_eq!(asked.len(), 10);
++    assert_eq!(asked[1].as_deref(), Some("d-2"));
++}
++
++#[test]
++fn more_than_ten_discussion_pages_fail_the_row_without_an_eleventh_call() {
++    let (rows, asked) = paged(11);
++
++    assert_eq!(rows[0].answer, failed("more than 1,000 discussions"));
++    assert_eq!(asked.len(), 10);
++    assert_eq!(MAX_DISCUSSION_PAGES * DISCUSSIONS_PER_PAGE, 1_000);
++}
++
++#[test]
++fn a_failing_later_page_fails_its_row_alone() {
++    let batch = [
++        merge_request(1, &[], Some("d-2")),
++        merge_request(2, &[open(&[comment("ben", 2)])], None),
++        merge_request(3, &[], Some("d-2")),
++    ];
++    let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| match after {
++        None => Ok(answer(&batch)),
++        Some(_) if iids == [MergeRequestIid(1)] => Err("glab: page 2 failed".to_owned()),
++        Some(_) => Ok(answer(&[])),
++    };
++
++    let rows = answered(&iids(&[1, 2, 3]), &project(), &mut fetch).0.rows;
++
++    assert_eq!(rows[0].answer, failed("glab: page 2 failed"));
++    assert!(matches!(rows[1].answer, DiscussionsAnswer::Open { .. }));
++    assert_eq!(rows[2].answer, failed("GitLab sent no merge request !3"));
++}
++
++#[test]
++fn more_discussions_without_a_cursor_fail_the_row() {
++    let mut batch = merge_request(1, &[], None);
++    batch["discussions"]["pageInfo"]["hasNextPage"] = json!(true);
++
++    let rows = rows_for(&[1], &[batch]);
++
++    let message = "GitLab says more discussions follow, but sent no cursor for them";
++    assert_eq!(rows[0].answer, failed(message));
++}
++
++#[test]
++fn a_note_url_gitlab_does_not_build_gives_no_page() {
++    let mut elsewhere = comment("anna", 1);
++    elsewhere["url"] = json!("https://evil.example/x#note_1");
++    let mut none = comment("ben", 2);
++    none["url"] = json!(null);
++
++    let open = open_of(&[merge_request(1, &[open(&[elsewhere]), open(&[none])], None)]);
++
++    let pages: Vec<Option<&WebPage>> = open.iter().map(|open| open.last.page.as_ref()).collect();
++    assert_eq!(pages, [None, None]);
++}
++
++#[test]
++fn no_project_in_the_answer_fails_each_row() {
++    let refused = json!({ "data": { "queryComplexity": null, "project": null } });
++    let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(refused.to_string().into_bytes());
++
++    let rows = answered(&iids(&[1]), &project(), &mut fetch).0.rows;
++
++    assert_eq!(rows[0].answer, failed(NO_PROJECT));
++}
++
++/// The fake glab on `tests/glab/mr-discussions/` through a symlink beside its `glab.env` (`tests/glab/README.md`).
++#[cfg(unix)]
++#[test]
++fn each_query_of_a_call_is_counted_and_the_batch_s_complexity_kept() {
++    let folder = tempfile::tempdir().unwrap();
++    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
++    let scenario = repository.join("tests/glab/mr-discussions");
++    let settings = format!("YAMT_FAKE_GLAB={}\n", scenario.display());
++    std::fs::write(folder.path().join("glab.env"), settings).unwrap();
++    let link = folder.path().join("glab");
++    std::os::unix::fs::symlink(repository.join("scripts/fake-glab/glab"), &link).unwrap();
++    let mut tally = Tally::default();
++
++    let read = through_glab(
++        folder.path(),
++        Some(&Glab::at(link)),
++        &iids(&[82, 81, 79, 78]),
++        &mut tally,
++    );
++
++    assert_eq!(read.rows.len(), 4);
++    assert_eq!(tally.queries, 2);
++    let measured = Complexity {
++        score: 58,
++        limit: 250,
++    };
++    assert_eq!(tally.complexity, Some(measured));
++}
+diff --git a/crates/merge-requests/src/lib.rs b/crates/merge-requests/src/lib.rs
+index 530e9c6..cf2ada4 100644
+--- a/crates/merge-requests/src/lib.rs
++++ b/crates/merge-requests/src/lib.rs
+@@ -1,11 +1,13 @@
+ //! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab,
+ //! each row's conflicts checked by yamt's own merge of GitLab's two commits, each one's changes prepared for a window
+-//! of their own, its page or a failed job's opened in the browser, a failed job's log read.
++//! of their own, its page or a failed job's opened in the browser, a failed job's log read, each row's open
++//! discussions read with their last person's note.
+ #![forbid(unsafe_code)]
+ #![warn(missing_docs)]
+ 
+ mod check;
+ mod detect;
++mod discussions;
+ mod job_log;
+ mod labels;
+ mod list;
+@@ -28,6 +30,10 @@ use specta::Type;
+ 
+ pub use check::{CheckSummary, ConflictCheck, MergedPairs, check_conflicts};
+ pub use detect::{GitLabRepository, gitlab_repository};
++pub use discussions::{
++    DISCUSSION_BATCH, DiscussionNote, DiscussionPlace, DiscussionsAnswer, OpenDiscussion,
++    ReadDiscussions, RowDiscussions, read_discussions, unread_discussions,
++};
+ pub use job_log::{JobLog, JobLogReply, MAX_LOG_BYTES, read_job_log};
+ pub use labels::{Label, LabelColors};
+ pub use list::{Listed, ListedPage, OfferedPicture, list_merge_requests};
+@@ -86,8 +92,8 @@ pub enum CiStatus {
+     Manual,
+ }
+ 
+-/// The address of a page on the project's GitLab that this window may open in the browser: a failed job's log or
+-/// a merge request; only `WebPage::job` and `WebPage::merge_request` make one.
++/// The address of a page on the project's GitLab that this window may open in the browser: a failed job's log, a
++/// merge request or a note on one; only `WebPage::job`, `WebPage::merge_request` and `WebPage::note` make one.
+ #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
+ pub struct WebPage(String);
+ 
+diff --git a/crates/merge-requests/src/list.rs b/crates/merge-requests/src/list.rs
+index 3359b95..bf4513e 100644
+--- a/crates/merge-requests/src/list.rs
++++ b/crates/merge-requests/src/list.rs
+@@ -119,7 +119,7 @@ fn pages(
+ }
+ 
+ /// The pictures by username, the last one of each.
+-fn one_per_username(pictures: Vec<OfferedPicture>) -> Vec<OfferedPicture> {
++pub(crate) fn one_per_username(pictures: Vec<OfferedPicture>) -> Vec<OfferedPicture> {
+     let mut addresses = BTreeMap::new();
+     for picture in pictures {
+         addresses.insert(picture.username, picture.address);
+diff --git a/crates/merge-requests/src/page.rs b/crates/merge-requests/src/page.rs
+index a4baaf7..a6cfce8 100644
+--- a/crates/merge-requests/src/page.rs
++++ b/crates/merge-requests/src/page.rs
+@@ -73,16 +73,16 @@ struct ProjectNode {
+ 
+ #[derive(Deserialize)]
+ #[serde(rename_all = "camelCase")]
+-struct Connection<T> {
+-    page_info: PageInfo,
+-    nodes: Vec<T>,
++pub(crate) struct Connection<T> {
++    pub page_info: PageInfo,
++    pub nodes: Vec<T>,
+ }
+ 
+ #[derive(Deserialize)]
+ #[serde(rename_all = "camelCase")]
+-struct PageInfo {
+-    has_next_page: bool,
+-    end_cursor: Option<String>,
++pub(crate) struct PageInfo {
++    pub has_next_page: bool,
++    pub end_cursor: Option<String>,
+ }
+ 
+ #[derive(Deserialize)]
+@@ -237,7 +237,7 @@ fn row(
+     Ok((row, to_check))
+ }
+ 
+-fn merge_request_iid(sent: &str) -> Result<MergeRequestIid, String> {
++pub(crate) fn merge_request_iid(sent: &str) -> Result<MergeRequestIid, String> {
+     let iid = sent
+         .parse()
+         .map_err(|_| format!("GitLab sent {sent:?} as a merge request number"))?;
+diff --git a/crates/merge-requests/src/project.rs b/crates/merge-requests/src/project.rs
+index b15238d..fc6c516 100644
+--- a/crates/merge-requests/src/project.rs
++++ b/crates/merge-requests/src/project.rs
+@@ -4,7 +4,7 @@ use serde::Deserialize;
+ use yamt_gitio::{AuthStatus, Glab};
+ 
+ use crate::web_page::HTTPS;
+-use crate::{JobLogReply, ListEnd, OpenReply, RerequestReply, ResolveRefusal};
++use crate::{DiscussionsAnswer, JobLogReply, ListEnd, OpenReply, RerequestReply, ResolveRefusal};
+ 
+ /// glab fills `:fullpath` with the project of the folder's remotes (glab docs, `glab api`).
+ const PROJECT_ROUTE: &str = "projects/:fullpath";
+@@ -111,6 +111,15 @@ impl From<NoProject> for JobLogReply {
+     }
+ }
+ 
++impl From<NoProject> for DiscussionsAnswer {
++    fn from(refused: NoProject) -> DiscussionsAnswer {
++        match refused {
++            NoProject::NotLoggedIn { detail } => DiscussionsAnswer::NotLoggedIn { detail },
++            NoProject::Failed { message } => DiscussionsAnswer::Failed { message },
++        }
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/crates/merge-requests/src/query.rs b/crates/merge-requests/src/query.rs
+index 82bb50b..00456e2 100644
+--- a/crates/merge-requests/src/query.rs
++++ b/crates/merge-requests/src/query.rs
+@@ -1,5 +1,6 @@
+ use serde_json::json;
+ 
++use crate::discussions::{DISCUSSIONS_PER_PAGE, NOTES_READ};
+ use crate::{MAX_FAILED_JOBS, MergeRequestIid, PAGE_SIZE};
+ 
+ /// A merge request's state, target branch and the two commits of its diff, asked afresh on each open so a push
+@@ -97,6 +98,50 @@ pub(crate) fn reviewers_args(full_path: &str, iid: MergeRequestIid) -> Vec<Strin
+     merge_request_args(REVIEWERS_QUERY, full_path, iid)
+ }
+ 
++/// The open discussions of the merge requests `$iids`, each with its last notes, read by `read_discussions`
++/// (`docs/slices/briefs/mr-discussions-design.md` §1.1, §1.2): 58 of GitLab's limit of 250 for 20 merge requests,
++/// measured on gitlab.com on 2026-11-03. One line, so the fake glab logs each call on one line.
++fn discussions_query() -> String {
++    format!(
++        "query MergeRequestDiscussions($fullPath: ID!, $iids: [String!], $first: Int!, $discussionsAfter: String) {{ \
++         queryComplexity {{ score limit }} \
++         project(fullPath: $fullPath) {{ mergeRequests(iids: $iids, first: $first) {{ nodes {{ iid \
++         discussions(first: {DISCUSSIONS_PER_PAGE}, after: $discussionsAfter) {{ \
++         pageInfo {{ hasNextPage endCursor }} nodes {{ \
++         resolvable resolved \
++         notes(last: {NOTES_READ}) {{ pageInfo {{ hasPreviousPage }} nodes {{ \
++         system author {{ username name avatarUrl }} body createdAt url position {{ filePath newLine oldLine }} \
++         }} }} }} }} }} }} }} }}"
++    )
++}
++
++/// `glab api graphql` for the open discussions of `iids`, from the discussions after `after` when given:
++/// `-F iids=<a JSON array of strings> -F first=<their count>`.
++pub(crate) fn discussions_args(
++    full_path: &str,
++    iids: &[MergeRequestIid],
++    after: Option<&str>,
++) -> Vec<String> {
++    let numbers: Vec<String> = iids.iter().map(|iid| iid.0.to_string()).collect();
++    let mut args = vec![
++        "api".to_owned(),
++        "graphql".to_owned(),
++        "-f".to_owned(),
++        format!("query={}", discussions_query()),
++        "-f".to_owned(),
++        format!("fullPath={full_path}"),
++        "-F".to_owned(),
++        format!("iids={}", json!(numbers)),
++        "-F".to_owned(),
++        format!("first={}", iids.len()),
++    ];
++    if let Some(cursor) = after {
++        args.push("-f".to_owned());
++        args.push(format!("discussionsAfter={cursor}"));
++    }
++    args
++}
++
+ /// The JSON body asking the reviewer with global id `user_id` (`gid://gitlab/User/<n>`) for their review of merge
+ /// request `iid` again; the id travels as a variable, never inside the query text.
+ pub(crate) fn rerequest_body(full_path: &str, iid: MergeRequestIid, user_id: &str) -> Vec<u8> {
+@@ -235,4 +280,33 @@ mod tests {
+         ];
+         assert_eq!(args, expected);
+     }
++
++    #[test]
++    fn the_discussions_query_is_one_line_as_designed_and_its_argv_is_exact() {
++        let query = "query=query MergeRequestDiscussions($fullPath: ID!, $iids: [String!], $first: Int!, \
++             $discussionsAfter: String) { queryComplexity { score limit } project(fullPath: $fullPath) { \
++             mergeRequests(iids: $iids, first: $first) { nodes { iid discussions(first: 100, after: \
++             $discussionsAfter) { pageInfo { hasNextPage endCursor } nodes { resolvable resolved notes(last: 20) { \
++             pageInfo { hasPreviousPage } nodes { system author { username name avatarUrl } body createdAt url \
++             position { filePath newLine oldLine } } } } } } } } }";
++        assert_eq!(query.matches('{').count(), query.matches('}').count());
++        let iids = [MergeRequestIid(82), MergeRequestIid(7)];
++
++        let batch = discussions_args("taskboard/taskboard", &iids, None);
++        let later = discussions_args("taskboard/taskboard", &iids[..1], Some("d-2"));
++
++        let common = [
++            "api",
++            "graphql",
++            "-f",
++            query,
++            "-f",
++            "fullPath=taskboard/taskboard",
++        ];
++        let batch_fields = ["-F", r#"iids=["82","7"]"#, "-F", "first=2"];
++        assert_eq!(batch, [common.as_slice(), &batch_fields].concat());
++        let later_fields = ["-F", r#"iids=["82"]"#, "-F", "first=1"];
++        let after = ["-f", "discussionsAfter=d-2"];
++        assert_eq!(later, [common.as_slice(), &later_fields, &after].concat());
++    }
+ }
+diff --git a/crates/merge-requests/src/web_page.rs b/crates/merge-requests/src/web_page.rs
+index 6597fc5..aeb9f96 100644
+--- a/crates/merge-requests/src/web_page.rs
++++ b/crates/merge-requests/src/web_page.rs
+@@ -6,6 +6,7 @@ use crate::{MergeRequestIid, PageOpened, WebPage};
+ pub(crate) const HTTPS: &str = "https://";
+ const JOBS_SEGMENT: &str = "/-/jobs/";
+ const MERGE_REQUESTS_SEGMENT: &str = "/-/merge_requests/";
++const NOTE_ANCHOR: &str = "#note_";
+ const PARENT_SEGMENT: &str = "..";
+ #[cfg(target_os = "macos")]
+ const OPENER: &str = "/usr/bin/open";
+@@ -41,6 +42,21 @@ impl WebPage {
+         project_page(origin, web_path, &tail)
+     }
+ 
++    /// GitLab's address of a note on merge request `iid`: `url` exactly `WebPage::merge_request(origin, web_path,
++    /// iid)` followed by `#note_<digits>`, as GitLab builds it (`merge_request_url(noteable, anchor: dom_id(note))`,
++    /// `lib/gitlab/url_builder.rb`); any other address → `None`.
++    pub(crate) fn note(
++        origin: &str,
++        web_path: &str,
++        iid: MergeRequestIid,
++        url: &str,
++    ) -> Option<WebPage> {
++        let merge_request = WebPage::merge_request(origin, web_path, iid)?;
++        let anchor = url.strip_prefix(merge_request.as_str())?;
++        let note = anchor.strip_prefix(NOTE_ANCHOR)?;
++        is_number(note).then(|| WebPage(url.to_owned()))
++    }
++
+     /// The page's address.
+     #[must_use]
+     pub fn as_str(&self) -> &str {
+@@ -229,6 +245,44 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn a_note_url_is_a_page_only_as_gitlab_builds_it() {
++        let note = |web_path: &str, url: &str| {
++            WebPage::note(ORIGIN, web_path, IID, url).map(|page| page.as_str().to_owned())
++        };
++        let gitlab_s = "https://gitlab.example/a/b/-/merge_requests/12#note_4131301160";
++        assert_eq!(note("/a/b", gitlab_s).as_deref(), Some(gitlab_s));
++        let under_sub_path = "https://gitlab.example/gitlab/a/b/-/merge_requests/12#note_7";
++        assert_eq!(
++            note("/gitlab/a/b", under_sub_path).as_deref(),
++            Some(under_sub_path)
++        );
++        let refused = [
++            "https://evil.example/a/b/-/merge_requests/12#note_1",
++            "http://gitlab.example/a/b/-/merge_requests/12#note_1",
++            "https://gitlab.example/a/c/-/merge_requests/12#note_1",
++            "https://gitlab.example/a/b/-/merge_requests/120#note_1",
++            "https://gitlab.example/a/b/-/merge_requests/1#note_1",
++            "https://gitlab.example/a/b/-/merge_requests/12#note_",
++            "https://gitlab.example/a/b/-/merge_requests/12#note_1a",
++            "https://gitlab.example/a/b/-/merge_requests/12#note_-1",
++            "https://gitlab.example/a/b/-/merge_requests/12#note_1/x",
++            "https://gitlab.example/a/b/-/merge_requests/12#note_1?x=1",
++            "https://gitlab.example/a/b/-/merge_requests/12",
++            "https://gitlab.example/a/b/-/merge_requests/12#",
++            "https://gitlab.example/a/b/-/merge_requests/12#diff_1",
++            "https://gitlab.example/a/b/-/merge_requests/12/#note_1",
++            "",
++        ];
++        for url in refused {
++            assert_eq!(note("/a/b", url), None, "{url}");
++        }
++        let missing_sub_path = "https://gitlab.example/a/b/-/merge_requests/12#note_1";
++        assert_eq!(note("/gitlab/a/b", missing_sub_path), None);
++        let elsewhere = WebPage::note("http://gitlab.example", "/a/b", IID, gitlab_s);
++        assert_eq!(elsewhere, None);
++    }
++
+     fn program_and_args(command: &Command) -> Vec<&std::ffi::OsStr> {
+         let mut words = vec![command.get_program()];
+         words.extend(command.get_args());
+diff --git a/crates/merge-requests/tests/discussions.rs b/crates/merge-requests/tests/discussions.rs
+new file mode 100644
+index 0000000..cb60c05
+--- /dev/null
++++ b/crates/merge-requests/tests/discussions.rs
+@@ -0,0 +1,202 @@
++#![cfg(test)]
++#![cfg(unix)]
++
++mod fake_glab;
++
++use yamt_conflict_repo::{TempDir, git_ok};
++use yamt_merge_requests::{
++    DiscussionNote, DiscussionPlace, DiscussionsAnswer, GitLabRepository, MergeRequestIid,
++    OfferedPicture, OpenDiscussion, ReadDiscussions, RowDiscussions, WebPage, gitlab_repository,
++    read_discussions,
++};
++
++use fake_glab::Fake;
++
++const GITLAB_REMOTE: &str = "https://gitlab.example/taskboard/taskboard.git";
++const SCENARIO: &str = "mr-discussions";
++const QUERY_START: &str = "argv: api graphql -f query=query MergeRequestDiscussions(";
++
++/// A repository whose `origin` is on gitlab.example, and its `GitLabRepository`.
++fn gitlab_repo() -> (TempDir, GitLabRepository) {
++    let repo = TempDir::new().unwrap();
++    git_ok(repo.path(), &["init", "-q"]).unwrap();
++    git_ok(repo.path(), &["remote", "add", "origin", GITLAB_REMOTE]).unwrap();
++    let repository = gitlab_repository(repo.path()).unwrap();
++    (repo, repository)
++}
++
++fn iids(numbers: &[u32]) -> Vec<MergeRequestIid> {
++    numbers
++        .iter()
++        .map(|&number| MergeRequestIid(number))
++        .collect()
++}
++
++fn read(fake: &Fake, numbers: &[u32]) -> ReadDiscussions {
++    let (_repo, repository) = gitlab_repo();
++    read_discussions(&repository, Some(&fake.glab), &iids(numbers))
++}
++
++/// The discussions query's argv lines the fake logged.
++fn queries(fake: &Fake) -> Vec<String> {
++    let argv = fake.logged("argv: ");
++    argv.into_iter()
++        .filter(|line| line.starts_with(QUERY_START))
++        .collect()
++}
++
++fn open_of(row: &RowDiscussions) -> &[OpenDiscussion] {
++    let DiscussionsAnswer::Open { discussions } = &row.answer else {
++        panic!("not open: {row:?}");
++    };
++    discussions
++}
++
++fn author(note: &DiscussionNote) -> Option<&str> {
++    note.author.as_ref().map(|person| person.username.as_str())
++}
++
++fn page(note: &DiscussionNote) -> Option<&str> {
++    note.page.as_ref().map(WebPage::as_str)
++}
++
++#[test]
++fn a_rows_open_discussions_arrive_with_their_last_persons_note_place_and_link() {
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &[82, 81, 79, 78]);
++
++    let asked: Vec<MergeRequestIid> = read.rows.iter().map(|row| row.iid).collect();
++    assert_eq!(asked, iids(&[82, 81, 79, 78]));
++    let open = open_of(&read.rows[0]);
++    assert_eq!(open.len(), 3, "{open:?}");
++    let (a, b, c) = (&open[0], &open[1], &open[2]);
++    let card = DiscussionPlace::File {
++        path: "src/board/card.ts".to_owned(),
++        line: Some(12),
++    };
++    assert_eq!(a.place, card);
++    assert_eq!(author(&a.last), Some("sam"));
++    assert_eq!(a.last.text, "Yes, done in the second commit.");
++    assert_eq!(a.last.created_at, "2026-11-03T11:05:00Z");
++    let note_103 = "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_103";
++    assert_eq!(page(&a.last), Some(note_103));
++    let due_dates = DiscussionPlace::File {
++        path: "src/board/dueDates.ts".to_owned(),
++        line: Some(6),
++    };
++    assert_eq!(b.place, due_dates);
++    assert_eq!(author(&b.last), Some("ben"));
++    assert_eq!(c.place, DiscussionPlace::Overview);
++    assert_eq!(author(&c.last), Some("anna"));
++    assert_eq!(page(&c.last), None);
++    let missing = DiscussionsAnswer::Failed {
++        message: "GitLab sent no merge request !78".to_owned(),
++    };
++    assert_eq!(read.rows[3].answer, missing);
++    let offered: Vec<&str> = read
++        .pictures
++        .iter()
++        .map(|picture| picture.username.as_str())
++        .collect();
++    assert_eq!(offered, ["anna"]);
++}
++
++#[test]
++fn one_rows_details_alone_are_one_call() {
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &[81]);
++
++    assert_eq!(read.rows.len(), 1);
++    assert_eq!(open_of(&read.rows[0]).len(), 1);
++    let asked = queries(&fake);
++    assert_eq!(asked.len(), 1, "{asked:?}");
++    assert!(
++        asked[0].ends_with(r#" -f fullPath=taskboard/taskboard -F iids=["81"] -F first=1"#),
++        "{asked:?}"
++    );
++}
++
++#[test]
++fn a_later_discussions_page_is_asked_for_that_row_alone() {
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &[82, 81, 79, 78]);
++
++    let open = open_of(&read.rows[2]);
++    assert_eq!(open.len(), 1, "{open:?}");
++    assert_eq!(open[0].last.text, "Search titles only, for now?");
++    let asked = queries(&fake);
++    assert_eq!(asked.len(), 2, "{asked:?}");
++    assert!(
++        asked[0].ends_with(r#" -F iids=["82","81","79","78"] -F first=4"#),
++        "{asked:?}"
++    );
++    let later = r#" -F iids=["79"] -F first=1 -f discussionsAfter=d-2"#;
++    assert!(asked[1].ends_with(later), "{asked:?}");
++}
++
++#[test]
++fn markup_in_a_body_stays_as_sent() {
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &[81]);
++
++    let text = &open_of(&read.rows[0])[0].last.text;
++    let sent = "Please **check** <b>THIS</b> & that\non a dark theme\n<script>alert(1)</script>";
++    assert_eq!(text, sent);
++}
++
++#[test]
++fn a_failed_glab_call_fails_its_rows_and_keeps_its_words() {
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &[77]);
++
++    let message = r#"glab: Post "https://gitlab.example/api/graphql": context deadline exceeded"#;
++    let failed = DiscussionsAnswer::Failed {
++        message: message.to_owned(),
++    };
++    let row = RowDiscussions {
++        iid: MergeRequestIid(77),
++        answer: failed,
++    };
++    assert_eq!(read.rows, [row]);
++    assert_eq!(read.pictures, Vec::<OfferedPicture>::new());
++}
++
++#[test]
++fn glab_missing_answers_each_row() {
++    let (_repo, repository) = gitlab_repo();
++
++    let read = read_discussions(&repository, None, &iids(&[82, 81]));
++
++    let answers: Vec<&DiscussionsAnswer> = read.rows.iter().map(|row| &row.answer).collect();
++    assert_eq!(answers, [&DiscussionsAnswer::GlabMissing; 2]);
++}
++
++#[test]
++fn logged_out_answers_each_row() {
++    let fake = Fake::new("logged-out");
++
++    let read = read(&fake, &[82, 81]);
++
++    let logged_out = DiscussionsAnswer::NotLoggedIn {
++        detail: "gitlab.com".to_owned(),
++    };
++    let answers: Vec<&DiscussionsAnswer> = read.rows.iter().map(|row| &row.answer).collect();
++    assert_eq!(answers, [&logged_out; 2]);
++    assert_eq!(fake.logged("argv: "), ["argv: auth status"]);
++}
++
++#[test]
++fn an_empty_ask_answers_nothing_and_runs_no_glab() {
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &[]);
++
++    assert_eq!(read.rows, Vec::<RowDiscussions>::new());
++    assert_eq!(read.pictures, Vec::<OfferedPicture>::new());
++    assert_eq!(fake.logged("argv: "), Vec::<String>::new());
++}
+diff --git a/crates/settings/AGENTS.md b/crates/settings/AGENTS.md
+index 2901166..e129068 100644
+--- a/crates/settings/AGENTS.md
++++ b/crates/settings/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The per-user settings file (plan §2 #57, #60, #67, #83): `lib.rs` (types crossing the IPC — incl. `LanguageServerSettings` { `repositories`: root path text → `RepositoryAnswer` `start`/`dontStart`, `off`: root path text → the keys of the found servers switched off there (`#[serde(default)]`: a 0.4.0 file reads with none; exported as optional `off?`), `added`: `AddedServer` { `command`, `fileTypes` } }, file key `languageServers`, one serde for the file and the IPC —, `Error`, the nine operations: `read`, `set_theme`, `set_antialiasing`, `set_keys`, `set_repository_answer` (`None` forgets the root's answer), `set_server_switch` (off adds the key to the root's set, on removes it, a root left with none is removed), `set_added_servers`, `relocate`, `stored_at_start`), `places.rs` (`Places`: the default file, the `settings-location` file, `~/` expansion), `file.rs` (parsing into kept entries, writing through a temporary file and a rename; `keys` and `languageServers` are written only when not empty). No tauri, no git, no `yamt-*` crate (arch-check); action ids, key strings, server keys and repository roots are opaque text. Tests are integration tests on temp folders in `tests/` (`settings.rs`, `antialiasing.rs`, `relocate.rs`, `language_servers.rs`, `themes.rs` (the two first names, kebab names, unknown names Broken), helpers in `config/`), plus three unit tests in `lib.rs`: `a_theme_name_is_its_serde_spelling` and `an_antialiasing_name_is_its_serde_spelling` (`name` = the serde spelling), `the_language_server_entry_crosses_the_ipc_spelled_as_in_the_file`.
++Owner skill: `skill://rust-conventions`. The per-user settings file (plan §2 #57, #60, #67, #83, #163): `lib.rs` (types crossing the IPC — incl. `LanguageServerSettings` { `repositories`: root path text → `RepositoryAnswer` `start`/`dontStart`, `off`: root path text → the keys of the found servers switched off there (`#[serde(default)]`: a 0.4.0 file reads with none; exported as optional `off?`), `added`: `AddedServer` { `command`, `fileTypes` } }, file key `languageServers`, one serde for the file and the IPC —, `DiscussionDetails` `full` (default)/`lazy`/`off`, file key `discussionDetails` (when the merge-request page reads each row's open discussions), `Error`, the ten operations: `read`, `set_theme`, `set_antialiasing`, `set_keys`, `set_repository_answer` (`None` forgets the root's answer), `set_server_switch` (off adds the key to the root's set, on removes it, a root left with none is removed), `set_added_servers`, `set_discussion_details`, `relocate`, `stored_at_start`), `places.rs` (`Places`: the default file, the `settings-location` file, `~/` expansion), `file.rs` (parsing into kept entries, writing through a temporary file and a rename; `keys` and `languageServers` are written only when not empty, `discussionDetails` only when not `full`, so a file without it follows a later default). No tauri, no git, no `yamt-*` crate (arch-check); action ids, key strings, server keys and repository roots are opaque text. Tests are integration tests on temp folders in `tests/` (`settings.rs`, `antialiasing.rs`, `relocate.rs`, `language_servers.rs`, `themes.rs` (the two first names, kebab names, unknown names Broken), `discussion_details.rs` (the three values, a missing key `full` and `full` not written, an unknown value Broken, unknown entries kept), helpers in `config/`), plus unit tests in `lib.rs`: `a_theme_name_is_its_serde_spelling` and `an_antialiasing_name_is_its_serde_spelling` (`name` = the serde spelling), `discussion_details_cross_the_ipc_spelled_as_in_the_file`, `the_language_server_entry_crosses_the_ipc_spelled_as_in_the_file`, the agent entry's.
+diff --git a/crates/settings/src/file.rs b/crates/settings/src/file.rs
+index 58dfa39..abd46fe 100644
+--- a/crates/settings/src/file.rs
++++ b/crates/settings/src/file.rs
+@@ -7,13 +7,14 @@ use serde::Serialize;
+ use serde::de::DeserializeOwned;
+ use serde_json::{Map, Value};
+ 
+-use crate::{AgentSettings, Error, LanguageServerSettings, StoredSettings};
++use crate::{AgentSettings, DiscussionDetails, Error, LanguageServerSettings, StoredSettings};
+ 
+ const THEME: &str = "theme";
+ const ANTIALIASING: &str = "antialiasing";
+ const KEYS: &str = "keys";
+ const LANGUAGE_SERVERS: &str = "languageServers";
+ const AGENT: &str = "agent";
++const DISCUSSION_DETAILS: &str = "discussionDetails";
+ 
+ /// Linux's MAXSYMLINKS (`include/linux/namei.h`): more links in a row than this is a cycle.
+ const MAX_LINK_HOPS: usize = 40;
+@@ -55,6 +56,10 @@ impl Loaded {
+         if let Some(agent) = agent_entry(path, self.stored.agent)? {
+             entries.insert(AGENT.to_owned(), agent);
+         }
++        if self.stored.discussion_details != DiscussionDetails::default() {
++            let details = Value::from(self.stored.discussion_details.name());
++            entries.insert(DISCUSSION_DETAILS.to_owned(), details);
++        }
+         Ok(entries)
+     }
+ }
+@@ -108,6 +113,7 @@ fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
+         keys: entry(path, KEYS, others.remove(KEYS))?,
+         language_servers: entry(path, LANGUAGE_SERVERS, others.remove(LANGUAGE_SERVERS))?,
+         agent: entry::<AgentSettings>(path, AGENT, others.remove(AGENT))?.without_empty_command(),
++        discussion_details: entry(path, DISCUSSION_DETAILS, others.remove(DISCUSSION_DETAILS))?,
+     };
+     Ok(Loaded { others, stored })
+ }
+diff --git a/crates/settings/src/lib.rs b/crates/settings/src/lib.rs
+index 1071402..6ea938a 100644
+--- a/crates/settings/src/lib.rs
++++ b/crates/settings/src/lib.rs
+@@ -67,6 +67,29 @@ impl Antialiasing {
+     }
+ }
+ 
++/// When the merge-request page reads each row's open discussions: as the list arrives, on the first hover of a
++/// row's count, or never.
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
++#[serde(rename_all = "lowercase")]
++pub enum DiscussionDetails {
++    #[default]
++    Full,
++    Lazy,
++    Off,
++}
++
++impl DiscussionDetails {
++    /// The spelling in the settings file.
++    #[must_use]
++    pub fn name(self) -> &'static str {
++        match self {
++            DiscussionDetails::Full => "full",
++            DiscussionDetails::Lazy => "lazy",
++            DiscussionDetails::Off => "off",
++        }
++    }
++}
++
+ /// What the window holds and sends: `keys` = action id → key strings, only for actions whose
+ /// keys differ from the defaults (the window knows the defaults; Rust never does).
+ #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+@@ -77,6 +100,8 @@ pub struct StoredSettings {
+     #[serde(rename = "languageServers")]
+     pub language_servers: LanguageServerSettings,
+     pub agent: AgentSettings,
++    #[serde(rename = "discussionDetails")]
++    pub discussion_details: DiscussionDetails,
+ }
+ 
+ /// The AI agent the window starts and its first message; `None` = the window's default.
+@@ -188,6 +213,16 @@ pub fn set_antialiasing(
+     change(places, current, |stored| stored.antialiasing = antialiasing)
+ }
+ 
++pub fn set_discussion_details(
++    places: &Places,
++    current: &StoredSettings,
++    details: DiscussionDetails,
++) -> Result<SettingsRead, Error> {
++    change(places, current, |stored| {
++        stored.discussion_details = details;
++    })
++}
++
+ pub fn set_keys(
+     places: &Places,
+     current: &StoredSettings,
+@@ -346,6 +381,28 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn discussion_details_cross_the_ipc_spelled_as_in_the_file() {
++        for details in [
++            DiscussionDetails::Full,
++            DiscussionDetails::Lazy,
++            DiscussionDetails::Off,
++        ] {
++            let sent = serde_json::Value::from(details.name());
++            assert_eq!(serde_json::to_value(details).unwrap(), sent);
++            let read: DiscussionDetails = serde_json::from_value(sent).unwrap();
++            assert_eq!(read, details);
++        }
++        let stored = StoredSettings {
++            discussion_details: DiscussionDetails::Lazy,
++            ..StoredSettings::default()
++        };
++        let sent = serde_json::to_value(&stored).unwrap();
++        assert_eq!(sent["discussionDetails"], "lazy");
++        let read: StoredSettings = serde_json::from_value(sent).unwrap();
++        assert_eq!(read, stored);
++    }
++
+     #[test]
+     fn the_language_server_entry_crosses_the_ipc_spelled_as_in_the_file() {
+         let mut stored = StoredSettings::default();
+diff --git a/crates/settings/tests/antialiasing.rs b/crates/settings/tests/antialiasing.rs
+index ebb891d..dc389e6 100644
+--- a/crates/settings/tests/antialiasing.rs
++++ b/crates/settings/tests/antialiasing.rs
+@@ -7,8 +7,8 @@ use std::fs;
+ 
+ use serde_json::json;
+ use yamt_settings::{
+-    AgentSettings, Antialiasing, Error, LanguageServerSettings, StoredSettings, Theme, read,
+-    set_antialiasing, set_theme,
++    AgentSettings, Antialiasing, DiscussionDetails, Error, LanguageServerSettings, StoredSettings,
++    Theme, read, set_antialiasing, set_theme,
+ };
+ 
+ use crate::config::{Config, json_at, keys, write};
+@@ -76,6 +76,7 @@ fn set_antialiasing_keeps_unknown_entries_and_the_other_settings() {
+         keys: keys(&[("apply", &["F2"])]),
+         language_servers: LanguageServerSettings::default(),
+         agent: AgentSettings::default(),
++        discussion_details: DiscussionDetails::Full,
+     };
+     assert_eq!(settings.stored, expected);
+     assert_eq!(
+diff --git a/crates/settings/tests/config/mod.rs b/crates/settings/tests/config/mod.rs
+index b29e156..35edf85 100644
+--- a/crates/settings/tests/config/mod.rs
++++ b/crates/settings/tests/config/mod.rs
+@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
+ use serde_json::Value;
+ use tempfile::TempDir;
+ use yamt_settings::{
+-    AgentSettings, Antialiasing, LanguageServerSettings, Places, StoredSettings, Theme,
++    AgentSettings, Antialiasing, DiscussionDetails, LanguageServerSettings, Places, StoredSettings,
++    Theme,
+ };
+ 
+ pub struct Config {
+@@ -73,5 +74,6 @@ pub fn light_with_apply() -> StoredSettings {
+         keys: keys(&[("apply", &["Mod-Enter"]), ("ignore", &[])]),
+         language_servers: LanguageServerSettings::default(),
+         agent: AgentSettings::default(),
++        discussion_details: DiscussionDetails::Full,
+     }
+ }
+diff --git a/crates/settings/tests/discussion_details.rs b/crates/settings/tests/discussion_details.rs
+new file mode 100644
+index 0000000..9fcc5df
+--- /dev/null
++++ b/crates/settings/tests/discussion_details.rs
+@@ -0,0 +1,110 @@
++#![cfg(test)]
++
++#[expect(dead_code, reason = "these tests use part of the shared helpers")]
++mod config;
++
++use std::fs;
++
++use serde_json::json;
++use yamt_settings::{
++    DiscussionDetails, Error, StoredSettings, Theme, read, set_discussion_details, set_theme,
++};
++
++use crate::config::{Config, json_at, write};
++
++#[test]
++fn the_three_values_read_and_write_as_named() {
++    for (details, name) in [
++        (DiscussionDetails::Lazy, "lazy"),
++        (DiscussionDetails::Off, "off"),
++    ] {
++        let config = Config::new();
++        let current = StoredSettings::default();
++
++        let settings = set_discussion_details(&config.places, &current, details).unwrap();
++
++        assert_eq!(settings.stored.discussion_details, details);
++        assert_eq!(
++            json_at(&config.default_file()),
++            json!({ "theme": "dark", "antialiasing": "subpixel", "discussionDetails": name })
++        );
++        let reread = read(&config.places, &current).unwrap();
++        assert_eq!(reread.stored.discussion_details, details);
++    }
++    let config = Config::new();
++    write(&config.default_file(), r#"{"discussionDetails": "full"}"#);
++    let settings = read(&config.places, &StoredSettings::default()).unwrap();
++    assert_eq!(settings.stored.discussion_details, DiscussionDetails::Full);
++}
++
++#[test]
++fn a_file_without_the_key_reads_as_full_and_full_is_not_written() {
++    let config = Config::new();
++    let text = r#"{"theme": "light"}"#;
++    write(&config.default_file(), text);
++    let current = StoredSettings::default();
++
++    let settings = read(&config.places, &current).unwrap();
++
++    assert_eq!(settings.stored.discussion_details, DiscussionDetails::Full);
++    assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
++    set_discussion_details(&config.places, &current, DiscussionDetails::Off).unwrap();
++    let back = set_discussion_details(&config.places, &current, DiscussionDetails::Full).unwrap();
++    assert_eq!(back.stored.discussion_details, DiscussionDetails::Full);
++    assert_eq!(
++        json_at(&config.default_file()),
++        json!({ "theme": "light", "antialiasing": "subpixel" })
++    );
++}
++
++#[test]
++fn an_unknown_value_is_broken_and_nothing_is_written() {
++    let config = Config::new();
++    let text = r#"{"discussionDetails": "eager", "theme": "light"}"#;
++    write(&config.default_file(), text);
++    let current = StoredSettings::default();
++
++    let read_error = read(&config.places, &current).unwrap_err();
++
++    let Error::Broken { message, .. } = read_error else {
++        panic!("not broken: {read_error:?}");
++    };
++    assert!(message.starts_with("`discussionDetails`: "), "{message}");
++    assert!(message.contains("eager"), "{message}");
++    let set_error =
++        set_discussion_details(&config.places, &current, DiscussionDetails::Off).unwrap_err();
++    assert!(matches!(set_error, Error::Broken { .. }), "{set_error:?}");
++    let theme_error = set_theme(&config.places, &current, Theme::Dark).unwrap_err();
++    assert!(
++        matches!(theme_error, Error::Broken { .. }),
++        "{theme_error:?}"
++    );
++    assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
++}
++
++#[test]
++fn unknown_entries_are_kept() {
++    let config = Config::new();
++    write(
++        &config.default_file(),
++        r#"{"window": {"x": 1}, "theme": "light", "discussionDetails": "off"}"#,
++    );
++
++    let settings = set_discussion_details(
++        &config.places,
++        &StoredSettings::default(),
++        DiscussionDetails::Lazy,
++    )
++    .unwrap();
++
++    assert_eq!(settings.stored.theme, Theme::Light);
++    assert_eq!(
++        json_at(&config.default_file()),
++        json!({
++            "window": { "x": 1 },
++            "theme": "light",
++            "antialiasing": "subpixel",
++            "discussionDetails": "lazy",
++        })
++    );
++}
+diff --git a/crates/settings/tests/settings.rs b/crates/settings/tests/settings.rs
+index 83315ff..0f8602b 100644
+--- a/crates/settings/tests/settings.rs
++++ b/crates/settings/tests/settings.rs
+@@ -7,8 +7,8 @@ use std::time::{Duration, SystemTime};
+ 
+ use serde_json::json;
+ use yamt_settings::{
+-    AgentSettings, Antialiasing, Error, KeysChange, LanguageServerSettings, StoredSettings, Theme,
+-    read, relocate, set_keys, set_theme, stored_at_start,
++    AgentSettings, Antialiasing, DiscussionDetails, Error, KeysChange, LanguageServerSettings,
++    StoredSettings, Theme, read, relocate, set_keys, set_theme, stored_at_start,
+ };
+ 
+ use crate::config::{Config, json_at, keys, light_with_apply, names_in, write};
+@@ -368,6 +368,7 @@ fn stored_at_start_gives_the_defaults_whenever_anything_is_missing_or_broken() {
+         keys: keys(&[("apply", &["F2"])]),
+         language_servers: LanguageServerSettings::default(),
+         agent: AgentSettings::default(),
++        discussion_details: DiscussionDetails::Full,
+     };
+     assert_eq!(stored_at_start(&config.places), stored);
+     write(&config.default_file(), r#"{"keys": {}}"#);
+diff --git a/scripts/fake-glab/glab b/scripts/fake-glab/glab
+index 921142e..a8ed52c 100755
+--- a/scripts/fake-glab/glab
++++ b/scripts/fake-glab/glab
+@@ -121,9 +121,19 @@ post() {
+ 	reply "$scenario/post-$number" '201 Created'
+ }
+ 
+-# A merge request's details with a field iid=<n>; else a page of the list: the first without a field after, the
+-# n-th for after=page-<n>.
++# Merge requests' discussions with a field iids=<JSON array>: graphql-discussions-<the iids joined by "-">, with
++# -after-<cursor> for a field discussionsAfter. Else a merge request's details with a field iid=<n>; else a page of
++# the list: the first without a field after, the n-th for after=page-<n>.
+ graphql() {
++	iids=$(field iids)
++	if [ -n "$iids" ]; then
++		name=$(printf '%s' "$iids" | sed 's/[][" ]//g; s/,/-/g')
++		after=$(field discussionsAfter)
++		if [ -n "$after" ]; then
++			name="$name-after-$after"
++		fi
++		reply "$scenario/graphql-discussions-$name" '200 OK'
++	fi
+ 	iid=$(field iid)
+ 	if [ -n "$iid" ]; then
+ 		reply "$scenario/graphql-merge-request-$iid" '200 OK'
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index 3dbf649..b298691 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -36,6 +36,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         settings::set_server_switch::<tauri::Wry>,
+         settings::set_added_servers::<tauri::Wry>,
+         settings::set_agent::<tauri::Wry>,
++        settings::set_discussion_details::<tauri::Wry>,
+         servers::servers_context,
+         servers::start_server,
+         servers::send_to_server,
+@@ -81,6 +82,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         merge_requests::find_local_merge::<tauri::Wry>,
+         merge_requests::rerequest_review::<tauri::Wry>,
+         merge_requests::read_job_log::<tauri::Wry>,
++        merge_requests::read_discussions::<tauri::Wry>,
+     ])
+ }
+ 
+diff --git a/src-tauri/src/merge_requests.rs b/src-tauri/src/merge_requests.rs
+index d7addef..beaa55e 100644
+--- a/src-tauri/src/merge_requests.rs
++++ b/src-tauri/src/merge_requests.rs
+@@ -10,7 +10,8 @@ use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
+ use yamt_merge_requests::{
+     CheckedRow, GitLabProject, GitLabRepository, Glab, JobLogReply, ListEnd, ListedPage,
+     MergeRequestIid, MergeRequestPage, MergedPairs, OpenReply, PageOpened, RerequestReply,
+-    ResolveRefusal, WebPage, check_conflicts, gitlab_repository, prepare_open, prepare_resolve,
++    ResolveRefusal, RowDiscussions, WebPage, check_conflicts, gitlab_repository, prepare_open,
++    prepare_resolve,
+ };
+ 
+ use crate::args::Ai;
+@@ -18,6 +19,7 @@ use crate::ipc_error::{IpcError, blocking_reply};
+ use crate::range::range_folder;
+ use crate::second_window;
+ 
++mod discussions;
+ mod job_logs;
+ mod pictures;
+ 
+@@ -316,6 +318,22 @@ pub(crate) async fn read_job_log<R: Runtime>(
+     .await
+ }
+ 
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn read_discussions<R: Runtime>(
++    window: WebviewWindow<R>,
++    iids: Vec<MergeRequestIid>,
++) -> Result<Vec<RowDiscussions>, IpcError> {
++    blocking_reply(move || {
++        Ok(discussions::discussions_reply(
++            &window.state(),
++            Glab::find().as_ref(),
++            &iids,
++        ))
++    })
++    .await
++}
++
+ #[tauri::command]
+ #[specta::specta]
+ pub(crate) async fn resolve_merge_request<R: Runtime>(
+diff --git a/src-tauri/src/merge_requests/discussions.rs b/src-tauri/src/merge_requests/discussions.rs
+new file mode 100644
+index 0000000..6a71a8e
+--- /dev/null
++++ b/src-tauri/src/merge_requests/discussions.rs
+@@ -0,0 +1,28 @@
++use yamt_merge_requests::{
++    DiscussionsAnswer, Glab, MergeRequestIid, RowDiscussions, read_discussions, unread_discussions,
++};
++
++use super::{MergeRequestState, NO_PROJECT, offered};
++
++/// No GitLab project → each asked row fails; else glab reads them, and every answered note's page joins `pages` and
++/// the authors' uploaded pictures are offered, both before the rows are returned. Never holds `pages` while glab
++/// runs.
++pub(super) fn discussions_reply(
++    state: &MergeRequestState,
++    glab: Option<&Glab>,
++    iids: &[MergeRequestIid],
++) -> Vec<RowDiscussions> {
++    let Some(repository) = &state.gitlab else {
++        return unread_discussions(iids, NO_PROJECT);
++    };
++    let read = read_discussions(repository, glab, iids);
++    let mut pages = offered(&state.pages);
++    for row in &read.rows {
++        if let DiscussionsAnswer::Open { discussions } = &row.answer {
++            pages.extend(discussions.iter().filter_map(|open| open.last.page.clone()));
++        }
++    }
++    drop(pages);
++    state.pictures.offer(read.pictures);
++    read.rows
++}
+diff --git a/src-tauri/src/merge_requests/tests.rs b/src-tauri/src/merge_requests/tests.rs
+index e59eabe..e2f13f0 100644
+--- a/src-tauri/src/merge_requests/tests.rs
++++ b/src-tauri/src/merge_requests/tests.rs
+@@ -125,6 +125,9 @@ mod rerequest;
+ #[cfg(unix)]
+ mod job_log;
+ 
++#[cfg(unix)]
++mod discussions;
++
+ mod csp;
+ 
+ #[cfg(unix)]
+diff --git a/src-tauri/src/merge_requests/tests/discussions.rs b/src-tauri/src/merge_requests/tests/discussions.rs
+new file mode 100644
+index 0000000..5ac4b3b
+--- /dev/null
++++ b/src-tauri/src/merge_requests/tests/discussions.rs
+@@ -0,0 +1,138 @@
++use tauri::http::StatusCode;
++
++use super::through_glab::{glab_log, in_this_repository, run_with_fakes};
++use super::*;
++use crate::merge_requests::discussions::discussions_reply;
++use crate::merge_requests::pictures::picture_answer;
++
++const SCENARIO: &str = "mr-discussions";
++const OFFERED_TEST: &str = "merge_requests::tests::discussions::note_pages_on_paths_glab";
++const PICTURE_TEST: &str = "merge_requests::tests::discussions::an_authors_picture_on_paths_glab";
++const READ_TEST: &str =
++    "merge_requests::tests::discussions::read_discussions_replies_on_paths_glab";
++const BATCH: [u32; 4] = [82, 81, 79, 78];
++const NOTE_103: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_103";
++const UNLISTED_NOTE: &str =
++    "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_999";
++const EVIL_NOTE: &str = "https://evil.example/x#note_1";
++const ANNA_S_PICTURE: &str =
++    "tests/glab/mr-discussions/pictures/uploads/-/system/user/avatar/2/avatar.png";
++
++/// The rows the window gets for `iids` through the command.
++fn read(window: &MergeRequestWindow, iids: &[u32]) -> Value {
++    let iids = iids.iter().map(|&iid| MergeRequestIid(iid)).collect();
++    let reply = block_on(read_discussions(window.webview.clone(), iids));
++    serde_json::to_value(reply.unwrap()).unwrap()
++}
++
++fn open(window: &MergeRequestWindow, page: &str) -> Value {
++    invoke(window, "open_page", json!({ "page": page })).unwrap()
++}
++
++fn is_offered(window: &MergeRequestWindow, page: &str) -> bool {
++    let page = serde_json::from_value(json!(page)).unwrap();
++    let state: State<'_, MergeRequestState> = window.webview.state();
++    offered(&state.pages).contains(&page)
++}
++
++#[test]
++fn a_note_page_is_offered_before_the_reply() {
++    run_with_fakes(OFFERED_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by a_note_page_is_offered_before_the_reply"]
++fn note_pages_on_paths_glab() {
++    let window = open_window_in(gitlab_repo());
++    let not_offered = json!({ "kind": "notOffered" });
++    assert_eq!(open(&window, NOTE_103), not_offered);
++
++    let rows = read(&window, &BATCH);
++
++    assert_eq!(
++        rows[0]["answer"]["discussions"][0]["last"]["page"],
++        NOTE_103
++    );
++    assert!(is_offered(&window, NOTE_103));
++    assert_eq!(open(&window, UNLISTED_NOTE), not_offered);
++    assert_eq!(open(&window, EVIL_NOTE), not_offered);
++    // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `web_page.rs`), not PATH's fake: it would
++    // open the real browser.
++    if cfg!(not(target_os = "macos")) {
++        assert_eq!(open(&window, NOTE_103), json!({ "kind": "opened" }));
++    }
++}
++
++#[test]
++fn an_authors_uploaded_picture_is_offered() {
++    run_with_fakes(PICTURE_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by an_authors_uploaded_picture_is_offered"]
++fn an_authors_picture_on_paths_glab() {
++    let window = open_window_in(gitlab_repo());
++    let asked = |path| picture_answer(&window.webview.state(), Glab::find().as_ref(), path);
++    assert_eq!(asked("/anna").status(), StatusCode::NOT_FOUND);
++
++    read(&window, &BATCH);
++
++    let answer = asked("/anna");
++    assert_eq!(answer.status(), StatusCode::OK);
++    let file = std::fs::read(in_this_repository(ANNA_S_PICTURE)).unwrap();
++    assert_eq!(answer.body(), &file);
++    assert_eq!(asked("/ben").status(), StatusCode::NOT_FOUND);
++    assert_eq!(asked("/sam").status(), StatusCode::NOT_FOUND);
++}
++
++#[test]
++fn no_gitlab_project_fails_each_asked_row() {
++    let plain = TempDir::new().unwrap();
++    git_ok(plain.path(), &["init", "-q"]).unwrap();
++    let window = open_window_in(plain);
++    let iids = [
++        MergeRequestIid(82),
++        MergeRequestIid(81),
++        MergeRequestIid(82),
++    ];
++
++    let rows = discussions_reply(&window.webview.state(), None, &iids);
++
++    let failed = json!({ "kind": "failed", "message": NO_PROJECT });
++    let expected = json!([{ "iid": 82, "answer": failed }, { "iid": 81, "answer": failed }]);
++    assert_eq!(serde_json::to_value(rows).unwrap(), expected);
++}
++
++#[test]
++fn read_discussions_answers_through_the_command() {
++    run_with_fakes(READ_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by read_discussions_answers_through_the_command"]
++fn read_discussions_replies_on_paths_glab() {
++    let window = open_window_in(gitlab_repo());
++
++    let rows = read(&window, &[81]);
++
++    let ben = json!({
++        "username": "ben",
++        "name": "Ben Okafor",
++        "picture": {
++            "kind": "gravatar",
++            "address": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon",
++        },
++    });
++    let last = json!({
++        "author": ben,
++        "createdAt": "2026-11-02T10:00:00Z",
++        "text": "Please **check** <b>THIS</b> & that\non a dark theme\n<script>alert(1)</script>",
++        "page": "https://gitlab.example/taskboard/taskboard/-/merge_requests/81#note_201",
++    });
++    let discussion = json!({ "place": { "kind": "overview" }, "last": last });
++    let answer = json!({ "kind": "open", "discussions": [discussion] });
++    assert_eq!(rows, json!([{ "iid": 81, "answer": answer }]));
++    assert_eq!(read(&window, &[]), json!([]));
++    let queries = glab_log("argv: api graphql");
++    assert_eq!(queries.len(), 1, "{queries:?}");
++}
+diff --git a/src-tauri/src/settings.rs b/src-tauri/src/settings.rs
+index b57999c..622a36b 100644
+--- a/src-tauri/src/settings.rs
++++ b/src-tauri/src/settings.rs
+@@ -1,8 +1,8 @@
+ use tauri::path::PathResolver;
+ use tauri::{Manager, Runtime, State, WebviewWindow};
+ use yamt_settings::{
+-    AddedServer, AgentSettings, Antialiasing, KeysChange, Places, RepositoryAnswer, SettingsRead,
+-    StoredSettings, Theme,
++    AddedServer, AgentSettings, Antialiasing, DiscussionDetails, KeysChange, Places,
++    RepositoryAnswer, SettingsRead, StoredSettings, Theme,
+ };
+ 
+ use crate::ipc_error::IpcError;
+@@ -181,3 +181,19 @@ pub(crate) fn set_agent<R: Runtime>(
+     show_theme(&window, read.stored.theme);
+     Ok(read)
+ }
++
++#[tauri::command]
++#[specta::specta]
++#[expect(
++    clippy::needless_pass_by_value,
++    reason = "tauri passes arguments by value"
++)]
++pub(crate) fn set_discussion_details<R: Runtime>(
++    window: WebviewWindow<R>,
++    current: StoredSettings,
++    details: DiscussionDetails,
++) -> Result<SettingsRead, IpcError> {
++    let read = yamt_settings::set_discussion_details(&places(window.path())?, &current, details)?;
++    show_theme(&window, read.stored.theme);
++    Ok(read)
++}
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index 75d57ca..80188b4 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -32,8 +32,9 @@ test ever runs a file it has just written (ETXTBSY).
+ | `post-<n>.err` | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body") |
+ | `post-<n>.exit` | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout |
+ | `post-<n>.sleep` | seconds to wait before answering (a post that hangs) |
+-| `graphql-page-<n>.json` | `glab api graphql` without `--input -` and without a field `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`) |
+-| `graphql-merge-request-<iid>.json` | `glab api graphql` without `--input -`, with a field `iid=<iid>` |
++| `graphql-page-<n>.json` | `glab api graphql` without `--input -` and without a field `iids` or `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`) |
++| `graphql-discussions-<iids>.json` | `glab api graphql` without `--input -`, with a field `iids=<JSON array>` (the discussions query): `<iids>` is the array without its quotes, brackets and spaces, its commas as `-` (`iids=["82","81"]` → `graphql-discussions-82-81`); with a field `discussionsAfter=<cursor>`, `graphql-discussions-<iids>-after-<cursor>` |
++| `graphql-merge-request-<iid>.json` | `glab api graphql` without `--input -` and without a field `iids`, with a field `iid=<iid>` |
+ | `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`) |
+ | `pictures/<path>` | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found` |
+ | `pictures/<path>.sleep` | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists |
+@@ -46,6 +47,10 @@ whose file is missing, or any other endpoint, answers `404 Not Found` with the b
+ A POST or GraphQL call whose `.json` is missing, or an `after` not of the form `page-<n>`, exits 2. Any other glab
+ command exits 2 with "fake glab: unknown command".
+ 
++`-F iids=["82","81"]` sends a JSON array of strings as the variable, measured on glab 1.126.0 against gitlab.com on
++2026-11-03 (`mergeRequests(iids: $iids)` answered all 20 merge requests of a 20-string array). The fake keeps the
++field as written.
++
+ ## What the fake prints, as glab 1.124.0 does
+ 
+ Measured with `HOME` and `XDG_CONFIG_HOME` in a temporary folder (no token), against gitlab.com:
+@@ -162,6 +167,22 @@ answered: <address or endpoint>            (a picture or a job's log, after its
+   25th), its first line naming `FIRST LINE OF THE LONG LOG`, its last a red failure line; `305.log` is empty; there
+   is no `304.log` (404); `310.log` is a short fork log (`FORK LOG: …`), `312.log` a short coloured log with `fail`.
+   `.gitattributes` keeps every byte (`* -text`).
++- `mr-discussions/` — each row's open discussions (`crates/merge-requests/tests/discussions.rs`, the discussions app
++  tests in `src-tauri/src/merge_requests/tests/discussions.rs`): logged in; `merge-requests/`'s project; user `sam`;
++  one page, the last, with the list query's fields (`queryComplexity` 170 of 250); no `diffHeadSha`. !82 (3 open: 4
++  resolvable, 1 resolved), !81 (1), !80 (0), !79 (1), !78 (1). The batch `graphql-discussions-82-81-79-78.json`
++  (`queryComplexity` 58 of 250, as gitlab.com scored 20 merge requests on 2026-11-03): !82 holds, in order, (a) a diff
++  discussion on `src/board/card.ts` line 12: anna's comment, a system note "changed this line in version 2 of the
++  diff", then sam's reply (note 103); (b) a diff discussion on `src/board/dueDates.ts`, old line 6 only: ben's
++  comment, then a system note last; (c) an Overview discussion by anna whose `url` is `https://evil.example/x#note_1`
++  (no page); (d) a resolved discussion; (e) a system-only "added 2 commits" (`resolvable: false`); (f) chiara's
++  non-resolvable comment. !81: one Overview discussion, ben's note 201, its body `Please **check** <b>THIS</b> & that`
++  on three lines with a `<script>` line. !79: page 1 holds only two resolved discussions and names `hasNextPage: true,
++  endCursor: "d-2"`; `graphql-discussions-79-after-d-2.json` holds the open one (sam, `src/board/search.ts` line 3).
++  !78 is absent from the batch's answer. `graphql-discussions-81.json` answers !81 alone (a lazy ask, score 32);
++  `graphql-discussions-77.err` and `.exit` (1) fail before any answer with a deadline line. Avatars: anna's uploaded
++  `/uploads/-/system/user/avatar/2/avatar.png` (`pictures/`, `mr-row-details/`'s PNG), ben's Gravatar as in
++  `mr-row-details/`; every other `url` is `https://gitlab.example/taskboard/taskboard/-/merge_requests/<iid>#note_<n>`.
+ 
+ ## Fake browser opener
+ 
+diff --git a/tests/glab/mr-discussions/graphql-discussions-77.err b/tests/glab/mr-discussions/graphql-discussions-77.err
+new file mode 100644
+index 0000000..2a82780
+--- /dev/null
++++ b/tests/glab/mr-discussions/graphql-discussions-77.err
+@@ -0,0 +1 @@
++glab: Post "https://gitlab.example/api/graphql": context deadline exceeded
+diff --git a/tests/glab/mr-discussions/graphql-discussions-77.exit b/tests/glab/mr-discussions/graphql-discussions-77.exit
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/glab/mr-discussions/graphql-discussions-77.exit
+@@ -0,0 +1 @@
++1
+diff --git a/tests/glab/mr-discussions/graphql-discussions-79-after-d-2.json b/tests/glab/mr-discussions/graphql-discussions-79-after-d-2.json
+new file mode 100644
+index 0000000..3a350c9
+--- /dev/null
++++ b/tests/glab/mr-discussions/graphql-discussions-79-after-d-2.json
+@@ -0,0 +1,36 @@
++{
++  "data": {
++    "queryComplexity": { "score": 32, "limit": 250 },
++    "project": {
++      "mergeRequests": {
++        "nodes": [
++          {
++            "iid": "79",
++            "discussions": {
++              "pageInfo": { "hasNextPage": false, "endCursor": "d-3" },
++              "nodes": [
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++                        "body": "Search titles only, for now?",
++                        "createdAt": "2026-10-31T10:20:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_303",
++                        "position": { "filePath": "src/board/search.ts", "newLine": 3, "oldLine": 3 }
++                      }
++                    ]
++                  }
++                }
++              ]
++            }
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/tests/glab/mr-discussions/graphql-discussions-81.json b/tests/glab/mr-discussions/graphql-discussions-81.json
+new file mode 100644
+index 0000000..9036da0
+--- /dev/null
++++ b/tests/glab/mr-discussions/graphql-discussions-81.json
+@@ -0,0 +1,40 @@
++{
++  "data": {
++    "queryComplexity": { "score": 32, "limit": 250 },
++    "project": {
++      "mergeRequests": {
++        "nodes": [
++          {
++            "iid": "81",
++            "discussions": {
++              "pageInfo": { "hasNextPage": false, "endCursor": "d-81" },
++              "nodes": [
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": {
++                          "username": "ben",
++                          "name": "Ben Okafor",
++                          "avatarUrl": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon"
++                        },
++                        "body": "Please **check** <b>THIS</b> & that\non a dark theme\n<script>alert(1)</script>",
++                        "createdAt": "2026-11-02T10:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/81#note_201",
++                        "position": null
++                      }
++                    ]
++                  }
++                }
++              ]
++            }
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/tests/glab/mr-discussions/graphql-discussions-82-81-79-78.json b/tests/glab/mr-discussions/graphql-discussions-82-81-79-78.json
+new file mode 100644
+index 0000000..d192035
+--- /dev/null
++++ b/tests/glab/mr-discussions/graphql-discussions-82-81-79-78.json
+@@ -0,0 +1,228 @@
++{
++  "data": {
++    "queryComplexity": { "score": 58, "limit": 250 },
++    "project": {
++      "mergeRequests": {
++        "nodes": [
++          {
++            "iid": "82",
++            "discussions": {
++              "pageInfo": { "hasNextPage": false, "endCursor": "d-82" },
++              "nodes": [
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": {
++                          "username": "anna",
++                          "name": "Anna Berg",
++                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
++                        },
++                        "body": "Should a card without a due date sort last?",
++                        "createdAt": "2026-11-03T10:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_101",
++                        "position": { "filePath": "src/board/card.ts", "newLine": 12, "oldLine": null }
++                      },
++                      {
++                        "system": true,
++                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++                        "body": "changed this line in [version 2 of the diff](/taskboard/taskboard/-/merge_requests/82/diffs?diff_id=2&start_sha=1732ffd14f9df9ea3b85433dc1fbacbc2260fe85#a1_12_12)",
++                        "createdAt": "2026-11-03T11:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_102",
++                        "position": { "filePath": "src/board/card.ts", "newLine": 12, "oldLine": null }
++                      },
++                      {
++                        "system": false,
++                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++                        "body": "Yes, done in the second commit.",
++                        "createdAt": "2026-11-03T11:05:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_103",
++                        "position": { "filePath": "src/board/card.ts", "newLine": 12, "oldLine": null }
++                      }
++                    ]
++                  }
++                },
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": {
++                          "username": "ben",
++                          "name": "Ben Okafor",
++                          "avatarUrl": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon"
++                        },
++                        "body": "This removed line still has a caller.",
++                        "createdAt": "2026-11-03T10:10:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_104",
++                        "position": { "filePath": "src/board/dueDates.ts", "newLine": null, "oldLine": 6 }
++                      },
++                      {
++                        "system": true,
++                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++                        "body": "changed this line in [version 2 of the diff](/taskboard/taskboard/-/merge_requests/82/diffs?diff_id=2&start_sha=1732ffd14f9df9ea3b85433dc1fbacbc2260fe85#b2_6_6)",
++                        "createdAt": "2026-11-03T11:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_105",
++                        "position": { "filePath": "src/board/dueDates.ts", "newLine": null, "oldLine": 6 }
++                      }
++                    ]
++                  }
++                },
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": {
++                          "username": "anna",
++                          "name": "Anna Berg",
++                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
++                        },
++                        "body": "Please add a screenshot to the description.",
++                        "createdAt": "2026-11-03T10:20:00Z",
++                        "url": "https://evil.example/x#note_1",
++                        "position": null
++                      }
++                    ]
++                  }
++                },
++                {
++                  "resolvable": true,
++                  "resolved": true,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "ben", "name": "Ben Okafor", "avatarUrl": null },
++                        "body": "A typo in the title.",
++                        "createdAt": "2026-11-03T10:30:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_106",
++                        "position": null
++                      }
++                    ]
++                  }
++                },
++                {
++                  "resolvable": false,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": true,
++                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++                        "body": "added 2 commits",
++                        "createdAt": "2026-11-03T11:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_107",
++                        "position": null
++                      }
++                    ]
++                  }
++                },
++                {
++                  "resolvable": false,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "chiara", "name": "Chiara Rossi", "avatarUrl": null },
++                        "body": "Looks good to me.",
++                        "createdAt": "2026-11-03T11:30:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_108",
++                        "position": null
++                      }
++                    ]
++                  }
++                }
++              ]
++            }
++          },
++          {
++            "iid": "81",
++            "discussions": {
++              "pageInfo": { "hasNextPage": false, "endCursor": "d-81" },
++              "nodes": [
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": {
++                          "username": "ben",
++                          "name": "Ben Okafor",
++                          "avatarUrl": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon"
++                        },
++                        "body": "Please **check** <b>THIS</b> & that\non a dark theme\n<script>alert(1)</script>",
++                        "createdAt": "2026-11-02T10:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/81#note_201",
++                        "position": null
++                      }
++                    ]
++                  }
++                }
++              ]
++            }
++          },
++          {
++            "iid": "79",
++            "discussions": {
++              "pageInfo": { "hasNextPage": true, "endCursor": "d-2" },
++              "nodes": [
++                {
++                  "resolvable": true,
++                  "resolved": true,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++                        "body": "Rename the search box.",
++                        "createdAt": "2026-10-31T10:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_301",
++                        "position": null
++                      }
++                    ]
++                  }
++                },
++                {
++                  "resolvable": true,
++                  "resolved": true,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++                        "body": "Debounce the input.",
++                        "createdAt": "2026-10-31T10:10:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_302",
++                        "position": null
++                      }
++                    ]
++                  }
++                }
++              ]
++            }
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/tests/glab/mr-discussions/graphql-page-1.json b/tests/glab/mr-discussions/graphql-page-1.json
+new file mode 100644
+index 0000000..331390a
+--- /dev/null
++++ b/tests/glab/mr-discussions/graphql-page-1.json
+@@ -0,0 +1,136 @@
++{
++  "data": {
++    "queryComplexity": { "score": 170, "limit": 250 },
++    "currentUser": { "username": "sam" },
++    "project": {
++      "mergeRequests": {
++        "pageInfo": { "hasNextPage": false, "endCursor": null },
++        "nodes": [
++          {
++            "iid": "82",
++            "title": "Due dates on cards",
++            "createdAt": "2026-11-03T09:00:00Z",
++            "draft": false,
++            "author": {
++              "username": "anna",
++              "name": "Anna Berg",
++              "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
++            },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 4,
++            "resolvedDiscussionsCount": 1,
++            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          },
++          {
++            "iid": "81",
++            "title": "Card colours",
++            "createdAt": "2026-11-02T09:00:00Z",
++            "draft": false,
++            "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 1,
++            "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          },
++          {
++            "iid": "80",
++            "title": "Archive old boards",
++            "createdAt": "2026-11-01T09:00:00Z",
++            "draft": false,
++            "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 2,
++            "resolvedDiscussionsCount": 2,
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          },
++          {
++            "iid": "79",
++            "title": "Board search",
++            "createdAt": "2026-10-31T09:00:00Z",
++            "draft": false,
++            "author": {
++              "username": "ben",
++              "name": "Ben Okafor",
++              "avatarUrl": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon"
++            },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 3,
++            "resolvedDiscussionsCount": 2,
++            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          },
++          {
++            "iid": "78",
++            "title": "Card templates",
++            "createdAt": "2026-10-30T09:00:00Z",
++            "draft": false,
++            "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 1,
++            "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/tests/glab/mr-discussions/pictures/uploads/-/system/user/avatar/2/avatar.png b/tests/glab/mr-discussions/pictures/uploads/-/system/user/avatar/2/avatar.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..3a295f56ad1008595b4c6ffab8007f030cdf498f
+GIT binary patch
+literal 362
+zcme7R@N?(olHy`uVBq!ia0y~yU=RRd0VW0ph69XSN*Nd!4Lw~PLo7}w?@1Nc5?*n}
+z!T5la!>+I+@lROlOzUUe&#6gv+{7xdIMR$OPkd5ShrzWCx#_$46aVM`eEQQ{aMhM+
+zfE}FwP*N{D;)C>AGk>FSu4QR*ht1eRcWjDL**jTsNkQacr=E*z<b=+vo-&yGsroqg
+zN%7c%sS#@v6^~^cGubAv&FkCSPnlds0w3qk<4?D(ICM&3qgzvhsn3o_4AU<PFbFoD
+zc=So0WkE!POz#Oc$D8+`-WHvspt4LSP;9{x-c1b4glB%pZfG%`a`xwjPY3NdIyJjb
+zcUtH+xZM38x&PXqtm7seN=y@5R~&h%{$x?po)oUc|6WygKX1;r|M%YZ{z8>tw=<hK
+z(%lX-7D)1%@&+@91nM^1A2w$5*mbPK;mL+$sV08%3BTC(^PkXp({a&<hk@by@|V@A
+T4%WR43=9mOu6{1-oD!M<*l?JO
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/glab/mr-discussions/project.json b/tests/glab/mr-discussions/project.json
+new file mode 100644
+index 0000000..d591a82
+--- /dev/null
++++ b/tests/glab/mr-discussions/project.json
+@@ -0,0 +1 @@
++{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example/taskboard/taskboard"}
