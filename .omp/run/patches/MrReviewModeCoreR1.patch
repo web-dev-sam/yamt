@@ -1,0 +1,204 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index f74edea..06e806f 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -18,6 +18,8 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ 
+ Discussions (request `docs/slices/request-mr-discussions.md` rules 2, 3, 5, design `docs/slices/briefs/mr-discussions-design.md` §1.3, §1.4, §1.8, plan §2 #163–#164): `OpenDiscussion` (a `DiscussionPlace` and its `last` comment, a `DiscussionNote`) is structural, so the window's domain type passes in unchanged. The turn rule: the viewer's turn when the last comment's author is not the viewer, an unknown author included; "waiting" when the viewer wrote it. The viewer is a username or null (nobody: every discussion is the viewer's turn); the window passes its `me`, review mode its reviewer. `discussionTurns` orders the viewer's turn first, then the waiting ones, newest last comment first within each, equal times in GitLab's order; `turnCounts` counts both. `Viewer` is whose turn the words speak for: `me { username | null }` or `person { username, name }`; `viewerOf(review, me, rows)` gives `me` for no review, Me, or a person whose username is `me`, else the person named by `displayName` of the first row reviewer with that username, else the username. Words: `DISCUSSIONS_LABEL` "Open discussions", `turnText(turn, viewer)` "Your turn" / "Anna Berg's turn" / "Waiting for an answer", `turnSummaryText(counts, viewer)` "2 of 5 wait for you", "1 of 5 waits for Anna Berg", "No open discussions" when there are none, `placeText` "Overview", `path:line` or the path alone, `noteAuthorName` the display name or `UNKNOWN_AUTHOR` "Someone", `agoText`. `noteExcerpt`: the body trimmed, its first three lines (`\n` or `\r\n`), at most 280 code points; when anything was left out it is cut there, end-trimmed, plus "…". Plain text: markup and capitals stay as typed.
+ 
++The viewer's possessive is `viewerPossessive(viewer, at)` alone ("Your"/"your" by `at`, a person "Anna Berg's"): `turnText` reads it at `start`, `reviewSortedText` and `reviewFailedText` `inside`.
++
+ Review mode (request `docs/slices/request-mr-review-mode.md` rules 1–3, 5, 6, design `docs/slices/briefs/mr-review-mode-design.md` option A §1.1–1.5): `ReviewFor` is Me or a person, never "None"; it is `Filters.review` (null: the normal order). `reviewing(who)` is Reviewer = who included, Draft ready, every other filter off; every other edit spreads the filters, so it keeps `review`; `NO_FILTERS` has none, so Clear filters ends it; `isFiltered` counts it. `stored` writes it as a fifth key `review`, `"me"` or `"user:<username>"` (the person words), only while it is set, so the four other keys are exactly what an older yamt reads; "none", junk or a non-string reads as off. `reviewChoices` is the picker: the Reviewer filter's choices without "None", in their order, the chosen one `included`. `reviewOrdered(rows, reviewer, dueOf, detailsOf)` (`reviewOrder`): the normal order (`byDueDate`); the first row in it whose `ReviewDetails` are `failed` gives `failed` with that row and the window's own failure value, the rows left in the normal order; else one stable sort: due rows with at least one discussion that is the reviewer's turn first (keeping the normal order), then the rest by fewest waiting on the author (`turnCounts`; `none` and `loading` count as no discussion), and `loading` is how many rows have not arrived. Words: `reviewSortedText` "Sorted for your review: due with your turn first, then fewest waiting on the author" (a person: "Sorted for Anna Berg's review: due with their turn first, …"), plus " (the discussions of 1 merge request are still loading; it moves when they arrive)" or "… of 3 merge requests … they move …"; `reviewFailedText` "Not sorted for your review: the discussions of !633 could not be read. <reason>".
+ 
+ Job log (request `docs/slices/request-ci-job-log.md` rules 4–6, design `docs/slices/briefs/ci-job-log-design.md` §1.2, §1.7–1.9, plan §2 #159): `jobLogView(raw)` turns the raw `/trace` text into `LogLine`s of styled `LogRun`s as GitLab's job page shows it (`lib/gitlab/ci/ansi2json/converter.rb`, `parser.rb`, `style.rb`, `line.rb`; bold from `ansi2html.rb`), in one scan: a break is `\r*\n`; the 32-character timestamp prefix is stripped from every line when the first line has it, and a line whose prefix ends in `+` continues the one before (only the `\n` goes, a `\r` before it then clears); `section_start`/`section_end` markers vanish and end a line that has text; a lone `\r` clears the line; only `ESC[…m` (SGR) is applied, by GitLab's exact-text code table (`sgr.ts` `penAfter`: `01` is nothing, `38;5;n` an indexed colour, `38;2;…` no truecolor, its numbers read as codes); every other escape, and C0 controls but tab, vanish; an escape cut off at a line's end drops the rest; 30–37 show bright while bold; the style carries across lines; a line without text is not shown; neighbouring text in equal styles is one run. Run text is text, never markup (RK57). `text` is the shown lines joined by `"\n"`: what the page's `search/` matcher runs over; `hitPlaces` maps its `{ line, from, to }` hits onto runs (a `from` at a run's end starts the next run, a `to` there ends in that run; a hit outside the view is left out). `basicColour` turns a 256-colour index into one of the 16 `AnsiColour`s, 16–255 the nearest on xterm's default palette (the triples classify, never paint: the page maps `AnsiColour` to the `--color-ansi-*` tokens). `jobLogSearch`: `firstHit` the last match, `steppedHit` wraps both ways, `hitCountText` "3 of 17", `NO_RESULTS`; for the page's highlights only the lines near the view count: `firstLineBelow(count, edge, y)` the first line whose growing `edge` is past `y` (binary search), `placesOnLines(places, first, end)` the places on lines `first` to `end` exclusive (binary search on the line order `hitPlaces` gives).
+diff --git a/frontend/src/mergeRequests/internal/discussions.ts b/frontend/src/mergeRequests/internal/discussions.ts
+index a23e480..8f5b188 100644
+--- a/frontend/src/mergeRequests/internal/discussions.ts
++++ b/frontend/src/mergeRequests/internal/discussions.ts
+@@ -78,11 +78,18 @@ export function viewerOf(
+   };
+ }
+ 
++export function viewerPossessive(viewer: Viewer, at: "start" | "inside"): string {
++  if (viewer.kind === "person") {
++    return `${viewer.name}'s`;
++  }
++  return at === "start" ? "Your" : "your";
++}
++
+ export function turnText(turn: Turn, viewer: Viewer): string {
+   if (turn === "waiting") {
+     return WAITING_TEXT;
+   }
+-  return viewer.kind === "me" ? "Your turn" : `${viewer.name}'s turn`;
++  return `${viewerPossessive(viewer, "start")} turn`;
+ }
+ 
+ export function turnSummaryText({ viewersTurn, waiting }: TurnCounts, viewer: Viewer): string {
+diff --git a/frontend/src/mergeRequests/internal/reviewOrder.test.ts b/frontend/src/mergeRequests/internal/reviewOrder.test.ts
+index 61b030f..c6b204b 100644
+--- a/frontend/src/mergeRequests/internal/reviewOrder.test.ts
++++ b/frontend/src/mergeRequests/internal/reviewOrder.test.ts
+@@ -5,6 +5,7 @@ import {
+   reviewFailedText,
+   reviewOrdered,
+   reviewSortedText,
++  turnText,
+   type CalendarDay,
+   type OpenDiscussion,
+   type Person,
+@@ -182,3 +183,16 @@ test("the failed words name the row and the reason", () => {
+     "Not sorted for Anna Berg's review: the discussions of !615 could not be read. glab failed: 500",
+   );
+ });
++
++test.each<[string, Viewer]>([
++  ["me", ME],
++  ["a named reviewer", AS_ANNA],
++  ["a reviewer named by a lowercase username", { kind: "person", username: "ben", name: "ben" }],
++])("the review words name %s as the turn words do", (_case, viewer) => {
++  const possessive = turnText("viewer", viewer).replace(/ turn$/u, "");
++  const inside = viewer.kind === "me" ? possessive.toLowerCase() : possessive;
++  expect(reviewSortedText(viewer, 0)).toMatch(new RegExp(`^Sorted for ${inside} review: `, "u"));
++  expect(reviewFailedText(viewer, 1, "")).toMatch(
++    new RegExp(`^Not sorted for ${inside} review: `, "u"),
++  );
++});
+diff --git a/frontend/src/mergeRequests/internal/reviewOrder.ts b/frontend/src/mergeRequests/internal/reviewOrder.ts
+index 645ee63..cf429ac 100644
+--- a/frontend/src/mergeRequests/internal/reviewOrder.ts
++++ b/frontend/src/mergeRequests/internal/reviewOrder.ts
+@@ -1,4 +1,10 @@
+-import { turnCounts, type OpenDiscussion, type TurnCounts, type Viewer } from "./discussions";
++import {
++  turnCounts,
++  viewerPossessive,
++  type OpenDiscussion,
++  type TurnCounts,
++  type Viewer,
++} from "./discussions";
+ import type { CalendarDay } from "./dueDate";
+ import { byDueDate } from "./order";
+ 
+@@ -57,10 +63,6 @@ export function reviewOrdered<R extends { readonly iid: number; readonly created
+   return { kind: "sorted", rows: sorted.map(({ row }) => row), loading };
+ }
+ 
+-function reviewName(viewer: Viewer): string {
+-  return viewer.kind === "me" ? "your" : `${viewer.name}'s`;
+-}
+-
+ function loadingText(loading: number): string {
+   if (loading === 0) {
+     return "";
+@@ -71,10 +73,10 @@ function loadingText(loading: number): string {
+ }
+ 
+ export function reviewSortedText(viewer: Viewer, loading: number): string {
+-  const turn = viewer.kind === "me" ? "your" : "their";
+-  return `Sorted for ${reviewName(viewer)} review: due with ${turn} turn first, then fewest waiting on the author${loadingText(loading)}`;
++  const whose = viewer.kind === "me" ? "your" : "their";
++  return `Sorted for ${viewerPossessive(viewer, "inside")} review: due with ${whose} turn first, then fewest waiting on the author${loadingText(loading)}`;
+ }
+ 
+ export function reviewFailedText(viewer: Viewer, iid: number, reason: string): string {
+-  return `Not sorted for ${reviewName(viewer)} review: the discussions of !${iid} could not be read. ${reason}`;
++  return `Not sorted for ${viewerPossessive(viewer, "inside")} review: the discussions of !${iid} could not be read. ${reason}`;
+ }
+diff --git a/frontend/src/ui/mergeRequestDueDates.test.ts b/frontend/src/ui/mergeRequestDueDates.test.ts
+index 285c698..f271382 100644
+--- a/frontend/src/ui/mergeRequestDueDates.test.ts
++++ b/frontend/src/ui/mergeRequestDueDates.test.ts
+@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
+ import { shallowRef } from "vue";
+ 
+ import { isMergeRequestIid, type MergeRequestIid } from "../ipc";
+-import type { CalendarDay } from "../mergeRequests";
++import { byDueDate, type CalendarDay } from "../mergeRequests";
+ import { createDueDates } from "./mergeRequestDueDates";
+ 
+ const KEY = "yamt.mergeRequests.dueDates";
+@@ -188,3 +188,20 @@ test("a storage that throws on write keeps the date in memory and logs under the
+     '[warn] mergeRequests.due_dates_storage_failed {kind: "Unexpected", message: "quota exceeded"}',
+   ]);
+ });
++
++test("due_of_is_the_day_dated_first_orders_by_and_follows_the_repository", () => {
++  const storage = memoryStorage({ [OTHER_REPOSITORY]: { "2": "2026-11-05" } });
++  const repository = shallowRef(REPOSITORY);
++  const due = createDueDates(repository, storage);
++  due.set(iid(1), DEC_24);
++  due.set(iid(3), NOV_5);
++  const rows = [1, 2, 3, 4].map((each) => ({ iid: iid(each), createdAt: each }));
++
++  expect(rows.map((row) => due.dueOf(row.iid))).toEqual([DEC_24, null, NOV_5, null]);
++  expect(due.datedFirst(rows).map((row) => row.iid)).toEqual([3, 1, 2, 4]);
++  expect(due.datedFirst(rows)).toEqual(byDueDate(rows, due.dueOf));
++
++  repository.value = OTHER_REPOSITORY;
++  expect(rows.map((row) => due.dueOf(row.iid))).toEqual([null, NOV_5, null, null]);
++  expect(due.datedFirst(rows).map((row) => row.iid)).toEqual([2, 1, 3, 4]);
++});
+diff --git a/frontend/src/ui/mergeRequestDueDates.ts b/frontend/src/ui/mergeRequestDueDates.ts
+index 0db2df1..648bb3d 100644
+--- a/frontend/src/ui/mergeRequestDueDates.ts
++++ b/frontend/src/ui/mergeRequestDueDates.ts
+@@ -16,6 +16,7 @@ export type DueDates = {
+   readonly dates: ComputedRef<Dates>;
+   set(iid: MergeRequestIid, day: CalendarDay | null): void;
+   keepOnly(iids: ReadonlySet<MergeRequestIid>): void;
++  readonly dueOf: (iid: number) => CalendarDay | null;
+   datedFirst<R extends Dated>(rows: readonly R[]): readonly R[];
+ };
+ 
+@@ -55,6 +56,10 @@ export function createDueDates(
+     const at = repository.value;
+     return at === null ? new Map() : datesFrom(byRepository.entryAt(at));
+   });
++  function dueOf(iid: number): CalendarDay | null {
++    const due: ReadonlyMap<number, CalendarDay> = dates.value;
++    return due.get(iid) ?? null;
++  }
+   return {
+     dates,
+     set: (iid, day) => {
+@@ -72,9 +77,7 @@ export function createDueDates(
+         write(byRepository, repository.value, new Map(kept));
+       }
+     },
+-    datedFirst: (rows) => {
+-      const due: ReadonlyMap<number, CalendarDay> = dates.value;
+-      return byDueDate(rows, (iid) => due.get(iid) ?? null);
+-    },
++    dueOf,
++    datedFirst: (rows) => byDueDate(rows, dueOf),
+   };
+ }
+diff --git a/frontend/src/ui/mergeRequestsShown.ts b/frontend/src/ui/mergeRequestsShown.ts
+index e76dd3f..ec4fc16 100644
+--- a/frontend/src/ui/mergeRequestsShown.ts
++++ b/frontend/src/ui/mergeRequestsShown.ts
+@@ -8,7 +8,6 @@ import {
+   searched,
+   summaryText,
+   viewerOf,
+-  type CalendarDay,
+   type Filters,
+   type ReviewDetails,
+   type Viewer,
+@@ -61,13 +60,9 @@ function reviewDetails(load: DiscussionLoad | undefined): ReviewDetails<Discussi
+ }
+ 
+ function ordered(listed: Listed, passing: readonly MergeRequestRow[], viewer: Viewer): Ordered {
+-  const due: ReadonlyMap<number, CalendarDay> = listed.dueDates.dates.value;
+   const loads: ReadonlyMap<number, DiscussionLoad> = listed.discussionQueue.discussions.value;
+-  const order = reviewOrdered(
+-    passing,
+-    viewer.username,
+-    (iid) => due.get(iid) ?? null,
+-    (iid) => reviewDetails(loads.get(iid)),
++  const order = reviewOrdered(passing, viewer.username, listed.dueDates.dueOf, (iid) =>
++    reviewDetails(loads.get(iid)),
+   );
+   return order.kind === "sorted"
+     ? { rows: order.rows, sort: { kind: "sorted", loading: order.loading } }

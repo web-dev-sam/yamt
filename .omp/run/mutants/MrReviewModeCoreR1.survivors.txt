@@ -1,0 +1,3 @@
+just mutants HEAD: 304 killed, 0 timeout, 9 survived, 2 no-cov; dueDates 100%, shown 95.74%, discussions 95.49%, reviewOrder 95.65%
+frontend/src/mergeRequests/internal/reviewOrder.ts:77 "inside"→"" in viewerPossessive — equivalent: any `at` other than "start" gives the inside form, and "" fails vue-tsc (`at` is "start"|"inside"), so typecheck covers it
+frontend/src/mergeRequests/internal/reviewOrder.ts:81 "inside"→"" — equivalent, same reason as line 77

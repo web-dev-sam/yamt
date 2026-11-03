@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { shallowRef } from "vue";
 
 import { isMergeRequestIid, type MergeRequestIid } from "../ipc";
-import type { CalendarDay } from "../mergeRequests";
+import { byDueDate, type CalendarDay } from "../mergeRequests";
 import { createDueDates } from "./mergeRequestDueDates";
 
 const KEY = "yamt.mergeRequests.dueDates";
@@ -187,4 +187,21 @@ test("a storage that throws on write keeps the date in memory and logs under the
   expect(warnings).toEqual([
     '[warn] mergeRequests.due_dates_storage_failed {kind: "Unexpected", message: "quota exceeded"}',
   ]);
+});
+
+test("due_of_is_the_day_dated_first_orders_by_and_follows_the_repository", () => {
+  const storage = memoryStorage({ [OTHER_REPOSITORY]: { "2": "2026-11-05" } });
+  const repository = shallowRef(REPOSITORY);
+  const due = createDueDates(repository, storage);
+  due.set(iid(1), DEC_24);
+  due.set(iid(3), NOV_5);
+  const rows = [1, 2, 3, 4].map((each) => ({ iid: iid(each), createdAt: each }));
+
+  expect(rows.map((row) => due.dueOf(row.iid))).toEqual([DEC_24, null, NOV_5, null]);
+  expect(due.datedFirst(rows).map((row) => row.iid)).toEqual([3, 1, 2, 4]);
+  expect(due.datedFirst(rows)).toEqual(byDueDate(rows, due.dueOf));
+
+  repository.value = OTHER_REPOSITORY;
+  expect(rows.map((row) => due.dueOf(row.iid))).toEqual([null, NOV_5, null, null]);
+  expect(due.datedFirst(rows).map((row) => row.iid)).toEqual([2, 1, 3, 4]);
 });

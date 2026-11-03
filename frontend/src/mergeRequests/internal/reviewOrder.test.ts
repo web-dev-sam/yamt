@@ -5,6 +5,7 @@ import {
   reviewFailedText,
   reviewOrdered,
   reviewSortedText,
+  turnText,
   type CalendarDay,
   type OpenDiscussion,
   type Person,
@@ -180,5 +181,18 @@ test("the failed words name the row and the reason", () => {
   );
   expect(reviewFailedText(AS_ANNA, 615, "glab failed: 500")).toBe(
     "Not sorted for Anna Berg's review: the discussions of !615 could not be read. glab failed: 500",
+  );
+});
+
+test.each<[string, Viewer]>([
+  ["me", ME],
+  ["a named reviewer", AS_ANNA],
+  ["a reviewer named by a lowercase username", { kind: "person", username: "ben", name: "ben" }],
+])("the review words name %s as the turn words do", (_case, viewer) => {
+  const possessive = turnText("viewer", viewer).replace(/ turn$/u, "");
+  const inside = viewer.kind === "me" ? possessive.toLowerCase() : possessive;
+  expect(reviewSortedText(viewer, 0)).toMatch(new RegExp(`^Sorted for ${inside} review: `, "u"));
+  expect(reviewFailedText(viewer, 1, "")).toMatch(
+    new RegExp(`^Not sorted for ${inside} review: `, "u"),
   );
 });

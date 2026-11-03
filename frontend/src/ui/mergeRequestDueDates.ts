@@ -16,6 +16,7 @@ export type DueDates = {
   readonly dates: ComputedRef<Dates>;
   set(iid: MergeRequestIid, day: CalendarDay | null): void;
   keepOnly(iids: ReadonlySet<MergeRequestIid>): void;
+  readonly dueOf: (iid: number) => CalendarDay | null;
   datedFirst<R extends Dated>(rows: readonly R[]): readonly R[];
 };
 
@@ -55,6 +56,10 @@ export function createDueDates(
     const at = repository.value;
     return at === null ? new Map() : datesFrom(byRepository.entryAt(at));
   });
+  function dueOf(iid: number): CalendarDay | null {
+    const due: ReadonlyMap<number, CalendarDay> = dates.value;
+    return due.get(iid) ?? null;
+  }
   return {
     dates,
     set: (iid, day) => {
@@ -72,9 +77,7 @@ export function createDueDates(
         write(byRepository, repository.value, new Map(kept));
       }
     },
-    datedFirst: (rows) => {
-      const due: ReadonlyMap<number, CalendarDay> = dates.value;
-      return byDueDate(rows, (iid) => due.get(iid) ?? null);
-    },
+    dueOf,
+    datedFirst: (rows) => byDueDate(rows, dueOf),
   };
 }

@@ -78,11 +78,18 @@ export function viewerOf(
   };
 }
 
+export function viewerPossessive(viewer: Viewer, at: "start" | "inside"): string {
+  if (viewer.kind === "person") {
+    return `${viewer.name}'s`;
+  }
+  return at === "start" ? "Your" : "your";
+}
+
 export function turnText(turn: Turn, viewer: Viewer): string {
   if (turn === "waiting") {
     return WAITING_TEXT;
   }
-  return viewer.kind === "me" ? "Your turn" : `${viewer.name}'s turn`;
+  return `${viewerPossessive(viewer, "start")} turn`;
 }
 
 export function turnSummaryText({ viewersTurn, waiting }: TurnCounts, viewer: Viewer): string {

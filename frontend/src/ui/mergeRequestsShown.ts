@@ -8,7 +8,6 @@ import {
   searched,
   summaryText,
   viewerOf,
-  type CalendarDay,
   type Filters,
   type ReviewDetails,
   type Viewer,
@@ -61,13 +60,9 @@ function reviewDetails(load: DiscussionLoad | undefined): ReviewDetails<Discussi
 }
 
 function ordered(listed: Listed, passing: readonly MergeRequestRow[], viewer: Viewer): Ordered {
-  const due: ReadonlyMap<number, CalendarDay> = listed.dueDates.dates.value;
   const loads: ReadonlyMap<number, DiscussionLoad> = listed.discussionQueue.discussions.value;
-  const order = reviewOrdered(
-    passing,
-    viewer.username,
-    (iid) => due.get(iid) ?? null,
-    (iid) => reviewDetails(loads.get(iid)),
+  const order = reviewOrdered(passing, viewer.username, listed.dueDates.dueOf, (iid) =>
+    reviewDetails(loads.get(iid)),
   );
   return order.kind === "sorted"
     ? { rows: order.rows, sort: { kind: "sorted", loading: order.loading } }

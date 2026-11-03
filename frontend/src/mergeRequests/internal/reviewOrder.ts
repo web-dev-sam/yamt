@@ -1,4 +1,10 @@
-import { turnCounts, type OpenDiscussion, type TurnCounts, type Viewer } from "./discussions";
+import {
+  turnCounts,
+  viewerPossessive,
+  type OpenDiscussion,
+  type TurnCounts,
+  type Viewer,
+} from "./discussions";
 import type { CalendarDay } from "./dueDate";
 import { byDueDate } from "./order";
 
@@ -57,10 +63,6 @@ export function reviewOrdered<R extends { readonly iid: number; readonly created
   return { kind: "sorted", rows: sorted.map(({ row }) => row), loading };
 }
 
-function reviewName(viewer: Viewer): string {
-  return viewer.kind === "me" ? "your" : `${viewer.name}'s`;
-}
-
 function loadingText(loading: number): string {
   if (loading === 0) {
     return "";
@@ -71,10 +73,10 @@ function loadingText(loading: number): string {
 }
 
 export function reviewSortedText(viewer: Viewer, loading: number): string {
-  const turn = viewer.kind === "me" ? "your" : "their";
-  return `Sorted for ${reviewName(viewer)} review: due with ${turn} turn first, then fewest waiting on the author${loadingText(loading)}`;
+  const whose = viewer.kind === "me" ? "your" : "their";
+  return `Sorted for ${viewerPossessive(viewer, "inside")} review: due with ${whose} turn first, then fewest waiting on the author${loadingText(loading)}`;
 }
 
 export function reviewFailedText(viewer: Viewer, iid: number, reason: string): string {
-  return `Not sorted for ${reviewName(viewer)} review: the discussions of !${iid} could not be read. ${reason}`;
+  return `Not sorted for ${viewerPossessive(viewer, "inside")} review: the discussions of !${iid} could not be read. ${reason}`;
 }
