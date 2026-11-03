@@ -19,6 +19,7 @@ import { RECHECK_PAUSE_MS } from "./glab";
 import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
 import {
   createDiscussions,
+  discussionsOf,
   type DiscussionQueue,
   type Discussions,
 } from "./mergeRequestDiscussions";
@@ -88,7 +89,7 @@ type State = Deps & {
   readonly pageProblem: ShallowRef<string | null>;
   readonly dueDates: DueDates;
   readonly rowActions: RowActions;
-  readonly discussions: DiscussionQueue;
+  readonly discussionQueue: DiscussionQueue;
   shown: Load | null;
   running: Load | null;
 };
@@ -101,7 +102,7 @@ function received(state: State, load: Load, { me, rows }: MergeRequestPage): voi
   }
   state.rows.value = merged(state.rows.value, rows);
   state.me.value = me;
-  state.discussions.listed(rows);
+  state.discussionQueue.listed(rows);
 }
 
 function ended(state: State, load: Load, end: ListEnd): void {
@@ -113,7 +114,7 @@ function ended(state: State, load: Load, end: ListEnd): void {
     state.rows.value = load.buffer;
     state.me.value = load.me;
     state.shown = load;
-    state.discussions.replaced(state.rows.value);
+    state.discussionQueue.replaced(state.rows.value);
   }
   if (end.kind === "loaded") {
     state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
@@ -169,6 +170,7 @@ async function load(state: State): Promise<void> {
   if (first) {
     state.rows.value = [];
     state.shown = null;
+    state.discussionQueue.replaced([]);
   }
   state.report({ action: "mergeRequests", step: "list", cause: outcome.cause });
 }
@@ -223,7 +225,6 @@ function createState(deps: Deps): State {
   );
   const rows = shallowRef<readonly MergeRequestRow[]>([]);
   const mode = deps.discussionDetails;
-  const discussions = createDiscussions({ ...deps, mode, rows: () => rows.value });
   return {
     ...deps,
     project,
@@ -237,7 +238,7 @@ function createState(deps: Deps): State {
     pageProblem: shallowRef<string | null>(null),
     dueDates: createDueDates(repository, deps.storage),
     rowActions: createRowActions(deps),
-    discussions,
+    discussionQueue: createDiscussions({ ...deps, mode, rows: () => rows.value }),
     shown: null,
     running: null,
   };
@@ -294,6 +295,6 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     ...state.rowActions,
     ...rerequestsOf(state),
     ...createJobLogs(deps),
-    ...state.discussions,
+    ...discussionsOf(state.discussionQueue),
   };
 }

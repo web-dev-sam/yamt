@@ -44,6 +44,8 @@ type Queue = {
   readonly entries: Entries;
   /** Every `loading` entry's iid, in the order they are sent; the running call's stay until answered. */
   queued: readonly MergeRequestIid[];
+  /** The running call's iids at a switch to "lazy" not hovered since: dropped unless its answer has them. */
+  unhovered: Set<MergeRequestIid>;
   running: Call | null;
   generation: number;
 };
@@ -83,6 +85,13 @@ function settle(
       next.set(iid, { kind: "failed", cause: outcome.cause });
     }
   }
+  const answered = new Set(outcome.ok ? outcome.value.map((row) => row.iid) : []);
+  for (const iid of queue.unhovered) {
+    if (!answered.has(iid)) {
+      next.delete(iid);
+    }
+  }
+  queue.unhovered = new Set();
   queue.entries.value = next;
   queue.queued = queue.queued.filter((iid) => next.get(iid)?.kind === "loading");
 }
@@ -128,9 +137,10 @@ function dropped(queue: Queue): void {
   queue.generation += 1;
   queue.entries.value = new Map();
   queue.queued = [];
+  queue.unhovered = new Set();
 }
 
-function unsentDropped(queue: Queue): void {
+function becameLazy(queue: Queue): void {
   const { running, generation } = queue;
   const sent = new Set(running?.generation === generation ? running.iids : []);
   const next = new Map(queue.entries.value);
@@ -139,15 +149,17 @@ function unsentDropped(queue: Queue): void {
   }
   queue.entries.value = next;
   queue.queued = queue.queued.filter((iid) => sent.has(iid));
+  queue.unhovered = sent;
 }
 
 function switched(queue: Queue, mode: DiscussionDetails, rows: readonly MergeRequestRow[]): void {
   switch (mode) {
     case "full":
+      queue.unhovered = new Set();
       listed(queue, rows);
       return;
     case "lazy":
-      unsentDropped(queue);
+      becameLazy(queue);
       return;
     case "off":
       dropped(queue);
@@ -160,12 +172,29 @@ function switched(queue: Queue, mode: DiscussionDetails, rows: readonly MergeReq
 }
 
 function asked(queue: Queue, iid: MergeRequestIid): void {
-  if (queue.mode() !== "lazy" || queue.entries.value.has(iid)) {
+  if (queue.mode() !== "lazy") {
+    return;
+  }
+  if (queue.unhovered.has(iid)) {
+    queue.unhovered.delete(iid);
+    return;
+  }
+  if (queue.entries.value.has(iid)) {
     return;
   }
   setRow(queue.entries, iid, LOADING);
   queue.queued = [iid, ...queue.queued];
   void send(queue);
+}
+
+export function discussionsOf(queue: DiscussionQueue): Discussions {
+  return {
+    discussions: queue.discussions,
+    discussionDetails: queue.discussionDetails,
+    askDiscussions: (iid) => {
+      queue.askDiscussions(iid);
+    },
+  };
 }
 
 export function createDiscussions(deps: {
@@ -178,6 +207,7 @@ export function createDiscussions(deps: {
     mode: deps.mode,
     entries: shallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>(new Map()),
     queued: [],
+    unhovered: new Set(),
     running: null,
     generation: 0,
   };

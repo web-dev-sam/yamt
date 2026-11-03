@@ -288,11 +288,64 @@ test("switching_to_lazy_drops_unsent_asks_and_keeps_what_was_read", async () => 
   const sent = openIids(second);
   expect(entry(live, sent[0] ?? 0)).toEqual(LOADING);
   await answered(live, 1, sent.slice(0, 2));
-  expect(callAt(live, 2).iids).toEqual(sent.slice(2));
-  await answered(live, 2);
+  expect(live.calls).toHaveLength(2);
   expect(entry(live, sent[0] ?? 0)).toEqual(read());
   expect(entry(live, openIids(first)[0] ?? 0)).toEqual(read());
-  expect(live.calls).toHaveLength(3);
+  expect([...live.queue.discussions.value.keys()]).toEqual([
+    ...openIids(first),
+    ...sent.slice(0, 2),
+  ]);
+
+  live.queue.askDiscussions(sent[2] ?? iid(0));
+  expect(callAt(live, 2).iids).toEqual([sent[2]]);
+});
+
+test("a_row_hovered_while_the_call_before_lazy_runs_stays_asked", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 20));
+  const sent = openIids(ROWS.slice(0, 20));
+  const [first, second, third] = sent;
+  live.mode.value = "lazy";
+  await nextTick();
+  live.queue.askDiscussions(second ?? iid(0));
+  expect(live.calls).toHaveLength(1);
+
+  await answered(live, 0, [first ?? iid(0)]);
+  expect([...live.queue.discussions.value.keys()]).toEqual([first, second]);
+  expect(entry(live, second ?? 0)).toEqual(LOADING);
+  expect(callAt(live, 1).iids).toEqual([second]);
+  expect(entry(live, third ?? 0)).toBeUndefined();
+});
+
+test("a_failed_call_before_lazy_drops_its_unhovered_rows", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 20));
+  const [first, second] = openIids(ROWS.slice(0, 20));
+  live.mode.value = "lazy";
+  await nextTick();
+  live.queue.askDiscussions(first ?? iid(0));
+
+  callAt(live, 0).answer({ ok: false, failure: STOPPED });
+  await settled();
+  expect([...live.queue.discussions.value.keys()]).toEqual([first]);
+  expect(entry(live, first ?? 0)?.kind).toBe("failed");
+  expect(live.calls).toHaveLength(1);
+  live.queue.askDiscussions(second ?? iid(0));
+  expect(callAt(live, 1).iids).toEqual([second]);
+});
+
+test("switching_back_to_full_before_the_call_settles_keeps_its_unanswered_rows_asked", async () => {
+  const live = rig();
+  live.rows.value = ROWS.slice(0, 20);
+  live.queue.listed(live.rows.value);
+  const sent = openIids(live.rows.value);
+  live.mode.value = "lazy";
+  await nextTick();
+  live.mode.value = "full";
+  await nextTick();
+
+  await answered(live, 0, sent.slice(0, 1));
+  expect(callAt(live, 1).iids).toEqual(sent.slice(1));
 });
 
 test("switching_to_lazy_after_a_swap_drops_the_new_asks_behind_an_older_call", async () => {

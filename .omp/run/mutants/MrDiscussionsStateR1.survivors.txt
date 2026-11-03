@@ -1,0 +1,7 @@
+just mutants HEAD: 97.58% overall (322 killed, 6 survived, 2 no coverage); mergeRequestDiscussions.ts 96.62%, mergeRequests.ts 98.35%
+mergeRequestDiscussions.ts:88 `: []`→["Stryker was here"] in answered — equivalent: no iid equals that string
+mergeRequests.ts:173 `replaced([])`→`replaced(["Stryker was here"])` — equivalent: listed() finds no openDiscussions > 0 on a string, so nothing is queued
+mergeRequestDiscussions.ts:145 `: []`→["Stryker was here"] (function renamed, line otherwise unchanged) — equivalent: no iid equals that string
+mergeRequestDiscussions.ts:137 `generation += 1`→`-= 1` (unchanged line) — equivalent: any change of generation drops the old answer
+mergeRequestDiscussions.ts:167 exhaustive default, no coverage — equivalent: unreachable by the DiscussionDetails type (TS3)
+mergeRequests.ts:183 and :235 — not on changed lines (stale check, search default), as before this round

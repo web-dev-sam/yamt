@@ -471,6 +471,34 @@ test("a failed first list call is reported and leaves nothing loaded, so the nex
   expect(live.loads).toHaveLength(2);
 });
 
+test("a_failed_first_load_drops_the_details_so_the_next_load_asks_its_rows_again", async () => {
+  const live = rig();
+  const page = ROWS.slice(0, 20);
+  const open = iids(page.filter((row) => row.openDiscussions > 0));
+  live.slice.show();
+  loadAt(live, 0).send({ me: "sam", rows: page });
+  live.discussionCalls[0]?.answer({ ok: false, failure: STOPPED });
+  await settled();
+  expect(live.slice.discussions.value.get(iid(open[0] ?? 0))?.kind).toBe("failed");
+  loadAt(live, 0).end({ ok: false, failure: STOPPED });
+  await settled();
+  expect(live.slice.discussions.value.size).toBe(0);
+
+  live.slice.show();
+  loadAt(live, 1).send({ me: "sam", rows: page });
+  expect(live.discussionCalls.map((call) => call.iids)).toEqual([open, open]);
+  expect(live.slice.discussions.value.get(iid(open[0] ?? 0))).toEqual({ kind: "loading" });
+});
+
+test("the_slice_holds_only_the_public_part_of_the_discussion_queue", () => {
+  const live = rig();
+  expect("listed" in live.slice).toBe(false);
+  expect("replaced" in live.slice).toBe(false);
+  live.mode.value = "lazy";
+  live.slice.askDiscussions(iid(639));
+  expect(live.discussionCalls.map((call) => call.iids)).toEqual([[639]]);
+});
+
 test("a failed reload call is reported and keeps the list and its last end", async () => {
   const live = rig();
   await loaded(live);
