@@ -11,6 +11,7 @@ import type {
   PageOpened,
   RerequestReply,
   ResolveReply,
+  RowDiscussions,
 } from "./mergeRequestDomain";
 
 export interface MergeRequestSource {
@@ -31,4 +32,9 @@ export interface MergeRequestSource {
   rerequestReview(iid: MergeRequestIid, username: string): Promise<SourceResult<RerequestReply>>;
   /** A failed job's log, read only when this window's list offered `page` (plan §2 row 158). */
   readJobLog(page: WebPage): Promise<SourceResult<JobLogReply>>;
+  /** The open discussions of the first rows of `iids` (at most Rust's DISCUSSION_BATCH), in their order, each once: a
+   *  non-empty answer for a non-empty ask; ask again for the rest (plan §2 row 162). */
+  readDiscussions(
+    iids: readonly MergeRequestIid[],
+  ): Promise<SourceResult<readonly RowDiscussions[]>>;
 }

@@ -64,6 +64,19 @@ export type RerequestReply =
   | Readonly<Exclude<Generated.RerequestReply, { kind: "requested" }>>
   | { readonly kind: "requested"; readonly reviewers: readonly Reviewer[] };
 export type JobLogReply = Readonly<Generated.JobLogReply>;
+type DiscussionPlace = Readonly<Generated.DiscussionPlace>;
+type DiscussionNote = {
+  readonly author: Person | null;
+  /** Milliseconds since 1970, from GitLab's ISO 8601 time. */
+  readonly createdAt: number;
+  readonly text: string;
+  readonly page: WebPage | null;
+};
+export type OpenDiscussion = { readonly place: DiscussionPlace; readonly last: DiscussionNote };
+export type DiscussionsAnswer =
+  | { readonly kind: "open"; readonly discussions: readonly OpenDiscussion[] }
+  | Readonly<Exclude<Generated.DiscussionsAnswer, { kind: "open" }>>;
+export type RowDiscussions = { readonly iid: MergeRequestIid; readonly answer: DiscussionsAnswer };
 
 type UploadedPicture = (username: string) => string;
 
@@ -160,4 +173,46 @@ export function toCheckedRow(raw: Generated.CheckedRow): CheckedRow {
 
 export function toOpenReply(raw: Generated.OpenReply): OpenReply {
   return raw.kind === "missingCommit" ? { kind: "missingCommit", shortId: raw.short_id } : raw;
+}
+
+function toNote(
+  raw: Generated.DiscussionNote,
+  field: string,
+  uploadedPicture: UploadedPicture,
+): DiscussionNote {
+  return {
+    author: raw.author === null ? null : toPerson(raw.author, uploadedPicture),
+    createdAt: toTime(raw.createdAt, `${field}.createdAt`),
+    text: raw.text,
+    page: raw.page === null ? null : toWebPage(raw.page, `${field}.page`),
+  };
+}
+
+function toAnswer(
+  raw: Generated.DiscussionsAnswer,
+  field: string,
+  uploadedPicture: UploadedPicture,
+): DiscussionsAnswer {
+  if (raw.kind !== "open") {
+    return raw;
+  }
+  return {
+    kind: "open",
+    discussions: raw.discussions.map(({ place, last }, at) => ({
+      place,
+      last: toNote(last, `${field}.discussions[${at}].last`, uploadedPicture),
+    })),
+  };
+}
+
+export function toRowDiscussions(
+  raw: Generated.RowDiscussions,
+  index: number,
+  uploadedPicture: UploadedPicture,
+): RowDiscussions {
+  const field = `rows[${index}]`;
+  return {
+    iid: branded(raw.iid, isMergeRequestIid, `${field}.iid`),
+    answer: toAnswer(raw.answer, `${field}.answer`, uploadedPicture),
+  };
 }

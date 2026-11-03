@@ -28,6 +28,7 @@ export type {
   ClipboardSelection,
   ColumnVersion,
   ContinueReply,
+  DiscussionDetails,
   DiskChange,
   DiskResult,
   DiskVersion,
@@ -69,6 +70,7 @@ export type { AbortReply, Leftover, MergeView, PushReply, ReturnTo } from "./loc
 export type {
   CheckedRow,
   ContinueMergeReply,
+  DiscussionsAnswer,
   GitLabProject,
   JobLogReply,
   ListEnd,
@@ -76,6 +78,7 @@ export type {
   Label,
   MergeRequestPage,
   MergeRequestRow,
+  OpenDiscussion,
   OpenReply,
   PageOpened,
   Person,
@@ -85,6 +88,7 @@ export type {
   ResolveRefusal,
   ResolveReply,
   Reviewer,
+  RowDiscussions,
   Started,
 } from "./mergeRequestDomain";
 export type { MergeRequestSource } from "./MergeRequestSource";

@@ -22,6 +22,7 @@ import type {
   MergeRequestPage,
   RerequestReply,
   ResolveReply,
+  RowDiscussions,
 } from "./mergeRequestDomain";
 import type { MergeRequestSource } from "./MergeRequestSource";
 import { branded } from "./validate";
@@ -483,5 +484,40 @@ test("a_job_log_is_logged_and_paused", async () => {
   expect(replied).toEqual({
     ok: true,
     value: { kind: "log", log: { text: expect.stringContaining("lint:docs"), cut: false } },
+  });
+});
+
+test("discussions_answer_a_prefix_of_ten_after_400_ms_and_log_the_ask", async () => {
+  vi.useFakeTimers();
+  const asked = [640, 640, 639, 638, 637, 636, 635, 634, 633, 632, 631, 630].map(iid);
+  const lines: string[] = [];
+  const answered: { rows: readonly RowDiscussions[] | null } = { rows: null };
+  void source("?mr=list", lines)
+    .readDiscussions(asked)
+    .then((result) => {
+      answered.rows = result.ok ? result.value : [];
+    });
+  expect(lines).toEqual([
+    `mergeRequests.fixture_discussions {"iids":"640,640,639,638,637,636,635,634,633,632,631,630"}`,
+  ]);
+  await vi.advanceTimersByTimeAsync(399);
+  expect(answered.rows).toBeNull();
+  await vi.advanceTimersByTimeAsync(1);
+
+  const rows = answered.rows ?? [];
+  expect(rows.map((row) => row.iid)).toEqual([640, 639, 638, 637, 636, 635, 634, 633, 632, 631]);
+  expect(rows[1]?.answer).toEqual({
+    kind: "open",
+    discussions: [
+      {
+        place: { kind: "file", path: "src/board/card.ts", line: 11 },
+        last: {
+          author: { username: "chiara", name: "Chiara Rossi", picture: null },
+          createdAt: Date.parse("2026-10-30T04:00:00Z"),
+          text: "Could you look at this again?",
+          page: null,
+        },
+      },
+    ],
   });
 });

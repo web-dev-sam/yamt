@@ -1,6 +1,6 @@
 import type { StorageLike } from "@vueuse/core";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
-import { shallowRef, type ShallowRef } from "vue";
+import { nextTick, shallowRef, type ShallowRef } from "vue";
 
 import {
   createFixtureCompareSource,
@@ -8,6 +8,7 @@ import {
   log,
   type CheckedRow,
   type ContinueMergeReply,
+  type DiscussionDetails,
   type ListEnd,
   type LocalMerge,
   type MergeRequestIid,
@@ -19,6 +20,7 @@ import {
   type RerequestReply,
   type ResolveReply,
   type Reviewer,
+  type RowDiscussions,
   type SourceFailure,
   type SourceResult,
   type WebPage,
@@ -52,6 +54,11 @@ type Asked<T> = {
   readonly answer: (result: SourceResult<T>) => void;
 };
 
+type DiscussionCall = {
+  readonly iids: readonly MergeRequestIid[];
+  readonly answer: (result: SourceResult<readonly RowDiscussions[]>) => void;
+};
+
 type Rig = {
   readonly slice: MergeRequests;
   readonly screen: ShallowRef<Screen>;
@@ -63,6 +70,8 @@ type Rig = {
   readonly localMerges: LocalMerge[];
   readonly rerequests: Asked<RerequestReply>[];
   readonly storage: MemoryStorage;
+  readonly mode: ShallowRef<DiscussionDetails>;
+  readonly discussionCalls: DiscussionCall[];
 };
 
 type MemoryStorage = StorageLike & { readonly items: Map<string, string> };
@@ -144,6 +153,8 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
   const localMerges: LocalMerge[] = [];
   const rerequests: Asked<RerequestReply>[] = [];
   const problems: Problem[] = [];
+  const discussionCalls: DiscussionCall[] = [];
+  const mode = shallowRef<DiscussionDetails>("full");
   const source: MergeRequestSource = {
     findGitLabProject: async () => ({ ok: true, value: { kind: "found", repository: REPOSITORY } }),
     listMergeRequests: (onPage, onChecked) =>
@@ -172,6 +183,10 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
         rerequests.push({ iid: asked, answer: resolve });
       }),
     readJobLog: async () => ({ ok: true, value: { kind: "noLog" } }),
+    readDiscussions: (asked) =>
+      new Promise((resolve) => {
+        discussionCalls.push({ iids: [...asked], answer: resolve });
+      }),
     ...edit,
   };
   const screen = shallowRef<Screen>({ kind: "files" });
@@ -180,6 +195,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
     screen,
     report: (problem) => problems.push(problem),
     storage,
+    discussionDetails: () => mode.value,
   });
   return {
     slice,
@@ -192,6 +208,8 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
     localMerges,
     rerequests,
     storage,
+    mode,
+    discussionCalls,
   };
 }
 
@@ -308,6 +326,36 @@ test("a reload keeps the old rows until its end, then swaps them in (catches a r
   await reloading;
   expect(iids(live.slice.rows.value)).toEqual(iids(kept));
   expect(live.slice.me.value).toBe("anna");
+});
+
+function glabMissing(iidList: readonly MergeRequestIid[]): SourceResult<readonly RowDiscussions[]> {
+  return {
+    ok: true,
+    value: iidList.map((each) => ({ iid: each, answer: { kind: "glabMissing" } })),
+  };
+}
+
+test("a_buffered_refresh_replaces_details_only_at_its_swap", async () => {
+  const live = rig();
+  await loaded(live);
+  const open = iids(ROWS.filter((row) => row.openDiscussions > 0));
+  const [first] = live.discussionCalls;
+  expect(first?.iids).toEqual(open);
+  first?.answer(glabMissing(first.iids));
+  await settled();
+  const details = live.slice.discussions.value;
+  expect(details.get(iid(639))?.kind).toBe("refused");
+
+  const reloading = live.slice.refresh();
+  const reload = loadAt(live, 1);
+  reload.send({ me: "sam", rows: ROWS });
+  expect(live.slice.discussions.value).toBe(details);
+  expect(live.discussionCalls).toHaveLength(1);
+
+  reload.end(LOADED);
+  await reloading;
+  expect(live.slice.discussions.value.get(iid(639))).toEqual({ kind: "loading" });
+  expect(live.discussionCalls.map((call) => call.iids)).toEqual([open, open]);
 });
 
 test.each<ListEnd>([
@@ -732,12 +780,49 @@ test("the seam hands every header and the page the window's one slice; problems 
   };
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-  const slice = windowMergeRequests(failing, { screen, problem });
+  const settings = shallowRef<{ readonly discussionDetails: DiscussionDetails }>({
+    discussionDetails: "full",
+  });
+  const slice = windowMergeRequests(failing, { screen, problem, settings });
   expect(useMergeRequests()).toBe(slice);
   await slice.findProject();
   expect(problem.value).toEqual({ action: "mergeRequests", step: "find", cause: STOPPED });
   slice.show();
   expect(screen.value).toEqual({ kind: "mergeRequests" });
+});
+
+test("the_window_setting_drives_the_slice", async () => {
+  const asked: MergeRequestIid[][] = [];
+  const source: MergeRequestSource = {
+    ...createFixtureCompareSource(log, "?mr=list", {}),
+    readDiscussions: async (iidList) => {
+      asked.push([...iidList]);
+      return glabMissing(iidList);
+    },
+  };
+  const settings = shallowRef<{ readonly discussionDetails: DiscussionDetails }>({
+    discussionDetails: "off",
+  });
+  const slice = windowMergeRequests(source, {
+    screen: shallowRef<Screen>({ kind: "files" }),
+    problem: shallowRef<Problem | null>(null),
+    settings,
+  });
+
+  await slice.refresh();
+  expect(slice.rows.value).toHaveLength(ROWS.length);
+  expect(slice.discussionDetails.value).toBe("off");
+  expect(asked).toEqual([]);
+
+  settings.value = { discussionDetails: "full" };
+  await nextTick();
+  await settled();
+  expect(slice.discussionDetails.value).toBe("full");
+  expect(asked).toEqual([iids(ROWS.filter((row) => row.openDiscussions > 0))]);
+  expect(slice.discussions.value.get(iid(639))).toEqual({
+    kind: "refused",
+    answer: { kind: "glabMissing" },
+  });
 });
 
 const MERGING_640: LocalMerge = { kind: "merging", iid: 640, windowOpen: false };

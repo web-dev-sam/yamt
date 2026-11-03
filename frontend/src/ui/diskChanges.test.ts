@@ -46,6 +46,7 @@ const SOURCE: ChunkSource = {
   setServerSwitch: notUsed,
   setAddedServers: notUsed,
   setAgent: notUsed,
+  setDiscussionDetails: notUsed,
 };
 
 function searchOver(files: Files): Searching<Pane> {

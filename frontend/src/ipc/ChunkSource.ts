@@ -3,6 +3,7 @@ import type {
   AgentSettings,
   Antialiasing,
   ContinueReply,
+  DiscussionDetails,
   DiskVersion,
   FileMergeData,
   FileSides,
@@ -42,6 +43,10 @@ export interface ChunkSource {
     current: StoredSettings,
     antialiasing: Antialiasing,
   ): Promise<SourceResult<SettingsRead>>;
+  setDiscussionDetails(
+    current: StoredSettings,
+    details: DiscussionDetails,
+  ): Promise<SourceResult<SettingsRead>>;
   setKeys(
     current: StoredSettings,
     changes: readonly KeysChange[],
@@ -68,6 +73,7 @@ export type SettingsSource = Pick<
   | "loadSettings"
   | "setTheme"
   | "setAntialiasing"
+  | "setDiscussionDetails"
   | "setKeys"
   | "moveSettings"
   | "setServerAnswer"

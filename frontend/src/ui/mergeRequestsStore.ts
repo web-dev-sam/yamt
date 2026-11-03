@@ -1,6 +1,6 @@
 import type { ShallowRef } from "vue";
 
-import type { MergeRequestSource } from "../ipc";
+import type { DiscussionDetails, MergeRequestSource } from "../ipc";
 import { createMergeRequests, type MergeRequests } from "./mergeRequests";
 import { report, type Problem } from "./problem";
 import type { Screen } from "./screen";
@@ -8,6 +8,7 @@ import type { Screen } from "./screen";
 type WindowRefs = {
   readonly screen: ShallowRef<Screen>;
   readonly problem: ShallowRef<Problem | null>;
+  readonly settings: Readonly<ShallowRef<{ readonly discussionDetails: DiscussionDetails }>>;
 };
 
 let registered: MergeRequests | null = null;
@@ -30,6 +31,7 @@ export function windowMergeRequests(source: MergeRequestSource, refs: WindowRefs
     report: (problem) => {
       report(refs, problem);
     },
+    discussionDetails: () => refs.settings.value.discussionDetails,
   });
   registerMergeRequests(slice);
   return slice;

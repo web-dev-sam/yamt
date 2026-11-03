@@ -8,6 +8,7 @@ import {
   type AddedServer,
   type AgentSettings,
   type Antialiasing,
+  type DiscussionDetails,
   type Key,
   type KeyAction,
   type KeyProblem,
@@ -32,6 +33,7 @@ export type SettingsInUse = {
   readonly keys: KeysRead;
   readonly languageServers: LanguageServerSettings;
   readonly agent: AgentSettings;
+  readonly discussionDetails: DiscussionDetails;
 };
 
 type SettingsTarget = {
@@ -46,6 +48,7 @@ export type SettingsActions = {
   loadSettings(): Promise<void>;
   setTheme(theme: Theme): Promise<void>;
   setAntialiasing(antialiasing: Antialiasing): Promise<void>;
+  setDiscussionDetails(details: DiscussionDetails): Promise<void>;
   addKey(action: KeyAction, key: Key): Promise<void>;
   changeKey(action: KeyAction, from: Key, to: Key): Promise<void>;
   removeKey(action: KeyAction, key: Key): Promise<void>;
@@ -68,6 +71,7 @@ export function startSettings(theme: Theme): SettingsInUse {
     keys: bindingsOf({}),
     languageServers: { repositories: {}, off: {}, added: [] },
     agent: { command: null, firstMessage: null },
+    discussionDetails: "full",
   };
 }
 
@@ -85,6 +89,7 @@ function storedSettings({
   keys,
   languageServers,
   agent,
+  discussionDetails,
 }: SettingsInUse): StoredSettings {
   const changed = KEY_ACTIONS.filter((action) => !isDefault(action, keys.bindings[action]));
   return {
@@ -93,6 +98,7 @@ function storedSettings({
     keys: Object.fromEntries(changed.map((action) => [action, keys.bindings[action].map(keyText)])),
     languageServers,
     agent,
+    discussionDetails,
   };
 }
 
@@ -150,12 +156,14 @@ function sameStored(inUse: SettingsRead | null, read: SettingsRead): boolean {
   if (inUse === null || inUse.path !== read.path) {
     return false;
   }
-  const { theme, antialiasing, keys, languageServers, agent, ...rest } = read.stored;
+  const { theme, antialiasing, keys, languageServers, agent, discussionDetails, ...rest } =
+    read.stored;
   rest satisfies Record<string, never>;
   const before = inUse.stored;
   return (
     theme === before.theme &&
     antialiasing === before.antialiasing &&
+    discussionDetails === before.discussionDetails &&
     sameServers(before.languageServers, languageServers) &&
     sameKeys(before.keys, keys) &&
     sameAgent(before.agent, agent)
@@ -189,7 +197,7 @@ function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: Set
 function adopt(target: SettingsTarget, read: SettingsRead): void {
   const before = target.settings.value;
   if (!sameStored(before.read, read)) {
-    const { theme, antialiasing, keys, languageServers, agent } = read.stored;
+    const { theme, antialiasing, keys, languageServers, agent, discussionDetails } = read.stored;
     target.settings.value = {
       read,
       theme,
@@ -197,6 +205,7 @@ function adopt(target: SettingsTarget, read: SettingsRead): void {
       keys: bindingsOf(keys),
       languageServers,
       agent,
+      discussionDetails,
     };
   }
   showKeyProblems(target, read, before);
@@ -247,6 +256,8 @@ export function settingsActions(target: SettingsTarget): SettingsActions {
     setTheme: (theme) => send(target, (current) => source.setTheme(current, theme)),
     setAntialiasing: (antialiasing) =>
       send(target, (current) => source.setAntialiasing(current, antialiasing)),
+    setDiscussionDetails: (details) =>
+      send(target, (current) => source.setDiscussionDetails(current, details)),
     addKey: (action, key) => editKeys(target, { kind: "add", action, key }),
     changeKey: (action, from, to) => editKeys(target, { kind: "change", action, from, to }),
     removeKey: (action, key) => editKeys(target, { kind: "remove", action, key }),

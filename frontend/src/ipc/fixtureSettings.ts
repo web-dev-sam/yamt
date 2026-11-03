@@ -33,6 +33,7 @@ function copied({
   keys,
   languageServers,
   agent,
+  discussionDetails,
 }: StoredSettings): StoredSettings {
   return {
     theme,
@@ -46,6 +47,7 @@ function copied({
       added: copiedServers(languageServers.added),
     },
     agent: copiedAgent(agent),
+    discussionDetails,
   };
 }
 
@@ -144,6 +146,9 @@ export function createFixtureSettings(): SettingsSource {
     },
     async setAntialiasing(current, antialiasing) {
       return change(files, current, (stored) => ({ ...stored, antialiasing }));
+    },
+    async setDiscussionDetails(current, discussionDetails) {
+      return change(files, current, (stored) => ({ ...stored, discussionDetails }));
     },
     async setKeys(current, changes) {
       return change(files, current, (stored) => ({

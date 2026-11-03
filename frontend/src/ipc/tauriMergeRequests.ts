@@ -7,6 +7,7 @@ import {
   toMergeRequestPage,
   toOpenReply,
   toRerequestReply,
+  toRowDiscussions,
   type CheckedRow,
   type ListEnd,
   type MergeRequestPage,
@@ -90,6 +91,11 @@ export function createTauriMergeRequests(): MergeRequestSource {
     },
     async readJobLog(page) {
       return toResult(await commands.readJobLog(page));
+    },
+    async readDiscussions(iids) {
+      return converted(toResult(await commands.readDiscussions([...iids])), (rows) =>
+        rows.map((row, at) => toRowDiscussions(row, at, uploadedPicture)),
+      );
     },
   };
 }

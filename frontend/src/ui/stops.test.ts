@@ -107,6 +107,7 @@ function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
     setServerSwitch: notUsed,
     setAddedServers: notUsed,
     setAgent: notUsed,
+    setDiscussionDetails: notUsed,
   };
 }
 

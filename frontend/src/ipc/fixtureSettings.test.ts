@@ -12,6 +12,7 @@ const IN_USE: StoredSettings = {
   keys: { apply: ["a"] },
   languageServers: NO_SERVERS,
   agent: NO_AGENT,
+  discussionDetails: "full",
 };
 const LIGHT: StoredSettings = {
   theme: "light",
@@ -19,6 +20,7 @@ const LIGHT: StoredSettings = {
   keys: {},
   languageServers: NO_SERVERS,
   agent: NO_AGENT,
+  discussionDetails: "full",
 };
 const REPOSITORY = "/fixture/repository";
 const OXLINT = { command: ["oxlint", "--lsp"], fileTypes: ["ts", "vue"] };
@@ -45,6 +47,7 @@ test("setTheme replaces the theme and keeps the keys and unknown actions", async
     keys: { "later-action": ["Mod-q"] },
     languageServers: NO_SERVERS,
     agent: NO_AGENT,
+    discussionDetails: "full",
   });
 
   const read = await settings.setTheme(
@@ -54,6 +57,7 @@ test("setTheme replaces the theme and keeps the keys and unknown actions", async
       keys: {},
       languageServers: NO_SERVERS,
       agent: NO_AGENT,
+      discussionDetails: "full",
     },
     "light",
   );
@@ -69,6 +73,7 @@ test("setTheme replaces the theme and keeps the keys and unknown actions", async
         keys: { "later-action": ["Mod-q"] },
         languageServers: NO_SERVERS,
         agent: NO_AGENT,
+        discussionDetails: "full",
       },
     },
   });
@@ -87,6 +92,26 @@ test("setAntialiasing replaces the antialiasing, keeps the rest, and the next lo
     keys: { "later-action": ["Mod-q"] },
     languageServers: NO_SERVERS,
     agent: NO_AGENT,
+    discussionDetails: "full",
+  };
+  expect(read).toEqual({
+    ok: true,
+    value: { path: DEFAULT_PATH, defaultPath: DEFAULT_PATH, stored },
+  });
+  expect(load).toEqual(read);
+});
+
+test("setDiscussionDetails_replaces_the_value_keeps_the_rest_and_the_next_load_reads_it", async () => {
+  const settings = createFixtureSettings();
+  await settings.loadSettings({ ...LIGHT, keys: { "later-action": ["Mod-q"] } });
+
+  const read = await settings.setDiscussionDetails(LIGHT, "lazy");
+  const load = await settings.loadSettings(IN_USE);
+
+  const stored = {
+    ...LIGHT,
+    keys: { "later-action": ["Mod-q"] },
+    discussionDetails: "lazy",
   };
   expect(read).toEqual({
     ok: true,
@@ -103,6 +128,7 @@ test("setKeys sets an entry with a list, removes it with null, and leaves the ot
     keys: { apply: ["a"], undo: ["Alt-Backspace"] },
     languageServers: NO_SERVERS,
     agent: NO_AGENT,
+    discussionDetails: "full",
   });
 
   const read = await settings.setKeys(IN_USE, [
@@ -129,6 +155,7 @@ test("a change before any load creates the file from the settings in use", async
     keys: { apply: ["a"] },
     languageServers: NO_SERVERS,
     agent: NO_AGENT,
+    discussionDetails: "full",
   });
 });
 

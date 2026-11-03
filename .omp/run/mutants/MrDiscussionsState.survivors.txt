@@ -1,0 +1,8 @@
+just mutants HEAD: 95.05% (1324 killed, 58 survived, 11 no coverage); mergeRequestDiscussions.ts 96.18%, fixtureMergeRequestDiscussions.ts 91.18%; others not on changed lines
+fixtureMergeRequestDiscussions.ts:33,35-38 text literals — gate-covered: module constants Stryker does not re-evaluate per mutant; asserted by the_markup_text_and_a_pageless_discussion_exist
+fixtureMergeRequestDiscussions.ts:42 two `?.`→`.` in sam() — equivalent: no fixture row has a null author, and sam is always among the 500 rows
+fixtureMergeRequestDiscussions.ts:75 `[0]?.author`→`[0].author` — equivalent: fixtureRows(n, 1) always has one row
+mergeRequestDiscussions.ts:87 `next.get(iid)?.kind`→`.kind` — equivalent: every queued iid has a loading entry
+mergeRequestDiscussions.ts:128 `generation += 1`→`-= 1` — equivalent: any change of generation drops the old answer
+mergeRequestDiscussions.ts:135 `[]`→["Stryker was here"] — equivalent: no iid equals that string
+mergeRequestDiscussions.ts:155 exhaustive default — equivalent: unreachable by the DiscussionDetails type (TS3)

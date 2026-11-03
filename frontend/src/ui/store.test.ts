@@ -52,6 +52,7 @@ const NO_SETTINGS: SettingsSource = {
   loadSettings: () => Promise.reject(new Error("not used")),
   setTheme: () => Promise.reject(new Error("not used")),
   setAntialiasing: () => Promise.reject(new Error("not used")),
+  setDiscussionDetails: () => Promise.reject(new Error("not used")),
   setKeys: () => Promise.reject(new Error("not used")),
   moveSettings: () => Promise.reject(new Error("not used")),
   setServerAnswer: () => Promise.reject(new Error("not used")),
@@ -66,12 +67,14 @@ const DARK = {
   antialiasing: "subpixel",
   languageServers: NO_SERVERS,
   agent: DEFAULT_AGENT,
+  discussionDetails: "full",
 } satisfies Omit<StoredSettings, "keys">;
 const LIGHT = {
   theme: "light",
   antialiasing: "subpixel",
   languageServers: NO_SERVERS,
   agent: DEFAULT_AGENT,
+  discussionDetails: "full",
 } satisfies Omit<StoredSettings, "keys">;
 
 afterEach(() => {
@@ -1836,6 +1839,7 @@ test("settings start with the start theme and the default keys, before any file 
     keys: { bindings: DEFAULT_KEYS, problems: [] },
     languageServers: NO_SERVERS,
     agent: DEFAULT_AGENT,
+    discussionDetails: "full",
   });
   expect(store.preferences.value).toEqual({ theme: "light", keys: DEFAULT_KEYS });
 });

@@ -1,0 +1,2003 @@
+diff --git a/frontend/src/ipc/ChunkSource.ts b/frontend/src/ipc/ChunkSource.ts
+index ff1f887..11aab30 100644
+--- a/frontend/src/ipc/ChunkSource.ts
++++ b/frontend/src/ipc/ChunkSource.ts
+@@ -3,6 +3,7 @@ import type {
+   AgentSettings,
+   Antialiasing,
+   ContinueReply,
++  DiscussionDetails,
+   DiskVersion,
+   FileMergeData,
+   FileSides,
+@@ -42,6 +43,10 @@ export interface ChunkSource {
+     current: StoredSettings,
+     antialiasing: Antialiasing,
+   ): Promise<SourceResult<SettingsRead>>;
++  setDiscussionDetails(
++    current: StoredSettings,
++    details: DiscussionDetails,
++  ): Promise<SourceResult<SettingsRead>>;
+   setKeys(
+     current: StoredSettings,
+     changes: readonly KeysChange[],
+@@ -68,6 +73,7 @@ export type SettingsSource = Pick<
+   | "loadSettings"
+   | "setTheme"
+   | "setAntialiasing"
++  | "setDiscussionDetails"
+   | "setKeys"
+   | "moveSettings"
+   | "setServerAnswer"
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index 7cbdf49..6d26aae 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -11,6 +11,7 @@ import type {
+   PageOpened,
+   RerequestReply,
+   ResolveReply,
++  RowDiscussions,
+ } from "./mergeRequestDomain";
+ 
+ export interface MergeRequestSource {
+@@ -31,4 +32,9 @@ export interface MergeRequestSource {
+   rerequestReview(iid: MergeRequestIid, username: string): Promise<SourceResult<RerequestReply>>;
+   /** A failed job's log, read only when this window's list offered `page` (plan §2 row 158). */
+   readJobLog(page: WebPage): Promise<SourceResult<JobLogReply>>;
++  /** The open discussions of the first rows of `iids` (at most Rust's DISCUSSION_BATCH), in their order, each once: a
++   *  non-empty answer for a non-empty ask; ask again for the rest (plan §2 row 162). */
++  readDiscussions(
++    iids: readonly MergeRequestIid[],
++  ): Promise<SourceResult<readonly RowDiscussions[]>>;
+ }
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 3991fb3..38d6978 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -45,6 +45,7 @@ export type DiskChange = Generated.DiskChange;
+ export type WriteReply = Generated.WriteReply;
+ export type Theme = Generated.Theme;
+ export type Antialiasing = Generated.Antialiasing;
++export type DiscussionDetails = Generated.DiscussionDetails;
+ export type ClipboardSelection = Generated.ClipboardSelection;
+ 
+ export type LanguageServerSettings = Required<Generated.LanguageServerSettings>;
+@@ -78,7 +79,6 @@ export type StartReply =
+   | { readonly kind: "Started"; readonly run: RunId };
+ 
+ export type ServerContext = Generated.ServerContext;
+-
+ export type ProgramFound = Generated.ProgramFound;
+ 
+ export type ProjectFile = Generated.ProjectFile;
+diff --git a/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts b/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
+new file mode 100644
+index 0000000..f243b8f
+--- /dev/null
++++ b/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
+@@ -0,0 +1,101 @@
++import { expect, test } from "vitest";
++
++import type * as Generated from "./bindings";
++import { TIMED_OUT } from "./fixtureGitLab";
++import { FIXTURE_ME, fixtureRows, LOGGED_OUT_DETAIL } from "./fixtureMergeRequestData";
++import {
++  DISCUSSIONS_FAILED_IID,
++  DISCUSSIONS_LOGGED_OUT_IID,
++  fixtureDiscussions,
++} from "./fixtureMergeRequestDiscussions";
++
++const LISTED = fixtureRows(0, 500);
++const SCRIPTED: ReadonlySet<number> = new Set([DISCUSSIONS_FAILED_IID, DISCUSSIONS_LOGGED_OUT_IID]);
++const LONG_LINE = 400;
++const MARKUP =
++  "Please RENAME this.\n**not bold** <b>not bold</b> &amp; <script>x</script>\nThird line\nA fourth line the box leaves out";
++
++function openOf(iid: number): readonly Generated.OpenDiscussion[] {
++  const answer = fixtureDiscussions(iid, LISTED);
++  if (answer.kind !== "open") {
++    throw new Error(`!${iid} answered ${answer.kind}`);
++  }
++  return answer.discussions;
++}
++
++const UNSCRIPTED = LISTED.filter((row) => !SCRIPTED.has(row.iid));
++
++function everyDiscussion(): readonly Generated.OpenDiscussion[] {
++  return UNSCRIPTED.flatMap((row) => openOf(row.iid));
++}
++
++function isSams(discussion: Generated.OpenDiscussion | undefined): boolean {
++  return discussion?.last.author?.username === FIXTURE_ME;
++}
++
++test("every_listed_row_with_open_discussions_has_that_many", () => {
++  for (const row of UNSCRIPTED) {
++    expect(openOf(row.iid)).toHaveLength(row.openDiscussions);
++  }
++  expect(LISTED.some((row) => row.openDiscussions === 2)).toBe(true);
++});
++
++test("both_turns_occur_for_sam_and_some_rows_wait_only", () => {
++  const pairs = UNSCRIPTED.map((row) => openOf(row.iid)).filter((open) => open.length === 2);
++  const mixed = pairs.filter(([first, second]) => !isSams(first) && isSams(second));
++  const samsOnly = pairs.filter((open) => open.every(isSams));
++
++  expect(mixed.length).toBeGreaterThan(0);
++  expect(samsOnly.length).toBeGreaterThan(0);
++  for (const [first, second] of mixed) {
++    expect(Date.parse(second?.last.createdAt ?? "")).toBeGreaterThan(
++      Date.parse(first?.last.createdAt ?? ""),
++    );
++  }
++});
++
++test("the_markup_text_and_a_pageless_discussion_exist", () => {
++  const all = everyDiscussion();
++  const texts = all.map((discussion) => discussion.last.text);
++
++  expect(texts).toContain(MARKUP);
++  expect(texts.filter((text) => text.length === LONG_LINE && !text.includes("\n"))).toHaveLength(1);
++  expect(openOf(638)[0]?.last.text).toHaveLength(LONG_LINE);
++  expect(all.some((discussion) => discussion.last.page === null)).toBe(true);
++  expect(openOf(636)[0]?.last.text).toBe(MARKUP);
++  expect(openOf(635).map((discussion) => discussion.last.text)).toEqual([
++    "Could you look at this again?",
++    "Done, see the new commit.",
++  ]);
++  expect(openOf(638).map((discussion) => discussion.last.page)).toEqual([
++    "https://gitlab.example/taskboard/taskboard/-/merge_requests/638#note_7020",
++    "https://gitlab.example/taskboard/taskboard/-/merge_requests/638#note_7021",
++  ]);
++  expect(openOf(638).map((discussion) => discussion.place)).toEqual([
++    { kind: "overview" },
++    { kind: "file", path: "src/board/column.ts", line: null },
++  ]);
++  expect(openOf(639)[0]?.place).toEqual({ kind: "file", path: "src/board/card.ts", line: 11 });
++});
++
++test("the_scripted_rows_refuse_as_named", () => {
++  for (const iid of SCRIPTED) {
++    expect(LISTED.find((row) => row.iid === iid)?.openDiscussions).toBeGreaterThan(0);
++  }
++  expect(fixtureDiscussions(DISCUSSIONS_FAILED_IID, LISTED)).toEqual({
++    kind: "failed",
++    message: TIMED_OUT,
++  });
++  expect(fixtureDiscussions(DISCUSSIONS_LOGGED_OUT_IID, LISTED)).toEqual({
++    kind: "notLoggedIn",
++    detail: LOGGED_OUT_DETAIL,
++  });
++});
++
++test("an_unlisted_iid_fails", () => {
++  expect(fixtureDiscussions(140, LISTED)).toEqual({
++    kind: "failed",
++    message: "GitLab sent no merge request !140",
++  });
++  expect(fixtureDiscussions(141, LISTED).kind).toBe("open");
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequestDiscussions.ts b/frontend/src/ipc/fixtureMergeRequestDiscussions.ts
+new file mode 100644
+index 0000000..2b26b55
+--- /dev/null
++++ b/frontend/src/ipc/fixtureMergeRequestDiscussions.ts
+@@ -0,0 +1,128 @@
++import type * as Generated from "./bindings";
++import { pause } from "./fixture";
++import { TIMED_OUT } from "./fixtureGitLab";
++import {
++  FIXTURE_ME,
++  fixtureRows,
++  fixtureUploadedPicture,
++  LOGGED_OUT_DETAIL,
++  ORIGIN,
++} from "./fixtureMergeRequestData";
++import type { Log } from "./log";
++import { toRowDiscussions } from "./mergeRequestDomain";
++import type { MergeRequestSource } from "./MergeRequestSource";
++
++type Position = { readonly index: number; readonly at: 0 | 1 };
++
++export const DISCUSSIONS_FAILED_IID = 633;
++export const DISCUSSIONS_LOGGED_OUT_IID = 629;
++
++const DISCUSSIONS_PAUSE_MS = 400;
++const FIXTURE_ANSWERED = 10;
++const HOUR_MS = 3_600_000;
++const REPLY_HOURS = 3;
++const FIRST_LINE = 10;
++const FIRST_NOTE = 7000;
++const NOTES_PER_ROW = 10;
++const MARKUP_EVERY = 4;
++const PAGELESS_EVERY = 6;
++const PAGELESS_AT = 1;
++const OVERVIEW_EVERY = 2;
++const LONG_TEXT_INDEX = 2;
++const LONG_TEXT_LENGTH = 400;
++const LONG_TEXT = "A single line that runs on,".padEnd(LONG_TEXT_LENGTH, " and on");
++const MARKUP_TEXT =
++  "Please RENAME this.\n**not bold** <b>not bold</b> &amp; <script>x</script>\nThird line\nA fourth line the box leaves out";
++const SHORT_TEXTS: Readonly<Record<Position["at"], string>> = {
++  0: "Could you look at this again?",
++  1: "Done, see the new commit.",
++};
++
++function sam(listed: readonly Generated.MergeRequestRow[]): Generated.Person | null {
++  return listed.find((row) => row.author?.username === FIXTURE_ME)?.author ?? null;
++}
++
++function text({ index, at }: Position): string {
++  if (index === LONG_TEXT_INDEX && at === 0) {
++    return LONG_TEXT;
++  }
++  return (index + at) % MARKUP_EVERY === 0 ? MARKUP_TEXT : SHORT_TEXTS[at];
++}
++
++function note(
++  row: Generated.MergeRequestRow,
++  position: Position,
++  author: Generated.Person | null,
++  hours: number,
++): Generated.DiscussionNote {
++  const { index, at } = position;
++  const pageless = index % PAGELESS_EVERY === PAGELESS_AT;
++  return {
++    author,
++    createdAt: new Date(Date.parse(row.createdAt) + hours * HOUR_MS).toISOString(),
++    text: text(position),
++    page: pageless
++      ? null
++      : `${ORIGIN}/-/merge_requests/${row.iid}#note_${FIRST_NOTE + NOTES_PER_ROW * index + at}`,
++  };
++}
++
++function discussions(
++  row: Generated.MergeRequestRow,
++  index: number,
++  listed: readonly Generated.MergeRequestRow[],
++): Generated.OpenDiscussion[] {
++  const nextAuthor = fixtureRows(index + 1, 1)[0]?.author ?? null;
++  const first: Generated.OpenDiscussion = {
++    place:
++      index % OVERVIEW_EVERY === 0
++        ? { kind: "overview" }
++        : { kind: "file", path: "src/board/card.ts", line: FIRST_LINE + index },
++    last: note(row, { index, at: 0 }, nextAuthor, 1),
++  };
++  const reply: Generated.OpenDiscussion = {
++    place: { kind: "file", path: "src/board/column.ts", line: null },
++    last: note(row, { index, at: 1 }, sam(listed), REPLY_HOURS),
++  };
++  return [first, reply].slice(0, row.openDiscussions);
++}
++
++/** The fixture's answer for `iid` among the `listed` rows (every script's rows): its row's `openDiscussions` open
++ *  ones, a scripted refusal, or a failure for an iid no row has. */
++export function fixtureDiscussions(
++  iid: number,
++  listed: readonly Generated.MergeRequestRow[],
++): Generated.DiscussionsAnswer {
++  if (iid === DISCUSSIONS_FAILED_IID) {
++    return { kind: "failed", message: TIMED_OUT };
++  }
++  if (iid === DISCUSSIONS_LOGGED_OUT_IID) {
++    return { kind: "notLoggedIn", detail: LOGGED_OUT_DETAIL };
++  }
++  const index = listed.findIndex((row) => row.iid === iid);
++  const row = listed[index];
++  if (row === undefined) {
++    return { kind: "failed", message: `GitLab sent no merge request !${iid}` };
++  }
++  return { kind: "open", discussions: discussions(row, index, listed) };
++}
++
++/** Answers the first FIXTURE_ANSWERED distinct iids, as Rust answers a prefix of DISCUSSION_BATCH. */
++export function discussionsScript(
++  log: Log,
++  listedRows: number,
++): Pick<MergeRequestSource, "readDiscussions"> {
++  return {
++    async readDiscussions(iids) {
++      log.info("mergeRequests.fixture_discussions", { iids: iids.join(",") });
++      await pause(DISCUSSIONS_PAUSE_MS);
++      const listed = fixtureRows(0, listedRows);
++      const answered = [...new Set(iids)].slice(0, FIXTURE_ANSWERED);
++      const rows = answered.map((iid) => ({ iid, answer: fixtureDiscussions(iid, listed) }));
++      return {
++        ok: true,
++        value: rows.map((row, at) => toRowDiscussions(row, at, fixtureUploadedPicture)),
++      };
++    },
++  };
++}
+diff --git a/frontend/src/ipc/fixtureMergeRequests.test.ts b/frontend/src/ipc/fixtureMergeRequests.test.ts
+index 7f4078f..20df611 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.test.ts
+@@ -22,6 +22,7 @@ import type {
+   MergeRequestPage,
+   RerequestReply,
+   ResolveReply,
++  RowDiscussions,
+ } from "./mergeRequestDomain";
+ import type { MergeRequestSource } from "./MergeRequestSource";
+ import { branded } from "./validate";
+@@ -485,3 +486,38 @@ test("a_job_log_is_logged_and_paused", async () => {
+     value: { kind: "log", log: { text: expect.stringContaining("lint:docs"), cut: false } },
+   });
+ });
++
++test("discussions_answer_a_prefix_of_ten_after_400_ms_and_log_the_ask", async () => {
++  vi.useFakeTimers();
++  const asked = [640, 640, 639, 638, 637, 636, 635, 634, 633, 632, 631, 630].map(iid);
++  const lines: string[] = [];
++  const answered: { rows: readonly RowDiscussions[] | null } = { rows: null };
++  void source("?mr=list", lines)
++    .readDiscussions(asked)
++    .then((result) => {
++      answered.rows = result.ok ? result.value : [];
++    });
++  expect(lines).toEqual([
++    `mergeRequests.fixture_discussions {"iids":"640,640,639,638,637,636,635,634,633,632,631,630"}`,
++  ]);
++  await vi.advanceTimersByTimeAsync(399);
++  expect(answered.rows).toBeNull();
++  await vi.advanceTimersByTimeAsync(1);
++
++  const rows = answered.rows ?? [];
++  expect(rows.map((row) => row.iid)).toEqual([640, 639, 638, 637, 636, 635, 634, 633, 632, 631]);
++  expect(rows[1]?.answer).toEqual({
++    kind: "open",
++    discussions: [
++      {
++        place: { kind: "file", path: "src/board/card.ts", line: 11 },
++        last: {
++          author: { username: "chiara", name: "Chiara Rossi", picture: null },
++          createdAt: Date.parse("2026-10-30T04:00:00Z"),
++          text: "Could you look at this again?",
++          page: null,
++        },
++      },
++    ],
++  });
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequests.ts b/frontend/src/ipc/fixtureMergeRequests.ts
+index 063c2ea..4dc06c6 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.ts
+@@ -14,6 +14,7 @@ import {
+   REFUSED_MESSAGE,
+   REFUSING_REVIEWER,
+ } from "./fixtureMergeRequestData";
++import { discussionsScript } from "./fixtureMergeRequestDiscussions";
+ import { fixtureJobLog } from "./fixtureMergeRequestLogs";
+ import type { Log } from "./log";
+ import {
+@@ -278,5 +279,6 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
+     ...localMergeScript(),
+     ...rerequestScript(log),
+     ...pageScript(log),
++    ...discussionsScript(log, LISTED_ROWS),
+   };
+ }
+diff --git a/frontend/src/ipc/fixtureSettings.test.ts b/frontend/src/ipc/fixtureSettings.test.ts
+index ced9c5e..a8b7296 100644
+--- a/frontend/src/ipc/fixtureSettings.test.ts
++++ b/frontend/src/ipc/fixtureSettings.test.ts
+@@ -12,6 +12,7 @@ const IN_USE: StoredSettings = {
+   keys: { apply: ["a"] },
+   languageServers: NO_SERVERS,
+   agent: NO_AGENT,
++  discussionDetails: "full",
+ };
+ const LIGHT: StoredSettings = {
+   theme: "light",
+@@ -19,6 +20,7 @@ const LIGHT: StoredSettings = {
+   keys: {},
+   languageServers: NO_SERVERS,
+   agent: NO_AGENT,
++  discussionDetails: "full",
+ };
+ const REPOSITORY = "/fixture/repository";
+ const OXLINT = { command: ["oxlint", "--lsp"], fileTypes: ["ts", "vue"] };
+@@ -45,6 +47,7 @@ test("setTheme replaces the theme and keeps the keys and unknown actions", async
+     keys: { "later-action": ["Mod-q"] },
+     languageServers: NO_SERVERS,
+     agent: NO_AGENT,
++    discussionDetails: "full",
+   });
+ 
+   const read = await settings.setTheme(
+@@ -54,6 +57,7 @@ test("setTheme replaces the theme and keeps the keys and unknown actions", async
+       keys: {},
+       languageServers: NO_SERVERS,
+       agent: NO_AGENT,
++      discussionDetails: "full",
+     },
+     "light",
+   );
+@@ -69,6 +73,7 @@ test("setTheme replaces the theme and keeps the keys and unknown actions", async
+         keys: { "later-action": ["Mod-q"] },
+         languageServers: NO_SERVERS,
+         agent: NO_AGENT,
++        discussionDetails: "full",
+       },
+     },
+   });
+@@ -87,6 +92,26 @@ test("setAntialiasing replaces the antialiasing, keeps the rest, and the next lo
+     keys: { "later-action": ["Mod-q"] },
+     languageServers: NO_SERVERS,
+     agent: NO_AGENT,
++    discussionDetails: "full",
++  };
++  expect(read).toEqual({
++    ok: true,
++    value: { path: DEFAULT_PATH, defaultPath: DEFAULT_PATH, stored },
++  });
++  expect(load).toEqual(read);
++});
++
++test("setDiscussionDetails_replaces_the_value_keeps_the_rest_and_the_next_load_reads_it", async () => {
++  const settings = createFixtureSettings();
++  await settings.loadSettings({ ...LIGHT, keys: { "later-action": ["Mod-q"] } });
++
++  const read = await settings.setDiscussionDetails(LIGHT, "lazy");
++  const load = await settings.loadSettings(IN_USE);
++
++  const stored = {
++    ...LIGHT,
++    keys: { "later-action": ["Mod-q"] },
++    discussionDetails: "lazy",
+   };
+   expect(read).toEqual({
+     ok: true,
+@@ -103,6 +128,7 @@ test("setKeys sets an entry with a list, removes it with null, and leaves the ot
+     keys: { apply: ["a"], undo: ["Alt-Backspace"] },
+     languageServers: NO_SERVERS,
+     agent: NO_AGENT,
++    discussionDetails: "full",
+   });
+ 
+   const read = await settings.setKeys(IN_USE, [
+@@ -129,6 +155,7 @@ test("a change before any load creates the file from the settings in use", async
+     keys: { apply: ["a"] },
+     languageServers: NO_SERVERS,
+     agent: NO_AGENT,
++    discussionDetails: "full",
+   });
+ });
+ 
+diff --git a/frontend/src/ipc/fixtureSettings.ts b/frontend/src/ipc/fixtureSettings.ts
+index 51de135..429fcc5 100644
+--- a/frontend/src/ipc/fixtureSettings.ts
++++ b/frontend/src/ipc/fixtureSettings.ts
+@@ -33,6 +33,7 @@ function copied({
+   keys,
+   languageServers,
+   agent,
++  discussionDetails,
+ }: StoredSettings): StoredSettings {
+   return {
+     theme,
+@@ -46,6 +47,7 @@ function copied({
+       added: copiedServers(languageServers.added),
+     },
+     agent: copiedAgent(agent),
++    discussionDetails,
+   };
+ }
+ 
+@@ -145,6 +147,9 @@ export function createFixtureSettings(): SettingsSource {
+     async setAntialiasing(current, antialiasing) {
+       return change(files, current, (stored) => ({ ...stored, antialiasing }));
+     },
++    async setDiscussionDetails(current, discussionDetails) {
++      return change(files, current, (stored) => ({ ...stored, discussionDetails }));
++    },
+     async setKeys(current, changes) {
+       return change(files, current, (stored) => ({
+         ...stored,
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 252638e..7705253 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -28,6 +28,7 @@ export type {
+   ClipboardSelection,
+   ColumnVersion,
+   ContinueReply,
++  DiscussionDetails,
+   DiskChange,
+   DiskResult,
+   DiskVersion,
+@@ -69,6 +70,7 @@ export type { AbortReply, Leftover, MergeView, PushReply, ReturnTo } from "./loc
+ export type {
+   CheckedRow,
+   ContinueMergeReply,
++  DiscussionsAnswer,
+   GitLabProject,
+   JobLogReply,
+   ListEnd,
+@@ -76,6 +78,7 @@ export type {
+   Label,
+   MergeRequestPage,
+   MergeRequestRow,
++  OpenDiscussion,
+   OpenReply,
+   PageOpened,
+   Person,
+@@ -85,6 +88,7 @@ export type {
+   ResolveRefusal,
+   ResolveReply,
+   Reviewer,
++  RowDiscussions,
+   Started,
+ } from "./mergeRequestDomain";
+ export type { MergeRequestSource } from "./MergeRequestSource";
+diff --git a/frontend/src/ipc/mergeRequestDomain.ts b/frontend/src/ipc/mergeRequestDomain.ts
+index c193edc..25d2517 100644
+--- a/frontend/src/ipc/mergeRequestDomain.ts
++++ b/frontend/src/ipc/mergeRequestDomain.ts
+@@ -64,6 +64,19 @@ export type RerequestReply =
+   | Readonly<Exclude<Generated.RerequestReply, { kind: "requested" }>>
+   | { readonly kind: "requested"; readonly reviewers: readonly Reviewer[] };
+ export type JobLogReply = Readonly<Generated.JobLogReply>;
++type DiscussionPlace = Readonly<Generated.DiscussionPlace>;
++type DiscussionNote = {
++  readonly author: Person | null;
++  /** Milliseconds since 1970, from GitLab's ISO 8601 time. */
++  readonly createdAt: number;
++  readonly text: string;
++  readonly page: WebPage | null;
++};
++export type OpenDiscussion = { readonly place: DiscussionPlace; readonly last: DiscussionNote };
++export type DiscussionsAnswer =
++  | { readonly kind: "open"; readonly discussions: readonly OpenDiscussion[] }
++  | Readonly<Exclude<Generated.DiscussionsAnswer, { kind: "open" }>>;
++export type RowDiscussions = { readonly iid: MergeRequestIid; readonly answer: DiscussionsAnswer };
+ 
+ type UploadedPicture = (username: string) => string;
+ 
+@@ -161,3 +174,45 @@ export function toCheckedRow(raw: Generated.CheckedRow): CheckedRow {
+ export function toOpenReply(raw: Generated.OpenReply): OpenReply {
+   return raw.kind === "missingCommit" ? { kind: "missingCommit", shortId: raw.short_id } : raw;
+ }
++
++function toNote(
++  raw: Generated.DiscussionNote,
++  field: string,
++  uploadedPicture: UploadedPicture,
++): DiscussionNote {
++  return {
++    author: raw.author === null ? null : toPerson(raw.author, uploadedPicture),
++    createdAt: toTime(raw.createdAt, `${field}.createdAt`),
++    text: raw.text,
++    page: raw.page === null ? null : toWebPage(raw.page, `${field}.page`),
++  };
++}
++
++function toAnswer(
++  raw: Generated.DiscussionsAnswer,
++  field: string,
++  uploadedPicture: UploadedPicture,
++): DiscussionsAnswer {
++  if (raw.kind !== "open") {
++    return raw;
++  }
++  return {
++    kind: "open",
++    discussions: raw.discussions.map(({ place, last }, at) => ({
++      place,
++      last: toNote(last, `${field}.discussions[${at}].last`, uploadedPicture),
++    })),
++  };
++}
++
++export function toRowDiscussions(
++  raw: Generated.RowDiscussions,
++  index: number,
++  uploadedPicture: UploadedPicture,
++): RowDiscussions {
++  const field = `rows[${index}]`;
++  return {
++    iid: branded(raw.iid, isMergeRequestIid, `${field}.iid`),
++    answer: toAnswer(raw.answer, `${field}.answer`, uploadedPicture),
++  };
++}
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index 7e99c43..c19c775 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -27,6 +27,7 @@ const commands = vi.hoisted(() => ({
+   setServerSwitch: vi.fn(),
+   setAddedServers: vi.fn(),
+   setAgent: vi.fn(),
++  setDiscussionDetails: vi.fn(),
+   serversContext: vi.fn(),
+   startServer: vi.fn(),
+   sendToServer: vi.fn(),
+@@ -429,6 +430,7 @@ const STORED: StoredSettings = {
+   keys: { undo: ["Alt-Backspace"] },
+   languageServers: { repositories: { "/home/me/yamt": "start" }, off: {}, added: [] },
+   agent: { command: ["omp", "acp", "--trace"], firstMessage: null },
++  discussionDetails: "full",
+ };
+ const SETTINGS_DTO: Generated.SettingsRead = {
+   path: "/home/me/.config/yamt/settings.json",
+@@ -580,6 +582,23 @@ test("setAgent sends the settings in use and the agent entry, and returns the re
+   expect(commands.setAgent).toHaveBeenCalledWith(STORED, agent);
+ });
+ 
++test("setDiscussionDetails sends the settings in use and the value, and returns the read or the error", async () => {
++  const broken = { kind: "SettingsBroken", path: SETTINGS_DTO.path, message: "x" };
++  commands.setDiscussionDetails.mockResolvedValueOnce({ status: "ok", data: SETTINGS_DTO });
++  commands.setDiscussionDetails.mockResolvedValueOnce({ status: "error", error: broken });
++  const source = createTauriSource();
++
++  expect(await source.setDiscussionDetails(STORED, "lazy")).toEqual({
++    ok: true,
++    value: SETTINGS_READ,
++  });
++  expect(await source.setDiscussionDetails(STORED, "off")).toEqual({ ok: false, failure: broken });
++  expect(commands.setDiscussionDetails.mock.calls).toEqual([
++    [STORED, "lazy"],
++    [STORED, "off"],
++  ]);
++});
++
+ type ChannelLike = { readonly onmessage: (event: Generated.HostEvent) => void };
+ 
+ test("the server host starts a run with a channel whose messages reach onEvent, branding the run", async () => {
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index fdc4c45..1766ea9 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -59,6 +59,9 @@ export function createTauriSettings(): SettingsSource {
+     async setAntialiasing(current, antialiasing) {
+       return toSettingsResult(await commands.setAntialiasing(current, antialiasing));
+     },
++    async setDiscussionDetails(current, details) {
++      return toSettingsResult(await commands.setDiscussionDetails(current, details));
++    },
+     async setKeys(current, changes) {
+       return toSettingsResult(await commands.setKeys(current, [...changes]));
+     },
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index 59592a3..6b55560 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -13,6 +13,7 @@ const commands = vi.hoisted(() => ({
+   openPage: vi.fn(),
+   rerequestReview: vi.fn(),
+   readJobLog: vi.fn(),
++  readDiscussions: vi.fn(),
+ }));
+ 
+ vi.mock("./bindings", () => ({ commands }));
+@@ -326,11 +327,125 @@ test("readJobLog_calls_the_command_with_the_page_and_returns_its_reply", async (
+   expect(commands.readJobLog).toHaveBeenCalledWith(page);
+ });
+ 
++test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", async () => {
++  const note = "https://gitlab.example/x/-/merge_requests/12#note_7001";
++  const rows: Generated.RowDiscussions[] = [
++    {
++      iid: 12,
++      answer: {
++        kind: "open",
++        discussions: [
++          {
++            place: { kind: "file", path: "src/a.ts", line: 4 },
++            last: {
++              author: { username: "ben", name: "Ben Okafor", picture: { kind: "uploaded" } },
++              createdAt: "2026-10-29T09:00:00Z",
++              text: "**not bold**",
++              page: note,
++            },
++          },
++          {
++            place: { kind: "overview" },
++            last: { author: null, createdAt: "2026-10-29T10:00:00Z", text: "x", page: null },
++          },
++        ],
++      },
++    },
++    { iid: 13, answer: { kind: "notLoggedIn", detail: "gitlab.example" } },
++  ];
++  commands.readDiscussions.mockResolvedValue({ status: "ok", data: rows });
++  const iids = [branded(12, isMergeRequestIid, "iid"), branded(13, isMergeRequestIid, "iid")];
++
++  expect(await createTauriMergeRequests().readDiscussions(iids)).toEqual({
++    ok: true,
++    value: [
++      {
++        iid: 12,
++        answer: {
++          kind: "open",
++          discussions: [
++            {
++              place: { kind: "file", path: "src/a.ts", line: 4 },
++              last: {
++                author: {
++                  username: "ben",
++                  name: "Ben Okafor",
++                  picture: "yamt-picture://localhost/ben",
++                },
++                createdAt: Date.parse("2026-10-29T09:00:00Z"),
++                text: "**not bold**",
++                page: note,
++              },
++            },
++            {
++              place: { kind: "overview" },
++              last: {
++                author: null,
++                createdAt: Date.parse("2026-10-29T10:00:00Z"),
++                text: "x",
++                page: null,
++              },
++            },
++          ],
++        },
++      },
++      { iid: 13, answer: { kind: "notLoggedIn", detail: "gitlab.example" } },
++    ],
++  });
++  expect(commands.readDiscussions).toHaveBeenCalledWith([12, 13]);
++});
++
++test.each([
++  [
++    "a time that is not ISO 8601",
++    { createdAt: "yesterday" },
++    /rows\[0\]\.answer\.discussions\[0\]\.last\.createdAt/u,
++  ],
++  [
++    "a page that is not https",
++    { page: "http://gitlab.example/x" },
++    /rows\[0\]\.answer\.discussions\[0\]\.last\.page/u,
++  ],
++] as const)("readDiscussions throws on %s, naming the field", async (_, change, field) => {
++  const last = { author: null, createdAt: "2026-10-29T09:00:00Z", text: "x", page: null };
++  commands.readDiscussions.mockResolvedValue({
++    status: "ok",
++    data: [
++      {
++        iid: 12,
++        answer: {
++          kind: "open",
++          discussions: [{ place: { kind: "overview" }, last: { ...last, ...change } }],
++        },
++      },
++    ],
++  });
++
++  await expect(
++    createTauriMergeRequests().readDiscussions([branded(12, isMergeRequestIid, "iid")]),
++  ).rejects.toThrow(field);
++});
++
++test("readDiscussions throws on a negative iid, naming the row", async () => {
++  commands.readDiscussions.mockResolvedValue({
++    status: "ok",
++    data: [
++      { iid: 12, answer: { kind: "glabMissing" } },
++      { iid: -1, answer: { kind: "glabMissing" } },
++    ],
++  });
++
++  await expect(
++    createTauriMergeRequests().readDiscussions([branded(12, isMergeRequestIid, "iid")]),
++  ).rejects.toThrow(/rows\[1\]\.iid/u);
++});
++
+ test.each([
+   ["listMergeRequests", { kind: "WorkerStopped" }],
+   ["openMergeRequest", { kind: "WorkerStopped" }],
+   ["rerequestReview", { kind: "WorkerStopped" }],
+   ["readJobLog", { kind: "WorkerStopped" }],
++  ["readDiscussions", { kind: "WorkerStopped" }],
+ ] as const)("a %s failure comes back unchanged", async (name, failure) => {
+   commands[name].mockResolvedValue({ status: "error", error: failure });
+   const source = createTauriMergeRequests();
+@@ -339,6 +454,7 @@ test.each([
+     openMergeRequest: () => source.openMergeRequest(branded(1, isMergeRequestIid, "iid")),
+     rerequestReview: () => source.rerequestReview(branded(1, isMergeRequestIid, "iid"), "anna"),
+     readJobLog: () => source.readJobLog(jobPage()),
++    readDiscussions: () => source.readDiscussions([branded(1, isMergeRequestIid, "iid")]),
+   };
+   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
+ });
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index 8b277c9..fe0a852 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -7,6 +7,7 @@ import {
+   toMergeRequestPage,
+   toOpenReply,
+   toRerequestReply,
++  toRowDiscussions,
+   type CheckedRow,
+   type ListEnd,
+   type MergeRequestPage,
+@@ -91,5 +92,10 @@ export function createTauriMergeRequests(): MergeRequestSource {
+     async readJobLog(page) {
+       return toResult(await commands.readJobLog(page));
+     },
++    async readDiscussions(iids) {
++      return converted(toResult(await commands.readDiscussions([...iids])), (rows) =>
++        rows.map((row, at) => toRowDiscussions(row, at, uploadedPicture)),
++      );
++    },
+   };
+ }
+diff --git a/frontend/src/ui/diskChanges.test.ts b/frontend/src/ui/diskChanges.test.ts
+index 9554dc9..34aac08 100644
+--- a/frontend/src/ui/diskChanges.test.ts
++++ b/frontend/src/ui/diskChanges.test.ts
+@@ -46,6 +46,7 @@ const SOURCE: ChunkSource = {
+   setServerSwitch: notUsed,
+   setAddedServers: notUsed,
+   setAgent: notUsed,
++  setDiscussionDetails: notUsed,
+ };
+ 
+ function searchOver(files: Files): Searching<Pane> {
+diff --git a/frontend/src/ui/listing.test.ts b/frontend/src/ui/listing.test.ts
+index 5d0b82e..a415543 100644
+--- a/frontend/src/ui/listing.test.ts
++++ b/frontend/src/ui/listing.test.ts
+@@ -89,6 +89,7 @@ function sourceListing(answers: SourceResult<Listing>[]): ChunkSource {
+     setServerSwitch: notUsed,
+     setAddedServers: notUsed,
+     setAgent: notUsed,
++    setDiscussionDetails: notUsed,
+   };
+ }
+ 
+diff --git a/frontend/src/ui/mergeRequestDiscussions.test.ts b/frontend/src/ui/mergeRequestDiscussions.test.ts
+new file mode 100644
+index 0000000..9046f27
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestDiscussions.test.ts
+@@ -0,0 +1,400 @@
++import { afterEach, beforeAll, expect, test, vi } from "vitest";
++import { nextTick, shallowRef, type ShallowRef } from "vue";
++
++import {
++  createFixtureCompareSource,
++  isMergeRequestIid,
++  log,
++  type DiscussionDetails,
++  type DiscussionsAnswer,
++  type MergeRequestIid,
++  type MergeRequestRow,
++  type OpenDiscussion,
++  type RowDiscussions,
++  type SourceFailure,
++  type SourceResult,
++} from "../ipc";
++import {
++  createDiscussions,
++  type DiscussionLoad,
++  type DiscussionQueue,
++} from "./mergeRequestDiscussions";
++
++type Call = {
++  readonly iids: readonly MergeRequestIid[];
++  readonly answer: (result: SourceResult<readonly RowDiscussions[]>) => void;
++  readonly fail: (error: unknown) => void;
++};
++
++type Rig = {
++  readonly queue: DiscussionQueue;
++  readonly calls: Call[];
++  readonly mode: ShallowRef<DiscussionDetails>;
++  readonly rows: ShallowRef<readonly MergeRequestRow[]>;
++};
++
++const MICROTASKS = 10;
++const STOPPED: SourceFailure = { kind: "WorkerStopped" };
++const LOADING: DiscussionLoad = { kind: "loading" };
++const NOTE_TEXT = "Please rename this, Anna";
++
++let ROWS: readonly MergeRequestRow[] = [];
++let DISCUSSION: OpenDiscussion;
++
++beforeAll(async () => {
++  const rows: MergeRequestRow[] = [];
++  await createFixtureCompareSource(log, "?mr=list", {}).listMergeRequests(
++    (page) => {
++      rows.push(...page.rows);
++    },
++    () => undefined,
++  );
++  ROWS = rows;
++  const author = rows.find((row) => row.author !== null)?.author ?? null;
++  const page = rows.find((row) => row.page !== null)?.page ?? null;
++  DISCUSSION = {
++    place: { kind: "file", path: "src/board/card.ts", line: 12 },
++    last: { author, createdAt: 0, text: NOTE_TEXT, page },
++  };
++});
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is not an iid`);
++  }
++  return value;
++}
++
++function rig(start: DiscussionDetails = "full"): Rig {
++  const calls: Call[] = [];
++  const mode = shallowRef<DiscussionDetails>(start);
++  const rows = shallowRef<readonly MergeRequestRow[]>([]);
++  const source = {
++    ...createFixtureCompareSource(log, "", {}),
++    readDiscussions: (iids: readonly MergeRequestIid[]) =>
++      new Promise<SourceResult<readonly RowDiscussions[]>>((resolve, reject) => {
++        calls.push({ iids: [...iids], answer: resolve, fail: reject });
++      }),
++  };
++  const queue = createDiscussions({ source, mode: () => mode.value, rows: () => rows.value });
++  return { queue, calls, mode, rows };
++}
++
++async function settled(): Promise<void> {
++  for (let turn = 0; turn < MICROTASKS; turn += 1) {
++    await Promise.resolve();
++  }
++}
++
++function callAt(live: Rig, index: number): Call {
++  const call = live.calls[index];
++  if (call === undefined) {
++    throw new Error(`no call ${index}; ${live.calls.length} made`);
++  }
++  return call;
++}
++
++function openIids(rows: readonly MergeRequestRow[]): MergeRequestIid[] {
++  return rows.filter((row) => row.openDiscussions > 0).map((row) => row.iid);
++}
++
++function opened(iids: readonly MergeRequestIid[]): SourceResult<readonly RowDiscussions[]> {
++  return {
++    ok: true,
++    value: iids.map((each) => ({ iid: each, answer: { kind: "open", discussions: [DISCUSSION] } })),
++  };
++}
++
++async function answered(
++  live: Rig,
++  index: number,
++  iids?: readonly MergeRequestIid[],
++): Promise<void> {
++  const call = callAt(live, index);
++  call.answer(opened(iids ?? call.iids));
++  await settled();
++}
++
++function entry(live: Rig, value: number): DiscussionLoad | undefined {
++  return live.queue.discussions.value.get(iid(value));
++}
++
++function read(): DiscussionLoad {
++  return { kind: "read", discussions: [DISCUSSION] };
++}
++
++test("full_queues_each_page_with_open_discussions_as_it_arrives", async () => {
++  const live = rig();
++  const [first, second] = [ROWS.slice(0, 20), ROWS.slice(20)];
++
++  live.queue.listed(first);
++  expect(live.calls.map((call) => call.iids)).toEqual([openIids(first)]);
++  expect([...live.queue.discussions.value.keys()]).toEqual(openIids(first));
++  expect(entry(live, 639)).toEqual(LOADING);
++  expect(entry(live, 640)).toBeUndefined();
++
++  live.queue.listed(second);
++  await answered(live, 0);
++
++  expect(live.calls.map((call) => call.iids)).toEqual([openIids(first), openIids(second)]);
++  const asked = live.calls.flatMap((call) => call.iids);
++  const quiet = ROWS.filter((row) => row.openDiscussions === 0).map((row) => row.iid);
++  expect(asked.filter((each) => quiet.includes(each))).toEqual([]);
++});
++
++test("a_prefix_answer_sends_the_rest_until_the_queue_is_empty", async () => {
++  const live = rig();
++  live.queue.listed(ROWS);
++  const all = openIids(ROWS);
++
++  await answered(live, 0, all.slice(0, 3));
++  expect(callAt(live, 1).iids).toEqual(all.slice(3));
++  expect(entry(live, all[0] ?? 0)).toEqual(read());
++  expect(entry(live, all[3] ?? 0)).toEqual(LOADING);
++
++  await answered(live, 1);
++  expect(live.calls).toHaveLength(2);
++  expect([...live.queue.discussions.value.values()].every((load) => load.kind === "read")).toBe(
++    true,
++  );
++});
++
++test("one_call_runs_at_a_time", async () => {
++  const live = rig("lazy");
++  live.queue.askDiscussions(iid(639));
++  live.queue.askDiscussions(iid(638));
++  live.queue.askDiscussions(iid(636));
++  expect(live.calls.map((call) => call.iids)).toEqual([[639]]);
++
++  await answered(live, 0);
++  expect(live.calls.map((call) => call.iids)).toEqual([[639], [636, 638]]);
++});
++
++test("the_refresh_swap_drops_every_entry_and_asks_again", async () => {
++  const live = rig();
++  live.queue.listed(ROWS);
++  await answered(live, 0);
++  expect(entry(live, 639)).toEqual(read());
++
++  const swapped = ROWS.slice(0, 10);
++  const before = live.queue.discussions.value;
++  live.queue.listed(ROWS);
++  expect(live.queue.discussions.value).toBe(before);
++  live.queue.replaced(swapped);
++  expect([...live.queue.discussions.value.keys()]).toEqual(openIids(swapped));
++  expect(entry(live, 639)).toEqual(LOADING);
++  expect(callAt(live, 1).iids).toEqual(openIids(swapped));
++
++  live.queue.replaced(ROWS.slice(0, 3));
++  await answered(live, 1);
++  expect(entry(live, 639)).toEqual(LOADING);
++  expect(entry(live, 636)).toBeUndefined();
++  expect(callAt(live, 2).iids).toEqual(openIids(ROWS.slice(0, 3)));
++});
++
++test("lazy_asks_the_hovered_row_first_and_once", async () => {
++  const live = rig("lazy");
++  live.queue.listed(ROWS);
++  live.queue.askDiscussions(iid(639));
++  live.queue.askDiscussions(iid(639));
++  expect(live.calls.map((call) => call.iids)).toEqual([[639]]);
++  expect(entry(live, 639)).toEqual(LOADING);
++
++  await answered(live, 0);
++  live.queue.askDiscussions(iid(639));
++  expect(live.calls).toHaveLength(1);
++  expect(entry(live, 639)).toEqual(read());
++
++  live.queue.askDiscussions(iid(636));
++  live.queue.askDiscussions(iid(635));
++  live.queue.askDiscussions(iid(633));
++  await answered(live, 1, [iid(636)]);
++  expect(callAt(live, 2).iids).toEqual([633, 635]);
++});
++
++test("lazy_never_asks_unhovered_rows", async () => {
++  const live = rig("lazy");
++  live.queue.listed(ROWS);
++  live.queue.replaced(ROWS);
++  await settled();
++
++  expect(live.calls).toEqual([]);
++  expect(live.queue.discussions.value.size).toBe(0);
++});
++
++test("off_asks_nothing_and_drops_an_answer_in_flight", async () => {
++  const live = rig();
++  live.rows.value = ROWS;
++  live.queue.listed(ROWS);
++  live.mode.value = "off";
++  await nextTick();
++  expect(live.queue.discussions.value.size).toBe(0);
++  expect(live.queue.discussionDetails.value).toBe("off");
++
++  await answered(live, 0);
++  live.queue.listed(ROWS);
++  live.queue.replaced(ROWS);
++  live.queue.askDiscussions(iid(639));
++  await settled();
++
++  expect(live.queue.discussions.value.size).toBe(0);
++  expect(live.calls).toHaveLength(1);
++});
++
++test("switching_to_full_asks_what_is_missing_without_a_reload", async () => {
++  const live = rig("lazy");
++  live.rows.value = ROWS;
++  live.queue.askDiscussions(iid(639));
++  await answered(live, 0);
++  live.queue.askDiscussions(iid(638));
++  callAt(live, 1).answer({
++    ok: true,
++    value: [{ iid: iid(638), answer: { kind: "failed", message: "glab timed out" } }],
++  });
++  await settled();
++  live.queue.askDiscussions(iid(636));
++  callAt(live, 2).answer({ ok: false, failure: STOPPED });
++  await settled();
++
++  live.mode.value = "full";
++  await nextTick();
++
++  const missing = openIids(ROWS).filter((each) => ![639, 638, 636].includes(each));
++  expect(callAt(live, 3).iids).toEqual(missing);
++  expect(entry(live, 638)?.kind).toBe("refused");
++  expect(entry(live, 636)?.kind).toBe("failed");
++  expect(live.queue.discussionDetails.value).toBe("full");
++});
++
++test("switching_to_lazy_drops_unsent_asks_and_keeps_what_was_read", async () => {
++  const live = rig();
++  const [first, second, third] = [ROWS.slice(0, 20), ROWS.slice(20, 30), ROWS.slice(30)];
++  live.queue.listed(first);
++  await answered(live, 0);
++  live.queue.listed(second);
++  live.queue.listed(third);
++
++  live.mode.value = "lazy";
++  await nextTick();
++
++  expect([...live.queue.discussions.value.keys()]).toEqual([
++    ...openIids(first),
++    ...openIids(second),
++  ]);
++  const sent = openIids(second);
++  expect(entry(live, sent[0] ?? 0)).toEqual(LOADING);
++  await answered(live, 1, sent.slice(0, 2));
++  expect(callAt(live, 2).iids).toEqual(sent.slice(2));
++  await answered(live, 2);
++  expect(entry(live, sent[0] ?? 0)).toEqual(read());
++  expect(entry(live, openIids(first)[0] ?? 0)).toEqual(read());
++  expect(live.calls).toHaveLength(3);
++});
++
++test("switching_to_lazy_after_a_swap_drops_the_new_asks_behind_an_older_call", async () => {
++  const live = rig();
++  live.rows.value = ROWS.slice(0, 6);
++  live.queue.listed(live.rows.value);
++  live.queue.replaced(live.rows.value);
++  live.mode.value = "lazy";
++  await nextTick();
++  expect(live.queue.discussions.value.size).toBe(0);
++
++  await answered(live, 0);
++  expect(live.calls).toHaveLength(1);
++  expect(live.queue.discussions.value.size).toBe(0);
++
++  live.mode.value = "full";
++  await nextTick();
++  await answered(live, 1);
++  live.mode.value = "lazy";
++  await nextTick();
++  expect(entry(live, 639)).toEqual(read());
++});
++
++test("a_refused_answer_is_kept_per_row", async () => {
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 6));
++  const refusals: readonly [number, Exclude<DiscussionsAnswer, { kind: "open" }>][] = [
++    [639, { kind: "glabMissing" }],
++    [638, { kind: "notLoggedIn", detail: "gitlab.example: no token" }],
++    [636, { kind: "failed", message: "glab timed out" }],
++  ];
++  expect(callAt(live, 0).iids).toEqual([639, 638, 636, 635]);
++
++  callAt(live, 0).answer({
++    ok: true,
++    value: [
++      ...refusals.map(([value, answer]) => ({ iid: iid(value), answer })),
++      { iid: iid(635), answer: { kind: "open", discussions: [] } },
++    ],
++  });
++  await settled();
++
++  for (const [value, answer] of refusals) {
++    expect(entry(live, value)).toEqual({ kind: "refused", answer });
++  }
++  expect(entry(live, 635)).toEqual({ kind: "read", discussions: [] });
++  expect(live.calls).toHaveLength(1);
++});
++
++test("a_source_failure_is_kept_per_asked_row_not_reported", async () => {
++  const warn = vi.spyOn(log, "warn");
++  const error = vi.spyOn(log, "error");
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 3));
++  callAt(live, 0).answer({ ok: false, failure: STOPPED });
++  await settled();
++
++  expect(entry(live, 639)).toEqual({ kind: "failed", cause: STOPPED });
++  expect(entry(live, 638)).toEqual({ kind: "failed", cause: STOPPED });
++  live.queue.listed(ROWS.slice(3, 6));
++  callAt(live, 1).fail(new Error("unreadable answer"));
++  await settled();
++
++  expect(entry(live, 636)).toEqual({
++    kind: "failed",
++    cause: { kind: "Unexpected", message: "unreadable answer" },
++  });
++  expect(live.calls).toHaveLength(2);
++  expect(warn).not.toHaveBeenCalled();
++  expect(error).not.toHaveBeenCalled();
++});
++
++test("the_log_event_never_carries_text_or_names", async () => {
++  const info = vi.spyOn(log, "info");
++  vi.spyOn(performance, "now")
++    .mockReturnValueOnce(1000)
++    .mockReturnValueOnce(1250.4)
++    .mockReturnValueOnce(2000)
++    .mockReturnValueOnce(2008);
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 6));
++  callAt(live, 0).answer({
++    ok: true,
++    value: [
++      { iid: iid(639), answer: { kind: "open", discussions: [DISCUSSION] } },
++      { iid: iid(638), answer: { kind: "notLoggedIn", detail: "gitlab.example: no token" } },
++      { iid: iid(636), answer: { kind: "glabMissing" } },
++    ],
++  });
++  await settled();
++  callAt(live, 1).answer({ ok: false, failure: STOPPED });
++  await settled();
++
++  expect(info.mock.calls).toEqual([
++    ["mergeRequests.discussions_read", { asked: 4, answered: 3, refused: 2, ms: 250 }],
++    ["mergeRequests.discussions_read", { asked: 1, failed: "WorkerStopped", ms: 8 }],
++  ]);
++  const logged = JSON.stringify(info.mock.calls);
++  const author = DISCUSSION.last.author;
++  for (const secret of [NOTE_TEXT, DISCUSSION.last.page, author?.username, author?.name]) {
++    expect(secret).toBeTruthy();
++    expect(logged).not.toContain(secret);
++  }
++  expect(logged).not.toContain("gitlab.example");
++});
+diff --git a/frontend/src/ui/mergeRequestDiscussions.ts b/frontend/src/ui/mergeRequestDiscussions.ts
+new file mode 100644
+index 0000000..0bccf92
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestDiscussions.ts
+@@ -0,0 +1,201 @@
++import { computed, shallowRef, watch, type ComputedRef, type ShallowRef } from "vue";
++
++import {
++  log,
++  type DiscussionDetails,
++  type DiscussionsAnswer,
++  type MergeRequestIid,
++  type MergeRequestRow,
++  type MergeRequestSource,
++  type OpenDiscussion,
++  type RowDiscussions,
++} from "../ipc";
++import { setRow } from "./mergeRequestActions";
++import { attempt, type Outcome, type ProblemCause } from "./problem";
++
++export type DiscussionLoad =
++  | { readonly kind: "loading" }
++  | { readonly kind: "read"; readonly discussions: readonly OpenDiscussion[] }
++  | {
++      readonly kind: "refused";
++      readonly answer: Exclude<DiscussionsAnswer, { readonly kind: "open" }>;
++    }
++  | { readonly kind: "failed"; readonly cause: ProblemCause };
++export type Discussions = {
++  /** Each asked row's discussions while this list stands; no entry: not asked, or (count 0) none open. */
++  readonly discussions: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>>;
++  /** Settings' "Discussion details" in use. */
++  readonly discussionDetails: ComputedRef<DiscussionDetails>;
++  /** A count's box opened: with "lazy", asks this row first unless it has an entry; else nothing. */
++  askDiscussions(iid: MergeRequestIid): void;
++};
++export type DiscussionQueue = Discussions & {
++  /** Rows the list now shows: with "full", queues each with `openDiscussions > 0` and no entry. */
++  listed(rows: readonly MergeRequestRow[]): void;
++  /** A refresh replaced the rows: every entry, the queue and any answer in flight dropped; then `listed(rows)`. */
++  replaced(rows: readonly MergeRequestRow[]): void;
++};
++
++type Entries = ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>;
++type Call = { readonly generation: number; readonly iids: readonly MergeRequestIid[] };
++type Queue = {
++  readonly source: MergeRequestSource;
++  readonly mode: () => DiscussionDetails;
++  readonly entries: Entries;
++  /** Every `loading` entry's iid, in the order they are sent; the running call's stay until answered. */
++  queued: readonly MergeRequestIid[];
++  running: Call | null;
++  generation: number;
++};
++
++const LOADING: DiscussionLoad = { kind: "loading" };
++
++function loadOf(answer: DiscussionsAnswer): DiscussionLoad {
++  return answer.kind === "open"
++    ? { kind: "read", discussions: answer.discussions }
++    : { kind: "refused", answer };
++}
++
++function loggedFields(
++  asked: number,
++  outcome: Outcome<readonly RowDiscussions[]>,
++  ms: number,
++): Record<string, string | number> {
++  if (!outcome.ok) {
++    return { asked, failed: outcome.cause.kind, ms };
++  }
++  const refused = outcome.value.filter((row) => row.answer.kind !== "open").length;
++  return { asked, answered: outcome.value.length, refused, ms };
++}
++
++function settle(
++  queue: Queue,
++  asked: readonly MergeRequestIid[],
++  outcome: Outcome<readonly RowDiscussions[]>,
++): void {
++  const next = new Map(queue.entries.value);
++  if (outcome.ok) {
++    for (const { iid, answer } of outcome.value) {
++      next.set(iid, loadOf(answer));
++    }
++  } else {
++    for (const iid of asked) {
++      next.set(iid, { kind: "failed", cause: outcome.cause });
++    }
++  }
++  queue.entries.value = next;
++  queue.queued = queue.queued.filter((iid) => next.get(iid)?.kind === "loading");
++}
++
++async function send(queue: Queue): Promise<void> {
++  if (queue.running !== null || queue.queued.length === 0) {
++    return;
++  }
++  const call: Call = { generation: queue.generation, iids: queue.queued };
++  queue.running = call;
++  const started = performance.now();
++  const outcome = await attempt(() => queue.source.readDiscussions(call.iids));
++  queue.running = null;
++  const ms = Math.round(performance.now() - started);
++  log.info("mergeRequests.discussions_read", loggedFields(call.iids.length, outcome, ms));
++  if (call.generation === queue.generation) {
++    settle(queue, call.iids, outcome);
++  }
++  await send(queue);
++}
++
++function listed(queue: Queue, rows: readonly MergeRequestRow[]): void {
++  if (queue.mode() !== "full") {
++    return;
++  }
++  const next = new Map(queue.entries.value);
++  const missing: MergeRequestIid[] = [];
++  for (const { iid, openDiscussions } of rows) {
++    if (openDiscussions > 0 && !next.has(iid)) {
++      next.set(iid, LOADING);
++      missing.push(iid);
++    }
++  }
++  if (missing.length === 0) {
++    return;
++  }
++  queue.entries.value = next;
++  queue.queued = [...queue.queued, ...missing];
++  void send(queue);
++}
++
++function dropped(queue: Queue): void {
++  queue.generation += 1;
++  queue.entries.value = new Map();
++  queue.queued = [];
++}
++
++function unsentDropped(queue: Queue): void {
++  const { running, generation } = queue;
++  const sent = new Set(running?.generation === generation ? running.iids : []);
++  const next = new Map(queue.entries.value);
++  for (const iid of queue.queued.filter((each) => !sent.has(each))) {
++    next.delete(iid);
++  }
++  queue.entries.value = next;
++  queue.queued = queue.queued.filter((iid) => sent.has(iid));
++}
++
++function switched(queue: Queue, mode: DiscussionDetails, rows: readonly MergeRequestRow[]): void {
++  switch (mode) {
++    case "full":
++      listed(queue, rows);
++      return;
++    case "lazy":
++      unsentDropped(queue);
++      return;
++    case "off":
++      dropped(queue);
++      return;
++    default: {
++      const _exhaustive: never = mode;
++      return _exhaustive;
++    }
++  }
++}
++
++function asked(queue: Queue, iid: MergeRequestIid): void {
++  if (queue.mode() !== "lazy" || queue.entries.value.has(iid)) {
++    return;
++  }
++  setRow(queue.entries, iid, LOADING);
++  queue.queued = [iid, ...queue.queued];
++  void send(queue);
++}
++
++export function createDiscussions(deps: {
++  readonly source: MergeRequestSource;
++  readonly mode: () => DiscussionDetails;
++  readonly rows: () => readonly MergeRequestRow[];
++}): DiscussionQueue {
++  const queue: Queue = {
++    source: deps.source,
++    mode: deps.mode,
++    entries: shallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>(new Map()),
++    queued: [],
++    running: null,
++    generation: 0,
++  };
++  watch(deps.mode, (mode) => {
++    switched(queue, mode, deps.rows());
++  });
++  return {
++    discussions: queue.entries,
++    discussionDetails: computed(deps.mode),
++    askDiscussions: (iid) => {
++      asked(queue, iid);
++    },
++    listed: (rows) => {
++      listed(queue, rows);
++    },
++    replaced: (rows) => {
++      dropped(queue);
++      listed(queue, rows);
++    },
++  };
++}
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index edee07c..21ffb2c 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -1,6 +1,6 @@
+ import type { StorageLike } from "@vueuse/core";
+ import { afterEach, beforeAll, expect, test, vi } from "vitest";
+-import { shallowRef, type ShallowRef } from "vue";
++import { nextTick, shallowRef, type ShallowRef } from "vue";
+ 
+ import {
+   createFixtureCompareSource,
+@@ -8,6 +8,7 @@ import {
+   log,
+   type CheckedRow,
+   type ContinueMergeReply,
++  type DiscussionDetails,
+   type ListEnd,
+   type LocalMerge,
+   type MergeRequestIid,
+@@ -19,6 +20,7 @@ import {
+   type RerequestReply,
+   type ResolveReply,
+   type Reviewer,
++  type RowDiscussions,
+   type SourceFailure,
+   type SourceResult,
+   type WebPage,
+@@ -52,6 +54,11 @@ type Asked<T> = {
+   readonly answer: (result: SourceResult<T>) => void;
+ };
+ 
++type DiscussionCall = {
++  readonly iids: readonly MergeRequestIid[];
++  readonly answer: (result: SourceResult<readonly RowDiscussions[]>) => void;
++};
++
+ type Rig = {
+   readonly slice: MergeRequests;
+   readonly screen: ShallowRef<Screen>;
+@@ -63,6 +70,8 @@ type Rig = {
+   readonly localMerges: LocalMerge[];
+   readonly rerequests: Asked<RerequestReply>[];
+   readonly storage: MemoryStorage;
++  readonly mode: ShallowRef<DiscussionDetails>;
++  readonly discussionCalls: DiscussionCall[];
+ };
+ 
+ type MemoryStorage = StorageLike & { readonly items: Map<string, string> };
+@@ -144,6 +153,8 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+   const localMerges: LocalMerge[] = [];
+   const rerequests: Asked<RerequestReply>[] = [];
+   const problems: Problem[] = [];
++  const discussionCalls: DiscussionCall[] = [];
++  const mode = shallowRef<DiscussionDetails>("full");
+   const source: MergeRequestSource = {
+     findGitLabProject: async () => ({ ok: true, value: { kind: "found", repository: REPOSITORY } }),
+     listMergeRequests: (onPage, onChecked) =>
+@@ -172,6 +183,10 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+         rerequests.push({ iid: asked, answer: resolve });
+       }),
+     readJobLog: async () => ({ ok: true, value: { kind: "noLog" } }),
++    readDiscussions: (asked) =>
++      new Promise((resolve) => {
++        discussionCalls.push({ iids: [...asked], answer: resolve });
++      }),
+     ...edit,
+   };
+   const screen = shallowRef<Screen>({ kind: "files" });
+@@ -180,6 +195,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+     screen,
+     report: (problem) => problems.push(problem),
+     storage,
++    discussionDetails: () => mode.value,
+   });
+   return {
+     slice,
+@@ -192,6 +208,8 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+     localMerges,
+     rerequests,
+     storage,
++    mode,
++    discussionCalls,
+   };
+ }
+ 
+@@ -310,6 +328,36 @@ test("a reload keeps the old rows until its end, then swaps them in (catches a r
+   expect(live.slice.me.value).toBe("anna");
+ });
+ 
++function glabMissing(iidList: readonly MergeRequestIid[]): SourceResult<readonly RowDiscussions[]> {
++  return {
++    ok: true,
++    value: iidList.map((each) => ({ iid: each, answer: { kind: "glabMissing" } })),
++  };
++}
++
++test("a_buffered_refresh_replaces_details_only_at_its_swap", async () => {
++  const live = rig();
++  await loaded(live);
++  const open = iids(ROWS.filter((row) => row.openDiscussions > 0));
++  const [first] = live.discussionCalls;
++  expect(first?.iids).toEqual(open);
++  first?.answer(glabMissing(first.iids));
++  await settled();
++  const details = live.slice.discussions.value;
++  expect(details.get(iid(639))?.kind).toBe("refused");
++
++  const reloading = live.slice.refresh();
++  const reload = loadAt(live, 1);
++  reload.send({ me: "sam", rows: ROWS });
++  expect(live.slice.discussions.value).toBe(details);
++  expect(live.discussionCalls).toHaveLength(1);
++
++  reload.end(LOADED);
++  await reloading;
++  expect(live.slice.discussions.value.get(iid(639))).toEqual({ kind: "loading" });
++  expect(live.discussionCalls.map((call) => call.iids)).toEqual([open, open]);
++});
++
+ test.each<ListEnd>([
+   { kind: "failed", message: "glab timed out" },
+   { kind: "glabMissing" },
+@@ -732,7 +780,10 @@ test("the seam hands every header and the page the window's one slice; problems
+   };
+   vi.spyOn(console, "error").mockImplementation(() => undefined);
+ 
+-  const slice = windowMergeRequests(failing, { screen, problem });
++  const settings = shallowRef<{ readonly discussionDetails: DiscussionDetails }>({
++    discussionDetails: "full",
++  });
++  const slice = windowMergeRequests(failing, { screen, problem, settings });
+   expect(useMergeRequests()).toBe(slice);
+   await slice.findProject();
+   expect(problem.value).toEqual({ action: "mergeRequests", step: "find", cause: STOPPED });
+@@ -740,6 +791,40 @@ test("the seam hands every header and the page the window's one slice; problems
+   expect(screen.value).toEqual({ kind: "mergeRequests" });
+ });
+ 
++test("the_window_setting_drives_the_slice", async () => {
++  const asked: MergeRequestIid[][] = [];
++  const source: MergeRequestSource = {
++    ...createFixtureCompareSource(log, "?mr=list", {}),
++    readDiscussions: async (iidList) => {
++      asked.push([...iidList]);
++      return glabMissing(iidList);
++    },
++  };
++  const settings = shallowRef<{ readonly discussionDetails: DiscussionDetails }>({
++    discussionDetails: "off",
++  });
++  const slice = windowMergeRequests(source, {
++    screen: shallowRef<Screen>({ kind: "files" }),
++    problem: shallowRef<Problem | null>(null),
++    settings,
++  });
++
++  await slice.refresh();
++  expect(slice.rows.value).toHaveLength(ROWS.length);
++  expect(slice.discussionDetails.value).toBe("off");
++  expect(asked).toEqual([]);
++
++  settings.value = { discussionDetails: "full" };
++  await nextTick();
++  await settled();
++  expect(slice.discussionDetails.value).toBe("full");
++  expect(asked).toEqual([iids(ROWS.filter((row) => row.openDiscussions > 0))]);
++  expect(slice.discussions.value.get(iid(639))).toEqual({
++    kind: "refused",
++    answer: { kind: "glabMissing" },
++  });
++});
++
+ const MERGING_640: LocalMerge = { kind: "merging", iid: 640, windowOpen: false };
+ const STARTED_640: ResolveReply = {
+   kind: "started",
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 8361352..84a843f 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -3,6 +3,7 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import type {
+   CheckedRow,
++  DiscussionDetails,
+   GitLabProject,
+   ListEnd,
+   MergeRequestIid,
+@@ -16,6 +17,11 @@ import type {
+ import { merged, rechecked, type CalendarDay } from "../mergeRequests";
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
++import {
++  createDiscussions,
++  type DiscussionQueue,
++  type Discussions,
++} from "./mergeRequestDiscussions";
+ import { createDueDates, type DueDates } from "./mergeRequestDueDates";
+ import { createJobLogs, type JobLogs } from "./mergeRequestJobLogs";
+ import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
+@@ -38,6 +44,7 @@ export type Opening =
+ export type MergeRequests = RowActions &
+   Rerequests &
+   JobLogs &
++  Discussions &
+   Shown & {
+     readonly project: Readonly<ShallowRef<GitLabProject>>;
+     readonly me: Readonly<ShallowRef<string | null>>;
+@@ -64,6 +71,7 @@ type Deps = {
+   readonly screen: ShallowRef<Screen>;
+   readonly report: (problem: Problem) => void;
+   readonly storage?: StorageLike;
++  readonly discussionDetails: () => DiscussionDetails;
+ };
+ 
+ type Load = { readonly buffered: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
+@@ -80,6 +88,7 @@ type State = Deps & {
+   readonly pageProblem: ShallowRef<string | null>;
+   readonly dueDates: DueDates;
+   readonly rowActions: RowActions;
++  readonly discussions: DiscussionQueue;
+   shown: Load | null;
+   running: Load | null;
+ };
+@@ -92,6 +101,7 @@ function received(state: State, load: Load, { me, rows }: MergeRequestPage): voi
+   }
+   state.rows.value = merged(state.rows.value, rows);
+   state.me.value = me;
++  state.discussions.listed(rows);
+ }
+ 
+ function ended(state: State, load: Load, end: ListEnd): void {
+@@ -103,6 +113,7 @@ function ended(state: State, load: Load, end: ListEnd): void {
+     state.rows.value = load.buffer;
+     state.me.value = load.me;
+     state.shown = load;
++    state.discussions.replaced(state.rows.value);
+   }
+   if (end.kind === "loaded") {
+     state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
+@@ -210,12 +221,15 @@ function createState(deps: Deps): State {
+   const repository = computed(() =>
+     project.value.kind === "found" ? project.value.repository : null,
+   );
++  const rows = shallowRef<readonly MergeRequestRow[]>([]);
++  const mode = deps.discussionDetails;
++  const discussions = createDiscussions({ ...deps, mode, rows: () => rows.value });
+   return {
+     ...deps,
+     project,
+     repository,
+     me: shallowRef<string | null>(null),
+-    rows: shallowRef<readonly MergeRequestRow[]>([]),
++    rows,
+     cut: shallowRef(false),
+     search: shallowRef(""),
+     listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
+@@ -223,6 +237,7 @@ function createState(deps: Deps): State {
+     pageProblem: shallowRef<string | null>(null),
+     dueDates: createDueDates(repository, deps.storage),
+     rowActions: createRowActions(deps),
++    discussions,
+     shown: null,
+     running: null,
+   };
+@@ -279,5 +294,6 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     ...state.rowActions,
+     ...rerequestsOf(state),
+     ...createJobLogs(deps),
++    ...state.discussions,
+   };
+ }
+diff --git a/frontend/src/ui/mergeRequestsStore.ts b/frontend/src/ui/mergeRequestsStore.ts
+index 5220a62..37f5279 100644
+--- a/frontend/src/ui/mergeRequestsStore.ts
++++ b/frontend/src/ui/mergeRequestsStore.ts
+@@ -1,6 +1,6 @@
+ import type { ShallowRef } from "vue";
+ 
+-import type { MergeRequestSource } from "../ipc";
++import type { DiscussionDetails, MergeRequestSource } from "../ipc";
+ import { createMergeRequests, type MergeRequests } from "./mergeRequests";
+ import { report, type Problem } from "./problem";
+ import type { Screen } from "./screen";
+@@ -8,6 +8,7 @@ import type { Screen } from "./screen";
+ type WindowRefs = {
+   readonly screen: ShallowRef<Screen>;
+   readonly problem: ShallowRef<Problem | null>;
++  readonly settings: Readonly<ShallowRef<{ readonly discussionDetails: DiscussionDetails }>>;
+ };
+ 
+ let registered: MergeRequests | null = null;
+@@ -30,6 +31,7 @@ export function windowMergeRequests(source: MergeRequestSource, refs: WindowRefs
+     report: (problem) => {
+       report(refs, problem);
+     },
++    discussionDetails: () => refs.settings.value.discussionDetails,
+   });
+   registerMergeRequests(slice);
+   return slice;
+diff --git a/frontend/src/ui/saving.test.ts b/frontend/src/ui/saving.test.ts
+index 078aaeb..2c74d20 100644
+--- a/frontend/src/ui/saving.test.ts
++++ b/frontend/src/ui/saving.test.ts
+@@ -149,6 +149,7 @@ function writeTarget(
+     setServerSwitch: notUsed,
+     setAddedServers: notUsed,
+     setAgent: notUsed,
++    setDiscussionDetails: notUsed,
+   };
+   return {
+     source,
+diff --git a/frontend/src/ui/settings.test.ts b/frontend/src/ui/settings.test.ts
+index 65f77f6..6bcea4d 100644
+--- a/frontend/src/ui/settings.test.ts
++++ b/frontend/src/ui/settings.test.ts
+@@ -64,6 +64,12 @@ function settingsTarget(loads: StoredSettings[]): {
+       return read({ ...current, theme });
+     },
+     setAntialiasing: async () => read(startStored()),
++    setDiscussionDetails: async (current, discussionDetails) => {
++      sent.push(["setDiscussionDetails", current, discussionDetails]);
++      return discussionDetails === "off"
++        ? { ok: false, failure: BROKEN }
++        : read({ ...current, discussionDetails });
++    },
+     setKeys: async () => read(startStored()),
+     moveSettings: async () => read(startStored()),
+     setServerSwitch: async (current, server, on) => {
+@@ -108,6 +114,7 @@ function startStored(): StoredSettings {
+     keys: {},
+     languageServers: NO_SERVERS,
+     agent: NO_AGENT,
++    discussionDetails: "full",
+   };
+ }
+ 
+@@ -341,3 +348,53 @@ test.each<[string, AgentSettings]>([
+ 
+   expect(target.settings.value).toBe(inUse);
+ });
++
++test("before_any_read_the_discussion_details_are_full_and_sent_so", async () => {
++  const { actions, target, sent } = settingsTarget([]);
++
++  expect(target.settings.value.discussionDetails).toBe("full");
++
++  await actions.loadSettings();
++
++  expect(sent).toEqual([["loadSettings", { ...startStored(), discussionDetails: "full" }]]);
++});
++
++test("setDiscussionDetails_sends_the_settings_in_use_and_adopts_the_reply", async () => {
++  const { actions, target, sent } = settingsTarget([{ ...startStored(), theme: "light" }]);
++  await actions.loadSettings();
++
++  await actions.setDiscussionDetails("lazy");
++  expect(sent[1]).toEqual(["setDiscussionDetails", { ...startStored(), theme: "light" }, "lazy"]);
++  expect(target.settings.value.discussionDetails).toBe("lazy");
++
++  await actions.setTheme("dark");
++  expect(sent[2]).toEqual([
++    "setTheme",
++    { ...startStored(), theme: "light", discussionDetails: "lazy" },
++    "dark",
++  ]);
++});
++
++test("a_failed_setDiscussionDetails_is_a_settings_problem_and_keeps_the_settings", async () => {
++  const { actions, target } = settingsTarget([]);
++  await actions.loadSettings();
++  const inUse = target.settings.value;
++
++  await actions.setDiscussionDetails("off");
++
++  expect(target.problem.value).toEqual({ action: "settings", cause: BROKEN });
++  expect(target.settings.value).toBe(inUse);
++});
++
++test("a_load_whose_only_difference_is_the_discussion_details_is_adopted", async () => {
++  const { actions, target } = settingsTarget([
++    { ...startStored(), discussionDetails: "lazy" },
++    { ...startStored(), discussionDetails: "off" },
++  ]);
++  await actions.loadSettings();
++  expect(target.settings.value.discussionDetails).toBe("lazy");
++
++  await actions.loadSettings();
++
++  expect(target.settings.value.discussionDetails).toBe("off");
++});
+diff --git a/frontend/src/ui/settings.ts b/frontend/src/ui/settings.ts
+index 0030551..d1f4327 100644
+--- a/frontend/src/ui/settings.ts
++++ b/frontend/src/ui/settings.ts
+@@ -8,6 +8,7 @@ import {
+   type AddedServer,
+   type AgentSettings,
+   type Antialiasing,
++  type DiscussionDetails,
+   type Key,
+   type KeyAction,
+   type KeyProblem,
+@@ -32,6 +33,7 @@ export type SettingsInUse = {
+   readonly keys: KeysRead;
+   readonly languageServers: LanguageServerSettings;
+   readonly agent: AgentSettings;
++  readonly discussionDetails: DiscussionDetails;
+ };
+ 
+ type SettingsTarget = {
+@@ -46,6 +48,7 @@ export type SettingsActions = {
+   loadSettings(): Promise<void>;
+   setTheme(theme: Theme): Promise<void>;
+   setAntialiasing(antialiasing: Antialiasing): Promise<void>;
++  setDiscussionDetails(details: DiscussionDetails): Promise<void>;
+   addKey(action: KeyAction, key: Key): Promise<void>;
+   changeKey(action: KeyAction, from: Key, to: Key): Promise<void>;
+   removeKey(action: KeyAction, key: Key): Promise<void>;
+@@ -68,6 +71,7 @@ export function startSettings(theme: Theme): SettingsInUse {
+     keys: bindingsOf({}),
+     languageServers: { repositories: {}, off: {}, added: [] },
+     agent: { command: null, firstMessage: null },
++    discussionDetails: "full",
+   };
+ }
+ 
+@@ -85,6 +89,7 @@ function storedSettings({
+   keys,
+   languageServers,
+   agent,
++  discussionDetails,
+ }: SettingsInUse): StoredSettings {
+   const changed = KEY_ACTIONS.filter((action) => !isDefault(action, keys.bindings[action]));
+   return {
+@@ -93,6 +98,7 @@ function storedSettings({
+     keys: Object.fromEntries(changed.map((action) => [action, keys.bindings[action].map(keyText)])),
+     languageServers,
+     agent,
++    discussionDetails,
+   };
+ }
+ 
+@@ -150,12 +156,14 @@ function sameStored(inUse: SettingsRead | null, read: SettingsRead): boolean {
+   if (inUse === null || inUse.path !== read.path) {
+     return false;
+   }
+-  const { theme, antialiasing, keys, languageServers, agent, ...rest } = read.stored;
++  const { theme, antialiasing, keys, languageServers, agent, discussionDetails, ...rest } =
++    read.stored;
+   rest satisfies Record<string, never>;
+   const before = inUse.stored;
+   return (
+     theme === before.theme &&
+     antialiasing === before.antialiasing &&
++    discussionDetails === before.discussionDetails &&
+     sameServers(before.languageServers, languageServers) &&
+     sameKeys(before.keys, keys) &&
+     sameAgent(before.agent, agent)
+@@ -189,7 +197,7 @@ function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: Set
+ function adopt(target: SettingsTarget, read: SettingsRead): void {
+   const before = target.settings.value;
+   if (!sameStored(before.read, read)) {
+-    const { theme, antialiasing, keys, languageServers, agent } = read.stored;
++    const { theme, antialiasing, keys, languageServers, agent, discussionDetails } = read.stored;
+     target.settings.value = {
+       read,
+       theme,
+@@ -197,6 +205,7 @@ function adopt(target: SettingsTarget, read: SettingsRead): void {
+       keys: bindingsOf(keys),
+       languageServers,
+       agent,
++      discussionDetails,
+     };
+   }
+   showKeyProblems(target, read, before);
+@@ -247,6 +256,8 @@ export function settingsActions(target: SettingsTarget): SettingsActions {
+     setTheme: (theme) => send(target, (current) => source.setTheme(current, theme)),
+     setAntialiasing: (antialiasing) =>
+       send(target, (current) => source.setAntialiasing(current, antialiasing)),
++    setDiscussionDetails: (details) =>
++      send(target, (current) => source.setDiscussionDetails(current, details)),
+     addKey: (action, key) => editKeys(target, { kind: "add", action, key }),
+     changeKey: (action, from, to) => editKeys(target, { kind: "change", action, from, to }),
+     removeKey: (action, key) => editKeys(target, { kind: "remove", action, key }),
+diff --git a/frontend/src/ui/stops.test.ts b/frontend/src/ui/stops.test.ts
+index 722bfee..9f52208 100644
+--- a/frontend/src/ui/stops.test.ts
++++ b/frontend/src/ui/stops.test.ts
+@@ -107,6 +107,7 @@ function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
+     setServerSwitch: notUsed,
+     setAddedServers: notUsed,
+     setAgent: notUsed,
++    setDiscussionDetails: notUsed,
+   };
+ }
+ 
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 7eb3a2d..4637c76 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -52,6 +52,7 @@ const NO_SETTINGS: SettingsSource = {
+   loadSettings: () => Promise.reject(new Error("not used")),
+   setTheme: () => Promise.reject(new Error("not used")),
+   setAntialiasing: () => Promise.reject(new Error("not used")),
++  setDiscussionDetails: () => Promise.reject(new Error("not used")),
+   setKeys: () => Promise.reject(new Error("not used")),
+   moveSettings: () => Promise.reject(new Error("not used")),
+   setServerAnswer: () => Promise.reject(new Error("not used")),
+@@ -66,12 +67,14 @@ const DARK = {
+   antialiasing: "subpixel",
+   languageServers: NO_SERVERS,
+   agent: DEFAULT_AGENT,
++  discussionDetails: "full",
+ } satisfies Omit<StoredSettings, "keys">;
+ const LIGHT = {
+   theme: "light",
+   antialiasing: "subpixel",
+   languageServers: NO_SERVERS,
+   agent: DEFAULT_AGENT,
++  discussionDetails: "full",
+ } satisfies Omit<StoredSettings, "keys">;
+ 
+ afterEach(() => {
+@@ -1836,6 +1839,7 @@ test("settings start with the start theme and the default keys, before any file
+     keys: { bindings: DEFAULT_KEYS, problems: [] },
+     languageServers: NO_SERVERS,
+     agent: DEFAULT_AGENT,
++    discussionDetails: "full",
+   });
+   expect(store.preferences.value).toEqual({ theme: "light", keys: DEFAULT_KEYS });
+ });

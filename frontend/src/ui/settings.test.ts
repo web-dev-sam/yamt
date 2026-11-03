@@ -64,6 +64,12 @@ function settingsTarget(loads: StoredSettings[]): {
       return read({ ...current, theme });
     },
     setAntialiasing: async () => read(startStored()),
+    setDiscussionDetails: async (current, discussionDetails) => {
+      sent.push(["setDiscussionDetails", current, discussionDetails]);
+      return discussionDetails === "off"
+        ? { ok: false, failure: BROKEN }
+        : read({ ...current, discussionDetails });
+    },
     setKeys: async () => read(startStored()),
     moveSettings: async () => read(startStored()),
     setServerSwitch: async (current, server, on) => {
@@ -108,6 +114,7 @@ function startStored(): StoredSettings {
     keys: {},
     languageServers: NO_SERVERS,
     agent: NO_AGENT,
+    discussionDetails: "full",
   };
 }
 
@@ -340,4 +347,54 @@ test.each<[string, AgentSettings]>([
   await actions.loadSettings();
 
   expect(target.settings.value).toBe(inUse);
+});
+
+test("before_any_read_the_discussion_details_are_full_and_sent_so", async () => {
+  const { actions, target, sent } = settingsTarget([]);
+
+  expect(target.settings.value.discussionDetails).toBe("full");
+
+  await actions.loadSettings();
+
+  expect(sent).toEqual([["loadSettings", { ...startStored(), discussionDetails: "full" }]]);
+});
+
+test("setDiscussionDetails_sends_the_settings_in_use_and_adopts_the_reply", async () => {
+  const { actions, target, sent } = settingsTarget([{ ...startStored(), theme: "light" }]);
+  await actions.loadSettings();
+
+  await actions.setDiscussionDetails("lazy");
+  expect(sent[1]).toEqual(["setDiscussionDetails", { ...startStored(), theme: "light" }, "lazy"]);
+  expect(target.settings.value.discussionDetails).toBe("lazy");
+
+  await actions.setTheme("dark");
+  expect(sent[2]).toEqual([
+    "setTheme",
+    { ...startStored(), theme: "light", discussionDetails: "lazy" },
+    "dark",
+  ]);
+});
+
+test("a_failed_setDiscussionDetails_is_a_settings_problem_and_keeps_the_settings", async () => {
+  const { actions, target } = settingsTarget([]);
+  await actions.loadSettings();
+  const inUse = target.settings.value;
+
+  await actions.setDiscussionDetails("off");
+
+  expect(target.problem.value).toEqual({ action: "settings", cause: BROKEN });
+  expect(target.settings.value).toBe(inUse);
+});
+
+test("a_load_whose_only_difference_is_the_discussion_details_is_adopted", async () => {
+  const { actions, target } = settingsTarget([
+    { ...startStored(), discussionDetails: "lazy" },
+    { ...startStored(), discussionDetails: "off" },
+  ]);
+  await actions.loadSettings();
+  expect(target.settings.value.discussionDetails).toBe("lazy");
+
+  await actions.loadSettings();
+
+  expect(target.settings.value.discussionDetails).toBe("off");
 });

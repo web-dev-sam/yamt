@@ -3,6 +3,7 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import type {
   CheckedRow,
+  DiscussionDetails,
   GitLabProject,
   ListEnd,
   MergeRequestIid,
@@ -16,6 +17,11 @@ import type {
 import { merged, rechecked, type CalendarDay } from "../mergeRequests";
 import { RECHECK_PAUSE_MS } from "./glab";
 import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
+import {
+  createDiscussions,
+  type DiscussionQueue,
+  type Discussions,
+} from "./mergeRequestDiscussions";
 import { createDueDates, type DueDates } from "./mergeRequestDueDates";
 import { createJobLogs, type JobLogs } from "./mergeRequestJobLogs";
 import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
@@ -38,6 +44,7 @@ export type Opening =
 export type MergeRequests = RowActions &
   Rerequests &
   JobLogs &
+  Discussions &
   Shown & {
     readonly project: Readonly<ShallowRef<GitLabProject>>;
     readonly me: Readonly<ShallowRef<string | null>>;
@@ -64,6 +71,7 @@ type Deps = {
   readonly screen: ShallowRef<Screen>;
   readonly report: (problem: Problem) => void;
   readonly storage?: StorageLike;
+  readonly discussionDetails: () => DiscussionDetails;
 };
 
 type Load = { readonly buffered: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
@@ -80,6 +88,7 @@ type State = Deps & {
   readonly pageProblem: ShallowRef<string | null>;
   readonly dueDates: DueDates;
   readonly rowActions: RowActions;
+  readonly discussions: DiscussionQueue;
   shown: Load | null;
   running: Load | null;
 };
@@ -92,6 +101,7 @@ function received(state: State, load: Load, { me, rows }: MergeRequestPage): voi
   }
   state.rows.value = merged(state.rows.value, rows);
   state.me.value = me;
+  state.discussions.listed(rows);
 }
 
 function ended(state: State, load: Load, end: ListEnd): void {
@@ -103,6 +113,7 @@ function ended(state: State, load: Load, end: ListEnd): void {
     state.rows.value = load.buffer;
     state.me.value = load.me;
     state.shown = load;
+    state.discussions.replaced(state.rows.value);
   }
   if (end.kind === "loaded") {
     state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
@@ -210,12 +221,15 @@ function createState(deps: Deps): State {
   const repository = computed(() =>
     project.value.kind === "found" ? project.value.repository : null,
   );
+  const rows = shallowRef<readonly MergeRequestRow[]>([]);
+  const mode = deps.discussionDetails;
+  const discussions = createDiscussions({ ...deps, mode, rows: () => rows.value });
   return {
     ...deps,
     project,
     repository,
     me: shallowRef<string | null>(null),
-    rows: shallowRef<readonly MergeRequestRow[]>([]),
+    rows,
     cut: shallowRef(false),
     search: shallowRef(""),
     listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
@@ -223,6 +237,7 @@ function createState(deps: Deps): State {
     pageProblem: shallowRef<string | null>(null),
     dueDates: createDueDates(repository, deps.storage),
     rowActions: createRowActions(deps),
+    discussions,
     shown: null,
     running: null,
   };
@@ -279,5 +294,6 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     ...state.rowActions,
     ...rerequestsOf(state),
     ...createJobLogs(deps),
+    ...state.discussions,
   };
 }

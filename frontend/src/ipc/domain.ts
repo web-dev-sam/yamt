@@ -45,6 +45,7 @@ export type DiskChange = Generated.DiskChange;
 export type WriteReply = Generated.WriteReply;
 export type Theme = Generated.Theme;
 export type Antialiasing = Generated.Antialiasing;
+export type DiscussionDetails = Generated.DiscussionDetails;
 export type ClipboardSelection = Generated.ClipboardSelection;
 
 export type LanguageServerSettings = Required<Generated.LanguageServerSettings>;
@@ -78,7 +79,6 @@ export type StartReply =
   | { readonly kind: "Started"; readonly run: RunId };
 
 export type ServerContext = Generated.ServerContext;
-
 export type ProgramFound = Generated.ProgramFound;
 
 export type ProjectFile = Generated.ProjectFile;

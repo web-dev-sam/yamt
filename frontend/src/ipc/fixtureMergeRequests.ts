@@ -14,6 +14,7 @@ import {
   REFUSED_MESSAGE,
   REFUSING_REVIEWER,
 } from "./fixtureMergeRequestData";
+import { discussionsScript } from "./fixtureMergeRequestDiscussions";
 import { fixtureJobLog } from "./fixtureMergeRequestLogs";
 import type { Log } from "./log";
 import {
@@ -278,5 +279,6 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
     ...localMergeScript(),
     ...rerequestScript(log),
     ...pageScript(log),
+    ...discussionsScript(log, LISTED_ROWS),
   };
 }

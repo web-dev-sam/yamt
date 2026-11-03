@@ -59,6 +59,9 @@ export function createTauriSettings(): SettingsSource {
     async setAntialiasing(current, antialiasing) {
       return toSettingsResult(await commands.setAntialiasing(current, antialiasing));
     },
+    async setDiscussionDetails(current, details) {
+      return toSettingsResult(await commands.setDiscussionDetails(current, details));
+    },
     async setKeys(current, changes) {
       return toSettingsResult(await commands.setKeys(current, [...changes]));
     },

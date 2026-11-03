@@ -149,6 +149,7 @@ function writeTarget(
     setServerSwitch: notUsed,
     setAddedServers: notUsed,
     setAgent: notUsed,
+    setDiscussionDetails: notUsed,
   };
   return {
     source,

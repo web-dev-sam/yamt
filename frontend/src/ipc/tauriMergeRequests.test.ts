@@ -13,6 +13,7 @@ const commands = vi.hoisted(() => ({
   openPage: vi.fn(),
   rerequestReview: vi.fn(),
   readJobLog: vi.fn(),
+  readDiscussions: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -326,11 +327,125 @@ test("readJobLog_calls_the_command_with_the_page_and_returns_its_reply", async (
   expect(commands.readJobLog).toHaveBeenCalledWith(page);
 });
 
+test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", async () => {
+  const note = "https://gitlab.example/x/-/merge_requests/12#note_7001";
+  const rows: Generated.RowDiscussions[] = [
+    {
+      iid: 12,
+      answer: {
+        kind: "open",
+        discussions: [
+          {
+            place: { kind: "file", path: "src/a.ts", line: 4 },
+            last: {
+              author: { username: "ben", name: "Ben Okafor", picture: { kind: "uploaded" } },
+              createdAt: "2026-10-29T09:00:00Z",
+              text: "**not bold**",
+              page: note,
+            },
+          },
+          {
+            place: { kind: "overview" },
+            last: { author: null, createdAt: "2026-10-29T10:00:00Z", text: "x", page: null },
+          },
+        ],
+      },
+    },
+    { iid: 13, answer: { kind: "notLoggedIn", detail: "gitlab.example" } },
+  ];
+  commands.readDiscussions.mockResolvedValue({ status: "ok", data: rows });
+  const iids = [branded(12, isMergeRequestIid, "iid"), branded(13, isMergeRequestIid, "iid")];
+
+  expect(await createTauriMergeRequests().readDiscussions(iids)).toEqual({
+    ok: true,
+    value: [
+      {
+        iid: 12,
+        answer: {
+          kind: "open",
+          discussions: [
+            {
+              place: { kind: "file", path: "src/a.ts", line: 4 },
+              last: {
+                author: {
+                  username: "ben",
+                  name: "Ben Okafor",
+                  picture: "yamt-picture://localhost/ben",
+                },
+                createdAt: Date.parse("2026-10-29T09:00:00Z"),
+                text: "**not bold**",
+                page: note,
+              },
+            },
+            {
+              place: { kind: "overview" },
+              last: {
+                author: null,
+                createdAt: Date.parse("2026-10-29T10:00:00Z"),
+                text: "x",
+                page: null,
+              },
+            },
+          ],
+        },
+      },
+      { iid: 13, answer: { kind: "notLoggedIn", detail: "gitlab.example" } },
+    ],
+  });
+  expect(commands.readDiscussions).toHaveBeenCalledWith([12, 13]);
+});
+
+test.each([
+  [
+    "a time that is not ISO 8601",
+    { createdAt: "yesterday" },
+    /rows\[0\]\.answer\.discussions\[0\]\.last\.createdAt/u,
+  ],
+  [
+    "a page that is not https",
+    { page: "http://gitlab.example/x" },
+    /rows\[0\]\.answer\.discussions\[0\]\.last\.page/u,
+  ],
+] as const)("readDiscussions throws on %s, naming the field", async (_, change, field) => {
+  const last = { author: null, createdAt: "2026-10-29T09:00:00Z", text: "x", page: null };
+  commands.readDiscussions.mockResolvedValue({
+    status: "ok",
+    data: [
+      {
+        iid: 12,
+        answer: {
+          kind: "open",
+          discussions: [{ place: { kind: "overview" }, last: { ...last, ...change } }],
+        },
+      },
+    ],
+  });
+
+  await expect(
+    createTauriMergeRequests().readDiscussions([branded(12, isMergeRequestIid, "iid")]),
+  ).rejects.toThrow(field);
+});
+
+test("readDiscussions throws on a negative iid, naming the row", async () => {
+  commands.readDiscussions.mockResolvedValue({
+    status: "ok",
+    data: [
+      { iid: 12, answer: { kind: "glabMissing" } },
+      { iid: -1, answer: { kind: "glabMissing" } },
+    ],
+  });
+
+  await expect(
+    createTauriMergeRequests().readDiscussions([branded(12, isMergeRequestIid, "iid")]),
+  ).rejects.toThrow(/rows\[1\]\.iid/u);
+});
+
 test.each([
   ["listMergeRequests", { kind: "WorkerStopped" }],
   ["openMergeRequest", { kind: "WorkerStopped" }],
   ["rerequestReview", { kind: "WorkerStopped" }],
   ["readJobLog", { kind: "WorkerStopped" }],
+  ["readDiscussions", { kind: "WorkerStopped" }],
 ] as const)("a %s failure comes back unchanged", async (name, failure) => {
   commands[name].mockResolvedValue({ status: "error", error: failure });
   const source = createTauriMergeRequests();
@@ -339,6 +454,7 @@ test.each([
     openMergeRequest: () => source.openMergeRequest(branded(1, isMergeRequestIid, "iid")),
     rerequestReview: () => source.rerequestReview(branded(1, isMergeRequestIid, "iid"), "anna"),
     readJobLog: () => source.readJobLog(jobPage()),
+    readDiscussions: () => source.readDiscussions([branded(1, isMergeRequestIid, "iid")]),
   };
   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
 });
