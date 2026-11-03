@@ -14,7 +14,7 @@ import {
   type ListFilter,
   type PersonValue,
 } from "../mergeRequests";
-import MenuNarrowing from "./MenuNarrowing.vue";
+import MergeRequestMenu from "./MergeRequestMenu.vue";
 import { clearFilterTitle, notValueLabel } from "./mergeRequestsText";
 import { vTooltip } from "./tooltip";
 import { useShiftHeld } from "./useShiftHeld";
@@ -117,7 +117,7 @@ function item(choice: Choice<Value>): Item {
     >
       <X class="size-3.5" aria-hidden="true" />
     </button>
-    <MenuNarrowing
+    <MergeRequestMenu
       ref="box"
       :choices="choices"
       :name="name"
@@ -159,6 +159,6 @@ function item(choice: Choice<Value>): Item {
           </li>
         </ul>
       </template>
-    </MenuNarrowing>
+    </MergeRequestMenu>
   </div>
 </template>

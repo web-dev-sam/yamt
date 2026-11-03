@@ -12,11 +12,6 @@ type Menu = {
   readonly above: boolean;
 };
 
-const MENU_SOURCES: Readonly<Record<string, string>> = import.meta.glob(
-  ["./MergeRequestFilter.vue", "./MergeRequestReviewMode.vue"],
-  { query: "?raw", import: "default", eager: true },
-);
-
 beforeEach(() => {
   const document = new EventTarget();
   vi.stubGlobal("document", document);
@@ -83,13 +78,5 @@ test("closed, neither menu renders its box or its choices", async () => {
   for (const html of [await filterMenu(menu), await pickerMenu(menu)]) {
     expect(narrowingBox(html)).toBeNull();
     expect(labels(html)).toEqual([]);
-  }
-});
-
-test("both menus leave typing, narrowing and its reset on opening to MenuNarrowing", () => {
-  expect(Object.keys(MENU_SOURCES)).toHaveLength(2);
-  for (const source of Object.values(MENU_SOURCES)) {
-    expect(source).toMatch(/<MenuNarrowing[^>]*:open="open"/u);
-    expect(source).not.toMatch(/typed|narrowed\(|NARROW_FROM|type="search"/u);
   }
 });

@@ -4,7 +4,7 @@ import Check from "~icons/lucide/check";
 import UserRoundSearch from "~icons/lucide/user-round-search";
 
 import { filterName, type Choice, type ReviewFor } from "../mergeRequests";
-import MenuNarrowing from "./MenuNarrowing.vue";
+import MergeRequestMenu from "./MergeRequestMenu.vue";
 import { REVIEW_MODE } from "./mergeRequestsText";
 import { vTooltip } from "./tooltip";
 
@@ -55,7 +55,7 @@ function keyOf(value: ReviewFor): string {
     >
       <UserRoundSearch class="size-4" aria-hidden="true" />
     </button>
-    <MenuNarrowing
+    <MergeRequestMenu
       ref="box"
       :choices="choices"
       :name="REVIEWER"
@@ -85,6 +85,6 @@ function keyOf(value: ReviewFor): string {
           </li>
         </ul>
       </template>
-    </MenuNarrowing>
+    </MergeRequestMenu>
   </div>
 </template>
