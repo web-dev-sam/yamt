@@ -145,31 +145,12 @@ Order: 2 ∥ 3, `just bindings`, 4, 5, 6 ∥ 7 smoke, 7 final.
 | 7   | verify (`briefs/mr-discussions-verify.md`): smoke after 5; final `just check`, WebKit, real app                     | verifier     | done        | smoke `96103a1f` (B6 = stale reload, #2217); final `MrDiscussionsFinal` at `2fe58a24`: `just check` pass (74.9 s, 4076 tests), B1–B8 both windows, C1–C6 pass. Notes `MrDiscussions{Smoke,Final}.md`                                                             |
 | 8   | owner check on the GitLab playground: a discussion answered by the author shows "Your turn" to the reviewer         | human        | handed over | the verify brief's "Owner check" (!1, four discussions by `samubr`; a second user's reply needed)                                                                                                                                                                |
 
-## Review mode (session 47; owner #2194, #2198–#2201: "a review mode, that sorts by the new number of open discussions")
-
-Request `docs/slices/request-mr-review-mode.md` (rules 1–7, acceptance, non-goals); base `5fce6e10` (discussions
-closed). Owner's answers in the request: order (#2198), ready = not a draft (#2198), only with details loaded fully
-(#2199). No product question open (OR13). Design `briefs/mr-review-mode-design.md` option A: review mode is a fifth
-field of the remembered filters (`review`: me / `user:<name>`, written only while on; older yamt reads its four keys),
-one pure core order over existing discussion data, picker in the bar's one hover menu; no Rust, no IPC; proposed plan
-#165–#166, RK62–RK63. Designer's two points decided by the request (OR13, owner may veto): one unreadable row keeps the
-normal order with the icon saying why (rule 6); rows move back while a Refresh reloads details (rule 6, discussions'
-"a refresh drops them" kept). Order: 2, 3, 4 ∥ 5 smoke, 5 final.
-
-| row | slice                                                                                     | owner       | status  | evidence                                                                                                                                                                                                                                         |
-| --- | ----------------------------------------------------------------------------------------- | ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | design: order's home, stored form, picker, late arrivals                                  | designer    | done    | `MrReviewModeDesign`: option A, three briefs. Notes `MrReviewModeDesign.md`                                                                                                                                                                      |
-| 2   | core (`briefs/mr-review-mode-core.md`): order, stored mode, rule-7 gate, box's viewer     | web-impl    | done    | `004a1829` + R1 `38527697` (#2219 #2220: one `viewerPossessive`, one `DueDates.dueOf`); row-reply words split to `ui/mergeRequestRowReplyText.ts` (granted); both reviews + R1 re-review pass; #2221 → docs keeper. Notes `MrReviewModeCore*.md` |
-| 3   | page (`briefs/mr-review-mode-page.md`): button, picker, sort icon, fixtures; wires window | web-impl    | done    | `494b71a8` + R1 `31ae54ce` (#2224: one narrowing box) + R2 `5eda1143` (#2229 #2230: no source-text test, box named `MergeRequestMenu.vue` inside the page fence); reviews and R1/R2 re-reviews pass. Notes `MrReviewModePage*.md`                |
-| 4   | docs keeper                                                                               | docs-keeper | done    | `11fe56bd`: architecture §5.1/§5.4, plan #165–#166 (+#134/#156 amended), RK62–RK63, tree/state/map, CHANGELOG; map-check ok. Notes `MrReviewModeDocs.md`                                                                                         |
-| 5   | verify: smoke after 3; final `just check`, WebKit fixture, real app                       | verifier    | running | smoke `MrReviewModeSmoke` at `74834ac9`: B1–B10 both windows dark+light, C1–C8 pass (arrows Me→Anna→Ben→Chiara→Dmitri); #2228 brief command fixed. Notes `MrReviewModeSmoke.md`                                                                  |
-
 ## Next, in the owner's order (session 45; owner #2193–#2198)
 
 One request per session (OR14), each started with `/new`, then `Implement docs/slices/request-<x>.md`:
 
 1. `request-mr-discussions.md`: done (section above); owner check handed over.
-2. `request-mr-review-mode.md`: review mode for any reviewer, review order, sort icon (needs 1's data).
+2. `request-mr-review-mode.md`: done (archived, session 47).
 3. `request-mr-starts.md`: the list's age left of Refresh, `yamt --mr`, `YAMT_AI=1`.
 
 ## Open product questions
