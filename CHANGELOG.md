@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-11-03
+
 ### Added
 
 - Merge-request rows for reviewing. Each row starts with the author's picture ("Author: <name>" on hover) and shows
@@ -494,7 +496,8 @@ The 0.6 line as a release: everything in 0.6.0-beta.1 and 0.6.0-beta.2 below, wi
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.6.5...HEAD
+[Unreleased]: ../../compare/v0.6.6...HEAD
+[0.6.6]: ../../compare/v0.6.5...v0.6.6
 [0.6.5]: ../../compare/v0.6.4...v0.6.5
 [0.6.4]: ../../compare/v0.6.3...v0.6.4
 [0.6.3]: ../../compare/v0.6.2...v0.6.3
