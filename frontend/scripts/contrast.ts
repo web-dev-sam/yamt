@@ -1,4 +1,6 @@
 export const OPAQUE_HEX = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/;
+export const ANSI_TOKEN = /^--color-ansi-/;
+export const PANEL_TOKEN = /^--color-panel$/;
 
 type Definition = { readonly name: string; readonly value: string; readonly line: number };
 type ContrastViolation = {
@@ -8,8 +10,6 @@ type ContrastViolation = {
   readonly match: string;
 };
 
-const ANSI_TOKEN = /^--color-ansi-/;
-const PANEL_TOKEN = "--color-panel";
 const MINIMUM_CONTRAST = 4.5;
 const TENTHS = 10;
 const HEX_RADIX = 16;
@@ -41,7 +41,7 @@ export function ansiContrastFindings(block: {
   readonly file: string;
   readonly definitions: readonly Definition[];
 }): ContrastViolation[] {
-  const panel = block.definitions.find(({ name }) => name === PANEL_TOKEN)?.value ?? "";
+  const panel = block.definitions.find(({ name }) => PANEL_TOKEN.test(name))?.value ?? "";
   return block.definitions
     .filter(({ name }) => ANSI_TOKEN.test(name))
     .flatMap(({ name, value, line }): ContrastViolation[] => {

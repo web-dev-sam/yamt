@@ -356,14 +356,16 @@ test("4.54:1 and black's 4.56:1 (linear below the sRGB knee) pass; 4.48:1 report
   ]);
 });
 
-test("an ansi colour is not measured in a block whose panel is no #rrggbb", () => {
+test("a panel that is no #rrggbb is a bad value, so its block's ansi colours are not left unmeasured", () => {
   const files = tree(
     withAnsi(DARK, { panel: "#17161c", token: "black", colour: "#878787" }),
     withAnsi(LIGHT, { panel: "#fff", token: "black", colour: "#ffffff" }),
     withAnsi(ZED, { panel: "#282c33", token: "black", colour: "#9b9ca1" }),
   );
 
-  expect(findThemeViolations(files)).toEqual([]);
+  expect(findThemeViolations(files)).toEqual([
+    { rule: "bad-value", file: "src/themes/light.css", line: 7, match: "--color-panel: #fff" },
+  ]);
 });
 
 function placeWindowFile(folder: string, text: string): void {

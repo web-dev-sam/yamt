@@ -1,7 +1,7 @@
 import { existsSync, globSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { ansiContrastFindings, OPAQUE_HEX } from "./contrast";
+import { ANSI_TOKEN, ansiContrastFindings, OPAQUE_HEX, PANEL_TOKEN } from "./contrast";
 import type { SourceFile } from "./fences";
 
 export type ThemeViolation = {
@@ -56,7 +56,8 @@ const ALLOWED_VALUES: readonly { readonly name: RegExp; readonly value: RegExp }
   { name: /^--syntax-[\w-]+-weight$/, value: /^(?:normal|bold)$/ },
   { name: /^--syntax-[\w-]+-line$/, value: /^(?:none|underline|line-through)$/ },
   { name: /^--(?:radius-island|spacing-island|island-line)$/, value: /^\d+px$/ },
-  { name: /^--color-ansi-/, value: OPAQUE_HEX },
+  { name: ANSI_TOKEN, value: OPAQUE_HEX },
+  { name: PANEL_TOKEN, value: OPAQUE_HEX },
 ];
 const WINDOW_TOKEN = "--color-window";
 const BACKGROUND_CONSTANT =

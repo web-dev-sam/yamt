@@ -1,0 +1,2 @@
+just mutants HEAD: All files 92.46% (317 killed, 2 timeout, 14 survived, 12 no cov, 0 errors)
+frontend/scripts/contrast.ts:44 `?? ""`→`?? "Stryker was here!"` — equivalent: any non-#rrggbb fallback gives undefined luminance, so no findings either way; a missing panel is reported by the missing-token rule

@@ -1,0 +1,75 @@
+diff --git a/frontend/scripts/contrast.ts b/frontend/scripts/contrast.ts
+index 0385b59..783f91e 100644
+--- a/frontend/scripts/contrast.ts
++++ b/frontend/scripts/contrast.ts
+@@ -1,4 +1,6 @@
+ export const OPAQUE_HEX = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/;
++export const ANSI_TOKEN = /^--color-ansi-/;
++export const PANEL_TOKEN = /^--color-panel$/;
+ 
+ type Definition = { readonly name: string; readonly value: string; readonly line: number };
+ type ContrastViolation = {
+@@ -8,8 +10,6 @@ type ContrastViolation = {
+   readonly match: string;
+ };
+ 
+-const ANSI_TOKEN = /^--color-ansi-/;
+-const PANEL_TOKEN = "--color-panel";
+ const MINIMUM_CONTRAST = 4.5;
+ const TENTHS = 10;
+ const HEX_RADIX = 16;
+@@ -41,7 +41,7 @@ export function ansiContrastFindings(block: {
+   readonly file: string;
+   readonly definitions: readonly Definition[];
+ }): ContrastViolation[] {
+-  const panel = block.definitions.find(({ name }) => name === PANEL_TOKEN)?.value ?? "";
++  const panel = block.definitions.find(({ name }) => PANEL_TOKEN.test(name))?.value ?? "";
+   return block.definitions
+     .filter(({ name }) => ANSI_TOKEN.test(name))
+     .flatMap(({ name, value, line }): ContrastViolation[] => {
+diff --git a/frontend/scripts/themes.test.ts b/frontend/scripts/themes.test.ts
+index ad8f9bd..08d885d 100644
+--- a/frontend/scripts/themes.test.ts
++++ b/frontend/scripts/themes.test.ts
+@@ -356,14 +356,16 @@ test("4.54:1 and black's 4.56:1 (linear below the sRGB knee) pass; 4.48:1 report
+   ]);
+ });
+ 
+-test("an ansi colour is not measured in a block whose panel is no #rrggbb", () => {
++test("a panel that is no #rrggbb is a bad value, so its block's ansi colours are not left unmeasured", () => {
+   const files = tree(
+     withAnsi(DARK, { panel: "#17161c", token: "black", colour: "#878787" }),
+     withAnsi(LIGHT, { panel: "#fff", token: "black", colour: "#ffffff" }),
+     withAnsi(ZED, { panel: "#282c33", token: "black", colour: "#9b9ca1" }),
+   );
+ 
+-  expect(findThemeViolations(files)).toEqual([]);
++  expect(findThemeViolations(files)).toEqual([
++    { rule: "bad-value", file: "src/themes/light.css", line: 7, match: "--color-panel: #fff" },
++  ]);
+ });
+ 
+ function placeWindowFile(folder: string, text: string): void {
+diff --git a/frontend/scripts/themes.ts b/frontend/scripts/themes.ts
+index 466b65a..6db4015 100644
+--- a/frontend/scripts/themes.ts
++++ b/frontend/scripts/themes.ts
+@@ -1,7 +1,7 @@
+ import { existsSync, globSync, readFileSync } from "node:fs";
+ import { dirname, join } from "node:path";
+ 
+-import { ansiContrastFindings, OPAQUE_HEX } from "./contrast";
++import { ANSI_TOKEN, ansiContrastFindings, OPAQUE_HEX, PANEL_TOKEN } from "./contrast";
+ import type { SourceFile } from "./fences";
+ 
+ export type ThemeViolation = {
+@@ -56,7 +56,8 @@ const ALLOWED_VALUES: readonly { readonly name: RegExp; readonly value: RegExp }
+   { name: /^--syntax-[\w-]+-weight$/, value: /^(?:normal|bold)$/ },
+   { name: /^--syntax-[\w-]+-line$/, value: /^(?:none|underline|line-through)$/ },
+   { name: /^--(?:radius-island|spacing-island|island-line)$/, value: /^\d+px$/ },
+-  { name: /^--color-ansi-/, value: OPAQUE_HEX },
++  { name: ANSI_TOKEN, value: OPAQUE_HEX },
++  { name: PANEL_TOKEN, value: OPAQUE_HEX },
+ ];
+ const WINDOW_TOKEN = "--color-window";
+ const BACKGROUND_CONSTANT =
