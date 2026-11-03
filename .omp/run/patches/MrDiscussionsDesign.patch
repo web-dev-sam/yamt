@@ -1,0 +1,1365 @@
+diff --git a/docs/slices/briefs/mr-discussions-core.md b/docs/slices/briefs/mr-discussions-core.md
+new file mode 100644
+index 0000000..30b8074
+--- /dev/null
++++ b/docs/slices/briefs/mr-discussions-core.md
+@@ -0,0 +1,114 @@
++# Slice mr-discussions-core — whose turn, the box's order and words
++
++Feature: whose turn it is, per open discussion. Sources:
++- Request `docs/slices/request-mr-discussions.md`: rules 2, 3, 5.
++- Design `docs/slices/briefs/mr-discussions-design.md` option A, §1.3, §1.4, §1.8.
++- Proposed plan §2 #163, #164.
++
++Runs beside `mr-discussions-rust`. It needs nothing generated: the core declares its own structural types (PM3).
++
++## Target
++
++**Owned:**
++- `frontend/src/mergeRequests/internal/discussions.ts` (new)
++- `frontend/src/mergeRequests/internal/discussions.test.ts` (new)
++- `frontend/src/mergeRequests/internal/relativeTime.ts`
++- `frontend/src/mergeRequests/internal/relativeTime.test.ts`
++- `frontend/src/mergeRequests/index.ts`
++- `frontend/src/mergeRequests/AGENTS.md`
++
++**Read-only:** everything else.
++- `mergeRequests/internal/filters.ts`: its `Person`.
++- `people.ts`: `displayName`.
++- `ipc/**`, `ui/**`, `docs/**`.
++
++**Non-goals:**
++- Loading, the setting, the box's markup and its loading or failure words (state and page).
++- The review order and review mode's words (`request-mr-review-mode.md`).
++- Skipping bots (design open question 1).
++
++## Contract
++
++Fixed; you may add, never change. Exported from `mergeRequests/index.ts`:
++
++```ts
++// The window's domain types are assignable to these (ipc's carry `page` and a `picture` too).
++export type DiscussionPlace =
++  | { readonly kind: "overview" }
++  | { readonly kind: "file"; readonly path: string; readonly line: number | null };
++export type DiscussionNote = {
++  readonly author: Person | null;   // filters.ts Person
++  readonly createdAt: number;       // ms since 1970
++  readonly text: string;            // the raw body
++};
++export type OpenDiscussion = { readonly place: DiscussionPlace; readonly last: DiscussionNote };
++
++/** "viewer": the last comment is not the viewer's (an unknown author too), so it is the viewer's turn; "waiting":
++ *  the viewer wrote it and waits for an answer (request rule 3). */
++export type Turn = "viewer" | "waiting";
++export type TurnLine<D extends OpenDiscussion> = { readonly discussion: D; readonly turn: Turn };
++export type TurnCounts = { readonly viewersTurn: number; readonly waiting: number };
++
++/** Each discussion with its turn for `viewer` (a username; null: nobody, so every one is the viewer's turn): the
++ *  viewer's turn first, then the rest; within each, the newest last comment first; equal times keep `open`'s order. */
++export function discussionTurns<D extends OpenDiscussion>(
++  open: readonly D[],
++  viewer: string | null,
++): readonly TurnLine<D>[];
++/** How many are `viewer`'s turn and how many wait on others (review mode's order uses both). */
++export function turnCounts(open: readonly OpenDiscussion[], viewer: string | null): TurnCounts;
++
++export const DISCUSSIONS_LABEL = "Open discussions";
++export const UNKNOWN_AUTHOR = "Someone";
++/** "Your turn" | "Waiting for an answer". */
++export function turnText(turn: Turn): string;
++/** "2 of 5 wait for you", "1 of 5 waits for you", "1 of 1 waits for you", "0 of 3 wait for you"; no discussion →
++ *  "No open discussions". */
++export function turnSummaryText(counts: TurnCounts): string;
++/** "Overview" | "src/board/card.ts:4" | "src/board/card.ts" (no line). */
++export function placeText(place: DiscussionPlace): string;
++/** The author's display name (`displayName`), or `UNKNOWN_AUTHOR`. */
++export function noteAuthorName(author: Person | null): string;
++/** The text trimmed, its first 3 lines (any of \n, \r\n), at most 280 characters (code points, never half a
++ *  surrogate pair); when anything was left out, cut there, end-trimmed, plus "…". Plain text, never markup. */
++export function noteExcerpt(text: string): string;
++/** "just now" under a minute, else "3 hours ago" (Intl, the units of createdAgo). */
++export function agoText(time: number, now: number): string;
++```
++
++`createdAgo(createdAt, now)` keeps its words ("created just now", "created 3 hours ago") and is built on `agoText`
++(one unit table).
++
++## Change
++
++1. `relativeTime.ts`: `agoText`, and `createdAgo` built on it; tests for both.
++2. `discussions.ts`: the types, `discussionTurns`, `turnCounts` and the words; tests.
++3. `index.ts` exports; `AGENTS.md`: the discussions paragraph (the turn rule, order, words, excerpt).
++
++## Acceptance
++
++Vitest (`pnpm -C frontend test -- src/mergeRequests`), each test named for the bug it catches, at least:
++- `the_viewers_own_last_comment_is_waiting_any_other_is_the_viewers_turn` (viewer `sam`; an author `anna`; an unknown
++  author → viewer's turn)
++- `a_reviewer_other_than_me_gets_the_turns_from_their_side` (the same discussions for `anna`)
++- `a_null_viewer_has_every_turn`
++- `the_viewers_turn_comes_first_then_newest_first_within_each`
++- `equal_times_keep_gitlabs_order`
++- `the_counts_add_up_to_the_open_discussions`
++- `the_summary_counts_words_singular_and_plural` (the five cases of the Contract)
++- `a_file_place_reads_path_and_line_or_path_alone`
++- `the_excerpt_keeps_three_lines_and_cuts_with_an_ellipsis` (four lines; 300 characters on one line; an emoji at the
++  cut; `\r\n`; leading blank lines)
++- `markup_and_capitals_stay_as_typed` (`**x**`, `<b>X</b>`, `&amp;`)
++- `an_unknown_author_is_someone`
++- `ago_text_uses_the_largest_whole_unit_and_just_now`
++- `created_ago_keeps_its_words`
++
++Commands:
++- `pnpm -C frontend lint`, `typecheck`, `test` (PM3, the core importing no other `src/` module, is checked by the
++  oxlint overrides and `frontend/scripts/fences.test.ts`): summary lines.
++- `just mutants HEAD` in your workspace (SP11).
++
++## Skills
++
++`skill://ts-conventions`, `skill://comment-policy`, `skill://verification`.
+diff --git a/docs/slices/briefs/mr-discussions-design.md b/docs/slices/briefs/mr-discussions-design.md
+new file mode 100644
+index 0000000..f720b24
+--- /dev/null
++++ b/docs/slices/briefs/mr-discussions-design.md
+@@ -0,0 +1,430 @@
++# Open discussions on a merge-request row: whose turn it is — design
++
++Request: `docs/slices/request-mr-discussions.md` (rules 1–8 settled; this design closes its "To be measured" list and
++refines only details a rule names). Next in line: `docs/slices/request-mr-review-mode.md`. Its order needs, for every
++listed row and for any reviewer, the number of open discussions that are that reviewer's turn and the number where the
++reviewer waits. This design shapes the data for that and designs nothing of review mode.
++
++Facts:
++- `.omp/run/notes/PlanScoutMrDiscussionFacts.md` (cited "facts §n"): logged out, gitlab.com, 2026-11-03.
++- The orchestrator's measurements of 2026-11-03, logged in as `samubr`, glab 1.126.0 (cited "Main, measured"):
++  - `-F 'iids=["4272","4292"]'` with `mergeRequests(iids: $iids)` on gitlab-org/cli is accepted and answers both, in
++    1.71 s.
++  - The query of §1.1 below, without `iids`, run as `mergeRequests(state: opened, sort: CREATED_DESC, first: N)` on
++    gitlab-org/gitlab:
++
++    | N | wall time | stdout | score / limit | discussions with more pages | notes with an earlier page |
++    | --- | --- | --- | --- | --- | --- |
++    | 100 | 22.22 s | 1,166,754 bytes | 58 / 250 | 0 of 100 | 0 |
++    | 20 | 4.47 s | 151,961 bytes | 36 / 250 | 0 | 0 |
++
++    `errors` was null both times.
++  - The playground's !1 "Due dates on cards" has 4 open discussions. Every note is by `samubr` with `system: false`;
++    one example has `url` `https://gitlab.com/samubr/glab-yamt-playground/-/merge_requests/1#note_4131301160` and
++    `position {filePath: "src/board/card.ts", newLine: 4, oldLine: null}`. !2–!6 have none.
++
++Anything else unmeasured is marked `[INFERENCE]`.
++
++## 1. The request's "to be measured", closed
++
++### 1.1 Where the query sits, and what it costs
++
++- **Not inside the list query.**
++  - Adding the discussions block to `list_query()` (`crates/merge-requests/src/query.rs:40-64`) scores 212 of
++    gitlab.com's logged-in limit of 250 (facts §2, a1; limit `gitlab_schema.rb`, facts header). That fits.
++  - But the discussions of 100 merge requests took **22.22 s** (Main, measured). One glab call has a 20 s deadline
++    (`crates/gitio/src/glab.rs:10` `GLAB_TIMEOUT`), so on a busy project every list page would time out.
++  - Rule 7 needs the list to keep its count when details fail. A failing block inside the list query fails the page
++    (`list.rs:88-91`).
++  - "Off" would still pay for the block unless there were a second list query.
++- **A second query of its own, by iids, 20 rows per glab call.** One text serves every case (§1.6):
++
++  ```
++  query MergeRequestDiscussions($fullPath: ID!, $iids: [String!], $first: Int!, $discussionsAfter: String) {
++    queryComplexity { score limit }
++    project(fullPath: $fullPath) { mergeRequests(iids: $iids, first: $first) { nodes { iid
++      discussions(first: 100, after: $discussionsAfter) { pageInfo { hasNextPage endCursor } nodes {
++        resolvable resolved
++        notes(last: 20) { pageInfo { hasPreviousPage } nodes {
++          system author { username name avatarUrl } body createdAt url position { filePath newLine oldLine } } } } } } } } }
++  ```
++
++  It is sent on one line, as the list query is (`query.rs:39`), so the fake glab logs each call on one line. The
++  arguments are `api graphql -f query=… -f fullPath=<path> -F iids=<JSON array of strings> -F first=<n> [-f
++  discussionsAfter=<cursor>]`. `-F` with a JSON array was measured working on glab 1.126.0 (Main, measured).
++- **Cost per call.**
++  - 20 rows took 4.47 s for 152 KB and scored 36 in the list form (Main, measured).
++  - The `iids` form counts its per-merge-request fields ×(1 + first × 0.05) = ×2 for `first: 20`, against ×1.2 in the
++    list form (facts §2, "Why the scores come out this way"). That puts it near 36 + 0.8 × ~25 ≈ 56 `[INFERENCE]`.
++  - Either way the score is far below 250, and it does not depend on the number of notes or discussions asked for:
++    a connection without a resolver gets no page multiplier (facts §2).
++  - The rust slice measures the real score and time once (its step 1) and logs `queryComplexity` of the first batch
++    of each call, as the list does (`list.rs:92-98`).
++- **At 100 rows per page and up to 500 rows** (`lib.rs:45-47`): the list query stays at 170 per page. The details
++  take ⌈rows with open discussions / 20⌉ calls of about 56 each. At the 500-row maximum that is 25 calls of about
++  4.5 s on gitlab-org/gitlab (≈ 2 min); a typical project is one or two calls `[INFERENCE]`.
++- **`DISCUSSION_BATCH = 20`** is the one tunable. It sits in Rust next to its only user, and the window never knows
++  it (§1.6). 20 is the measured size under the deadline with a 4× margin. 100 was measured over the deadline.
++
++### 1.2 The last person's note; how many notes are read
++
++- `Discussion.notes` takes only connection arguments; there is no `filter` (facts §1). So `notes(last: 1)` can return
++  a system note: observed on gitlab-org/cli !4292 discussion `1d3cb881…` (facts §1).
++- **Read `notes(last: 20)` and take the last note with `system: false`.**
++  - A resolvable discussion always holds a person's note (`resolvable?` needs a `resolvable?` note, and a system note
++    never is one; facts §1).
++  - The system notes inside a resolvable discussion are the "changed this line in version N" notes, one per push that
++    changes the line (facts §1 `[INFERENCE]`).
++  - In the measured 100 merge requests, no discussion had a note beyond its last 20 (`hasPreviousPage` true in 0;
++    Main, measured).
++  - `last: 20` costs the same score as `last: 1` (facts §2: a1 = a3 = a5).
++- When all of the last 20 notes are system notes and earlier notes exist, the row answers `Failed` with "a discussion's
++  last 20 notes are all GitLab's own; yamt reads no further". The box says so (rule 7); a wrong turn is never shown.
++- **Discussions per merge request.**
++  - `discussions(first: 100)` is the schema's page cap (facts §2), and every system note is its own discussion (facts
++    §1). Measured: 0 of 100 merge requests needed a second page (Main, measured).
++  - A merge request with more is asked again, alone, with the same query text, `-F iids=["<iid>"] -F first=1 -f
++    discussionsAfter=<endCursor>`, until no page is left.
++  - The limit is `MAX_DISCUSSION_PAGES = 10` pages (1,000 discussions). Beyond it the row answers `Failed` ("more
++    than 1,000 discussions"); a partial list is never shown.
++- **Which discussions are open.** A discussion is open when it is `resolvable` and not `resolved`. This matches the
++  count, `resolvableDiscussionsCount − resolvedDiscussionsCount` (`page.rs:252-256`; "user discussions",
++  `merge_request_type.rb:188-191`, facts §1).
++- **Where a discussion is (its place).** The place comes from the last person's note's `position`:
++  - `null` → Overview.
++  - Otherwise → `filePath` and `newLine ?? oldLine` (both may be null, facts §1).
++  - Every note of a diff discussion carries the discussion's position `[INFERENCE]`: the observed system note in the
++    middle had "same file, newLine 128" (facts §3). A Rust test pins this reading.
++- **Bots.** Bot accounts write `system: false` notes (facts §1), and rule 4 skips only "GitLab's system notes". So a
++  bot's comment counts as the last comment. This is decided here and offered to the owner as open question 1.
++
++### 1.3 The viewer
++
++- The viewer is the slice's `me`: the list's `currentUser { username }` (`query.rs:44`, `page.rs:167`,
++  `ui/mergeRequests.ts:43,94`).
++- It is the same value the filters call "Me" (`ui/mergeRequestsShown.ts:36,42`, `mergeRequests/internal/filters.ts:57-60`).
++  No new glab call and no second source.
++- The core's turn rule takes the viewer as a plain `username | null` parameter. Review mode will pass its chosen
++  reviewer there (`request-mr-review-mode.md` rule 5) and nothing else changes.
++
++### 1.4 Where the turn rule, the order and the box's words live
++
++- **Rust** decides only what is GitLab's data: which discussions are open, which note is the last person's (system
++  notes skipped), its place, whether its `url` is GitLab's link for that note, and the author's picture source. These
++  are boundary facts, parsed once (`skill://principles` §1 "external data is untyped until parsed").
++- **The framework-free core** (`frontend/src/mergeRequests/internal/discussions.ts`) holds the turn rule, the order
++  and every word of the box: the turn words, the header sum, the place text, the cut text, the author's name and "…
++  ago".
++  - The turn depends on a viewer that review mode changes per reviewer. Rust would have to answer per viewer or
++    send every author anyway.
++  - The owner reads TypeScript (vision 1).
++  - The core already holds the page's other word rules (`readinessText`, `reviewStateText`, `ciStatusText`,
++    `mergeRequests/index.ts`).
++- The core stays self-contained (PM3). It declares its own structural `OpenDiscussion` (as `filters.ts` declares
++  `Person`), so the window's domain type passes into it unchanged.
++
++### 1.5 The IPC types (`skill://ipc-contract`)
++
++Every type below is generated by tauri-specta.
++- Brands: `MergeRequestIid` and `WebPage` (validated in `mergeRequestDomain.ts` as `toRow` does,
++  `mergeRequestDomain.ts:119-139`).
++- Sum types: the place (`overview | file`) and the per-row answer (`open | glabMissing | notLoggedIn | failed`).
++- Every failure is a reply value, never an `IpcError` (IPC4: "GitLab, git and launch problems … are replies").
++
++```rust
++// crates/merge-requests/src/discussions.rs (re-exported from lib.rs)
++pub struct RowDiscussions { pub iid: MergeRequestIid, pub answer: DiscussionsAnswer }
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DiscussionsAnswer {
++    Open { discussions: Vec<OpenDiscussion> },     // GitLab's order
++    GlabMissing,
++    NotLoggedIn { detail: String },
++    Failed { message: String },
++}
++pub struct OpenDiscussion { pub place: DiscussionPlace, pub last: DiscussionNote }
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DiscussionPlace { Overview, File { path: String, line: Option<u32> } }
++pub struct DiscussionNote {
++    pub author: Option<Person>,   // People::person: uploaded pictures offered by username (#152)
++    pub created_at: String,       // as GitLab sent it
++    pub text: String,             // the raw body: plain text to the window (rule 5)
++    pub page: Option<WebPage>,    // WebPage::note: only GitLab's own url for this note (rule 6)
++}
++// crates/settings: the setting (§1.10)
++#[serde(rename_all = "lowercase")] pub enum DiscussionDetails { #[default] Full, Lazy, Off }
++```
++
++The window's domain (`ipc/mergeRequestDomain.ts`) turns `createdAt` into milliseconds (as `toRow`), `author` into the
++domain `Person` (`toPerson`, `:96-110`) and `page` into the `WebPage` brand. `DiscussionDetails` is an alias of the
++generated union `"full" | "lazy" | "off"`.
++
++### 1.6 One load path for "fully" and "lazily", without two query shapes
++
++**One command, `read_discussions(iids) -> Vec<RowDiscussions>`.**
++- It answers a non-empty prefix of `iids`: at most `DISCUSSION_BATCH`, in the asked order, each iid once. It answers
++  nothing only when nothing was asked.
++- A glab or login failure answers each row of that prefix with its reason, so even a failure moves on.
++
++**The window keeps the one queue and decides what is asked** (`ui/mergeRequestDiscussions.ts`):
++- **Fully:** every listed row with `openDiscussions > 0` and no entry, as pages arrive. After a refresh's rows replace
++  the old ones, all of them again. On a switch to "Load fully", the rows still missing.
++- **Lazily:** the one row whose count is hovered or focused for the first time, put first in the queue.
++- **Off:** nothing. The queue and the entries are dropped, and an answer in flight is dropped too.
++- One call runs at a time. Each answer removes the answered iids from the queue. The window calls again until the
++  queue is empty.
++
++The query text is the same in every case (§1.1); only the variables differ.
++
++Rows whose count is 0 are never asked: no entry and a count of 0 mean "none open". This saves a call per quiet row,
++and review mode reads "not loaded" as "none" anyway (its rule 6).
++
++### 1.7 Freshness and failure (rule 7)
++
++- **Freshness.**
++  - Details live as long as the rows they belong to. A Refresh keeps the shown rows and their details until its own
++    rows replace them (`ui/mergeRequests.ts:97-106`, the buffered load).
++  - At that swap every entry and queued ask is dropped, and "Load fully" asks again for the new rows. "Load lazily"
++    asks again on the next hover.
++  - A call answered after the swap or after "Off" is dropped (a generation number), as `mergeRequestJobLogs.ts:65-67`
++    drops a reply for a log no longer shown.
++- **Failure.**
++  - The count always comes from the list (rule 1).
++  - The box's header gives the reason:
++    - "Loading discussions…" while the row's ask is queued or running.
++    - For a refused answer, the glab words the list already uses (`ui/glab.ts`: `GLAB_MISSING_TEXT`,
++      `glabNotLoggedInText`, `glabFailedText`).
++    - For an IPC failure, `problemText` with the new step `discussions` ("Could not read the discussions").
++  - Nothing goes to the problem bar.
++  - A failed row is asked again only after the next refresh. A switch between modes does not retry it.
++
++### 1.8 Plain text and links
++
++- **Plain text** (rule 5, RK57's text rule): the body crosses as `text: String` and is shown by Vue text
++  interpolation only, never `v-html`. The core cuts it with `noteExcerpt` into at most three lines and 280 characters,
++  ending in "…" when anything was cut, and the box also clamps to three lines in CSS. `**bold**`, `<b>` and capitals
++  show as typed.
++- **Links** (rule 6, plan §2 #137, RK41):
++  - A new maker `WebPage::note(origin, web_path, iid, url)` accepts GitLab's `url` only when it equals the merge
++    request's own page (`WebPage::merge_request`, `web_page.rs:35-42`) followed by `#note_<digits>`. That is the form
++    GitLab builds (`merge_request_url(noteable, anchor: dom_id(note))`, facts §1; observed, facts §3 and Main). Any
++    other address → `page: None`, and the line is not clickable.
++  - `src-tauri` adds every note page to the window's offered `pages` before the reply is sent (as `forward_page`,
++    `src-tauri/src/merge_requests.rs:98-111`). A click goes through the existing `open_page` (`:369-375`),
++    `PageKind` `"discussion"`.
++- **Pictures** (RK53, plan §2 #152): authors go through `People::person` (`people.rs:110-125`). Their uploaded
++  pictures are offered by username through `state.pictures.offer` before the reply, otherwise the picture scheme
++  answers 404 (facts §5 note b).
++
++### 1.9 The box: the people box's pieces, one hover rule
++
++- The new `ui/MergeRequestDiscussions.vue` replaces the count span (`MergeRequestRow.vue:163-171`). Its shape is
++  `MergeRequestPeople.vue`'s:
++  - `useHoverBox({ area, opener, box })` (`MergeRequestPeople.vue:52-59`). This is the one hover rule (plan §2 #154);
++    the CI box and the labels use it too (facts §4).
++  - An area span with `data-row-control @click.stop`.
++  - A `<button :aria-expanded>` opener showing the icon and count (`aria-label` = `discussionsText`).
++  - The same box classes (`:147`).
++  - `MergeRequestPicture :person size="box"` and the person's name for each author (`:158-159`).
++- There is no second hover rule, no second picture component and no tooltip on the opener (rich content is a box,
++  #154).
++- "Load lazily" asks the row's details by `watch(open)`, so pointer and keyboard focus both ask once (useHoverBox opens
++  on either, `useHoverBox.ts:80-92`).
++- **Off, or a count of 0:** today's span with `v-tooltip="discussionsText(count)"`, unchanged, and no box.
++- Extracting a shared box component for the four hover boxes is out of scope. The class string is copied once more,
++  as the CI and labels boxes already do.
++
++### 1.10 The setting
++
++- **File:** the key `"discussionDetails"`, with the values `"full"` (default), `"lazy"` or `"off"`.
++  - It is written only when it is not `"full"`. A file without the key reads as "Load fully", so a later default still
++    reaches users who never chose (#57's rule as #113 restates it).
++  - Unknown keys are kept as they are today (`file.rs:102-113`).
++- **Rust:** `DiscussionDetails` in `StoredSettings`, `set_discussion_details(places, current, details)` as
++  `set_antialiasing` (`crates/settings/src/lib.rs:183-189`), and the command `set_discussion_details(current,
++  details)` as `src-tauri/src/settings.rs:56-64`.
++- **Window:**
++  - `SettingsInUse.discussionDetails` (start `"full"`, as `antialiasing` starts `"subpixel"`, `ui/settings.ts:63-72`)
++    and `setDiscussionDetails` beside `setAntialiasing`.
++  - A section "Discussion details" with three `ChoiceButtons` ("Load fully", "Load lazily", "Off"). It is a component
++    `MergeRequestDiscussionSetting.vue` that the compare and range roots put into `SettingsView`'s slot, as the range
++    root puts `AgentSettings` (`RangeApp.vue:148-150`). The merge window has no merge-request page, so it shows no
++    such choice.
++- **Applied at once:** the slice reads the mode through a getter on the window's `settings` ref and watches it (§1.6).
++  There is no reload.
++
++## 2. Options
++
++The options differ in where loading is driven and where the details travel.
++
++### Option A — one command answering a batch prefix; the window's queue drives every mode (recommended)
++
++**Data structures:**
++- Rust:
++  - The IPC types of §1.5.
++  - `ReadDiscussions { rows: Vec<RowDiscussions>, pictures: Vec<OfferedPicture> }` (shell only, as `ListedPage`).
++  - `DISCUSSION_BATCH`, `NOTES_READ`, `DISCUSSIONS_PER_PAGE`, `MAX_DISCUSSION_PAGES`.
++- Window state: `ReadonlyMap<MergeRequestIid, DiscussionLoad>` with `DiscussionLoad = loading | read { discussions } |
++  refused { answer } | failed { cause }`, plus a private queue `MergeRequestIid[]`, the call in flight and a
++  generation number.
++- Core: `Turn = "viewer" | "waiting"`, `TurnLine<D> { discussion, turn }`, `TurnCounts { viewersTurn, waiting }`.
++
++**Flow:**
++- The list pages arrive.
++- With "full", the slice queues the new rows that have open discussions.
++- The queue sends all queued iids. Rust reads the first 20 in one glab call (plus any later-pages calls), offers pages
++  and pictures, and answers those rows.
++- The window stores them and sends the rest.
++- A hover with "lazy" puts one row first. "Off" clears the queue and the entries.
++
++**Files:**
++- Rust: new `crates/merge-requests/src/discussions.rs` (+ tests). Changed: `query.rs`, `web_page.rs`, `project.rs`
++  (`From<NoProject>`), `lib.rs`, `crates/settings/src/{lib,file}.rs` (+ `tests/discussion_details.rs`),
++  `src-tauri/src/merge_requests.rs` (+ `merge_requests/discussions.rs`, tests), `src-tauri/src/settings.rs`,
++  `src-tauri/src/commands.rs`, `scripts/fake-glab/glab`, `tests/glab/mr-discussions/**`.
++- Core: `mergeRequests/internal/discussions.ts`, `relativeTime.ts`, `index.ts`.
++- State: `ipc/` sources, domain and fixtures, `ui/mergeRequestDiscussions.ts`, `ui/mergeRequests.ts`,
++  `ui/mergeRequestsStore.ts`, `ui/settings.ts`, plus the settings-source literals in five tests.
++- Page: `ui/MergeRequestDiscussions.vue`, `ui/MergeRequestDiscussionSetting.vue`, `ui/MergeRequestRow.vue`, texts,
++  `problem.ts`, `problemText.ts`, `settingsStore.ts`, and the two roots' Settings slot.
++
++**Risks:**
++- On a 500-row busy project "fully" takes ≈ 2 min to fill every row (§1.1). Rows fill top-down in list order, 20 at a
++  time.
++- Each call checks the login and project again (`logged_in_project`: `auth status` and `api projects/:fullpath`, as
++  `read_job_log` does, `job_log.rs:89-90`): two more glab runs per batch.
++- glab before JSON-array `-F` (the fake stands in for 1.124.0, `tests/glab/README.md:3`; Main measured 1.126.0) would
++  send the array as a string. GitLab then refuses the variable, and every row shows GitLab's words in its box: visible,
++  never wrong `[INFERENCE]`.
++- The queue must end. Rust's contract (a non-empty prefix for a non-empty ask) is pinned by a Rust test and by the
++  fixture's own prefix answers.
++
++**Tests:**
++- Rust: system notes skipped (inside and last), resolved and non-resolvable excluded, place, note link accepted and
++  refused, a later discussions page asked alone, 20 notes all system → `Failed`, a missing iid → `Failed`, batch
++  prefix and dedupe, glab missing and logged out per row, the setting's three values read and written (default not
++  written).
++- App: pages and pictures offered before the reply; a note link opens, another address `NotOffered`.
++- Core: the turn for a viewer and for another username, order (turn first, newest first, ties stable), counts, words,
++  excerpt cut.
++- State: full queues as pages arrive, the refresh swap drops and re-asks, lazy asks once, off asks nothing and drops
++  an answer in flight, switching applies, a prefix answer continues the queue, an IPC failure is kept per row.
++- WebKit and the real app per setting (verify).
++
++**Visions:** 1 (one path, rules in TS, one constant), 2 (one source per fact: viewer = `me`, the batch size only in
++Rust, the setting only in the file), 4 (sum types for place, answer and load), 5 (no new dependency, one new command).
++
++### Option B — Rust drives "fully" on the list's channel; a second entry point for "lazily"
++
++**Data structures:**
++- `list_merge_requests(messages, details: DiscussionDetails)`.
++- `ListMessage` gains `Discussions { rows: Vec<RowDiscussions> }`, sent after `End` in batches from a second scoped
++  thread beside the conflict check (`src-tauri/src/merge_requests.rs:121-140`).
++- `read_discussions(iid)` for one row. The window applies `Discussions` messages as it applies `Checked`
++  (`ui/mergeRequests.ts:113-119`, shown rows or the refresh buffer).
++
++**Files:** as A, plus the list command, `ListMessage`, `tauriMergeRequests.ts`'s channel and the list's tests.
++
++**Risks:**
++- The setting has to cross into the list command.
++- Rule 8's "switching to Load fully loads what is missing" needs a whole reload, or a third path that asks rows
++  outside a load.
++- Two threads send on one channel, and the conflict check's single log line per load (`merge_requests.rs:119-120`)
++  must stay single.
++- The window's queue disappears, but the lazy path still needs its own loading state.
++
++**Tests:** as A, plus channel ordering (pages, End, then `Checked` and `Discussions` interleaved) and a second load
++discarding the first's late messages.
++
++**Visions:** 2 (details tied to their load like `Checked`). It costs 1 and 5: two entry points for one fact, the setting
++in two layers.
++
++### Option C — the discussions block inside the list query; a per-row query for "lazily"
++
++**Data structures:**
++- `MergeRequestRow.discussions: Option<Vec<OpenDiscussion>>`, filled by the list.
++- `mergeRequest(iid) { discussions … }` for one row (facts §2 c1, score 26).
++- A second list query text without the block for "lazily" and "Off".
++
++**Files:** `query.rs`, `page.rs`, `MergeRequestRow` and its domain, plus a details command.
++
++**Risks:**
++- Measured: 100 rows' discussions take 22.22 s, over glab's 20 s deadline (Main, measured; `glab.rs:10`). The whole
++  list page fails on a busy project, against rule 7 ("the count still shows").
++- Two query shapes, which the request rules out.
++- Every list page grows by about 1.2 MB (Main, measured).
++
++**Tests:** the list's page tests with the block, and the timeout scenario.
++
++**Visions:** 5 (fewest moving parts). It fails rule 7 by measurement.
++
++## 3. Recommendation
++
++**Option A.**
++- It is one command, one query text and one queue for all three settings. Its batch size is measured to fit glab's
++  deadline with a 4× margin, and a slow or failing detail can never cost the list its rows (rule 7).
++- The turn rule takes any viewer, so review mode passes its reviewer and reuses everything.
++- **Cost:**
++  - About 25 Rust files with their tests and scenario, about 6 core files, about 27 state files (five of them get a
++    one-line addition), and about 13 page files.
++  - One new IPC command per concern (`read_discussions`, `set_discussion_details`).
++  - Two more glab runs per batch for the login check.
++  - On the largest projects, about 2 minutes until every row's details are in.
++
++### Proposed plan §2 rows (DR5: the orchestrator records them; numbers as free at commit time)
++
++| # | **Decision** | Rejected alternatives & why | Vision |
++| --- | --- | --- | --- |
++| 162 | **A merge request's open discussions are read by their own query, 20 rows per glab call, driven by the window's queue** (owner #2193, #2199–#2200; request `docs/slices/request-mr-discussions.md`; design `briefs/mr-discussions-design.md` option A). `read_discussions(iids) -> Vec<RowDiscussions>` answers a non-empty prefix of at most `DISCUSSION_BATCH` 20 (measured 4.47 s for 20 and 22.22 s for 100 on gitlab-org/gitlab, glab's deadline 20 s): `mergeRequests(iids:, first:) { iid discussions(first: 100, after:) { … notes(last: 20) { system author body createdAt url position } } }` with `-F iids=<JSON>`; a later discussions page asked alone (at most 10); open = resolvable and not resolved; the last note with `system: false` is the last comment (20 system notes in a row → `Failed`); place from its `position` (`null` → Overview); `WebPage::note` accepts only GitLab's `url` of the form `<merge request page>#note_<digits>`, offered in `pages` before the reply, authors' uploaded pictures offered by username; failures are row answers. The window asks: "fully", every listed row with open discussions as pages arrive, again after a refresh replaces the rows; "lazily", the hovered row first; "off", nothing; one call at a time; answers after a refresh or "off" dropped. | The block inside the list query (212/250, but 100 rows took 22.22 s: the list would time out, and rule 7 wants the count kept); Rust driving "fully" on the list channel (the setting in the list command, a reload to switch to "fully", two senders on one channel); per-row queries for "fully" (up to 500 glab calls). | 1, 2, 4, 5 |
++| 163 | **The turn rule, its order and the box's words live in the core; the box is the people box's pieces** (rules 2–5). `discussionTurns(open, viewer)`: the viewer's turn when the last comment's author is not the viewer (an unknown author too), first, newest last comment first within each group, ties in GitLab's order; the viewer is the list's `me`, review mode passes its reviewer. Words: "Your turn", "Waiting for an answer", "N of M wait(s) for you", "Overview", `path:line`, three lines / 280 characters then "…", "3 hours ago". `MergeRequestDiscussions.vue` uses `useHoverBox`, `MergeRequestPicture` and the people box's classes; text by interpolation only; Off or a count of 0 keeps today's tooltip. Settings' "Discussion details" (`discussionDetails`: `full` default, written only when not, `lazy`, `off`) is a section the compare and range roots put in the Settings slot, applied at once. | Turns computed in Rust (a viewer per call; the owner reads TS); a second hover rule or a shared box component (one more user only); the setting in `SettingsView` for every window (the merge window has no merge-request page). | 1, 2, 4 |
++| 164 | **Defaults decided with the discussions design** (orchestrator, OR13; the owner may veto): a bot's comment counts as a person's; rows with no open discussion are never asked; a failed row is asked again only after a refresh; "Off" drops loaded details; the excerpt cut at 280 characters; "Someone" for a deleted author; the header for details that list none "No open discussions". | — | 1 |
++
++### Risks for the register (`skill://risk-register`, next free id RK60)
++
++| id | risk | owner | proving test |
++| --- | --- | --- | --- |
++| RK60 | a click on a discussion opens an address GitLab did not give for that note, or a comment's text is interpreted as markup | `yamt-merge-requests` `WebPage::note` + `src-tauri` `merge_requests/discussions.rs` (pages offered) + `MergeRequestDiscussions.vue` (text interpolation only) | `a_note_url_is_a_page_only_as_gitlab_builds_it`, `a_note_page_is_offered_before_the_reply`, WebKit "markup in a comment shows as text" |
++| RK61 | a system note shown as a discussion's last comment (a wrong "Your turn"), or details asked while the setting is "Off" | `yamt-merge-requests` `discussions.rs` (last `system: false`) + `ui/mergeRequestDiscussions.ts` (no ask with "off") | `a_system_note_after_the_last_reply_is_skipped`, `off_asks_nothing_and_drops_an_answer_in_flight`, real app "no discussion query with off" |
++
++### Shared edits for the orchestrator (no slice owns them)
++
++- `just bindings` after `mr-discussions-rust` lands and before `mr-discussions-state` starts. It brings
++  `RowDiscussions`, `DiscussionsAnswer`, `OpenDiscussion`, `DiscussionPlace`, `DiscussionNote`, `DiscussionDetails`,
++  `StoredSettings.discussionDetails`, `commands.readDiscussions(iids)` and `commands.setDiscussionDetails(current,
++  details)`.
++  - The frontend typecheck fails after it until the state slice lands, because `StoredSettings` literals lack the new
++    field.
++  - Run the two back to back, or accept the known red step between them, as `setAgent` did
++    (`.omp/run/notes/RVAgentSettingsWeb.md`).
++- No `Cargo.toml` or `package.json` change: `serde_json` is already a dependency of the crate (`query.rs:1`).
++- Plan rows #162–#164 and RK60–RK61 above.
++- **Docs keeper (once, after the page slice):**
++  - `docs/architecture.md`:
++    - §3.6: the key and `set_discussion_details`.
++    - §3.9: `discussions.rs`, `WebPage::note`, the types.
++    - §4: the two commands.
++    - §5: `ui/mergeRequestDiscussions.ts` in the state table.
++  - `.omp/skills/ipc-contract/SKILL.md`: the two command lines and `MergeRequestSource.readDiscussions`.
++  - `skill://project-map/tree.md` and `state.md`: the new files; `discussions` owned by `mergeRequestDiscussions.ts`.
++  - `src-tauri/AGENTS.md`: the settings command count.
++  - The `AGENTS.md` lines of `crates/merge-requests`, `crates/settings`, `frontend/src/ipc`, `frontend/src/ui` and
++    `frontend/src/mergeRequests` that the slices report in `deviations_from_brief`.
++  - `tests/glab/README.md` is the rust slice's own.
++
++## 4. Slice graph
++
++| wave | brief | owner | needs | beside |
++| --- | --- | --- | --- | --- |
++| 1 | `mr-discussions-rust.md` | rust-impl | — | core |
++| 1 | `mr-discussions-core.md` | web-impl | — | rust |
++| — | orchestrator: `just bindings` | orchestrator | rust | — |
++| 2 | `mr-discussions-state.md` | web-impl | rust + bindings | core (if still running) |
++| 3 | `mr-discussions-page.md` (wires the window) | web-impl | state, core | — |
++| 4 | docs keeper | docs-keeper | page | verify's smoke pass |
++| 4 | `mr-discussions-verify.md` | verifier | page (smoke); docs (final `just check`) | docs keeper |
++
++## 5. Open questions for the owner
++
++Each is decided as written (row #164) and the owner may veto:
++
++1. A bot's comment (GitLab Duo, gitlab-bot) counts as the last comment. With a bot's reply last, the reviewer sees
++   "Your turn" even when the author has not answered. Skipping bots would instead show the human comment before it.
+diff --git a/docs/slices/briefs/mr-discussions-page.md b/docs/slices/briefs/mr-discussions-page.md
+new file mode 100644
+index 0000000..94719eb
+--- /dev/null
++++ b/docs/slices/briefs/mr-discussions-page.md
+@@ -0,0 +1,163 @@
++# Slice mr-discussions-page — the count's box of open discussions, whose turn first; the Settings choice
++
++Feature: whose turn it is, per open discussion. Sources:
++- Request `docs/slices/request-mr-discussions.md`: rules 1–8 and the WebKit-fixture acceptance.
++- Design `docs/slices/briefs/mr-discussions-design.md` option A, §1.7–1.10.
++- Proposed plan §2 #163, #164; proposed RK60.
++
++Needs `mr-discussions-state` (the slice's `discussions`, `discussionDetails`, `askDiscussions`; `setDiscussionDetails`
++on `SettingsActions`; the fixture's discussions) and `mr-discussions-core` (`discussionTurns`, `turnCounts`, the words)
++landed. **Wires the window:** the last implementer slice.
++
++## Target
++
++**Owned:**
++- `frontend/src/ui/`:
++  - New components: `MergeRequestDiscussions.vue`, `MergeRequestDiscussionSetting.vue`.
++  - `MergeRequestRow.vue`.
++  - Words and problems: `mergeRequestsText.ts`, `mergeRequestsText.test.ts`, `problem.ts`, `problemText.ts`,
++    `problemText.test.ts`.
++  - Settings seam: `settingsStore.ts`, `settingsStore.test.ts`.
++  - The two roots' Settings slot only: `CompareApp.vue`, `RangeApp.vue`.
++  - `AGENTS.md`.
++
++**Read-only:** everything else.
++- The state, used as contracted: `ui/mergeRequests.ts`, `ui/mergeRequestDiscussions.ts`, `ui/settings.ts`, `ipc/**`
++  and its fixtures.
++- `mergeRequests/**`: use its exports.
++- The pattern to follow: `ui/useHoverBox.ts`, `ui/MergeRequestPeople.vue`, `ui/MergeRequestPicture.vue`,
++  `ui/ChoiceButtons.vue`, `ui/SettingsView.vue`, `ui/tooltip.ts`.
++- `ui/mergeRequestTitles.test.ts`: the no-`title` detector must stay green.
++- `ui/compareStore.ts`, `ui/rangeStore.ts`, `ui/store.ts`: they already spread `settingsActions`.
++- `docs/**`.
++
++**Non-goals:**
++- Replying, resolving or reacting.
++- Resolved discussions, whole threads.
++- Review mode and its words.
++- A shared box component for the four hover boxes (design §1.9).
++- The setting in the merge window (no merge-request page there).
++- Markdown rendering (rule 5).
++
++## Contract
++
++Existing and fixed by the earlier slices:
++- `useMergeRequests()` gives `discussions`, `discussionDetails`, `askDiscussions(iid)`, `me` and `openPage(clicked,
++  page)`; `DiscussionLoad` (brief `mr-discussions-state.md`).
++- `SettingsActions.setDiscussionDetails(details)`.
++- The core's `discussionTurns`, `turnCounts`, `turnText`, `turnSummaryText`, `placeText`, `noteAuthorName`,
++  `noteExcerpt`, `agoText`, `DISCUSSIONS_LABEL` (brief `mr-discussions-core.md`).
++- From `../ipc`: `DiscussionDetails`, `DiscussionsAnswer`, `OpenDiscussion`.
++
++New here:
++
++```ts
++// ui/mergeRequestsText.ts
++export type PageKind = "job" | "mergeRequest" | "discussion";
++// NOT_OFFERED.discussion = "This comment's page was not listed by GitLab, so yamt did not open it."
++export const DISCUSSIONS_LOADING = "Loading discussions…";
++export const DISCUSSION_DETAILS = "Discussion details";
++export const DISCUSSION_DETAILS_OPTIONS: readonly { readonly value: DiscussionDetails; readonly label: string }[];
++//   full "Load fully", lazy "Load lazily", off "Off"
++export const DISCUSSION_DETAILS_HINT =
++  "On the merge-request page: every listed merge request's open discussions, right after the list; one merge " +
++  "request's, when you first hover its count; or none.";
++/** The list's glab words with "then Refresh." (glabMissingListText, notLoggedInListText, glabFailedText). */
++export function discussionsRefusedText(answer: Exclude<DiscussionsAnswer, { readonly kind: "open" }>): string;
++// ui/problem.ts MergeRequestStep gains "discussions" | "discussion"; problemText.ts words:
++//   discussions "Could not read the discussions", discussion "Could not open the comment's page"
++// ui/settingsStore.ts: SettingsStore's Pick gains "setDiscussionDetails"
++```
++
++**`MergeRequestDiscussions.vue`**:
++- Props `{ row: MergeRequestRow; now: number }`. It reads the slice through `useMergeRequests()` (PM10).
++- **Off, or `row.openDiscussions === 0`:** exactly today's count span, moved from `MergeRequestRow.vue:163-171`:
++  `v-tooltip` of `discussionsText`, `aria-label`, `MessageSquare` and the number, muted at 0. No box, no ask.
++- **Otherwise**, the people box's shape (`MergeRequestPeople.vue:52-59,111-149`):
++  - `useHoverBox({ area, opener, box })`.
++  - An area `<span data-row-control class="flex cursor-default" @click.stop>` with its five handlers.
++  - An opener `<button type="button" :aria-expanded="open" :aria-label="discussionsText(count)">` holding the icon
++    and the count. It has no tooltip (#154).
++  - The box `v-if="open"`, `tabindex="-1"`, with the people box's classes, `:style="placement"`.
++- **Asking.** `watch(open, (isOpen) => { if (isOpen) askDiscussions(row.iid); })`, so pointer and keyboard focus both
++  ask. The slice asks only with "lazy" and only once.
++- **Header** (`role="status"`, `px-2 pt-1 pb-0.5`):
++  - No entry or `loading` → `DISCUSSIONS_LOADING`.
++  - `read` → `turnSummaryText(turnCounts(discussions, me))`.
++  - `refused` → `discussionsRefusedText(answer)`.
++  - `failed` → `problemText({ action: "mergeRequests", step: "discussions", cause })`.
++  - Never the problem bar.
++- **List** (`<ul :aria-label="DISCUSSIONS_LABEL">`): `discussionTurns(discussions, me)`. Each line is a `<button
++  type="button">` (block, left-aligned, `hover:bg-hover`) that calls `openPage("discussion", page)` when `last.page`
++  is not null, else a `<div>`. It holds:
++  1. `MergeRequestPicture :person="last.author" size="box" aria-hidden="true"`, `noteAuthorName`, `agoText(createdAt,
++     now)` muted, and right-aligned `turnText(turn)`: the viewer's turn in `text-primary` with weight, waiting muted.
++  2. `placeText(place)`, muted.
++  3. `noteExcerpt(text)` in `whitespace-pre-line break-words line-clamp-3`.
++- **Text** is by interpolation only: no `v-html` and no `innerHTML` (rule 5, RK60). No `title` attribute anywhere.
++- **Viewer.** `me` is the viewer. Review mode will replace this one argument; add no seam for it.
++
++`MergeRequestRow.vue`: the count span becomes `<span class="flex w-12 shrink-0"><MergeRequestDiscussions :row
++:now /></span>`. Drop what is then unused.
++
++`MergeRequestDiscussionSetting.vue`:
++- `<section aria-labelledby="settings-discussion-details">`, an `<h3>` `DISCUSSION_DETAILS`, then `ChoiceButtons
++  :options="DISCUSSION_DETAILS_OPTIONS" :pressed="settings.discussionDetails" @pick="setDiscussionDetails"`, then a
++  `<p class="mt-1 text-fg-muted">` hint. The same shape as the Antialiasing section (`SettingsView.vue:82-90`).
++- It is put into `SettingsView`'s slot by `CompareApp.vue` (`:92`) and by `RangeApp.vue` (`:148-150`, beside
++  `AgentSettings`).
++
++## Change
++
++1. `problem.ts`, `problemText.ts` and test; `mergeRequestsText.ts` and test; `settingsStore.ts` and test.
++2. `MergeRequestDiscussions.vue`, then `MergeRequestRow.vue`.
++3. `MergeRequestDiscussionSetting.vue`, then the two roots' slots.
++4. `ui/AGENTS.md`:
++   - The box: hover rule, ask on open, words, Off.
++   - The setting section.
++   - The state slice's `deviations_from_brief` `ui/` lines.
++
++## Acceptance
++
++**Vitest**, each test named for the bug it catches:
++- Texts: every new word and each refused answer (exhaustive).
++- `pageProblemText` for `discussion`.
++- `problemText`'s two rows.
++- `settingsStore`: the seam carries `setDiscussionDetails`.
++
++**Commands:**
++- `pnpm -C frontend lint`, `typecheck`, `test` (including `mergeRequestTitles.test.ts` and the fences, PM10):
++  summary lines.
++- `just map-check`: list its findings for the docs keeper.
++
++**WebKit smoke on the fixture** (`skill://verification` recipe): `just app-session start-fixture --name md --diff --mr
++list --size 1600x1000`, open the merge requests page. Use `hover`, `click`, `press`, `read <js>`, `shot`, and the
++session's log for `mergeRequests.fixture_discussions`.
++
++1. **Load fully (default).** Hover !638's count (2 open):
++   - The box shows the header "N of 2 wait(s) for you" at once (its details came after the list), the viewer's-turn
++     line first, then the newest first.
++   - Each line has a picture, name, "… ago", "Your turn" or "Waiting for an answer", and its place.
++   - The markup text shows as typed: `read` finds no `b` and no `script` element in the box, and its `innerText`
++     holds `<b>not bold</b>` and `**not bold**`.
++   - The fixture log shows `fixture_discussions` calls of at most 10 iids, each made once, with no count-0 row's iid.
++2. **Click a line with a page:** `mergeRequests.fixture_page` with `…#note_…`, and no MR-page open from the row. A
++   pageless line is no button.
++3. **Load lazily.** Settings → Discussion details → Load lazily → Back. Refresh.
++   - Hover a row's count: "Loading discussions…", then the box; exactly one new `fixture_discussions` line naming
++     that iid only.
++   - Hover away and back: no new line.
++   - Tab to the next row's count opener (keyboard focus): it asks that row once.
++4. **Off.** Settings → Off → Back. Refresh: no new `fixture_discussions` line. Hovering a count shows today's plain
++   tooltip ("2 open discussions"); there is no `aria-expanded` opener.
++5. **Applied at once.** From Off, Settings → Load fully → Back, without Refresh: `fixture_discussions` lines follow,
++   and a hover shows the box.
++6. **Failures.** `DISCUSSIONS_FAILED_IID`'s box says "glab timed out" in the list's words, and the count still shows.
++7. `shot` with a box open in yamt Dark and yamt Light (Settings → Theme).
++
++**Mutation:** `just mutants HEAD` in your workspace (SP11).
++
++## Skills
++
++`skill://vue-conventions`, `skill://ts-conventions`, `skill://comment-policy`, `skill://risk-register` (proposed
++RK60), `skill://verification`.
+diff --git a/docs/slices/briefs/mr-discussions-rust.md b/docs/slices/briefs/mr-discussions-rust.md
+new file mode 100644
+index 0000000..2e40bef
+--- /dev/null
++++ b/docs/slices/briefs/mr-discussions-rust.md
+@@ -0,0 +1,267 @@
++# Slice mr-discussions-rust — open discussions with their last person's note, 20 rows per call; the setting
++
++Feature: whose turn it is, per open discussion. Sources:
++- Request `docs/slices/request-mr-discussions.md`: rules 2, 4, 6, 7, 8 and the Rust acceptance.
++- Design `docs/slices/briefs/mr-discussions-design.md` option A, §1.1, §1.2, §1.5, §1.6, §1.8, §1.10.
++- Proposed plan §2 #162, #163; proposed RK60, RK61; existing RK41 and RK53.
++
++Runs beside `mr-discussions-core`. After it lands the orchestrator runs `just bindings`.
++
++## Target
++
++**Owned:**
++- `crates/merge-requests/**`
++- `crates/settings/**`
++- `src-tauri/src/merge_requests.rs`, `src-tauri/src/merge_requests/**`
++- `src-tauri/src/settings.rs`
++- `src-tauri/src/commands.rs` (the command list only)
++- `scripts/fake-glab/glab`
++- `tests/glab/mr-discussions/**` (new)
++- `tests/glab/README.md`
++
++**Read-only:** everything else.
++- `frontend/**`: the generated `frontend/src/ipc/bindings.ts` comes from the orchestrator's `just bindings` (PM4).
++- `crates/gitio/**`: use `Glab::get` as it is (`glab.rs:101-104`).
++- Every `Cargo.toml`: no new dependency; `serde_json` is already the crate's (`query.rs:1`).
++- The other scenarios under `tests/glab/`.
++- `docs/**`, and the `AGENTS.md` files outside your Owned globs: put their lines in `deviations_from_brief`.
++
++**Non-goals:**
++- Replying, resolving or reacting (request non-goals).
++- Resolved discussions or whole threads.
++- Turns, order or words: the core's.
++- Retrying a failed row.
++- Caching details across calls.
++- Skipping bots' notes (design open question 1: a bot's note counts).
++- Any frontend code.
++- `scripts/gitlab-playground.sh`: the owner's check needs a second GitLab user who answers by hand (orchestrator,
++  measured: !1 already holds four open discussions by `samubr`).
++
++## Contract
++
++Fixed; you may add, never change. In `yamt-merge-requests`, a new module `discussions.rs`, re-exported from `lib.rs`.
++The IPC types derive `Clone, Debug, PartialEq, Eq, Serialize, Type`, are documented as their neighbours are, and carry
++`#[serde(rename_all = "camelCase")]` (enums also `tag = "kind"`):
++
++```rust
++/// Merge requests read in one glab call: 20 took 4.47 s on gitlab-org/gitlab, 100 took 22.22 s, past glab's 20 s
++/// deadline (orchestrator, measured 2026-11-03).
++pub const DISCUSSION_BATCH: usize = 20;
++const DISCUSSIONS_PER_PAGE: u32 = 100;   // the schema's page cap (facts §2)
++const NOTES_READ: u32 = 20;              // costs the same complexity as 1 (facts §2)
++const MAX_DISCUSSION_PAGES: u32 = 10;
++
++/// One merge request's open discussions, or why they were not read.
++pub struct RowDiscussions { pub iid: MergeRequestIid, pub answer: DiscussionsAnswer }
++
++pub enum DiscussionsAnswer {
++    /// Its resolvable, unresolved discussions, in GitLab's order.
++    Open { discussions: Vec<OpenDiscussion> },
++    GlabMissing,
++    NotLoggedIn { detail: String },
++    Failed { message: String },
++}
++
++/// An open discussion: where it is and its last note written by a person (system notes skipped).
++pub struct OpenDiscussion { pub place: DiscussionPlace, pub last: DiscussionNote }
++
++pub enum DiscussionPlace {
++    /// On the merge request itself: the last person's note has no `position`.
++    Overview,
++    /// On the diff: `filePath`, and `newLine`, else `oldLine` (both may be null).
++    File { path: String, line: Option<u32> },
++}
++
++pub struct DiscussionNote {
++    pub author: Option<Person>,     // People::person
++    pub created_at: String,         // GitLab's ISO 8601 time, as sent
++    pub text: String,               // the raw body
++    pub page: Option<WebPage>,      // WebPage::note of GitLab's `url`
++}
++
++/// What the shell gets: the rows answered, and the uploaded pictures of their authors (one per username).
++pub struct ReadDiscussions { pub rows: Vec<RowDiscussions>, pub pictures: Vec<OfferedPicture> }   // not IPC
++
++/// Answers the first `DISCUSSION_BATCH` distinct iids of `iids`, in their order, each once; nothing only for an empty
++/// `iids` (then no glab run).
++/// - no glab → each of them `GlabMissing`;
++/// - `logged_in_project` → `NotLoggedIn`/`Failed` each (`From<NoProject> for DiscussionsAnswer`, project.rs);
++/// - one `Glab::get` of `discussions_args`; `Err(line)` or GraphQL `errors` → each `Failed` with that message;
++/// - per merge request: `discussions.pageInfo.hasNextPage` → the same query for that iid alone with
++///   `discussionsAfter=<endCursor>`, at most `MAX_DISCUSSION_PAGES` pages in all (more → that row `Failed`
++///   "more than 1,000 discussions"; a failing later page → that row `Failed`);
++/// - open = `resolvable && !resolved`; its last note = the last with `system: false` among `notes(last: 20)`; none
++///   and `hasPreviousPage` → that row `Failed` ("a discussion's last 20 notes are all GitLab's own; yamt reads no
++///   further"); none without earlier notes (not resolvable per GitLab, facts §1) → the discussion is left out;
++/// - an asked iid GitLab's answer does not name → `Failed` ("GitLab sent no merge request !<iid>").
++/// One `tracing::info!` per call: asked, answered, failed rows, glab calls, the first batch's
++/// `queryComplexity { score, limit }`; never a name, a body or an address.
++pub fn read_discussions(repository: &GitLabRepository, glab: Option<&Glab>, iids: &[MergeRequestIid]) -> ReadDiscussions;
++
++/// The same batch cut, each `Failed { message }`: for a window without a GitLab project, and for a failed call.
++pub fn unread_discussions(iids: &[MergeRequestIid], message: &str) -> Vec<RowDiscussions>;
++```
++
++**Query** (`query.rs`, one line like `list_query`, design §1.1 verbatim):
++`MergeRequestDiscussions($fullPath: ID!, $iids: [String!], $first: Int!, $discussionsAfter: String)` with
++`queryComplexity { score limit }` and `project { mergeRequests(iids: $iids, first: $first) { nodes { iid
++discussions(first: 100, after: $discussionsAfter) { pageInfo { hasNextPage endCursor } nodes { resolvable resolved
++notes(last: 20) { pageInfo { hasPreviousPage } nodes { system author { username name avatarUrl } body createdAt url
++position { filePath newLine oldLine } } } } } } } }`. Spell the numbers through the constants.
++
++```rust
++/// `api graphql -f query=… -f fullPath=<path> -F iids=<["1","2"] by serde_json> -F first=<count> [-f discussionsAfter=<cursor>]`
++pub(crate) fn discussions_args(full_path: &str, iids: &[MergeRequestIid], after: Option<&str>) -> Vec<String>;
++```
++
++**Note page** (`web_page.rs`, the maker beside `merge_request`):
++
++```rust
++/// GitLab's address of a note on merge request `iid`: `url` exactly `WebPage::merge_request(origin, web_path, iid)`
++/// followed by `#note_<digits>` (`lib/gitlab/url_builder.rb`, facts §1); any other address → `None`.
++pub(crate) fn note(origin: &str, web_path: &str, iid: MergeRequestIid, url: &str) -> Option<WebPage>;
++```
++
++**src-tauri** (`merge_requests.rs` and the new `merge_requests/discussions.rs`, the shape of `job_logs.rs`):
++
++```rust
++/// No GitLab project → `unread_discussions(iids, NO_PROJECT)`; else `read_discussions`, then every answered note's
++/// page added to `pages` and the pictures offered (`state.pictures.offer`), both before the rows are returned; never
++/// holds `pages` while glab runs.
++pub(super) fn discussions_reply(state: &MergeRequestState, glab: Option<&Glab>, iids: &[MergeRequestIid]) -> Vec<RowDiscussions>;
++
++#[tauri::command] #[specta::specta]
++pub(crate) async fn read_discussions<R: Runtime>(window: WebviewWindow<R>, iids: Vec<MergeRequestIid>)
++    -> Result<Vec<RowDiscussions>, IpcError>;   // blocking_reply, as read_job_log (merge_requests.rs:303-317)
++```
++
++**Settings** (`crates/settings`):
++- `#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
++  #[serde(rename_all = "lowercase")] pub enum DiscussionDetails { #[default] Full, Lazy, Off }`, with `name()` as
++  `Antialiasing::name` (`lib.rs:59-68`).
++- `StoredSettings` gains `#[serde(rename = "discussionDetails")] pub discussion_details: DiscussionDetails`.
++- `pub fn set_discussion_details(places: &Places, current: &StoredSettings, details: DiscussionDetails) ->
++  Result<SettingsRead, Error>` (through `change`, as `set_antialiasing` at `lib.rs:183-189`).
++- `file.rs`:
++  - The key `DISCUSSION_DETAILS = "discussionDetails"`, read with `entry()`, so a missing key is `Full`.
++  - It is written only when not `Full`.
++  - Another value → `Broken` ("`discussionDetails`: …") as the other entries.
++- src-tauri `settings::set_discussion_details(window, current, details)` as `set_antialiasing`
++  (`src-tauri/src/settings.rs:50-64`).
++
++Both commands are registered in `commands.rs`: `merge_requests::read_discussions::<tauri::Wry>` after
++`read_job_log`, and `settings::set_discussion_details::<tauri::Wry>` after `set_agent`. Generated TS:
++- `commands.readDiscussions(iids: MergeRequestIid[]): Result<RowDiscussions[], IpcError>`
++- `commands.setDiscussionDetails(current, details)`
++- `StoredSettings.discussionDetails: DiscussionDetails`, with `DiscussionDetails = "full" | "lazy" | "off"`
++
++**Fake glab** (`scripts/fake-glab/glab` `graphql()`):
++- Before the `iid` route: a field `iids` (`-F`, kept as `name=value`) answers
++  `$scenario/graphql-discussions-<the iids, quotes, brackets and spaces dropped, commas as "-">[-after-<discussionsAfter>]`
++  through `reply` (so `.json`, `.status`, `.err`, `.exit` and `.sleep` work).
++- Every other route stays as it is.
++- `tests/glab/README.md`: the row, the measured `-F` JSON array (glab 1.126.0), and the scenario.
++
++**Scenario `tests/glab/mr-discussions/`:**
++- Logged in; `merge-requests/`'s project (`taskboard/taskboard` on `https://gitlab.example`); user `sam`.
++- One list page, the last, with every field today's list query reads (copy `mr-row-details/graphql-page-1.json`'s
++  shape, its `queryComplexity`); no `diffHeadSha`.
++
++| row | open (resolvable − resolved) | its discussions |
++| --- | --- | --- |
++| !82 | 3 | below |
++| !81 | 1 | an Overview discussion whose last note is ben's; `body` `Please **check** <b>THIS</b> & that` on several lines |
++| !80 | 0 | — |
++| !79 | 1 | discussions page 1 has `hasNextPage: true, endCursor: "d-2"` and only closed ones; page 2 holds the open one |
++| !78 | 1 | absent from the batch's answer |
++
++!82's discussions:
++- (a) A diff discussion: anna's comment, a system note "changed this line in version 2 of the diff", then sam's
++  reply. Its last person is sam.
++- (b) A diff discussion: ben's comment, then a system note as the last note. Its last person is ben.
++- (c) An Overview discussion by anna whose `url` is `https://evil.example/x#note_1`, so it gets no page.
++- (d) A resolved discussion.
++- (e) A system-only discussion ("added 2 commits", `resolvable: false`).
++- (f) A non-resolvable comment.
++
++Every other `url` is `https://gitlab.example/taskboard/taskboard/-/merge_requests/<iid>#note_<n>`. Avatars are anna's
++uploaded `/uploads/-/system/user/avatar/2/avatar.png` and ben's Gravatar, as in `mr-row-details/`.
++
++Answer files:
++- `graphql-discussions-82-81-79-78.json` (the batch; `queryComplexity` with the score step 1 measured)
++- `graphql-discussions-79-after-d-2.json`
++- `graphql-discussions-81.json` (one row, lazy)
++- `graphql-discussions-77.json` with `.err` and `.exit` 1 (glab fails)
++
++## Change
++
++1. **Measure first**, read-only, with the logged-in glab in `../glab-yamt-playground` (as `briefs/mr-diff-stats.md`
++   did): `glab --version`. Then `time glab api graphql -f query='<the query>' -f fullPath=gitlab-org/cli -F
++   'iids=[<20 open iids from glab api "projects/gitlab-org%2Fcli/merge_requests?state=opened&per_page=20">]' -F
++   first=20 | wc -c`. Paste the score and limit, the time and the bytes. Then the playground's !1 with `-F 'iids=["1"]'
++   -F first=1`: four open discussions, their last notes `samubr`. Write nothing to GitLab.
++2. `query.rs`: the query and `discussions_args`, with a unit test that the query is one line and the args are as
++   contracted. `web_page.rs`: `note`, with tests.
++3. `discussions.rs`: the parse types, `read_discussions`, `unread_discussions`, and unit tests over inline JSON.
++   `project.rs`: `From<NoProject>`. `lib.rs` re-exports.
++4. `tests/discussions.rs` with the fake glab (`tests/fake_glab/mod.rs`, as `tests/job_log.rs` uses it).
++5. Settings: the enum, the field, `file.rs`, `set_discussion_details`, `tests/discussion_details.rs` (the
++   `tests/antialiasing.rs` shape).
++6. src-tauri: `merge_requests/discussions.rs`, the command, `settings.rs`, `commands.rs`, and
++   `merge_requests/tests/discussions.rs`.
++7. Fake glab route, the scenario, the README; the crate's `AGENTS.md`: discussions, the batch, note pages.
++
++## Acceptance
++
++**Tests** (`cargo nextest run -p yamt-merge-requests -p yamt-settings` with the hermetic prefix as `just test`, and
++`-p yamt-app merge_requests settings`), each named for the bug it catches, at least:
++
++- `discussions.rs` unit:
++  - `a_system_note_after_the_last_reply_is_skipped` (RK61)
++  - `a_system_note_between_replies_is_skipped`
++  - `resolved_and_unresolvable_discussions_are_left_out`
++  - `a_note_without_position_is_the_overview`
++  - `a_diff_place_takes_the_new_line_else_the_old`
++  - `twenty_system_notes_with_earlier_ones_fail_the_row`
++  - `an_iid_gitlab_does_not_name_fails_alone`
++  - `graphql_errors_fail_each_row_of_the_batch`
++  - `the_batch_is_the_first_twenty_distinct_iids_in_order`
++  - `an_empty_ask_answers_nothing_and_runs_no_glab`
++  - `an_uploaded_avatar_is_offered_once_per_username`
++- `web_page.rs`: `a_note_url_is_a_page_only_as_gitlab_builds_it` (RK60). Accepts GitLab's form. Refuses another
++  host, `http`, another project, another iid, `#note_` with no digits or other characters, a path after the
++  anchor, and an origin under a sub-path missing from the url.
++- `tests/discussions.rs` (scenario `mr-discussions`):
++  - `a_rows_open_discussions_arrive_with_their_last_persons_note_place_and_link` (!82: three, in GitLab's order;
++    (a) sam at `src/…:<line>`, (b) ben, (c) no page)
++  - `one_rows_details_alone_are_one_call` (`[81]`: one `argv:` line naming `iids=["81"]`)
++  - `a_later_discussions_page_is_asked_for_that_row_alone` (!79: the `discussionsAfter=d-2` line)
++  - `markup_in_a_body_stays_as_sent`
++  - `a_failed_glab_call_fails_its_rows_and_keeps_its_words` (77)
++  - `glab_missing_answers_each_row`, `logged_out_answers_each_row` (scenario `logged-out`)
++- `crates/settings/tests/discussion_details.rs`:
++  - `the_three_values_read_and_write_as_named`
++  - `a_file_without_the_key_reads_as_full_and_full_is_not_written`
++  - `an_unknown_value_is_broken_and_nothing_is_written`
++  - `unknown_entries_are_kept`
++  - plus the IPC-spelling round trip in `lib.rs` (as `the_agent_entry_crosses_the_ipc_…`)
++- `src-tauri` `merge_requests/tests/discussions.rs`:
++  - `a_note_page_is_offered_before_the_reply` (then `open_page` of it does not answer `NotOffered`; another address
++    does; RK41, RK60)
++  - `an_authors_uploaded_picture_is_offered`
++  - `no_gitlab_project_fails_each_asked_row`
++  - `read_discussions_replies_on_paths_glab` (as the job log's)
++
++**Commands:**
++- `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`, `just arch-check`: summary lines.
++- `sh -n scripts/fake-glab/glab`: no output.
++- Step 1 pasted.
++- `cargo run -p yamt-app --features bindings --bin export-bindings -- target/bindings-discussions.ts` then
++  `diff -u frontend/src/ipc/bindings.ts target/bindings-discussions.ts`: only the types and the two commands of the
++  Contract.
++- `just mutants HEAD` in your workspace (SP11).
++
++## Skills
++
++`skill://rust-conventions`, `skill://ipc-contract`, `skill://risk-register` (RK41, RK53; proposed RK60, RK61),
++`skill://verification`.
+diff --git a/docs/slices/briefs/mr-discussions-state.md b/docs/slices/briefs/mr-discussions-state.md
+new file mode 100644
+index 0000000..c2c46b8
+--- /dev/null
++++ b/docs/slices/briefs/mr-discussions-state.md
+@@ -0,0 +1,230 @@
++# Slice mr-discussions-state — the source call, the setting in the window, the one queue, the fixture's discussions
++
++Feature: whose turn it is, per open discussion. Sources:
++- Request `docs/slices/request-mr-discussions.md`: rules 2, 6, 7, 8.
++- Design `docs/slices/briefs/mr-discussions-design.md` option A, §1.5–1.7, §1.10.
++- Proposed plan §2 #162, #164; proposed RK61.
++
++Needs `mr-discussions-rust` landed and `just bindings` run, which brings `Generated.RowDiscussions`,
++`DiscussionsAnswer`, `OpenDiscussion`, `DiscussionPlace`, `DiscussionNote`, `DiscussionDetails`,
++`StoredSettings.discussionDetails`, `commands.readDiscussions` and `commands.setDiscussionDetails`. Until this slice
++lands, the typecheck fails on `StoredSettings` literals (design "Shared edits"). It runs beside `mr-discussions-core`
++if that one is still running; this slice does not use the core.
++
++## Target
++
++**Owned** (27 files; five of them, marked ¹, gain one `setDiscussionDetails: notUsed` line only):
++- `frontend/src/ipc/`:
++  - Sources and domain: `MergeRequestSource.ts`, `mergeRequestDomain.ts`, `domain.ts`, `index.ts`, `ChunkSource.ts`.
++  - Tauri: `tauriMergeRequests.ts`, `tauriMergeRequests.test.ts`, `tauri.ts`, `tauri.test.ts`.
++  - Fixtures: `fixtureMergeRequests.ts`, `fixtureMergeRequests.test.ts`, `fixtureMergeRequestDiscussions.ts` (new),
++    `fixtureMergeRequestDiscussions.test.ts` (new), `fixtureSettings.ts`, `fixtureSettings.test.ts`.
++- `frontend/src/ui/`:
++  - Settings: `settings.ts`, `settings.test.ts`.
++  - The merge-request slice: `mergeRequestDiscussions.ts` (new), `mergeRequestDiscussions.test.ts` (new),
++    `mergeRequests.ts`, `mergeRequests.test.ts`, `mergeRequestsStore.ts`.
++  - Literals only: `store.test.ts` (its `StoredSettings` literals gain `discussionDetails: "full"`), `listing.test.ts`¹,
++    `saving.test.ts`¹, `stops.test.ts`¹, `diskChanges.test.ts`¹, and the settings source literal in
++    `settings.test.ts`¹.
++
++**Read-only:** everything else.
++- `frontend/src/ipc/bindings.ts` (generated, PM4).
++- `frontend/src/mergeRequests/**` (the core's).
++- `ui/settingsStore.ts` and its test (the page slice's), every `.vue`, `ui/mergeRequestsText.ts`, `ui/problem.ts`,
++  `ui/problemText.ts`.
++- `ui/compareStore.ts`, `ui/rangeStore.ts`: they already pass `refs` holding `settings` to `windowMergeRequests`
++  (`compareStore.ts:127`, `rangeStore.ts:180`).
++- `ui/mergeRequestJobLogs.ts` (the pattern).
++- `ipc/AGENTS.md`, `ui/AGENTS.md`, `docs/**`: put their lines in `deviations_from_brief`.
++
++**Non-goals:**
++- Any rendering, words or the Settings choice (page).
++- Turns and order (core).
++- Retrying failed rows before a refresh (#164).
++- Review mode.
++- Reporting to the problem bar (rule 7: the box says why).
++
++## Contract
++
++**Domain and source** (`ipc/domain.ts` beside `Antialiasing`; `ipc/mergeRequestDomain.ts`; all exported from
++`ipc/index.ts`):
++
++```ts
++export type DiscussionDetails = Generated.DiscussionDetails;              // "full" | "lazy" | "off" — domain.ts
++export type DiscussionPlace = Readonly<Generated.DiscussionPlace>;
++export type DiscussionNote = {
++  readonly author: Person | null;
++  readonly createdAt: number;        // ms, Date.parse of GitLab's time (toTime)
++  readonly text: string;
++  readonly page: WebPage | null;     // toWebPage
++};
++export type OpenDiscussion = { readonly place: DiscussionPlace; readonly last: DiscussionNote };
++export type DiscussionsAnswer =
++  | { readonly kind: "open"; readonly discussions: readonly OpenDiscussion[] }
++  | Readonly<Exclude<Generated.DiscussionsAnswer, { kind: "open" }>>;
++export type RowDiscussions = { readonly iid: MergeRequestIid; readonly answer: DiscussionsAnswer };
++export function toRowDiscussions(
++  raw: Generated.RowDiscussions,
++  index: number,
++  uploadedPicture: (username: string) => string,
++): RowDiscussions;   // throws on a bad iid, time or page as toRow does (mergeRequestDomain.ts:119-139)
++
++// MergeRequestSource, beside readJobLog
++/** The open discussions of the first rows of `iids` (at most Rust's DISCUSSION_BATCH), in their order, each once: a
++ *  non-empty answer for a non-empty ask; ask again for the rest (plan §2 row 162). */
++readDiscussions(iids: readonly MergeRequestIid[]): Promise<SourceResult<readonly RowDiscussions[]>>;
++// ChunkSource and the SettingsSource Pick, beside setAntialiasing
++setDiscussionDetails(current: StoredSettings, details: DiscussionDetails): Promise<SourceResult<SettingsRead>>;
++```
++
++`tauriMergeRequests.ts`: `converted(toResult(await commands.readDiscussions([...iids])), (rows) => rows.map((row, at)
++=> toRowDiscussions(row, at, uploadedPicture)))`. `tauri.ts` `createTauriSettings`: `setDiscussionDetails` as
++`setAntialiasing`.
++
++**Settings in use** (`ui/settings.ts`):
++- `SettingsInUse.discussionDetails: DiscussionDetails`, starting `"full"` in `startSettings`.
++- It is sent back in `storedSettings`, compared in `sameStored` (the `rest satisfies Record<string, never>` guard
++  keeps the destructuring complete), adopted in `adopt`.
++- `SettingsActions.setDiscussionDetails(details): Promise<void>`, sent as `setAntialiasing` is.
++
++**The queue** (`ui/mergeRequestDiscussions.ts`; `MergeRequests` becomes `RowActions & Rerequests & JobLogs &
++Discussions & Shown & {…}`):
++
++```ts
++export type DiscussionLoad =
++  | { readonly kind: "loading" }                                   // queued or asked
++  | { readonly kind: "read"; readonly discussions: readonly OpenDiscussion[] }
++  | { readonly kind: "refused"; readonly answer: Exclude<DiscussionsAnswer, { readonly kind: "open" }> }
++  | { readonly kind: "failed"; readonly cause: ProblemCause };    // the source call failed
++export type Discussions = {
++  /** Each asked row's discussions while this list stands; no entry: not asked, or (count 0) none open. */
++  readonly discussions: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>>;
++  /** Settings' "Discussion details" in use. */
++  readonly discussionDetails: ComputedRef<DiscussionDetails>;
++  /** A count's box opened: with "lazy", asks this row first unless it has an entry; else nothing. */
++  askDiscussions(iid: MergeRequestIid): void;
++};
++export function createDiscussions(deps: {
++  readonly source: MergeRequestSource;
++  readonly mode: () => DiscussionDetails;
++  readonly rows: () => readonly MergeRequestRow[];
++}): Discussions & {
++  /** Rows the list now shows: with "full", queues each with `openDiscussions > 0` and no entry. */
++  listed(rows: readonly MergeRequestRow[]): void;
++  /** A refresh replaced the rows: every entry, the queue and any answer in flight dropped; then `listed(rows)`. */
++  replaced(rows: readonly MergeRequestRow[]): void;
++};
++```
++
++`createMergeRequests`'s `Deps` gains `readonly discussionDetails: () => DiscussionDetails`. `windowMergeRequests`'s
++`WindowRefs` gains `readonly settings: Readonly<ShallowRef<{ readonly discussionDetails: DiscussionDetails }>>` and
++passes `() => refs.settings.value.discussionDetails`.
++
++Rules (design §1.6, §1.7):
++1. **One call at a time.** It sends the whole queue in order. Each answered row gets `read { discussions }` or
++   `refused { answer }`, and its iid leaves the queue. Then the queue is sent again while it is not empty. A source
++   failure gives every asked row `failed { cause }` and they leave the queue.
++2. **Generation.** `replaced`, and a switch to `"off"`, start a new generation. An answer from an older generation
++   is dropped whole, and the queue goes on with the current one.
++3. **Full.**
++   - `mergeRequests.ts` `received` calls `listed(rows of the page)` for a load that is not buffered.
++   - `ended` calls `replaced(state.rows.value)` where a buffered load swaps its rows in (`mergeRequests.ts:102-106`).
++   - A switch to `"full"` (a `watch` on `mode`) calls `listed(rows())`. Rows already `refused` or `failed` stay until
++     the next refresh (#164).
++4. **Lazy.** `askDiscussions(iid)` with no entry: `loading`, put **first** in the queue, send. An entry of any kind:
++   nothing (a second hover asks nothing). A switch to `"lazy"` drops the queued, unsent asks and their `loading`
++   entries; an answer in flight is kept.
++5. **Off.** A switch to `"off"` drops every entry and the queue. `askDiscussions` and `listed` ask nothing.
++6. **Log.** One `log.info("mergeRequests.discussions_read", { asked, answered, refused, ms })` per settled call
++   (`failed` instead of the counts for a source failure). Never a name, a text or an address (RK57's rule).
++
++**Fixture** (`ipc/fixtureMergeRequestDiscussions.ts`). `createFixtureMergeRequests` gains `readDiscussions(iids)`:
++`log.info("mergeRequests.fixture_discussions", { iids })`, then `pause(DISCUSSIONS_PAUSE_MS)` (400), then it answers
++the first `FIXTURE_ANSWERED` (10) iids through `toRowDiscussions(…, fixtureUploadedPicture)`. That makes the fixture
++answer prefixes as Rust does.
++
++```ts
++/** The fixture's answer for `iid` among the listed rows (`fixtureRows(0, 500)`, every script's rows). */
++export function fixtureDiscussions(iid: number): Generated.DiscussionsAnswer;
++export const DISCUSSIONS_FAILED_IID: number;     // a row with open discussions → failed { message: "glab timed out" }
++export const DISCUSSIONS_LOGGED_OUT_IID: number; // another → notLoggedIn { detail: LOGGED_OUT_DETAIL }
++```
++
++- **Where the discussions come from.** A row with `openDiscussions` k (k = index % 3,
++  `fixtureMergeRequestData.ts:221`) gets k open discussions; an iid no row has → `failed { message: "GitLab sent no
++  merge request !<iid>" }`.
++- **Discussion 0:**
++  - Last author: `PEOPLE[(index + 2) % PEOPLE.length]`, so some rows' last author is `sam` (`FIXTURE_ME`).
++  - Place: Overview on even indexes; on odd ones `file` `src/board/card.ts`, line `10 + index`.
++  - Time: one hour after the row's `createdAt`.
++- **Discussion 1** (k = 2): last author `sam`, three hours after; place `file` `src/board/column.ts` with `line:
++  null`.
++- **Mixed headers.** Rows of k = 2 whose discussion 0 is not sam's have one discussion of each turn, the newer one
++  sam's. Some rows hold only sam's ("0 of 2 wait for you"). The turn order then beats the time order.
++- **Texts.**
++  - Every 4th discussion holds `Please RENAME this.\n**not bold** <b>not bold</b> &amp; <script>x</script>\nThird
++    line\nA fourth line the box leaves out`.
++  - One holds a 400-character single line.
++  - The others hold a short line.
++- **Pages.** `${ORIGIN}/-/merge_requests/<iid>#note_<7000 + 10·index + k>`, except one discussion per 6 rows with
++  `page: null`.
++- **The palette fence.** No string contains `#` followed by 3, 4, 6 or 8 hex digits (`frontend/scripts/palette.ts`).
++  `#note_` digits follow `_`, so they pass.
++
++## Change
++
++1. Domain types, `toRowDiscussions`, exports. Source method, tauri method and test. Settings source method on
++   `ChunkSource`, `tauri.ts` and `fixtureSettings.ts` (its `copied` and a setter), with tests. The one-line literals.
++2. `fixtureMergeRequestDiscussions.ts` and test. The fixture source's `readDiscussions` and test.
++3. `ui/settings.ts` and test.
++4. `ui/mergeRequestDiscussions.ts` and test. Wire it into `mergeRequests.ts` (`received`, `ended`, the spread) and
++   `mergeRequestsStore.ts`. `mergeRequests.test.ts`: its `MergeRequestSource` literal (`:147-176`) gains
++   `readDiscussions`, its rig a mode ref.
++
++## Acceptance
++
++**Vitest** (`pnpm -C frontend test -- src/ui src/ipc`), each test named for the bug it catches, at least:
++
++- `mergeRequestDiscussions.test.ts`:
++  - `full_queues_each_page_with_open_discussions_as_it_arrives` (count-0 rows never asked)
++  - `a_prefix_answer_sends_the_rest_until_the_queue_is_empty`
++  - `one_call_runs_at_a_time`
++  - `the_refresh_swap_drops_every_entry_and_asks_again` (old entries gone; an old answer arriving after the swap is
++    dropped)
++  - `lazy_asks_the_hovered_row_first_and_once`
++  - `lazy_never_asks_unhovered_rows`
++  - `off_asks_nothing_and_drops_an_answer_in_flight` (RK61)
++  - `switching_to_full_asks_what_is_missing_without_a_reload`
++  - `switching_to_lazy_drops_unsent_asks_and_keeps_what_was_read`
++  - `a_refused_answer_is_kept_per_row`
++  - `a_source_failure_is_kept_per_asked_row_not_reported`
++  - `the_log_event_never_carries_text_or_names`
++- `settings.test.ts`:
++  - `before_any_read_the_discussion_details_are_full_and_sent_so`
++  - `setDiscussionDetails_sends_the_settings_in_use_and_adopts_the_reply`
++  - `a_failed_setDiscussionDetails_is_a_settings_problem_and_keeps_the_settings`
++  - `a_load_whose_only_difference_is_the_discussion_details_is_adopted`
++- `mergeRequests.test.ts`:
++  - `a_buffered_refresh_replaces_details_only_at_its_swap`
++  - `the_window_setting_drives_the_slice` (through `windowMergeRequests` with a settings ref)
++- `fixtureMergeRequestDiscussions.test.ts`:
++  - `every_listed_row_with_open_discussions_has_that_many`
++  - `both_turns_occur_for_sam_and_some_rows_wait_only`
++  - `the_markup_text_and_a_pageless_discussion_exist`
++  - `the_scripted_rows_refuse_as_named`
++  - `an_unlisted_iid_fails`
++- `fixtureMergeRequests.test.ts`: `discussions_answer_a_prefix_of_ten_after_400_ms_and_log_the_ask` (fake timers).
++- `fixtureSettings.test.ts`: `setDiscussionDetails_replaces_the_value_keeps_the_rest_and_the_next_load_reads_it`.
++- `tauriMergeRequests.test.ts`: `readDiscussions_calls_the_command_with_the_iids_and_converts_each_row` (a time, an
++  uploaded author, a page); `readDiscussions` in the "a %s failure comes back unchanged" table.
++- `tauri.test.ts`: `setDiscussionDetails sends the settings in use and the value, and returns the read or the error`.
++
++**Commands:**
++- `pnpm -C frontend lint`, `typecheck` (clean), `test` (palette fence green on the new fixture): summary lines.
++- `just map-check`: its expected findings are only the new names the docs keeper adds (paste them).
++- `just mutants HEAD` in your workspace (SP11).
++
++## Skills
++
++`skill://ts-conventions`, `skill://ipc-contract`, `skill://comment-policy`, `skill://risk-register` (proposed RK61),
++`skill://verification`.
+diff --git a/docs/slices/briefs/mr-discussions-verify.md b/docs/slices/briefs/mr-discussions-verify.md
+new file mode 100644
+index 0000000..7a77fbf
+--- /dev/null
++++ b/docs/slices/briefs/mr-discussions-verify.md
+@@ -0,0 +1,125 @@
++# Slice mr-discussions-verify — the gate, the WebKit fixture and the real app for open discussions
++
++Design: `docs/slices/briefs/mr-discussions-design.md` option A. Request acceptance:
++`docs/slices/request-mr-discussions.md` "Acceptance" (`:62-72`). Proposed plan §2 #162–#164 and RK60–RK61. Recipes:
++`skill://verification`. Windows open only on a private display, and screenshots come only from the session or the
++private display.
++
++## Target
++
++**Owned:** none (read-only commands; your scratch folder only).
++
++**Read-only:** the whole tree.
++
++**Needs:**
++- `mr-discussions-rust` (with `just bindings` applied), `-core`, `-state` and `-page` committed.
++- **Smoke pass** (steps B–C, no `just check`): as soon as `-page` is committed, beside its reviewers.
++- **Final pass**: once the docs keeper has named every new file in the project map (`just map-check`, PM6) and
++  `read_discussions`, `set_discussion_details` and `MergeRequestSource.readDiscussions` in architecture and
++  ipc-contract. Run `just check` once, then B–C.
++
++**Non-goals:** the owner's playground check (below, for the orchestrator to hand on); fixing anything; `just
++mutants`.
++
++## Contract
++
++**Fixture `?mr=list`**, as `mr-discussions-state` built it:
++- A row with `openDiscussions` k has k discussions.
++- Discussion 0's last author cycles through `PEOPLE` from index + 2. Its place is Overview on even indexes and
++  `src/board/card.ts:<10+index>` on odd ones.
++- Discussion 1 is sam's, newer, on `src/board/column.ts`.
++- Every 4th discussion holds the markup text (`Please RENAME this.`, `**not bold** <b>not bold</b> &amp;
++  <script>x</script>`, two more lines).
++- One discussion per 6 rows has no page.
++- `DISCUSSIONS_FAILED_IID` answers "glab timed out", `DISCUSSIONS_LOGGED_OUT_IID` answers not logged in.
++- Answers come 10 iids per call after 400 ms.
++- The fixture logs `mergeRequests.fixture_discussions { iids }` and `mergeRequests.fixture_page`.
++
++**Scenario `tests/glab/mr-discussions/`**, as `mr-discussions-rust` recorded it:
++
++| row | open | what the box should show |
++| --- | --- | --- |
++| !82 | 3 | (a) last sam, `src/…:<line>`; (b) last ben, with a system note after his comment; (c) anna on the Overview, no link |
++| !81 | 1 | ben on the Overview, markup in the body |
++| !80 | 0 | — |
++| !79 | 1 | its open one on a second discussions page |
++| !78 | 1 | GitLab names no such merge request |
++
++The user is `sam`.
++
++**Words:**
++- Core: "Your turn", "Waiting for an answer", "N of M wait(s) for you", "No open discussions", "Overview",
++  `path:line`, "… ago", "Someone".
++- Page: "Loading discussions…", "Discussion details" with "Load fully", "Load lazily", "Off".
++- Problems: "Could not read the discussions", and "This comment's page was not listed by GitLab, so yamt did not
++  open it."
++
++## Change (the steps)
++
++**A. Gate (final pass only).** `just check` → pass, or the failing recipe and its first 30 lines.
++
++**B. WebKit fixture.** `just app-session start-fixture --name md --diff --mr list --size 1600x1000`, then open the
++merge requests page. Run every step in both windows (`--diff` and `--range-case review --mr list`) unless noted.
++
++1. **Load fully.**
++   - Hover !638's count. The box opens without a loading wait; its header sums the turns, viewer's-turn lines come
++     first, and newest first within each.
++   - Each line: picture, name, "… ago", turn words, place, at most three lines ending in "…" where cut.
++   - The session log has `fixture_discussions` calls of ≤ 10 iids that together name each row with a count > 0
++     exactly once, and no count-0 row.
++2. **Text and links.**
++   - A markup discussion: `read` finds no `b`/`script` element in the box; `innerText` holds `<b>not bold</b>`,
++     `**not bold**` and `RENAME` in capitals.
++   - Click a line with a page: `fixture_page` names `…/-/merge_requests/<iid>#note_<n>`, and the row's own page is
++     not opened.
++   - A pageless line is no button.
++3. **Keyboard.** Tab to a count opener: the box opens (focus inside). Escape: the box closes and focus is back on
++   the opener.
++4. **Load lazily.** Settings → Discussion details → Load lazily → Back → Refresh.
++   - No `fixture_discussions` line after the refresh until a hover.
++   - Hover a count: "Loading discussions…", then the box, with one line naming that iid alone.
++   - Hover away and back: no new line.
++   - In `--range-case review`, the review-mode button does not exist (it does not exist yet in any mode; record its
++     absence for the next feature).
++5. **Off.** Settings → Off → Back → Refresh: no `fixture_discussions` line. A hover over a count shows the plain
++   tooltip "N open discussions"; there is no `aria-expanded` opener.
++6. **Switching applies at once.** From Off: Settings → Load fully → Back, without Refresh. `fixture_discussions`
++   lines follow, and a hover shows the box.
++7. **Failure.** The `DISCUSSIONS_FAILED_IID` row's box says "glab timed out" in the list's words, its count still
++   shows, and the page's problem bar stays empty.
++8. `shot` with a box open in yamt Dark and yamt Light.
++
++**C. Real app.** `scripts/local-conflicts-repo.sh <scratch>/md`, then `cargo tauri build --debug --no-bundle`, then
++`just app-session start-app --name md --diff --dir <scratch>/md --glab mr-discussions`. Open the merge requests page.
++
++1. **Full.**
++   - The fake glab log has one `argv:` line with `MergeRequestDiscussions` and `iids=["82","81","79","78"]`, then
++     one with `iids=["79"]` and `discussionsAfter=d-2`, and no other discussions line.
++   - !82's box: three lines, ben's (b) and anna's (c) "Your turn" first, sam's (a) "Waiting for an answer"; header
++     "2 of 3 wait for you".
++   - !81: the markup shows as text.
++   - !79: its one discussion.
++   - !78: the box says GitLab sent no such merge request; the count shows 1.
++   - !80: the plain tooltip.
++2. **Links.** Click (a): `<scratch>/md/glab/opened.log` names `https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_…`.
++   (c) is no button.
++3. **Lazy.** Settings → Load lazily → Back → Refresh: no discussions `argv:` line until a hover. Hover !81: exactly
++   one line with `iids=["81"]`. Hover again: none.
++4. **Off.** Settings → Off → Back → Refresh: no discussions `argv:` line through hovers on every count.
++5. **The file.** The settings file in use holds `"discussionDetails": "off"`. After Load fully it holds no
++   `discussionDetails` key.
++6. The app log has one `mergeRequests.discussions_read` line per call and never a body, name or address. `shot` in
++   dark and light.
++
++## Acceptance
++
++Each step: pass or fail with the observed words, the `read` results, and the app-log and fake-glab log lines pasted
++verbatim, plus the screenshots' paths.
++
++**Owner check** (hand on, not run): the playground's !1 "Due dates on cards" (4 open discussions, all by `samubr`).
++1. The owner, as `samubr` in the real app, sees each discussion "Waiting for an answer" and the header "0 of 4 wait
++   for you".
++2. Then he answers one of them **by hand as a second GitLab user**: the author's side. No script can do it; `glab` is
++   `samubr`.
++3. After Refresh that discussion reads "Your turn", sits first, and the header reads "1 of 4 waits for you". Its line
++   opens that comment on GitLab.

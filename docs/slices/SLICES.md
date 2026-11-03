@@ -122,6 +122,29 @@ colours show as the nearest of the theme's 16. No product question open. Order: 
 | 8   | verify (`briefs/ci-job-log-verify.md`): smoke after 6; final `just check`, WebKit, real app                                                              | verifier     | done        | `CiJobLogFinal` at `3bb05979` (`just check` pass, B/C pass but #2191); re-pass `CiJobLogRepass` at `4b9994ae`: `just check` pass (46 s), Light/Dark no stale marks, one-letter 38–46 ms, tip hidden, real app count uncovered. Notes `CiJobLog{Smoke,Final,Repass}.md`                                           |
 | 9   | owner check on the GitLab playground (`scripts/gitlab-playground.sh`, branch `feature/failing-ci`): a real failed job's log looks like GitLab's job page | human        | handed over | the verify brief's "Owner check"                                                                                                                                                                                                                                                                                 |
 
+## Open discussions on hover (session 46; owner #2193, #2198–#2201: "on hover I need more info so that it becomes obvious if the reviewer needs to react")
+
+Request `docs/slices/request-mr-discussions.md` (rules 1–8, acceptance, non-goals); base `75e95e5f`. Owner's answers:
+review mode's perspective lives in the next request (#2198); a setting loads fully, lazily or off (#2199), default
+fully (#2200). No product question open (OR13). Design `briefs/mr-discussions-design.md` option A: one
+`read_discussions(iids)` command answering ≤ 20 rows per glab call (100 rows measured 22.22 s, over glab's 20 s
+deadline), one window queue serving full/lazy/off, turn rule in the TS core for any viewer, plan #162–#164, RK60–RK61.
+Designer's open point decided by design (row #164, owner may veto): a bot's comment counts as the last comment.
+Order: 2 ∥ 3, `just bindings`, 4, 5, 6 ∥ 7 smoke, 7 final.
+
+| row | slice                                                                                                               | owner        | status  | evidence                                                                                                                                                        |
+| --- | ------------------------------------------------------------------------------------------------------------------- | ------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | facts: GraphQL discussion fields, cost beside the list query, system notes, viewer, code map                        | scout        | done    | `.omp/run/notes/PlanScoutMrDiscussionFacts.md`: `Discussion.notes` has no system filter; separate 100-row discussions query scores 60, one-row 26, list 170/250 |
+| 1   | design: query shape and cost, one load path for both modes, turn rule's home, box reuse, setting shape              | designer     | done    | `MrDiscussionsDesign`: option A, five briefs. Notes `MrDiscussionsDesign.md`                                                                                    |
+| 2   | rust (`briefs/mr-discussions-rust.md`): `read_discussions`, last person's note, `WebPage::note`, setting, fake glab | rust-impl    | pending |                                                                                                                                                                 |
+| 3   | core (`briefs/mr-discussions-core.md`): turn rule, order, header and per-discussion words                           | web-impl     | pending |                                                                                                                                                                 |
+| 3b  | `just bindings` after row 2 lands                                                                                   | orchestrator | pending |                                                                                                                                                                 |
+| 4   | state (`briefs/mr-discussions-state.md`): ipc source + fixtures, settings, the window's discussion queue            | web-impl     | pending |                                                                                                                                                                 |
+| 5   | page (`briefs/mr-discussions-page.md`): hover box on the count, Settings choice; wires the window                   | web-impl     | pending |                                                                                                                                                                 |
+| 6   | docs keeper: design "Shared edits", plan #162–#164, RK60–RK61                                                       | docs-keeper  | pending |                                                                                                                                                                 |
+| 7   | verify (`briefs/mr-discussions-verify.md`): smoke after 5; final `just check`, WebKit, real app                     | verifier     | pending |                                                                                                                                                                 |
+| 8   | owner check on the GitLab playground: a discussion answered by the author shows "Your turn" to the reviewer         | human        | pending |                                                                                                                                                                 |
+
 ## Next, in the owner's order (session 45; owner #2193–#2198)
 
 One request per session (OR14), each started with `/new`, then `Implement docs/slices/request-<x>.md`:
