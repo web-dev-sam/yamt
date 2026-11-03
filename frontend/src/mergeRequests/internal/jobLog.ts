@@ -1,13 +1,8 @@
 import type { AnsiColour } from "./ansiColours";
 import { PLAIN_PEN, penAfter, type Pen } from "./sgr";
 
-export type LogStyle = {
+export type LogStyle = Omit<Pen, "foreground"> & {
   readonly foreground: AnsiColour | null; // null: the box's own text colour
-  readonly background: AnsiColour | null; // null: the box's own background
-  readonly bold: boolean;
-  readonly italic: boolean;
-  readonly underline: boolean;
-  readonly struck: boolean;
 };
 export type LogRun = { readonly text: string; readonly style: LogStyle }; // text never ""
 export type LogLine = { readonly runs: readonly LogRun[] }; // at least one run
@@ -116,20 +111,13 @@ function nextSpecial(line: string, from: number): number {
   return found === -1 ? line.length : from + found;
 }
 
-function shownStyle({ foreground, background, bold, italic, underline, struck }: Pen): LogStyle {
-  const shown = bold ? foreground?.whenBold : foreground?.colour;
-  return { foreground: shown ?? null, background, bold, italic, underline, struck };
+function shownStyle({ foreground, ...attributes }: Pen): LogStyle {
+  const shown = attributes.bold ? foreground?.whenBold : foreground?.colour;
+  return { ...attributes, foreground: shown ?? null };
 }
 
 function sameStyle(left: LogStyle, right: LogStyle): boolean {
-  return (
-    left.foreground === right.foreground &&
-    left.background === right.background &&
-    left.bold === right.bold &&
-    left.italic === right.italic &&
-    left.underline === right.underline &&
-    left.struck === right.struck
-  );
+  return Object.entries(left).every(([field, value]) => Reflect.get(right, field) === value);
 }
 
 function addText(scan: Scan, text: string): void {

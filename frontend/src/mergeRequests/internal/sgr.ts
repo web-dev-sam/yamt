@@ -9,7 +9,7 @@ import {
 type Foreground = { readonly colour: AnsiColour; readonly whenBold: AnsiColour };
 export type Pen = {
   readonly foreground: Foreground | null;
-  readonly background: AnsiColour | null;
+  readonly background: AnsiColour | null; // null: the box's own background
   readonly bold: boolean;
   readonly italic: boolean;
   readonly underline: boolean;

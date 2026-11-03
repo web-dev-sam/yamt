@@ -1,0 +1,11 @@
+just mutants HEAD: no Rust; Stryker jobLog.ts 228 killed / 14 timeout / 46 survived / 1 no-cov; sgr.ts 74 / 8 / 33 / 1; all 80.00%
+jobLog.ts:72,79,82,105 kind "dropped"→"" — equivalent: in applied(), "" matches no case and returns, the same as the dropped case
+jobLog.ts:154 case "dropped" body removed or label "" — equivalent: falls off the end of a switch that returns void
+jobLog.ts:92 end + SECTION_END.length → minus — equivalent: the marker's last 6 chars hold no ESC or section_, and the \r that follows clears them
+jobLog.ts:52 physical[0] ?? "" (no-cov) — equivalent: split always returns ≥1 element
+jobLog.ts:211 pointAt edge "end"→"" — equivalent: pointAt only tests edge === "start"
+sgr.ts:89 code = "" default (no-cov) — equivalent: slice(at,…) with at < length always has a first element
+jobLog.ts:31 TIMESTAMP regex ×19 — gate-covered: module-level, #732; each breaks the stamped prefix used by the timestamp and prefix tests
+jobLog.ts:33 SECTION ×16, :34 SECTION_END, :35 CONTROL_OR_SECTION, :36 ESCAPE — gate-covered: #732; the ^ mutant was applied by hand and fails text_that_is_almost…
+sgr.ts:20-26 PLAIN_PEN, :36-38 digitCodes, :42-63 SGR_CODES entries, :66 INDEXED_COLOUR (33) — gate-covered: #732; "0" was applied by hand and fails 6 tests; codes_follow_gitlabs_exact_table pins each code
+ansiColours.ts:34-73 (30), jobLogSearch.ts:1 — gate-covered: #732, module-level tables (separate run, file not in the HEAD diff)

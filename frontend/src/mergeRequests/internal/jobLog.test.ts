@@ -23,15 +23,22 @@ const PLAIN: LogStyle = {
   struck: false,
 };
 
-const inputs: string[] = [];
-
-function viewOf(raw: string): JobLogView {
-  inputs.push(raw);
-  return jobLogView(raw);
-}
-
 function lineText(line: LogLine): string {
   return line.runs.map((run) => run.text).join("");
+}
+
+function expectWellFormed(view: JobLogView): void {
+  expect(view.text).toBe(view.lines.map(lineText).join("\n"));
+  for (const line of view.lines) {
+    expect(line.runs.length).toBeGreaterThan(0);
+    expect(line.runs.every((run) => run.text !== "")).toBe(true);
+  }
+}
+
+function viewOf(raw: string): JobLogView {
+  const view = jobLogView(raw);
+  expectWellFormed(view);
+  return view;
 }
 
 function shown(raw: string): string[] {
@@ -303,6 +310,19 @@ test("equal_styles_merge_into_one_run_and_no_run_is_empty", () => {
       ["b", styled({ italic: true })],
     ],
   ]);
+  for (const [codes, style] of [
+    ["1", { bold: true }],
+    ["41", { background: "red" }],
+    ["4", { underline: true }],
+    ["9", { struck: true }],
+  ] satisfies [string, Partial<LogStyle>][]) {
+    expect(runs(`a${E}[${codes}mb`)).toEqual([
+      [
+        ["a", PLAIN],
+        ["b", styled(style)],
+      ],
+    ]);
+  }
 });
 
 test("hit_places_at_run_boundaries", () => {
@@ -343,13 +363,14 @@ test("a_whole_log_of_500_kb_parses_in_linear_time", () => {
 });
 
 test("the_text_is_the_lines_joined_by_line_breaks", () => {
-  expect(inputs.length).toBeGreaterThan(50);
-  for (const raw of inputs) {
-    const view = jobLogView(raw);
-    expect(view.text).toBe(view.lines.map(lineText).join("\n"));
-    for (const line of view.lines) {
-      expect(line.runs.length).toBeGreaterThan(0);
-      expect(line.runs.every((run) => run.text !== "")).toBe(true);
-    }
+  for (const raw of [
+    "",
+    "\n\n",
+    `a\nb${E}[31mc\r\n\nd`,
+    `${E}[1m\r${E}[0m`,
+    `x\ry\n${E}[32m${E}[0m\nz`,
+    `${stamped("one")}\n${joined("two")}\n${stamped(`section_start:1:s${MARKER_END}three`)}`,
+  ]) {
+    expectWellFormed(jobLogView(raw));
   }
 });
