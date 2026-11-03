@@ -1,0 +1,1384 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 2bf7b82..cc173bb 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -65,3 +65,5 @@ Local conflict results (request `docs/slices/request-local-conflict-check.md`):
+ Merge-request conflicts (plan §2 #138–#143): `MergeRequestRow.vue` shows the change size in its meta line (`sizeParts`, each part its own span, title `sizeTitle` on the whole size; none when GitLab gave none), `MergeRequestReadiness.vue` (a `w-7` column right of the CI box: the Lucide icon of `readinessIcon`, title and accessible name `readinessText`) and, left of the open-changes button, the row's one action from `mergeRequests/` `rowAction` (Resolve `git-merge`, Continue `step-forward`; a disabled one through the `<span :title>` hover of `OperationButtons.vue`; the spinner while it runs) with its reply line under the row (`rowReplyText` in `mergeRequestRowReplyText.ts`, `role="status"`, the error colour only when `refused`). `mergeRequestActions.ts` `createRowActions` (held by the slice) is the only writer of `actions` (one `RowActing` per row, replaced by the next click; a click while the row runs sends nothing) and `localMerge` (rules 8, 9): it is read at `show()`, on the window's `focus` while the page is shown (`MergeRequestsView.vue`) and after every resolve or continue reply; a failed read keeps what was known and reports the `localMerge` step. Its `setRow` (a new map with the row's value, or without the row for `null`) and `claimRow` (the row set busy unless it already is) are the one per-row write and busy guard of `actions` and of the slice's `openings`.
+ 
+ The merge window of a merge request (plan §2 #138–#143): `question.ts` is what is asked; `questionText.ts` is its words (`cancel: null` draws one button; a bullet list is kind `lines`). Abort of a merge yamt started (`mergeRequest`, written only by `listing.ts`) asks by returnTo/branchBefore, then shows the one-button notice if git left anything (`leftoverText.ts`, the page's `gitRefused` line uses it too), then `closeEndedMerge`. `pushing.ts` offers the push after Continue answers ReadyToPush: only Push pushes (RK45), a failure asks pushFailed again, Keep Local or Escape closes once. A failed push is the `push` problem ("Could not push <branch>"); a failed `closeEndedMerge`, after the push offer or after Abort's leftovers, is the `closeMerge` problem of the merge read before the action began ("Could not close the merge of <target> into <branch>"), never Abort's. Once Continue answers ReadyToPush, or Abort answers leftovers, git stays running: the window is ended for every reader.
++
++People on a merge request (request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, plan §2 #169, #170): `useMergeRequests()` carries `peopleSearch`/`searchPeople`/`endPeopleSearch` (the window's one search, 250 ms after the last call, newest answer only), `peopleAsks`/`changePeople` (`mergeRequestPeople.ts`: one change at a time per merge request, `queue[0]` running, `notDone` kept until the box closes) and `openPeopleBoxes`/`peopleBoxOpened`/`peopleBoxClosed`: `shownRows` keeps a row whose box is open (rule 9), so `MergeRequestPeople.vue` calls Opened when `useHoverBox`'s `open` turns true and Closed when it turns false or the box unmounts open. On a row with `mayRerequest` the box always shows both groups ("None" when empty; a row with nobody opens it from the dimmed icon), each header with a `user-plus` add button that opens `MergeRequestPeopleSearch.vue` under it (one field per box, `adding`): a `role="combobox"` field over a `role="listbox"` of `mergeRequestPeopleLines.ts` `pickList` (the core's `peopleSuggestions` while empty, else the search's people; "Already an assignee/reviewer" lines `aria-disabled`, a queued add spinning), arrows over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines change (`keptHighlight`), Enter or a click (its `mousedown` prevented) adds, and the field clears and keeps focus once that add is answered unless the text changed meanwhile; Escape closes the field (focus to its add button), a second Escape the box. Each assignee and reviewer line ends with `MergeRequestPersonMenu.vue` (`ellipsis-vertical`, one `useDropdownMenu<true>` menu with "Remove assignee/reviewer", `position: fixed` inside the box so the hover box holds it; the spinner, `aria-disabled` and no menu while that remove is queued or running). A change GitLab did not make is one `peopleChangeText` sentence (`personState` under the listed person for a remove, else `groupNotices` under the group). Every control of a line carries `data-control`; when a reply removes the focused one, focus moves to the box.
+diff --git a/frontend/src/ui/MergeRequestPeople.vue b/frontend/src/ui/MergeRequestPeople.vue
+index 96ee404..01077cf 100644
+--- a/frontend/src/ui/MergeRequestPeople.vue
++++ b/frontend/src/ui/MergeRequestPeople.vue
+@@ -1,13 +1,14 @@
+ <script setup lang="ts">
+-import { computed, useTemplateRef, watch, type Component } from "vue";
++import { computed, onBeforeUnmount, shallowRef, useTemplateRef, watch, type Component } from "vue";
+ import CircleAlert from "~icons/lucide/circle-alert";
+ import CircleCheck from "~icons/lucide/circle-check";
+ import CircleMinus from "~icons/lucide/circle-minus";
+ import LoaderCircle from "~icons/lucide/loader-circle";
+ import MessageSquareText from "~icons/lucide/message-square-text";
+ import RotateCcw from "~icons/lucide/rotate-ccw";
++import UserPlus from "~icons/lucide/user-plus";
+ 
+-import type { MergeRequestRow, Reviewer } from "../ipc";
++import type { MergeRequestRow, PeopleGroup, Person, Reviewer } from "../ipc";
+ import {
+   displayName,
+   moreText,
+@@ -17,10 +18,24 @@ import {
+   reviewStateText,
+   type ReviewState,
+ } from "../mergeRequests";
++import {
++  groupNotices,
++  NO_PEOPLE_ASKS,
++  personState,
++  type PersonState,
++} from "./mergeRequestPeopleLines";
++import MergeRequestPeopleSearch from "./MergeRequestPeopleSearch.vue";
++import MergeRequestPersonMenu from "./MergeRequestPersonMenu.vue";
+ import MergeRequestPicture from "./MergeRequestPicture.vue";
+ import type { RerequestAsk } from "./mergeRequests";
++import { useMergeRequests } from "./mergeRequestsStore";
+ import {
++  ADD_ASSIGNEE,
++  ADD_REVIEWER,
+   ASSIGNEES,
++  NO_ONE,
++  REMOVE_ASSIGNEE,
++  REMOVE_REVIEWER,
+   REREQUEST_REVIEW,
+   rerequestLabel,
+   rerequestReplyText,
+@@ -30,14 +45,25 @@ import { vTooltip } from "./tooltip";
+ import { useHoverBox } from "./useHoverBox";
+ 
+ type StateLook = { readonly icon: Component; readonly tone: string };
+-type ReviewerLine = {
+-  readonly reviewer: Reviewer;
+-  readonly name: string;
++type Review = {
+   readonly look: StateLook;
+   readonly stateText: string;
+   readonly rerequest: { readonly label: string; readonly running: boolean } | null;
+   readonly refusal: string | null;
+ };
++type BoxLine = {
++  readonly person: Person;
++  readonly name: string;
++  readonly state: PersonState;
++  readonly review: Review | null;
++};
++type GroupWords = { readonly title: string; readonly add: string; readonly remove: string };
++type BoxGroup = {
++  readonly group: PeopleGroup;
++  readonly words: GroupWords;
++  readonly lines: readonly BoxLine[];
++  readonly notices: readonly string[];
++};
+ 
+ const props = defineProps<{ row: MergeRequestRow; asks: ReadonlyMap<string, RerequestAsk> }>();
+ const emit = defineEmits<{ rerequestReview: [username: string]; closed: [] }>();
+@@ -48,7 +74,20 @@ const REVIEW_STATE_LOOKS: Readonly<Record<ReviewState, StateLook>> = {
+   approved: { icon: CircleCheck, tone: "text-success-signal" },
+   changesRequested: { icon: CircleAlert, tone: "text-problem-error" },
+ };
++const GROUP_WORDS: Readonly<Record<PeopleGroup, GroupWords>> = {
++  assignees: { title: ASSIGNEES, add: ADD_ASSIGNEE, remove: REMOVE_ASSIGNEE },
++  reviewers: { title: REVIEWERS, add: ADD_REVIEWER, remove: REMOVE_REVIEWER },
++};
++const GROUPS: readonly PeopleGroup[] = ["assignees", "reviewers"];
+ 
++const {
++  peopleAsks,
++  changePeople,
++  searchPeople,
++  endPeopleSearch,
++  peopleBoxOpened,
++  peopleBoxClosed,
++} = useMergeRequests();
+ const area = useTemplateRef<HTMLSpanElement>("area");
+ const opener = useTemplateRef<HTMLButtonElement>("opener");
+ const box = useTemplateRef<HTMLDivElement>("box");
+@@ -57,51 +96,130 @@ const { open, placement, on } = useHoverBox({
+   opener: () => opener.value,
+   box,
+ });
++const adding = shallowRef<PeopleGroup | null>(null);
+ 
++const editable = computed(() => props.row.mayRerequest);
+ const stack = computed(() => peopleStack(props.row.assignees, props.row.reviewers));
+-const reviewers = computed(() => props.row.reviewers.map(reviewerLine));
++const groups = computed(() =>
++  GROUPS.map(boxGroup).filter((group) => editable.value || group.lines.length > 0),
++);
++const controls = computed(
++  () =>
++    new Set(
++      groups.value.flatMap((group) => group.lines.flatMap((line) => controlsOf(group, line))),
++    ),
++);
+ 
+ watch(open, (isOpen) => {
+-  if (!isOpen) {
+-    emit("closed");
++  if (isOpen) {
++    peopleBoxOpened(props.row.iid);
++    return;
++  }
++  boxClosed();
++  emit("closed");
++});
++watch(controls, keepFocusInBox, { flush: "pre" });
++
++onBeforeUnmount(() => {
++  if (open.value) {
++    boxClosed();
+   }
+ });
+-watch(reviewers, keepFocusInBox, { flush: "pre" });
+ 
+-function reviewerLine(reviewer: Reviewer): ReviewerLine {
+-  const name = displayName(reviewer.person);
++function review(reviewer: Reviewer, name: string): Review {
+   const ask = props.asks.get(reviewer.person.username);
+   return {
+-    reviewer,
+-    name,
+     look: REVIEW_STATE_LOOKS[reviewer.state],
+     stateText: reviewStateText(reviewer.state),
+     rerequest:
+-      props.row.mayRerequest && reviewDone(reviewer.state)
++      editable.value && reviewDone(reviewer.state)
+         ? { label: rerequestLabel(name), running: ask?.kind === "running" }
+         : null,
+     refusal: ask?.kind === "refused" ? rerequestReplyText(ask.reply, name) : null,
+   };
+ }
+ 
+-function keepFocusInBox(lines: readonly ReviewerLine[]): void {
++function boxGroup(group: PeopleGroup): BoxGroup {
++  const place = {
++    row: props.row,
++    group,
++    asks: peopleAsks.value.get(props.row.iid) ?? NO_PEOPLE_ASKS,
++    platform: navigator.platform,
++  };
++  function line(person: Person, reviewer: Reviewer | null): BoxLine {
++    const name = displayName(person);
++    return {
++      person,
++      name,
++      state: personState(place, person.username),
++      review: reviewer === null ? null : review(reviewer, name),
++    };
++  }
++  return {
++    group,
++    words: GROUP_WORDS[group],
++    lines:
++      group === "assignees"
++        ? props.row.assignees.map((person) => line(person, null))
++        : props.row.reviewers.map((reviewer) => line(reviewer.person, reviewer)),
++    notices: groupNotices(place),
++  };
++}
++
++function controlsOf(group: BoxGroup, line: BoxLine): string[] {
++  const username = line.person.username;
++  const rerequest = line.review !== null && line.review.rerequest !== null;
++  return [
++    ...(rerequest ? [`rerequest:${username}`] : []),
++    ...(editable.value ? [`more:${group.group}:${username}`] : []),
++  ];
++}
++
++function keepFocusInBox(kept: ReadonlySet<string>): void {
+   const focused = document.activeElement;
+-  const username =
++  const control =
+     focused instanceof HTMLElement && box.value?.contains(focused) === true
+-      ? focused.dataset.rerequest
++      ? focused.closest<HTMLElement>("[data-control]")?.dataset.control
+       : undefined;
+-  const kept = lines.some(
+-    (line) => line.rerequest !== null && line.reviewer.person.username === username,
+-  );
+-  if (username !== undefined && !kept) {
++  if (control !== undefined && !kept.has(control)) {
+     box.value?.focus();
+   }
+ }
++
++function closeField(): void {
++  if (adding.value !== null) {
++    endPeopleSearch();
++    adding.value = null;
++  }
++}
++
++function boxClosed(): void {
++  peopleBoxClosed(props.row.iid);
++  closeField();
++}
++
++function toggleAdding(group: PeopleGroup): void {
++  if (adding.value === group) {
++    closeField();
++    return;
++  }
++  adding.value = group;
++  searchPeople("");
++}
++
++function fieldClosed(group: PeopleGroup): void {
++  box.value?.querySelector<HTMLElement>(`[data-add="${group}"]`)?.focus();
++  closeField();
++}
++
++function remove(group: PeopleGroup, username: string): void {
++  void changePeople(props.row.iid, { group, action: "remove", username });
++}
+ </script>
+ 
+ <template>
+   <MergeRequestPicture
+-    v-if="stack.shown.length === 0"
++    v-if="stack.shown.length === 0 && !editable"
+     v-tooltip="NO_PEOPLE_TEXT"
+     :person="null"
+     size="stack"
+@@ -126,6 +244,14 @@ function keepFocusInBox(lines: readonly ReviewerLine[]): void {
+       :aria-expanded="open"
+       class="flex items-center rounded p-0.5 hover:bg-hover"
+     >
++      <MergeRequestPicture
++        v-if="stack.shown.length === 0"
++        v-tooltip="NO_PEOPLE_TEXT"
++        :person="null"
++        size="stack"
++        role="img"
++        :aria-label="NO_PEOPLE_TEXT"
++      />
+       <MergeRequestPicture
+         v-for="(person, index) in stack.shown"
+         :key="person.username"
+@@ -147,61 +273,99 @@ function keepFocusInBox(lines: readonly ReviewerLine[]): void {
+       class="fixed z-10 max-h-[60vh] w-max max-w-[30rem] overflow-y-auto rounded-md border border-control-border bg-panel-inline p-1 text-fg shadow-lg outline-none"
+       :style="placement"
+     >
+-      <template v-if="row.assignees.length > 0">
+-        <p class="px-2 pt-1 pb-0.5 text-fg-muted">{{ ASSIGNEES }}</p>
+-        <ul :aria-label="ASSIGNEES">
+-          <li
+-            v-for="person in row.assignees"
+-            :key="person.username"
+-            class="flex items-center gap-2 px-2 py-1"
++      <template v-for="group in groups" :key="group.group">
++        <div class="flex items-center gap-2 px-2 pt-1 pb-0.5">
++          <p class="text-fg-muted">{{ group.words.title }}</p>
++          <button
++            v-if="editable"
++            v-tooltip="group.words.add"
++            type="button"
++            :data-add="group.group"
++            :aria-label="group.words.add"
++            :aria-expanded="adding === group.group"
++            class="ml-auto rounded p-1 hover:bg-hover aria-expanded:bg-row-selected"
++            @click="toggleAdding(group.group)"
+           >
+-            <MergeRequestPicture :person="person" size="box" aria-hidden="true" />
+-            <span>{{ displayName(person) }}</span>
+-          </li>
+-        </ul>
+-      </template>
+-      <template v-if="reviewers.length > 0">
+-        <p class="px-2 pt-1 pb-0.5 text-fg-muted">{{ REVIEWERS }}</p>
+-        <ul :aria-label="REVIEWERS">
+-          <li v-for="line in reviewers" :key="line.reviewer.person.username" class="px-2 py-0.5">
+-            <div class="flex items-center gap-2">
+-              <MergeRequestPicture :person="line.reviewer.person" size="box" aria-hidden="true" />
++            <UserPlus class="size-4" aria-hidden="true" />
++          </button>
++        </div>
++        <MergeRequestPeopleSearch
++          v-if="adding === group.group"
++          :row="row"
++          :group="group.group"
++          @close="fieldClosed(group.group)"
++        />
++        <p v-if="group.lines.length === 0" class="px-2 py-1 text-fg-muted">{{ NO_ONE }}</p>
++        <ul v-else :aria-label="group.words.title">
++          <li v-for="line in group.lines" :key="line.person.username" class="px-2 py-0.5">
++            <div class="flex min-h-6 items-center gap-2">
++              <MergeRequestPicture :person="line.person" size="box" aria-hidden="true" />
+               <span>{{ line.name }}</span>
+               <span class="ml-auto flex items-center gap-0.5 pl-4">
+-                <button
+-                  v-if="line.rerequest !== null"
+-                  v-tooltip="REREQUEST_REVIEW"
+-                  type="button"
+-                  :data-rerequest="line.reviewer.person.username"
+-                  :aria-label="line.rerequest.label"
+-                  :aria-busy="line.rerequest.running"
+-                  :aria-disabled="line.rerequest.running"
+-                  class="rounded p-1 not-aria-disabled:cursor-pointer hover:bg-hover aria-disabled:text-fg-muted aria-disabled:hover:bg-transparent"
+-                  @click="emit('rerequestReview', line.reviewer.person.username)"
+-                >
+-                  <LoaderCircle
+-                    v-if="line.rerequest.running"
+-                    class="size-4 animate-spin"
+-                    aria-hidden="true"
+-                  />
+-                  <RotateCcw v-else class="size-4" aria-hidden="true" />
+-                </button>
+-                <span
+-                  v-tooltip="line.stateText"
+-                  role="img"
+-                  :aria-label="line.stateText"
+-                  class="flex p-1"
+-                  :class="line.look.tone"
+-                >
+-                  <component :is="line.look.icon" class="size-4" aria-hidden="true" />
+-                </span>
++                <template v-if="line.review !== null">
++                  <button
++                    v-if="line.review.rerequest !== null"
++                    v-tooltip="REREQUEST_REVIEW"
++                    type="button"
++                    :data-control="`rerequest:${line.person.username}`"
++                    :aria-label="line.review.rerequest.label"
++                    :aria-busy="line.review.rerequest.running"
++                    :aria-disabled="line.review.rerequest.running"
++                    class="rounded p-1 not-aria-disabled:cursor-pointer hover:bg-hover aria-disabled:text-fg-muted aria-disabled:hover:bg-transparent"
++                    @click="emit('rerequestReview', line.person.username)"
++                  >
++                    <LoaderCircle
++                      v-if="line.review.rerequest.running"
++                      class="size-4 animate-spin"
++                      aria-hidden="true"
++                    />
++                    <RotateCcw v-else class="size-4" aria-hidden="true" />
++                  </button>
++                  <span
++                    v-tooltip="line.review.stateText"
++                    role="img"
++                    :aria-label="line.review.stateText"
++                    class="flex p-1"
++                    :class="line.review.look.tone"
++                  >
++                    <component :is="line.review.look.icon" class="size-4" aria-hidden="true" />
++                  </span>
++                </template>
++                <MergeRequestPersonMenu
++                  v-if="editable"
++                  :data-control="`more:${group.group}:${line.person.username}`"
++                  :name="line.name"
++                  :item="group.words.remove"
++                  :working="line.state.removing"
++                  @choose="remove(group.group, line.person.username)"
++                />
+               </span>
+             </div>
+-            <p v-if="line.refusal !== null" role="status" class="max-w-80 pb-1 text-problem-error">
+-              {{ line.refusal }}
++            <p
++              v-if="line.review !== null && line.review.refusal !== null"
++              role="status"
++              class="max-w-80 pb-1 text-problem-error"
++            >
++              {{ line.review.refusal }}
++            </p>
++            <p
++              v-for="(notice, index) in line.state.notices"
++              :key="index"
++              role="status"
++              class="max-w-80 pb-1 text-problem-error"
++            >
++              {{ notice }}
+             </p>
+           </li>
+         </ul>
++        <p
++          v-for="(notice, index) in group.notices"
++          :key="index"
++          role="status"
++          class="max-w-80 px-2 pb-1 text-problem-error"
++        >
++          {{ notice }}
++        </p>
+       </template>
+     </div>
+   </span>
+diff --git a/frontend/src/ui/MergeRequestPeopleSearch.vue b/frontend/src/ui/MergeRequestPeopleSearch.vue
+new file mode 100644
+index 0000000..6259f13
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestPeopleSearch.vue
+@@ -0,0 +1,161 @@
++<script setup lang="ts">
++import { computed, onMounted, shallowRef, useId, useTemplateRef, watch } from "vue";
++import LoaderCircle from "~icons/lucide/loader-circle";
++
++import type { MergeRequestRow, PeopleGroup } from "../ipc";
++import { ARROW_STEPS } from "./menuKeys";
++import {
++  keptHighlight,
++  NO_PEOPLE_ASKS,
++  pickList,
++  steppedHighlight,
++  type PickLine,
++} from "./mergeRequestPeopleLines";
++import MergeRequestPicture from "./MergeRequestPicture.vue";
++import { useMergeRequests } from "./mergeRequestsStore";
++import { alreadyText, SEARCH_PEOPLE, SEARCH_PEOPLE_PLACEHOLDER } from "./mergeRequestsText";
++
++const props = defineProps<{ row: MergeRequestRow; group: PeopleGroup }>();
++const emit = defineEmits<{ close: [] }>();
++
++const { rows, me, peopleSearch, peopleAsks, searchPeople, changePeople } = useMergeRequests();
++const field = useTemplateRef<HTMLInputElement>("field");
++const listId = useId();
++const text = shallowRef("");
++const highlight = shallowRef<number | null>(null);
++
++const list = computed(() =>
++  pickList({
++    rows: rows.value,
++    row: props.row,
++    group: props.group,
++    me: me.value,
++    search: peopleSearch.value,
++    asks: peopleAsks.value.get(props.row.iid) ?? NO_PEOPLE_ASKS,
++    platform: navigator.platform,
++  }),
++);
++const activeId = computed(() => (highlight.value === null ? undefined : optionId(highlight.value)));
++const already = computed(() => alreadyText(props.group));
++
++watch(
++  () => list.value.lines,
++  (lines, before) => {
++    highlight.value = keptHighlight(before ?? [], lines, highlight.value);
++  },
++  { immediate: true },
++);
++watch(
++  activeId,
++  (id) => {
++    if (id !== undefined) {
++      document.getElementById(id)?.scrollIntoView({ block: "nearest" });
++    }
++  },
++  { flush: "post" },
++);
++
++onMounted(() => {
++  field.value?.focus();
++});
++
++function optionId(index: number): string {
++  return `${listId}-${index}`;
++}
++
++function typed(event: Event): void {
++  if (event.target instanceof HTMLInputElement) {
++    text.value = event.target.value;
++    searchPeople(text.value);
++  }
++}
++
++async function add(line: PickLine): Promise<void> {
++  if (line.state !== "addable") {
++    return;
++  }
++  const typedAtPick = text.value;
++  await changePeople(props.row.iid, {
++    group: props.group,
++    action: "add",
++    username: line.username,
++  });
++  if (field.value !== null && text.value === typedAtPick) {
++    text.value = "";
++    searchPeople("");
++    field.value.focus();
++  }
++}
++
++function fieldKey(event: KeyboardEvent): void {
++  const step = ARROW_STEPS[event.key];
++  if (step !== undefined) {
++    event.preventDefault();
++    highlight.value = steppedHighlight(list.value.lines, highlight.value, step);
++  } else if (event.key === "Enter") {
++    event.preventDefault();
++    const line = highlight.value === null ? undefined : list.value.lines[highlight.value];
++    if (line !== undefined) {
++      void add(line);
++    }
++  } else if (event.key === "Escape") {
++    event.preventDefault();
++    emit("close");
++  }
++}
++</script>
++
++<template>
++  <div class="px-2 pb-1">
++    <input
++      ref="field"
++      type="text"
++      role="combobox"
++      spellcheck="false"
++      autocomplete="off"
++      aria-autocomplete="list"
++      aria-expanded="true"
++      :aria-controls="listId"
++      :aria-activedescendant="activeId"
++      :aria-label="SEARCH_PEOPLE"
++      :placeholder="SEARCH_PEOPLE_PLACEHOLDER"
++      :value="text"
++      class="w-64 rounded border border-control-border bg-panel px-2 py-1 outline-none focus:border-primary"
++      @input="typed"
++      @keydown="fieldKey"
++    />
++    <ul :id="listId" role="listbox" :aria-label="SEARCH_PEOPLE" class="pt-1">
++      <li
++        v-for="(line, index) in list.lines"
++        :id="optionId(index)"
++        :key="line.username"
++        role="option"
++        :aria-selected="index === highlight"
++        :aria-disabled="line.state !== 'addable'"
++        class="flex items-center gap-2 rounded px-2 py-1 not-aria-disabled:cursor-pointer not-aria-disabled:hover:bg-hover aria-selected:bg-row-selected"
++        @mousedown.prevent
++        @click="add(line)"
++      >
++        <MergeRequestPicture :person="line.picture" size="box" aria-hidden="true" />
++        <span>{{ line.label }}</span>
++        <span class="text-fg-muted">@{{ line.username }}</span>
++        <span v-if="line.state === 'already'" class="ml-auto pl-4 text-fg-muted">{{
++          already
++        }}</span>
++        <LoaderCircle
++          v-else-if="line.state === 'working'"
++          class="ml-auto size-4 animate-spin"
++          aria-hidden="true"
++        />
++      </li>
++    </ul>
++    <p
++      v-if="list.note !== null"
++      role="status"
++      class="max-w-80 px-2 py-1"
++      :class="list.note.failed ? 'text-problem-error' : 'text-fg-muted'"
++    >
++      {{ list.note.text }}
++    </p>
++  </div>
++</template>
+diff --git a/frontend/src/ui/MergeRequestPersonMenu.vue b/frontend/src/ui/MergeRequestPersonMenu.vue
+new file mode 100644
+index 0000000..aca9c10
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestPersonMenu.vue
+@@ -0,0 +1,78 @@
++<script setup lang="ts">
++import { computed, shallowRef, useTemplateRef } from "vue";
++import EllipsisVertical from "~icons/lucide/ellipsis-vertical";
++import LoaderCircle from "~icons/lucide/loader-circle";
++
++import type { Point } from "./menuPosition";
++import { MORE, moreLabel } from "./mergeRequestsText";
++import { vTooltip } from "./tooltip";
++import { useDropdownMenu } from "./useDropdownMenu";
++import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
++
++const props = defineProps<{ name: string; item: string; working: boolean }>();
++const emit = defineEmits<{ choose: [] }>();
++
++const opener = useTemplateRef<HTMLButtonElement>("opener");
++const menu = useTemplateRef<HTMLUListElement>("menu");
++const at = shallowRef<Point>({ x: 0, y: 0 });
++const { openFor, toggle, close, menuKey } = useDropdownMenu<true>({
++  menu: () => menu.value,
++  opener: () => opener.value,
++});
++const placement = useMenuPlacement(menu, at);
++
++const label = computed(() => moreLabel(props.name));
++
++async function toggleMenu(): Promise<void> {
++  if (props.working || opener.value === null) {
++    return;
++  }
++  at.value = belowLeft(opener.value);
++  await toggle(true);
++}
++
++async function choose(): Promise<void> {
++  await close();
++  emit("choose");
++}
++</script>
++
++<template>
++  <span class="flex">
++    <button
++      ref="opener"
++      v-tooltip="MORE"
++      type="button"
++      aria-haspopup="menu"
++      :aria-expanded="openFor !== null"
++      :aria-label="label"
++      :aria-busy="working"
++      :aria-disabled="working"
++      class="rounded p-1 not-aria-disabled:cursor-pointer hover:bg-hover aria-disabled:text-fg-muted aria-disabled:hover:bg-transparent aria-expanded:bg-row-selected"
++      @click="toggleMenu"
++    >
++      <LoaderCircle v-if="working" class="size-4 animate-spin" aria-hidden="true" />
++      <EllipsisVertical v-else class="size-4" aria-hidden="true" />
++    </button>
++    <ul
++      v-if="openFor !== null"
++      ref="menu"
++      role="menu"
++      :aria-label="label"
++      class="fixed z-20 rounded border border-control-border bg-panel py-1 shadow-lg"
++      :style="placement"
++      @keydown="menuKey"
++    >
++      <li role="none">
++        <button
++          type="button"
++          role="menuitem"
++          class="w-full px-3 py-1 text-left whitespace-nowrap outline-none hover:bg-hover focus:bg-row-selected"
++          @click="choose"
++        >
++          {{ item }}
++        </button>
++      </li>
++    </ul>
++  </span>
++</template>
+diff --git a/frontend/src/ui/mergeRequestPeopleLines.test.ts b/frontend/src/ui/mergeRequestPeopleLines.test.ts
+new file mode 100644
+index 0000000..ed22393
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestPeopleLines.test.ts
+@@ -0,0 +1,259 @@
++import { beforeAll, expect, test } from "vitest";
++
++import {
++  createFixtureCompareSource,
++  log,
++  type MergeRequestRow,
++  type PeopleChange,
++  type Person,
++} from "../ipc";
++import {
++  firstAddable,
++  groupNotices,
++  keptHighlight,
++  NO_PEOPLE_ASKS,
++  personState,
++  pickList,
++  steppedHighlight,
++  type GroupPlace,
++  type PickInput,
++  type PickLine,
++} from "./mergeRequestPeopleLines";
++import type { NotDone, PeopleSearch, RowPeopleAsks } from "./mergeRequests";
++
++const PLATFORM = "Linux x86_64";
++const SAM: Person = { username: "sam", name: "Sam Reed", picture: null };
++const ANNA: Person = { username: "anna", name: "Anna Berg", picture: "yamt-picture://anna" };
++const ERIK: Person = { username: "erik", name: "Erik Lund", picture: null };
++const CHIARA: Person = { username: "chiara", name: "Chiara Rossi", picture: null };
++
++let BASE: MergeRequestRow;
++
++beforeAll(async () => {
++  const rows: MergeRequestRow[] = [];
++  await createFixtureCompareSource(log, "?mr=list", {}).listMergeRequests(
++    (page) => {
++      rows.push(...page.rows);
++    },
++    () => undefined,
++  );
++  const first = rows[0];
++  if (first === undefined) {
++    throw new Error("the fixture lists no row");
++  }
++  BASE = first;
++});
++
++function row(people: Partial<MergeRequestRow>): MergeRequestRow {
++  return {
++    ...BASE,
++    author: ANNA,
++    assignees: [SAM],
++    reviewers: [{ person: CHIARA, state: "requested" }],
++    approvedBy: [],
++    ...people,
++  };
++}
++
++function input(edit: Partial<PickInput>): PickInput {
++  const shown = edit.row ?? row({});
++  return {
++    rows: [shown],
++    row: shown,
++    group: "assignees",
++    me: "sam",
++    search: { kind: "empty" },
++    asks: NO_PEOPLE_ASKS,
++    platform: PLATFORM,
++    ...edit,
++  };
++}
++
++function line(username: string, state: PickLine["state"]): PickLine {
++  return { username, picture: SAM, label: username, state };
++}
++
++function states(lines: readonly PickLine[]): string[] {
++  return lines.map((each) => `${each.label} ${each.username} ${each.state}`);
++}
++
++function add(username: string, group: PeopleChange["group"]): PeopleChange {
++  return { group, action: "add", username };
++}
++
++function remove(username: string, group: PeopleChange["group"]): PeopleChange {
++  return { group, action: "remove", username };
++}
++
++test("already_in_the_group_is_not_addable_and_working_shows_for_a_queued_add", () => {
++  const asks: RowPeopleAsks = {
++    queue: [add("chiara", "assignees"), add("anna", "reviewers"), remove("anna", "assignees")],
++    notDone: [],
++  };
++  const assignees = pickList(input({ asks }));
++  expect(states(assignees.lines)).toEqual([
++    "Me sam already",
++    "Anna Berg anna addable",
++    "Chiara Rossi chiara working",
++  ]);
++  expect(assignees.note).toBeNull();
++  expect(assignees.lines[0]?.picture).toBe(SAM);
++
++  const reviewers = pickList(input({ group: "reviewers", asks }));
++  expect(states(reviewers.lines)).toEqual([
++    "Me sam addable",
++    "Anna Berg anna working",
++    "Chiara Rossi chiara already",
++  ]);
++});
++
++test("the viewer on no loaded row reads Me with a picture of their username's initials", () => {
++  const list = pickList(input({ me: "olga" }));
++  expect(list.lines[0]).toEqual({
++    username: "olga",
++    picture: { username: "olga", name: "", picture: null },
++    label: "Me",
++    state: "addable",
++  });
++});
++
++test("arrows_skip_people_already_there_and_wrap", () => {
++  const lines = [
++    line("sam", "already"),
++    line("anna", "addable"),
++    line("chiara", "working"),
++    line("erik", "addable"),
++    line("olga", "addable"),
++  ];
++  expect(firstAddable(lines)).toBe(1);
++  expect(steppedHighlight(lines, 1, 1)).toBe(3);
++  expect(steppedHighlight(lines, 3, 1)).toBe(4);
++  expect(steppedHighlight(lines, 4, 1)).toBe(1);
++  expect(steppedHighlight(lines, 1, -1)).toBe(4);
++  expect(steppedHighlight(lines, 4, -1)).toBe(3);
++  expect(steppedHighlight(lines, null, 1)).toBe(1);
++  expect(steppedHighlight(lines, null, -1)).toBe(4);
++  expect(steppedHighlight(lines, 0, -1)).toBe(4);
++  const none = [line("sam", "already"), line("chiara", "working")];
++  expect(firstAddable(none)).toBeNull();
++  expect(steppedHighlight(none, null, 1)).toBeNull();
++  expect(steppedHighlight(none, null, -1)).toBeNull();
++  expect(steppedHighlight([], null, 1)).toBeNull();
++});
++
++test("the_highlight_returns_to_the_first_addable_line_when_the_list_changes", () => {
++  const before = [line("sam", "already"), line("anna", "addable"), line("erik", "addable")];
++  expect(keptHighlight(before, [...before], 2)).toBe(2);
++  expect(
++    keptHighlight(
++      before,
++      [line("sam", "already"), line("anna", "working"), line("erik", "addable")],
++      1,
++    ),
++  ).toBe(2);
++  expect(keptHighlight(before, [line("erik", "addable"), line("anna", "addable")], 1)).toBe(0);
++  expect(keptHighlight(before, before.slice(0, 2), 1)).toBe(1);
++  expect(keptHighlight(before.slice(1), [...before.slice(1), line("olga", "addable")], 1)).toBe(0);
++  expect(
++    keptHighlight(
++      before,
++      [line("sam", "already"), line("erik", "addable"), line("anna", "addable")],
++      2,
++    ),
++  ).toBe(1);
++  expect(keptHighlight(before, [line("sam", "already")], 1)).toBeNull();
++});
++
++function place(notDone: readonly NotDone[], group: PeopleChange["group"]): GroupPlace {
++  return { row: row({}), group, asks: { queue: [], notDone }, platform: PLATFORM };
++}
++
++test("a_remove_notice_sits_under_its_listed_person_else_under_the_group", () => {
++  const notDone: NotDone[] = [
++    { change: remove("chiara", "reviewers"), why: { kind: "unchanged" } },
++    {
++      change: remove("erik", "reviewers"),
++      why: { kind: "refused", reply: { kind: "refused", message: "gone" } },
++    },
++    { change: add("olga", "reviewers"), why: { kind: "unchanged" } },
++    { change: add("anna", "reviewers"), why: { kind: "unchanged" } },
++    {
++      change: add("chiara", "reviewers"),
++      why: { kind: "refused", reply: { kind: "refused", message: "twice" } },
++    },
++    {
++      change: remove("sam", "assignees"),
++      why: { kind: "failed", cause: { kind: "WorkerStopped" } },
++    },
++    { change: remove("chiara", "assignees"), why: { kind: "unchanged" } },
++  ];
++  const reviewers = place(notDone, "reviewers");
++  expect(personState(reviewers, "chiara")).toEqual({
++    removing: false,
++    notices: ["GitLab still lists Chiara Rossi as reviewer."],
++  });
++  expect(groupNotices(reviewers)).toEqual([
++    "gone",
++    "GitLab did not add @olga as reviewer (GitLab Free allows one reviewer per merge request).",
++    "GitLab did not add Anna Berg as reviewer (GitLab Free allows one reviewer per merge request).",
++    "twice",
++  ]);
++  const assignees = place(notDone, "assignees");
++  expect(personState(assignees, "sam").notices).toEqual([
++    "Could not change the merge request's people: yamt's worker stopped; try again.",
++  ]);
++  expect(groupNotices(assignees)).toEqual(["GitLab still lists Chiara Rossi as assignee."]);
++});
++
++test("a notice names a person the row does not hold, on a row without an author, by @username", () => {
++  const noAuthor: GroupPlace = {
++    row: row({ author: null }),
++    group: "assignees",
++    asks: {
++      queue: [],
++      notDone: [{ change: add("olga", "assignees"), why: { kind: "unchanged" } }],
++    },
++    platform: PLATFORM,
++  };
++  expect(groupNotices(noAuthor)).toEqual([
++    "GitLab did not add @olga as assignee (GitLab Free allows one assignee per merge request).",
++  ]);
++});
++
++test("a person's remove queued or running is working; an add of them or another group's remove is not", () => {
++  const asks: RowPeopleAsks = {
++    queue: [add("sam", "reviewers"), remove("chiara", "reviewers"), add("chiara", "assignees")],
++    notDone: [],
++  };
++  const reviewers: GroupPlace = { row: row({}), group: "reviewers", asks, platform: PLATFORM };
++  expect(personState(reviewers, "chiara")).toEqual({ removing: true, notices: [] });
++  expect(personState(reviewers, "sam").removing).toBe(false);
++  expect(personState({ ...reviewers, group: "assignees" }, "chiara").removing).toBe(false);
++});
++
++test("searching_keeps_the_last_people_and_found_nobody_is_no_one_found", () => {
++  const searching: PeopleSearch = { kind: "searching", text: "er", people: [ERIK, SAM] };
++  const kept = pickList(input({ search: searching }));
++  expect(states(kept.lines)).toEqual(["Erik Lund erik addable", "Sam Reed sam already"]);
++  expect(kept.lines[0]?.picture).toBe(ERIK);
++  expect(kept.note).toEqual({ text: "Searching…", failed: false });
++
++  const found = pickList(input({ search: { kind: "found", text: "er", people: [ERIK] } }));
++  expect(states(found.lines)).toEqual(["Erik Lund erik addable"]);
++  expect(found.note).toBeNull();
++
++  const nobody = pickList(input({ search: { kind: "found", text: "zz", people: [] } }));
++  expect(nobody).toEqual({ lines: [], note: { text: "No one found", failed: false } });
++
++  const refused = pickList(
++    input({ search: { kind: "refused", text: "er", reply: { kind: "failed", message: "boom" } } }),
++  );
++  expect(refused).toEqual({ lines: [], note: { text: "boom", failed: true } });
++  const failed = pickList(
++    input({ search: { kind: "failed", text: "er", cause: { kind: "WorkerStopped" } } }),
++  );
++  expect(failed).toEqual({
++    lines: [],
++    note: { text: "Could not search people: yamt's worker stopped; try again.", failed: true },
++  });
++});
+diff --git a/frontend/src/ui/mergeRequestPeopleLines.ts b/frontend/src/ui/mergeRequestPeopleLines.ts
+new file mode 100644
+index 0000000..5c04631
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestPeopleLines.ts
+@@ -0,0 +1,196 @@
++import type { MergeRequestRow, PeopleGroup, Person } from "../ipc";
++import { displayName, ME_WORD, peopleSuggestions, type Suggestion } from "../mergeRequests";
++import type { NotDone, PeopleSearch, RowPeopleAsks } from "./mergeRequests";
++import {
++  NO_ONE_FOUND,
++  peopleChangeText,
++  peopleSearchText,
++  SEARCHING_PEOPLE,
++} from "./mergeRequestsText";
++
++/** `working`: an add of this person to the group is queued or running. */
++type PickState = "addable" | "already" | "working";
++
++/** One line of the add field's list; `picture` is a person even for the viewer on no loaded row (initials). */
++export type PickLine = {
++  readonly username: string;
++  readonly picture: Person;
++  readonly label: string;
++  readonly state: PickState;
++};
++
++/** `failed`: the note says why the search found nothing (a refusal or a thrown call), shown as an error. */
++type PickNote = { readonly text: string; readonly failed: boolean };
++export type PickList = { readonly lines: readonly PickLine[]; readonly note: PickNote | null };
++
++export type PickInput = {
++  readonly rows: readonly MergeRequestRow[];
++  readonly row: MergeRequestRow;
++  readonly group: PeopleGroup;
++  readonly me: string | null;
++  readonly search: PeopleSearch;
++  readonly asks: RowPeopleAsks;
++  readonly platform: string;
++};
++
++/** One group of one row's box, with that row's asks. */
++export type GroupPlace = {
++  readonly row: MergeRequestRow;
++  readonly group: PeopleGroup;
++  readonly asks: RowPeopleAsks;
++  readonly platform: string;
++};
++
++export type PersonState = { readonly removing: boolean; readonly notices: readonly string[] };
++
++type Shown = Omit<PickLine, "state">;
++
++/** A row with no change queued and no notice. */
++export const NO_PEOPLE_ASKS: RowPeopleAsks = { queue: [], notDone: [] };
++
++function usernamesIn(row: MergeRequestRow, group: PeopleGroup): readonly string[] {
++  return group === "assignees"
++    ? row.assignees.map((person) => person.username)
++    : row.reviewers.map((reviewer) => reviewer.person.username);
++}
++
++function personShown(person: Person): Shown {
++  return { username: person.username, picture: person, label: displayName(person) };
++}
++
++function suggestionShown(suggestion: Suggestion<Person>): Shown {
++  if (suggestion.kind === "known") {
++    return personShown(suggestion.person);
++  }
++  const { username, person } = suggestion;
++  return { username, picture: person ?? { username, name: "", picture: null }, label: ME_WORD };
++}
++
++function shownOf(input: PickInput): {
++  readonly shown: readonly Shown[];
++  readonly note: PickNote | null;
++} {
++  const search = input.search;
++  switch (search.kind) {
++    case "empty":
++      return {
++        shown: peopleSuggestions(input.rows, input.row, input.group, input.me).map(suggestionShown),
++        note: null,
++      };
++    case "searching":
++      return {
++        shown: search.people.map(personShown),
++        note: { text: SEARCHING_PEOPLE, failed: false },
++      };
++    case "found":
++      return {
++        shown: search.people.map(personShown),
++        note: search.people.length === 0 ? { text: NO_ONE_FOUND, failed: false } : null,
++      };
++    case "refused":
++    case "failed":
++      return {
++        shown: [],
++        note: { text: peopleSearchText(search, input.platform), failed: true },
++      };
++    default: {
++      const _exhaustive: never = search;
++      return _exhaustive;
++    }
++  }
++}
++
++/** The add field's list for `group`: the suggestions while the field is empty, else the search's people. */
++export function pickList(input: PickInput): PickList {
++  const { shown, note } = shownOf(input);
++  const there = usernamesIn(input.row, input.group);
++  function stateOf(username: string): PickState {
++    const adding = input.asks.queue.some(
++      (change) =>
++        change.action === "add" && change.group === input.group && change.username === username,
++    );
++    if (adding) {
++      return "working";
++    }
++    return there.includes(username) ? "already" : "addable";
++  }
++  return { lines: shown.map((line) => ({ ...line, state: stateOf(line.username) })), note };
++}
++
++function addableIndexes(lines: readonly PickLine[]): readonly number[] {
++  return lines.flatMap((line, index) => (line.state === "addable" ? [index] : []));
++}
++
++export function firstAddable(lines: readonly PickLine[]): number | null {
++  return addableIndexes(lines)[0] ?? null;
++}
++
++/** The highlight moved by `step` (1 down, -1 up) over the addable lines, wrapping; null when none is addable. */
++export function steppedHighlight(
++  lines: readonly PickLine[],
++  current: number | null,
++  step: number,
++): number | null {
++  const addable = addableIndexes(lines);
++  const at = addable.findIndex((index) => index === current);
++  const next = at === -1 ? (step > 0 ? 0 : addable.length - 1) : at + step + addable.length;
++  return addable[next % addable.length] ?? null;
++}
++
++function linesKey(lines: readonly PickLine[]): string {
++  return lines.map((line) => `${line.username} ${line.state}`).join("\n");
++}
++
++/** The highlight after the list was recomputed: kept while the lines and their states are the same, else the first
++ *  addable line. */
++export function keptHighlight(
++  before: readonly PickLine[],
++  after: readonly PickLine[],
++  current: number | null,
++): number | null {
++  return linesKey(before) === linesKey(after) ? current : firstAddable(after);
++}
++
++/** How a notice names a person: their display name when the row names them anywhere, else `@username`. */
++function noticeName(row: MergeRequestRow, username: string): string {
++  const named = [
++    ...(row.author === null ? [] : [row.author]),
++    ...row.assignees,
++    ...row.reviewers.map((reviewer) => reviewer.person),
++    ...row.approvedBy,
++  ].find((person) => person.username === username);
++  return named === undefined ? `@${username}` : displayName(named);
++}
++
++/** The listed person a notice sits under: a remove's person while the group lists them, else null (the group). */
++function noticeUnder(row: MergeRequestRow, notDone: NotDone): string | null {
++  const { change } = notDone;
++  return change.action === "remove" && usernamesIn(row, change.group).includes(change.username)
++    ? change.username
++    : null;
++}
++
++function noticesWhere(place: GroupPlace, under: string | null): readonly string[] {
++  return place.asks.notDone
++    .filter(
++      (notDone) =>
++        notDone.change.group === place.group && noticeUnder(place.row, notDone) === under,
++    )
++    .map((notDone) =>
++      peopleChangeText(notDone, noticeName(place.row, notDone.change.username), place.platform),
++    );
++}
++
++export function groupNotices(place: GroupPlace): readonly string[] {
++  return noticesWhere(place, null);
++}
++
++export function personState(place: GroupPlace, username: string): PersonState {
++  return {
++    removing: place.asks.queue.some(
++      (change) =>
++        change.action === "remove" && change.group === place.group && change.username === username,
++    ),
++    notices: noticesWhere(place, username),
++  };
++}
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index 061a0cd..89388a1 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -11,7 +11,11 @@ import {
+   type RangeStart,
+ } from "../ipc";
+ import { daysLeft, daysLeftText, dueDateText } from "../mergeRequests";
++import type { NotDone, PeopleChangeFailure, PeopleSearch } from "./mergeRequests";
+ import {
++  ADD_ASSIGNEE,
++  ADD_REVIEWER,
++  alreadyText,
+   approvalsText,
+   ASSIGNEES,
+   CLEAR_DUE_DATE,
+@@ -31,20 +35,31 @@ import {
+   dueDateLabel,
+   jobTitle,
+   listFailureText,
++  MORE,
++  moreLabel,
+   narrowLabel,
+   narrowPlaceholder,
+   LOADING_TEXT,
++  NO_ONE,
++  NO_ONE_FOUND,
+   NONE_TEXT,
+   notValueLabel,
+   openChangesTitle,
+   openPageTitle,
+   openReplyText,
+   pageProblemText,
++  peopleChangeText,
++  peopleSearchText,
++  REMOVE_ASSIGNEE,
++  REMOVE_REVIEWER,
+   REREQUEST_REVIEW,
+   rerequestLabel,
+   rerequestReplyText,
+   REVIEW_MODE,
+   REVIEWERS,
++  SEARCH_PEOPLE,
++  SEARCH_PEOPLE_PLACEHOLDER,
++  SEARCHING_PEOPLE,
+   SET_DUE_DATE,
+   type PageKind,
+ } from "./mergeRequestsText";
+@@ -295,3 +310,108 @@ test("the due-date button names the date day first, the days left and what a cli
+ test("an excluded value is named with not", () => {
+   expect(notValueLabel("anna")).toBe("not anna");
+ });
++
++test("the people box's add, menu and search words are the request's and GitLab's", () => {
++  expect([
++    ADD_ASSIGNEE,
++    ADD_REVIEWER,
++    MORE,
++    REMOVE_ASSIGNEE,
++    REMOVE_REVIEWER,
++    SEARCH_PEOPLE,
++    SEARCH_PEOPLE_PLACEHOLDER,
++    SEARCHING_PEOPLE,
++    NO_ONE_FOUND,
++    NO_ONE,
++  ]).toEqual([
++    "Add assignee",
++    "Add reviewer",
++    "More",
++    "Remove assignee",
++    "Remove reviewer",
++    "Search people",
++    "Search people…",
++    "Searching…",
++    "No one found",
++    "None",
++  ]);
++});
++
++test("a person's menu button is named after them; a person already there says which group", () => {
++  expect(moreLabel("Anna Berg")).toBe("More for Anna Berg");
++  expect(alreadyText("assignees")).toBe("Already an assignee");
++  expect(alreadyText("reviewers")).toBe("Already a reviewer");
++});
++
++test.each<[Extract<PeopleSearch, { kind: "refused" | "failed" }>, string]>([
++  [
++    { kind: "refused", text: "er", reply: { kind: "glabMissing" } },
++    "glab is not installed (not found on PATH) — install glab, then Refresh.",
++  ],
++  [
++    { kind: "refused", text: "er", reply: { kind: "notLoggedIn", detail: DETAIL } },
++    `glab is not logged in: ${DETAIL} — run glab auth login in a terminal, then Refresh.`,
++  ],
++  [
++    { kind: "refused", text: "er", reply: { kind: "failed", message: "no autocompleteUsers" } },
++    "no autocompleteUsers",
++  ],
++  [
++    { kind: "failed", text: "er", cause: { kind: "WorkerStopped" } },
++    "Could not search people: yamt's worker stopped; try again.",
++  ],
++])("a search ending %j reads %j", (search, words) => {
++  expect(peopleSearchText(search, "Linux x86_64")).toBe(words);
++});
++
++function notDone(
++  group: "assignees" | "reviewers",
++  action: "add" | "remove",
++  why: PeopleChangeFailure,
++): NotDone {
++  return { change: { group, action, username: "olga" }, why };
++}
++
++test.each<[NotDone, string]>([
++  [
++    notDone("assignees", "add", { kind: "unchanged" }),
++    "GitLab did not add @olga as assignee (GitLab Free allows one assignee per merge request).",
++  ],
++  [
++    notDone("reviewers", "add", { kind: "unchanged" }),
++    "GitLab did not add @olga as reviewer (GitLab Free allows one reviewer per merge request).",
++  ],
++  [notDone("reviewers", "remove", { kind: "unchanged" }), "GitLab still lists @olga as reviewer."],
++  [notDone("assignees", "remove", { kind: "unchanged" }), "GitLab still lists @olga as assignee."],
++  [
++    notDone("assignees", "add", { kind: "refused", reply: { kind: "glabMissing" } }),
++    "glab is not installed (not found on PATH) — install glab, then Refresh.",
++  ],
++  [
++    notDone("assignees", "add", {
++      kind: "refused",
++      reply: { kind: "notLoggedIn", detail: DETAIL },
++    }),
++    `glab is not logged in: ${DETAIL} — run glab auth login in a terminal, then Refresh.`,
++  ],
++  [
++    notDone("reviewers", "add", {
++      kind: "refused",
++      reply: { kind: "refused", message: "Cannot assign @olga to !640" },
++    }),
++    "Cannot assign @olga to !640",
++  ],
++  [
++    notDone("reviewers", "remove", {
++      kind: "refused",
++      reply: { kind: "failed", message: "glab timed out" },
++    }),
++    "glab timed out",
++  ],
++  [
++    notDone("assignees", "remove", { kind: "failed", cause: { kind: "WorkerStopped" } }),
++    "Could not change the merge request's people: yamt's worker stopped; try again.",
++  ],
++])("a change GitLab did not make, %j, reads %j", (change, words) => {
++  expect(peopleChangeText(change, "@olga", "Linux x86_64")).toBe(words);
++});
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index 9637485..c0ac44b 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -4,11 +4,13 @@ import type {
+   MergeRequestIid,
+   OpenReply,
+   PageOpened,
++  PeopleGroup,
+   RerequestReply,
+ } from "../ipc";
+ import type { DraftFilter } from "../mergeRequests";
+ import { GLAB_MISSING_TEXT, glabFailedText, glabNotLoggedInText } from "./glab";
+ import type { DiscussionFailure } from "./mergeRequestDiscussions";
++import type { NotDone, PeopleSearch } from "./mergeRequestPeople";
+ import { problemText } from "./problemText";
+ import { counted } from "./serverText";
+ 
+@@ -36,6 +38,16 @@ export const MORE_FAILED_JOBS = "More failed jobs on GitLab";
+ export const ASSIGNEES = "Assignees";
+ export const REVIEWERS = "Reviewers";
+ export const REREQUEST_REVIEW = "Re-request review";
++export const ADD_ASSIGNEE = "Add assignee";
++export const ADD_REVIEWER = "Add reviewer";
++export const MORE = "More";
++export const REMOVE_ASSIGNEE = "Remove assignee";
++export const REMOVE_REVIEWER = "Remove reviewer";
++export const SEARCH_PEOPLE = "Search people";
++export const SEARCH_PEOPLE_PLACEHOLDER = "Search people…";
++export const SEARCHING_PEOPLE = "Searching…";
++export const NO_ONE_FOUND = "No one found";
++export const NO_ONE = "None";
+ export const SET_DUE_DATE = "Set a due date";
+ export const CLEAR_DUE_DATE = "Clear";
+ export const DUE_DATE_DIALOG = "Choose a due date";
+@@ -150,6 +162,57 @@ export function rerequestReplyText(
+   }
+ }
+ 
++const ROLE: Readonly<Record<PeopleGroup, string>> = {
++  assignees: "assignee",
++  reviewers: "reviewer",
++};
++
++export function moreLabel(name: string): string {
++  return `More for ${name}`;
++}
++
++export function alreadyText(group: PeopleGroup): string {
++  return group === "assignees" ? "Already an assignee" : "Already a reviewer";
++}
++
++export function peopleSearchText(
++  search: Extract<PeopleSearch, { kind: "refused" | "failed" }>,
++  platform: string,
++): string {
++  if (search.kind === "failed") {
++    return problemText(
++      { action: "mergeRequests", step: "searchPeople", cause: search.cause },
++      platform,
++    );
++  }
++  const reply = search.reply;
++  return reply.kind === "failed" ? reply.message : glabRefusalText(reply);
++}
++
++export function peopleChangeText(notDone: NotDone, name: string, platform: string): string {
++  const { change, why } = notDone;
++  const role = ROLE[change.group];
++  switch (why.kind) {
++    case "unchanged":
++      return change.action === "add"
++        ? `GitLab did not add ${name} as ${role} (GitLab Free allows one ${role} per merge request).`
++        : `GitLab still lists ${name} as ${role}.`;
++    case "refused":
++      return why.reply.kind === "glabMissing" || why.reply.kind === "notLoggedIn"
++        ? glabRefusalText(why.reply)
++        : why.reply.message;
++    case "failed":
++      return problemText(
++        { action: "mergeRequests", step: "changePeople", cause: why.cause },
++        platform,
++      );
++    default: {
++      const _exhaustive: never = why;
++      return _exhaustive;
++    }
++  }
++}
++
+ export function dueDateLabel(date: string, left: string): string {
+   return `Due ${date}, ${left}. Change the due date`;
+ }

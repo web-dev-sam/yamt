@@ -4,11 +4,13 @@ import type {
   MergeRequestIid,
   OpenReply,
   PageOpened,
+  PeopleGroup,
   RerequestReply,
 } from "../ipc";
 import type { DraftFilter } from "../mergeRequests";
 import { GLAB_MISSING_TEXT, glabFailedText, glabNotLoggedInText } from "./glab";
 import type { DiscussionFailure } from "./mergeRequestDiscussions";
+import type { NotDone, PeopleSearch } from "./mergeRequestPeople";
 import { problemText } from "./problemText";
 import { counted } from "./serverText";
 
@@ -36,6 +38,16 @@ export const MORE_FAILED_JOBS = "More failed jobs on GitLab";
 export const ASSIGNEES = "Assignees";
 export const REVIEWERS = "Reviewers";
 export const REREQUEST_REVIEW = "Re-request review";
+export const ADD_ASSIGNEE = "Add assignee";
+export const ADD_REVIEWER = "Add reviewer";
+export const MORE = "More";
+export const REMOVE_ASSIGNEE = "Remove assignee";
+export const REMOVE_REVIEWER = "Remove reviewer";
+export const SEARCH_PEOPLE = "Search people";
+export const SEARCH_PEOPLE_PLACEHOLDER = "Search people…";
+export const SEARCHING_PEOPLE = "Searching…";
+export const NO_ONE_FOUND = "No one found";
+export const NO_ONE = "None";
 export const SET_DUE_DATE = "Set a due date";
 export const CLEAR_DUE_DATE = "Clear";
 export const DUE_DATE_DIALOG = "Choose a due date";
@@ -145,6 +157,57 @@ export function rerequestReplyText(
       return reply.message;
     default: {
       const _exhaustive: never = reply;
+      return _exhaustive;
+    }
+  }
+}
+
+const ROLE: Readonly<Record<PeopleGroup, string>> = {
+  assignees: "assignee",
+  reviewers: "reviewer",
+};
+
+export function moreLabel(name: string): string {
+  return `More for ${name}`;
+}
+
+export function alreadyText(group: PeopleGroup): string {
+  return group === "assignees" ? "Already an assignee" : "Already a reviewer";
+}
+
+export function peopleSearchText(
+  search: Extract<PeopleSearch, { kind: "refused" | "failed" }>,
+  platform: string,
+): string {
+  if (search.kind === "failed") {
+    return problemText(
+      { action: "mergeRequests", step: "searchPeople", cause: search.cause },
+      platform,
+    );
+  }
+  const reply = search.reply;
+  return reply.kind === "failed" ? reply.message : glabRefusalText(reply);
+}
+
+export function peopleChangeText(notDone: NotDone, name: string, platform: string): string {
+  const { change, why } = notDone;
+  const role = ROLE[change.group];
+  switch (why.kind) {
+    case "unchanged":
+      return change.action === "add"
+        ? `GitLab did not add ${name} as ${role} (GitLab Free allows one ${role} per merge request).`
+        : `GitLab still lists ${name} as ${role}.`;
+    case "refused":
+      return why.reply.kind === "glabMissing" || why.reply.kind === "notLoggedIn"
+        ? glabRefusalText(why.reply)
+        : why.reply.message;
+    case "failed":
+      return problemText(
+        { action: "mergeRequests", step: "changePeople", cause: why.cause },
+        platform,
+      );
+    default: {
+      const _exhaustive: never = why;
       return _exhaustive;
     }
   }

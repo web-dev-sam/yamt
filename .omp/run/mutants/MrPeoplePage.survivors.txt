@@ -1,0 +1,5 @@
+just mutants HEAD (StrykerJS: mergeRequestPeopleLines.ts and mergeRequestsText.ts; .vue not mutated): 306 killed, 3 survived, 10 no coverage
+ui/mergeRequestPeopleLines.ts:136 step > 0 → >= 0 — equivalent: the step is always ±1 (ARROW_STEPS), never 0.
+ui/mergeRequestPeopleLines.ts:141 join("\n") → join("") — equivalent: usernames have no spaces and the three states are not prefixes of each other, so the key stays injective.
+ui/mergeRequestPeopleLines.ts:157 [] → ["Stryker was here"] — equivalent: a non-person entry never matches the username in find.
+ui/mergeRequestPeopleLines.ts:93 and mergeRequestsText.ts:209 exhaustive default (no coverage) — gate-covered: unreachable over closed unions; vue-tsc checks the never branch.

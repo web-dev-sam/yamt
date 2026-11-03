@@ -11,7 +11,11 @@ import {
   type RangeStart,
 } from "../ipc";
 import { daysLeft, daysLeftText, dueDateText } from "../mergeRequests";
+import type { NotDone, PeopleChangeFailure, PeopleSearch } from "./mergeRequests";
 import {
+  ADD_ASSIGNEE,
+  ADD_REVIEWER,
+  alreadyText,
   approvalsText,
   ASSIGNEES,
   CLEAR_DUE_DATE,
@@ -31,20 +35,31 @@ import {
   dueDateLabel,
   jobTitle,
   listFailureText,
+  MORE,
+  moreLabel,
   narrowLabel,
   narrowPlaceholder,
   LOADING_TEXT,
+  NO_ONE,
+  NO_ONE_FOUND,
   NONE_TEXT,
   notValueLabel,
   openChangesTitle,
   openPageTitle,
   openReplyText,
   pageProblemText,
+  peopleChangeText,
+  peopleSearchText,
+  REMOVE_ASSIGNEE,
+  REMOVE_REVIEWER,
   REREQUEST_REVIEW,
   rerequestLabel,
   rerequestReplyText,
   REVIEW_MODE,
   REVIEWERS,
+  SEARCH_PEOPLE,
+  SEARCH_PEOPLE_PLACEHOLDER,
+  SEARCHING_PEOPLE,
   SET_DUE_DATE,
   type PageKind,
 } from "./mergeRequestsText";
@@ -294,4 +309,109 @@ test("the due-date button names the date day first, the days left and what a cli
 
 test("an excluded value is named with not", () => {
   expect(notValueLabel("anna")).toBe("not anna");
+});
+
+test("the people box's add, menu and search words are the request's and GitLab's", () => {
+  expect([
+    ADD_ASSIGNEE,
+    ADD_REVIEWER,
+    MORE,
+    REMOVE_ASSIGNEE,
+    REMOVE_REVIEWER,
+    SEARCH_PEOPLE,
+    SEARCH_PEOPLE_PLACEHOLDER,
+    SEARCHING_PEOPLE,
+    NO_ONE_FOUND,
+    NO_ONE,
+  ]).toEqual([
+    "Add assignee",
+    "Add reviewer",
+    "More",
+    "Remove assignee",
+    "Remove reviewer",
+    "Search people",
+    "Search people…",
+    "Searching…",
+    "No one found",
+    "None",
+  ]);
+});
+
+test("a person's menu button is named after them; a person already there says which group", () => {
+  expect(moreLabel("Anna Berg")).toBe("More for Anna Berg");
+  expect(alreadyText("assignees")).toBe("Already an assignee");
+  expect(alreadyText("reviewers")).toBe("Already a reviewer");
+});
+
+test.each<[Extract<PeopleSearch, { kind: "refused" | "failed" }>, string]>([
+  [
+    { kind: "refused", text: "er", reply: { kind: "glabMissing" } },
+    "glab is not installed (not found on PATH) — install glab, then Refresh.",
+  ],
+  [
+    { kind: "refused", text: "er", reply: { kind: "notLoggedIn", detail: DETAIL } },
+    `glab is not logged in: ${DETAIL} — run glab auth login in a terminal, then Refresh.`,
+  ],
+  [
+    { kind: "refused", text: "er", reply: { kind: "failed", message: "no autocompleteUsers" } },
+    "no autocompleteUsers",
+  ],
+  [
+    { kind: "failed", text: "er", cause: { kind: "WorkerStopped" } },
+    "Could not search people: yamt's worker stopped; try again.",
+  ],
+])("a search ending %j reads %j", (search, words) => {
+  expect(peopleSearchText(search, "Linux x86_64")).toBe(words);
+});
+
+function notDone(
+  group: "assignees" | "reviewers",
+  action: "add" | "remove",
+  why: PeopleChangeFailure,
+): NotDone {
+  return { change: { group, action, username: "olga" }, why };
+}
+
+test.each<[NotDone, string]>([
+  [
+    notDone("assignees", "add", { kind: "unchanged" }),
+    "GitLab did not add @olga as assignee (GitLab Free allows one assignee per merge request).",
+  ],
+  [
+    notDone("reviewers", "add", { kind: "unchanged" }),
+    "GitLab did not add @olga as reviewer (GitLab Free allows one reviewer per merge request).",
+  ],
+  [notDone("reviewers", "remove", { kind: "unchanged" }), "GitLab still lists @olga as reviewer."],
+  [notDone("assignees", "remove", { kind: "unchanged" }), "GitLab still lists @olga as assignee."],
+  [
+    notDone("assignees", "add", { kind: "refused", reply: { kind: "glabMissing" } }),
+    "glab is not installed (not found on PATH) — install glab, then Refresh.",
+  ],
+  [
+    notDone("assignees", "add", {
+      kind: "refused",
+      reply: { kind: "notLoggedIn", detail: DETAIL },
+    }),
+    `glab is not logged in: ${DETAIL} — run glab auth login in a terminal, then Refresh.`,
+  ],
+  [
+    notDone("reviewers", "add", {
+      kind: "refused",
+      reply: { kind: "refused", message: "Cannot assign @olga to !640" },
+    }),
+    "Cannot assign @olga to !640",
+  ],
+  [
+    notDone("reviewers", "remove", {
+      kind: "refused",
+      reply: { kind: "failed", message: "glab timed out" },
+    }),
+    "glab timed out",
+  ],
+  [
+    notDone("assignees", "remove", { kind: "failed", cause: { kind: "WorkerStopped" } }),
+    "Could not change the merge request's people: yamt's worker stopped; try again.",
+  ],
+])("a change GitLab did not make, %j, reads %j", (change, words) => {
+  expect(peopleChangeText(change, "@olga", "Linux x86_64")).toBe(words);
 });
