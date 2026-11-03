@@ -23,6 +23,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   first.
 - Exclude filters: Shift+click on an assignee, reviewer or label value filters it out ("Assignee: not Me"); while
   Shift is held each value shows a minus icon. Filters stored by an older yamt still read.
+- Search in the merge-request list: the field left of the filters keeps the rows whose title contains the text (any
+  case), and the merge request whose number appears anywhere in it (`!1234`, `#1234`, a pasted merge-request link).
+  It works together with the filters; Escape empties it.
 
 ### Changed
 
