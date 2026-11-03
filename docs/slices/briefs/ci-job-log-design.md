@@ -233,6 +233,10 @@ firstHit(count) / steppedHit(current, count, backwards) / hitCountText(current, 
   The current match is scrolled to the middle of the box by `scrollTop` only (never `scrollIntoView`, which can move
   ancestors; `useFollowEnd.ts:10-11`).
 - Conceal (SGR 8) shows its text; 256 colours as the nearest of 16 (§1.8); text per job name across repositories (§1.10).
+- Decided after the smoke pass (#2179 #2180 #2185): the highlights hold only the matches on lines in view ± one
+  screen (count and steps use all), since ~27k live ranges cost seconds per paint in WebKitGTK; a run with an ANSI
+  background shows its text in the panel colour (≥ 4.5:1 by the palette rule); a refusal leaves no focus in the field,
+  so Shift asks again. An OSC title shows its tail (`itle…`) exactly as GitLab's page does (§1.9).
 
 ## 3. Options
 

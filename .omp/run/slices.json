@@ -1,5 +1,5 @@
 {
-  "CiJobLogPage": {
+  "CiJobLogPageR1": {
     "owned": [
       "frontend/src/ui/CiStatusBox.vue",
       "frontend/src/ui/CiStatusJobLog.vue",
@@ -20,20 +20,17 @@
       "frontend/src/ui/keyHold.test.ts",
       "frontend/src/ui/altHold.ts",
       "frontend/src/ui/altHold.test.ts",
+      "frontend/src/ui/rangeKeys.ts",
+      "frontend/src/ui/rangeKeys.test.ts",
+      "frontend/src/ui/typingTarget.ts",
+      "frontend/src/ui/typingTarget.test.ts",
+      "frontend/src/mergeRequests/index.ts",
+      "frontend/src/mergeRequests/internal/jobLogSearch.ts",
+      "frontend/src/mergeRequests/internal/jobLogSearch.test.ts",
+      "frontend/src/mergeRequests/AGENTS.md",
       "frontend/scripts/app-session/keys.ts",
       "frontend/scripts/app-session/keys.test.ts",
       "frontend/src/ui/AGENTS.md"
-    ]
-  },
-  "CiJobLogStateR1": {
-    "owned": [
-      "frontend/src/ui/mergeRequestJobLogs.ts",
-      "frontend/src/ui/mergeRequestJobLogs.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestLogs.ts",
-      "frontend/src/ipc/fixtureMergeRequestLogs.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestData.ts",
-      "frontend/src/ipc/fixtureMergeRequests.ts",
-      "frontend/src/ipc/fixtureMergeRequests.test.ts"
     ]
   }
 }
