@@ -122,6 +122,14 @@ colours show as the nearest of the theme's 16. No product question open. Order: 
 | 8   | verify (`briefs/ci-job-log-verify.md`): smoke after 6; final `just check`, WebKit, real app                                                              | verifier     | done        | `CiJobLogFinal` at `3bb05979` (`just check` pass, B/C pass but #2191); re-pass `CiJobLogRepass` at `4b9994ae`: `just check` pass (46 s), Light/Dark no stale marks, one-letter 38–46 ms, tip hidden, real app count uncovered. Notes `CiJobLog{Smoke,Final,Repass}.md`                                           |
 | 9   | owner check on the GitLab playground (`scripts/gitlab-playground.sh`, branch `feature/failing-ci`): a real failed job's log looks like GitLab's job page | human        | handed over | the verify brief's "Owner check"                                                                                                                                                                                                                                                                                 |
 
+## Next, in the owner's order (session 45; owner #2193–#2198)
+
+One request per session (OR14), each started with `/new`, then `Implement docs/slices/request-<x>.md`:
+
+1. `request-mr-discussions.md`: hover the open-discussions count → each open discussion's last comment, whose turn.
+2. `request-mr-review-mode.md`: review mode for any reviewer, review order, sort icon (needs 1's data).
+3. `request-mr-starts.md`: the list's age left of Refresh, `yamt --mr`, `YAMT_AI=1`.
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.

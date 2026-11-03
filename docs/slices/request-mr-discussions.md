@@ -1,0 +1,76 @@
+# Request — open discussions on a merge-request row: whose turn it is, on hover
+
+Asked by the owner on 2026-11-03 (#2193, first in importance; answers #2198); details by the orchestrator as owner
+(OR13, the owner may veto). A design may refine a detail it names, never reopen a rule. Base: main `399f0eb0`.
+Window: the merge-request page (`frontend/src/ui/MergeRequestRow.vue:164-170`, the count from
+`resolvableDiscussionsCount − resolvedDiscussionsCount`, `crates/merge-requests/src/query.rs:56,133,155`;
+`discussionsText`, `ui/mergeRequestsText.ts:87`; the tooltip `ui/tooltip.ts`, the hover box `ui/useHoverBox.ts`).
+Next in line: `request-mr-review-mode.md` sorts by this feature's data, so the data must exist for every listed row.
+
+## Owner's words
+
+- "More details about open discussions: The number can be confusing, to a reviewer there is a difference between
+  technically open discussions and who belongs the latest comment within an open discussion and what it says. So on
+  hover I need more info so that it becomes obvious if the reviewer needs to react to a comment or not."
+
+## Rules
+
+1. **The count stays.** The row still shows the number of open discussions (resolvable, not resolved), as today.
+2. **Hover shows each open discussion.** Pointer over the count (or keyboard focus on it) opens a box, like the
+   people box, listing every open discussion of that merge request. Per discussion: the author of its **last**
+   comment (picture and name, as the people box shows people), how long ago it was written, the first lines of its
+   text (about three lines, cut with "…"), and where it is (`file:line` for a discussion on the diff, "Overview" for
+   one on the merge request itself).
+3. **Whose turn.** The viewer is the user glab is logged in as; while review mode is on
+   (`request-mr-review-mode.md`), the reviewer chosen there. A discussion whose last comment is **not** the viewer's is
+   marked as the viewer's turn ("Your turn" / "<name>'s turn" in review mode); one whose last comment is the
+   viewer's reads that the viewer is waiting for an answer. The box's header sums it up ("2 of 5 wait for you").
+   Discussions that are the viewer's turn come first, then the rest; within each, the newest last comment first.
+4. **Only people's comments.** GitLab's system notes ("added 2 commits", "changed the description") are neither a
+   last comment nor counted as one; a discussion's last comment is its last note written by a person.
+5. **Plain text.** Comment text is shown as text, never as markup (risk register, the log-text rule of RK57).
+6. **To GitLab.** A click on a discussion opens that comment on GitLab in the browser, as a row click opens the merge
+   request (plan §2 #137), only for a link GitLab's own answer gave for that comment.
+7. **Freshness and failure.** The details come with the list or right after it, for every listed row (review mode
+   sorts by them), and are as fresh as the list (`request-mr-starts.md` rule A shows its age). While they load the
+   box says so; if they cannot be read, the count still shows and the box says why — never a problem box.
+
+## To be measured by the design (unverified)
+
+- The GraphQL shape: `discussions { nodes { resolvable resolved notes(last: …) { author … body createdAt position
+  url system } } }` per merge request, inside the list query or as a second query after it; its complexity against
+  GitLab's limit (the list query's cost today, `query.rs`), at 100 rows per page and up to 500 rows
+  (`MAX_MERGE_REQUESTS`).
+- Whether `notes(last: 1)` can skip system notes, or how many notes must be read to find the last person's note.
+- Which `glab` user is "the viewer" (the list already knows "Me": the filters' "Me" value).
+- Where the turn rule lives (Rust or the framework-free `mergeRequests/` core) and the shape crossing the IPC.
+- The box: the people box's component reused or shared, without a second hover rule (`useHoverBox`, one tooltip).
+
+## Acceptance
+
+Rust: against the fake glab (`tests/glab/<case>/`), a listed row's open discussions arrive with each one's last
+person's note, its place and link; system notes are skipped; a failure keeps the list. WebKit fixture (`?mr=list`):
+hover a row's count → the box lists its open discussions, turn first, words as rule 3; capitals and markup in a
+comment show as text; review-mode viewer switch changes the turn marks (once review mode exists, else the "Me"
+case only); dark and light. Real app on the fake glab: the same hover. `just check` passes. Owner check on the
+GitLab playground: a discussion answered by the author shows "Your turn" to the reviewer.
+
+## Non-goals
+
+Replying to, resolving or reacting to a discussion from yamt; resolved discussions; changing what the count counts;
+showing whole threads; notifications.
+
+## Owner's answers
+
+- (#2198) Review mode's perspective and order are in `request-mr-review-mode.md`.
+
+## Slice graph (proposal; the session's orchestrator refines it)
+
+| row | slice                                                                           | owner       | needs |
+| --- | ------------------------------------------------------------------------------- | ----------- | ----- |
+| 1   | design: query shape and cost, system notes, viewer, turn rule's home, box reuse | designer    | —     |
+| 2   | rust: discussion details for listed rows, fake glab scenario                    | rust-impl   | 1     |
+| 3   | core: the turn rule and the box's order and words                               | web-impl    | 1     |
+| 4   | page: hover box on the count, ipc + fixtures; wires the window                  | web-impl    | 2, 3  |
+| 5   | docs keeper                                                                     | docs-keeper | 4     |
+| 6   | verify: smoke after 4; final `just check`, WebKit, real app                     | verifier    | 4     |
