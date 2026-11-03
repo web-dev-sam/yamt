@@ -1,4 +1,3 @@
-import { useTimeoutFn } from "@vueuse/core";
 import { shallowRef, type ShallowRef } from "vue";
 
 import type {
@@ -98,11 +97,9 @@ function searchOf(
       search.value = searchAnswer(text, outcome);
     }
   }
-  const pause = useTimeoutFn((text: string) => void ask(text), SEARCH_PAUSE_MS, {
-    immediate: false,
-  });
+  let pause: number | undefined;
   function stop(): void {
-    pause.stop();
+    clearTimeout(pause);
     calls += 1;
   }
   return {
@@ -115,7 +112,7 @@ function searchOf(
         return;
       }
       search.value = { kind: "searching", text, people: shownPeople(search.value) };
-      pause.start(text);
+      pause = setTimeout(() => void ask(text), SEARCH_PAUSE_MS);
     },
     endPeopleSearch: () => {
       stop();
@@ -132,11 +129,7 @@ function setAsks(asks: Asks, iid: MergeRequestIid, row: RowPeopleAsks): void {
   setRow(asks, iid, row.queue.length === 0 && row.notDone.length === 0 ? null : row);
 }
 
-function failureOf(
-  deps: Deps,
-  iid: MergeRequestIid,
-  outcome: Outcome<PeopleChangeReply>,
-): PeopleChangeFailure | null {
+function failureOf(outcome: Outcome<PeopleChangeReply>): PeopleChangeFailure | null {
   if (!outcome.ok) {
     return { kind: "failed", cause: outcome.cause };
   }
@@ -144,7 +137,6 @@ function failureOf(
   if (reply.kind !== "changed" && reply.kind !== "unchanged") {
     return { kind: "refused", reply };
   }
-  deps.replaced(iid, reply.people);
   return reply.kind === "changed" ? null : { kind: "unchanged" };
 }
 
@@ -154,7 +146,11 @@ async function answer(
   iid: MergeRequestIid,
   change: PeopleChange,
 ): Promise<void> {
-  const why = failureOf(deps, iid, await attempt(() => deps.source.changePeople(iid, change)));
+  const outcome = await attempt(() => deps.source.changePeople(iid, change));
+  if (outcome.ok && (outcome.value.kind === "changed" || outcome.value.kind === "unchanged")) {
+    deps.replaced(iid, outcome.value.people);
+  }
+  const why = failureOf(outcome);
   const row = asks.value.get(iid) ?? NO_ASKS;
   setAsks(asks, iid, {
     queue: row.queue.filter((queued) => queued !== change),

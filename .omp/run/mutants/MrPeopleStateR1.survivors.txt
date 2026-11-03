@@ -1,0 +1,4 @@
+just mutants HEAD: 264 killed, 0 timeout, 4 survived, 4 no coverage; score 97.06 (98.51 covered). No timer mutant exists any more.
+src/ui/mergeRequestPeople.ts:103 `calls += 1` → `-= 1` — equivalent: `calls` is only compared for equality with the value seen when the search was sent, and any step makes it differ
+fixtureMergeRequestPeople.ts:43,64 NoCoverage on the `never` default arms — equivalent: unreachable, the type checker enforces it
+fixtureMergeRequestPeople.ts:18,22,24 (KNOWN_PEOPLE, found()) — lines this round did not change, left alone

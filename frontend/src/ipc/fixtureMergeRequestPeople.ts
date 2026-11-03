@@ -25,40 +25,44 @@ function found(text: string): Generated.Person[] {
   ).slice(0, FOUND_LIMIT);
 }
 
-function listAfter<T>(
-  list: readonly T[],
-  change: PeopleChange,
-  usernameOf: (each: T) => string,
-  added: T,
-): T[] {
-  const kept = list.filter((each) => usernameOf(each) !== change.username);
-  if (change.action === "remove") {
-    return kept;
-  }
-  return kept.length < list.length ? [...list] : [...list, added];
-}
-
-function peopleAfter(
+function peopleWithout(
   people: Generated.MergeRequestPeople,
   change: PeopleChange,
-  person: Generated.Person,
 ): Generated.MergeRequestPeople {
   switch (change.group) {
     case "assignees":
       return {
         ...people,
-        assignees: listAfter(people.assignees, change, (each) => each.username, person),
+        assignees: people.assignees.filter((each) => each.username !== change.username),
       };
     case "reviewers":
       return {
         ...people,
-        reviewers: listAfter(people.reviewers, change, (each) => each.person.username, {
-          person,
-          state: "requested",
-        }),
+        reviewers: people.reviewers.filter((each) => each.person.username !== change.username),
       };
     default: {
       const _exhaustive: never = change.group;
+      return _exhaustive;
+    }
+  }
+}
+
+function peopleWith(
+  people: Generated.MergeRequestPeople,
+  group: PeopleChange["group"],
+  person: Generated.Person,
+): Generated.MergeRequestPeople {
+  switch (group) {
+    case "assignees":
+      return people.assignees.some((each) => each.username === person.username)
+        ? people
+        : { ...people, assignees: [...people.assignees, person] };
+    case "reviewers":
+      return people.reviewers.some((each) => each.person.username === person.username)
+        ? people
+        : { ...people, reviewers: [...people.reviewers, { person, state: "requested" }] };
+    default: {
+      const _exhaustive: never = group;
       return _exhaustive;
     }
   }
@@ -75,11 +79,14 @@ function changeReply(
   if (change.username === REFUSED_PERSON) {
     return { kind: "refused", message: `Cannot assign @${REFUSED_PERSON} to !${iid}` };
   }
+  if (change.action === "remove") {
+    return { kind: "changed", people: peopleWithout(people, change) };
+  }
   const person = KNOWN_PEOPLE.find((each) => each.username === change.username);
-  if (person === undefined || (change.action === "add" && person.username === FREE_TIER_PERSON)) {
+  if (person === undefined || person.username === FREE_TIER_PERSON) {
     return { kind: "unchanged", people };
   }
-  return { kind: "changed", people: peopleAfter(people, change, person) };
+  return { kind: "changed", people: peopleWith(people, change.group, person) };
 }
 
 /** GitLab's people search, and its changes over the listed rows' people, kept per iid until the page reloads. */

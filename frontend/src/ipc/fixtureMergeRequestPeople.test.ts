@@ -156,6 +156,11 @@ test("adding_then_removing_follows_the_scripts_own_lists", async () => {
     reviewers: [],
   });
   expect(lists(await changed(people, 639, change("assignees", "remove", "nobody")))).toEqual({
+    kind: "changed",
+    assignees: ["anna"],
+    reviewers: ["dmitri:reviewed"],
+  });
+  expect(lists(await changed(people, 639, change("assignees", "add", "nobody")))).toEqual({
     kind: "unchanged",
     assignees: ["anna"],
     reviewers: ["dmitri:reviewed"],
@@ -215,6 +220,21 @@ test("a_new_reviewer_is_requested", async () => {
     username: "erik",
     name: "Erik Lund",
     picture: expect.stringMatching(/^data:image\/png/u),
+  });
+});
+
+test("a_listed_reviewer_added_again_stays_once_and_a_removed_one_leaves_the_others", async () => {
+  const people = script();
+  await changed(people, 639, change("reviewers", "add", "erik"));
+  expect(lists(await changed(people, 639, change("reviewers", "add", "erik")))).toEqual({
+    kind: "changed",
+    assignees: ["anna"],
+    reviewers: ["dmitri:reviewed", "erik:requested"],
+  });
+  expect(lists(await changed(people, 639, change("reviewers", "remove", "erik")))).toEqual({
+    kind: "changed",
+    assignees: ["anna"],
+    reviewers: ["dmitri:reviewed"],
   });
 });
 
