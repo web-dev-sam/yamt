@@ -17,6 +17,7 @@ import { merged, rechecked, type CalendarDay } from "../mergeRequests";
 import { RECHECK_PAUSE_MS } from "./glab";
 import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
 import { createDueDates, type DueDates } from "./mergeRequestDueDates";
+import { createJobLogs, type JobLogs } from "./mergeRequestJobLogs";
 import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
 import { shownOf, type Shown } from "./mergeRequestsShown";
 import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
@@ -36,6 +37,7 @@ export type Opening =
 
 export type MergeRequests = RowActions &
   Rerequests &
+  JobLogs &
   Shown & {
     readonly project: Readonly<ShallowRef<GitLabProject>>;
     readonly me: Readonly<ShallowRef<string | null>>;
@@ -276,5 +278,6 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     },
     ...state.rowActions,
     ...rerequestsOf(state),
+    ...createJobLogs(deps),
   };
 }

@@ -171,6 +171,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
       new Promise((resolve) => {
         rerequests.push({ iid: asked, answer: resolve });
       }),
+    readJobLog: async () => ({ ok: true, value: { kind: "noLog" } }),
     ...edit,
   };
   const screen = shallowRef<Screen>({ kind: "files" });
@@ -1079,4 +1080,29 @@ test("Refresh keeps the search; show empties it (catches the text surviving a pa
   live.slice.show();
   expect(live.slice.search.value).toBe("");
   expect(live.slice.shownRows.value).toHaveLength(40);
+});
+
+test("the slice shows a job's log through its source and remembers job searches in its storage (catches the job-log calls left out of the slice)", async () => {
+  const pages: WebPage[] = [];
+  const live = rig({
+    readJobLog: async (page) => {
+      pages.push(page);
+      return {
+        ok: true,
+        value: { kind: "log", log: { text: "\u001b[31mError\u001b[0m", cut: false } },
+      };
+    },
+  });
+  const job = { name: "test:unit", page: webPage(JOB) };
+
+  await live.slice.showJobLog(job);
+  expect(pages).toEqual([JOB]);
+  expect(live.slice.jobLog.value?.job).toEqual(job);
+  expect(live.slice.jobLog.value?.load.kind).toBe("shown");
+  live.slice.closeJobLog();
+  expect(live.slice.jobLog.value).toBeNull();
+
+  live.slice.setJobSearch("test:unit", "fail");
+  expect(live.slice.jobSearch("test:unit")).toBe("fail");
+  expect(live.storage.items.get("yamt.mergeRequests.jobSearches")).toBe('{"test:unit":"fail"}');
 });

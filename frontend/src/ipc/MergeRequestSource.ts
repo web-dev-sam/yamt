@@ -3,6 +3,7 @@ import type {
   CheckedRow,
   ContinueMergeReply,
   GitLabProject,
+  JobLogReply,
   ListEnd,
   LocalMerge,
   MergeRequestPage,
@@ -28,4 +29,6 @@ export interface MergeRequestSource {
   continueMergeRequest(iid: MergeRequestIid): Promise<SourceResult<ContinueMergeReply>>;
   findLocalMerge(): Promise<SourceResult<LocalMerge>>;
   rerequestReview(iid: MergeRequestIid, username: string): Promise<SourceResult<RerequestReply>>;
+  /** A failed job's log, read only when this window's list offered `page` (plan §2 row 158). */
+  readJobLog(page: WebPage): Promise<SourceResult<JobLogReply>>;
 }

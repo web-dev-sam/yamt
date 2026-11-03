@@ -1,0 +1,1041 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index b1e22cb..40c9397 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -14,6 +14,8 @@ Resolving a merge request's conflicts (plan §2 #139–#143) adds three `MergeRe
+ 
+ A row's people (plan §2 #151–#156): the author, assignees, reviewers (with their `ReviewState`) and approvers (`approvedBy`, GitLab's order) are domain `Person`s whose `picture` is the one address the `<img>` loads: `toMergeRequestPage(raw, uploadedPicture)` and `toRerequestReply(raw, uploadedPicture)` turn an `uploaded` picture into `uploadedPicture(username)` (in the app `convertFileSrc(username, PICTURE_SCHEME)`, `tauriMergeRequests.ts`, `yamt-picture://localhost/<username>`, 404 when none), a `gravatar` one into Rust's checked address as sent, `none` into `null` (initials); no other address is built. Labels keep their colours (`null` when GitLab's are not hex) and rows `mayRerequest`. `rerequestReview(iid, username)` → `RerequestReply` (`requested` carries the row's reviewers now). Fixture mode: every row has an author (the next of `PEOPLE`), review states cycling requested, reviewed, approved, changes requested, `approvedBy` the first `index % 4` people, `mayRerequest` false on every 9th row from index 8; every 8th row from index 2 (!638, …) has three reviewers besides its assignee in three states (dmitri a done one on !638); label colours are CSS colour names (`docs` none); !635 has a zero size; pictures are `data:` addresses only (sam and anna load, ben's does not decode, chiara and dmitri none: `fixtureUploadedPicture` stands in for the scheme). Its `rerequestReview` answers after 1,000 ms and logs `mergeRequests.fixture_rerequest`: dmitri `refused`, a non-reviewer `notReviewer`, any other reviewer `requested` with that reviewer back at `requested`.
+ 
++A failed job's log (request `docs/slices/request-ci-job-log.md`, plan §2 row 158): `readJobLog(page)` → `JobLogReply` (`mergeRequestDomain.ts`, an alias of the generated type: `log { text, cut }` with the raw text, colour codes and all, or `notOffered`, `noLog`, `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), passed through unchanged by `tauriMergeRequests.ts`; Rust answers only a job page this window's list offered and keeps the logs for the run. Fixture mode answers every script after `LOG_PAUSE_MS` (400 ms), logging `mergeRequests.fixture_job_log { page }` first, from `fixtureMergeRequestLogs.ts` `fixtureJobLog`: a `${ORIGIN}/-/jobs/<n>` page with `n ≥ 9000` and `n % 10 === 0` (every `lint:docs`) a short timestamped log (`cut: false`; sections with and without `\e[0K` before `section_start`, a `\r` progress line, `\r\n` ends, a `00O+` continuation, basic, bright, 256 and truecolor runs, an OSC title, a markup line); `n % 10 === 1` (every `test:unit`) about 9,000 lines under 512,000 bytes, built once, `cut: true`; the `lint:docs` and `test:unit` of `NO_LOG_IID` (!632) `noLog` and `failed` "glab timed out", of `LOGGED_OUT_LOG_IID` (!624) `notLoggedIn` and `glabMissing`; any other page `notOffered`. No string in the file names a `#`-hex colour (the palette fence).
++
+ `localMergeDomain.ts` holds the merge window's aliases (MergeView, ReturnTo, Leftover, AbortReply, PushReply) over bindings; domain.ts's Listing and ChunkSource import from it.
+ 
+ `tauri.ts` `readClipboard(selection)` reads the clipboard through the shell, never through WebKit (plan §2 #99): GTK's text request, `null` for unreadable or no text; `main.ts` hands it to `ui/linuxPaste.ts` `takeLinuxPastes` on Linux. The fence (PM8, `scripts/clipboardFence.ts`) is on WebKit's clipboard reads: `clipboardData` and `navigator.clipboard.read`/`readText` outside `ui/linuxPaste.ts`. `keys.ts` holds both platform tests: `isMac` (CodeMirror's `Mod`) and `isLinux` (the one Linux rule, also behind `showsAntialiasing`).
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index 91e419d..7cbdf49 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -3,6 +3,7 @@ import type {
+   CheckedRow,
+   ContinueMergeReply,
+   GitLabProject,
++  JobLogReply,
+   ListEnd,
+   LocalMerge,
+   MergeRequestPage,
+@@ -28,4 +29,6 @@ export interface MergeRequestSource {
+   continueMergeRequest(iid: MergeRequestIid): Promise<SourceResult<ContinueMergeReply>>;
+   findLocalMerge(): Promise<SourceResult<LocalMerge>>;
+   rerequestReview(iid: MergeRequestIid, username: string): Promise<SourceResult<RerequestReply>>;
++  /** A failed job's log, read only when this window's list offered `page` (plan §2 row 158). */
++  readJobLog(page: WebPage): Promise<SourceResult<JobLogReply>>;
+ }
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.ts b/frontend/src/ipc/fixtureMergeRequestData.ts
+index 81e02a2..45c5815 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.ts
+@@ -8,7 +8,7 @@ export const LOGGED_OUT_DETAIL =
+ export const REFUSED_MESSAGE = "Field 'approvedBy' doesn't exist on type 'MergeRequest'";
+ export const PAGE_FAILED_MESSAGE = "glab api graphql: 502 Bad Gateway";
+ 
+-const ORIGIN = "https://gitlab.example/taskboard/taskboard";
++export const ORIGIN = "https://gitlab.example/taskboard/taskboard";
+ const NEWEST_IID = 640;
+ export const ALREADY_OPEN_IID = 639;
+ export const FETCH_FAILS_IID = 638;
+diff --git a/frontend/src/ipc/fixtureMergeRequestLogs.test.ts b/frontend/src/ipc/fixtureMergeRequestLogs.test.ts
+new file mode 100644
+index 0000000..0e341a0
+--- /dev/null
++++ b/frontend/src/ipc/fixtureMergeRequestLogs.test.ts
+@@ -0,0 +1,148 @@
++import { expect, test } from "vitest";
++
++import { jobLogView, type JobLogView, type LogStyle } from "../mergeRequests";
++import { isWebPage, type WebPage } from "./domain";
++import { fixtureRows, LOGGED_OUT_DETAIL, ORIGIN } from "./fixtureMergeRequestData";
++import { fixtureJobLog, LOGGED_OUT_LOG_IID, NO_LOG_IID } from "./fixtureMergeRequestLogs";
++import type { JobLogReply } from "./mergeRequestDomain";
++
++const MANY_ROWS = 500;
++const MAX_LOG_BYTES = 512_000;
++const TIMESTAMP = /\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z/u;
++const SCRIPTED: ReadonlySet<number> = new Set([NO_LOG_IID, LOGGED_OUT_LOG_IID]);
++
++function webPage(text: string): WebPage {
++  if (!isWebPage(text)) {
++    throw new Error(`${text} is not a web page`);
++  }
++  return text;
++}
++
++function listedPages(name: string): readonly WebPage[] {
++  return fixtureRows(0, MANY_ROWS)
++    .filter((row) => !SCRIPTED.has(row.iid))
++    .flatMap((row) => row.pipeline?.failedJobs ?? [])
++    .filter((job) => job.name === name)
++    .map((job) => webPage(job.page ?? ""));
++}
++
++function pageOf(iid: number, name: string): WebPage {
++  const row = fixtureRows(0, MANY_ROWS).find((listed) => listed.iid === iid);
++  const job = row?.pipeline?.failedJobs.find((failed) => failed.name === name);
++  return webPage(job?.page ?? "");
++}
++
++function logOf(reply: JobLogReply): { readonly text: string; readonly cut: boolean } {
++  if (reply.kind !== "log") {
++    throw new Error(`no log: ${reply.kind}`);
++  }
++  return reply.log;
++}
++
++function runStyle(view: JobLogView, text: string): LogStyle | undefined {
++  return view.lines.flatMap((line) => line.runs).find((run) => run.text === text)?.style;
++}
++
++test("every_listed_lint_job_has_its_short_coloured_log", () => {
++  const pages = listedPages("lint:docs");
++  expect(pages.length).toBeGreaterThan(SCRIPTED.size);
++  const raw = logOf(fixtureJobLog(pages[0] ?? webPage(ORIGIN)));
++  for (const page of pages) {
++    expect(fixtureJobLog(page)).toEqual({ kind: "log", log: { text: raw.text, cut: false } });
++  }
++  const physical = raw.text.split("\n").filter((line) => line !== "");
++  expect(physical.length).toBeGreaterThanOrEqual(40);
++  expect(physical.length).toBeLessThanOrEqual(80);
++  expect(physical.every((line) => TIMESTAMP.test(line))).toBe(true);
++  const times = physical.map((line) => Date.parse(line.slice(0, "2026-10-30T09:00:01.123".length)));
++  expect(times.every((time, at) => at === 0 || time > (times[at - 1] ?? time))).toBe(true);
++  expect(raw.text).toContain("\r\n");
++  expect(raw.text).toContain(" 00O+");
++  expect(raw.text).toContain("\u001b[0Ksection_start:");
++  expect(raw.text).toMatch(/00O section_start:\d+:prepare_script\[collapsed=true\]\r/u);
++  expect(raw.text).toContain(":prepare_script[collapsed=true]\r\u001b[0K");
++
++  const view = jobLogView(raw.text);
++  const lines = view.text.split("\n");
++  expect(view.text).not.toMatch(TIMESTAMP);
++  expect(view.text).not.toContain("section_");
++  expect(lines).toContain("<b>not bold</b> &amp; <script>x</script>");
++  expect(lines).toContain("Preparing environment");
++  expect(lines).toContain("Receiving objects: 100% (120/120), done.");
++  expect(lines).toContain(
++    "The command stopped at the first error in each file; see the list above for every error.",
++  );
++  expect(lines.filter((line) => line.includes("Error")).length).toBeGreaterThanOrEqual(1);
++  expect(lines.filter((line) => line.includes("error")).length).toBeGreaterThanOrEqual(2);
++  expect(lines.at(-1)).toBe("ERROR: Job failed: exit code 1");
++  expect(runStyle(view, "MD013/line-length")?.foreground).toBe("red");
++  expect(runStyle(view, "MD040/fenced-code-language")?.foreground).toBe("brightRed");
++  expect(runStyle(view, "Summary:")?.bold).toBe(true);
++  expect(runStyle(view, "warning")?.foreground).not.toBeNull();
++  expect(runStyle(view, " BLOCKER ")?.background).not.toBeNull();
++  expect(runStyle(view, "Error")?.foreground).not.toBeNull();
++});
++
++test("every_listed_unit_job_has_the_long_cut_log", () => {
++  const pages = listedPages("test:unit");
++  expect(pages.length).toBeGreaterThan(SCRIPTED.size);
++  const raw = logOf(fixtureJobLog(pages[0] ?? webPage(ORIGIN)));
++  for (const page of pages) {
++    const log = logOf(fixtureJobLog(page));
++    expect(log.cut).toBe(true);
++    expect(log.text).toBe(raw.text);
++  }
++  expect(new TextEncoder().encode(raw.text).length).toBeLessThanOrEqual(MAX_LOG_BYTES);
++  expect(raw.text.split("\n")[0]).toMatch(TIMESTAMP);
++
++  const view = jobLogView(raw.text);
++  const lines = view.text.split("\n");
++  expect(view.lines.length).toBeGreaterThanOrEqual(8000);
++  expect(view.text).not.toMatch(TIMESTAMP);
++  expect(lines[0]).toBe("$ pnpm test:unit");
++  expect(lines.slice(1, 3)).toEqual(["PASS t1.ts", "PASS t2.ts"]);
++  expect(lines[97]).toBe("FAIL t97.ts");
++  expect(view.lines[1]?.runs.map((run) => [run.text, run.style.foreground])).toEqual([
++    ["PASS t1.ts", null],
++  ]);
++  expect(view.lines[2]?.runs.map((run) => [run.text, run.style.foreground])).toEqual([
++    ["PASS", "green"],
++    [" t2.ts", null],
++  ]);
++  expect(
++    view.lines[97]?.runs.map((run) => [run.text, run.style.foreground, run.style.bold]),
++  ).toEqual([
++    ["FAIL", "brightRed", true],
++    [" t97.ts", null, false],
++  ]);
++  expect(lines.at(-1)).toBe("ERROR: Job failed: exit code 1");
++});
++
++test("the_scripted_rows_refuse_as_named", () => {
++  expect(NO_LOG_IID).not.toBe(LOGGED_OUT_LOG_IID);
++  expect(fixtureJobLog(pageOf(NO_LOG_IID, "lint:docs"))).toEqual({ kind: "noLog" });
++  expect(fixtureJobLog(pageOf(NO_LOG_IID, "test:unit"))).toEqual({
++    kind: "failed",
++    message: "glab timed out",
++  });
++  expect(fixtureJobLog(pageOf(LOGGED_OUT_LOG_IID, "lint:docs"))).toEqual({
++    kind: "notLoggedIn",
++    detail: LOGGED_OUT_DETAIL,
++  });
++  expect(fixtureJobLog(pageOf(LOGGED_OUT_LOG_IID, "test:unit"))).toEqual({ kind: "glabMissing" });
++  const firstFailed = fixtureRows(0, MANY_ROWS).find(
++    (row) => (row.pipeline?.failedJobs.length ?? 0) > 0,
++  );
++  expect([NO_LOG_IID, LOGGED_OUT_LOG_IID]).not.toContain(firstFailed?.iid);
++});
++
++test.each([
++  `${ORIGIN}/-/merge_requests/640`,
++  `${ORIGIN}/-/jobs/9002`,
++  `${ORIGIN}/-/jobs/8990`,
++  `${ORIGIN}/-/jobs/9000/raw`,
++  "https://gitlab.another/taskboard/taskboard/-/jobs/9000",
++  "https://gitlab.example/taskboard/otherbord/-/jobs/9001",
++])("a_page_that_is_no_listed_job_is_not_offered: %s", (page) => {
++  expect(fixtureJobLog(webPage(page))).toEqual({ kind: "notOffered" });
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequestLogs.ts b/frontend/src/ipc/fixtureMergeRequestLogs.ts
+new file mode 100644
+index 0000000..d07aefe
+--- /dev/null
++++ b/frontend/src/ipc/fixtureMergeRequestLogs.ts
+@@ -0,0 +1,156 @@
++import type { WebPage } from "./domain";
++import { TIMED_OUT } from "./fixtureGitLab";
++import { fixtureRows, LOGGED_OUT_DETAIL, ORIGIN } from "./fixtureMergeRequestData";
++import type { JobLogReply } from "./mergeRequestDomain";
++
++type RawLine = string | { readonly continues: string };
++
++export const NO_LOG_IID = 632;
++export const LOGGED_OUT_LOG_IID = 624;
++
++const JOB_PREFIX = `${ORIGIN}/-/jobs/`;
++const JOB_NUMBER = /^\d+$/u;
++const FIRST_JOB = 9000;
++const JOBS_PER_ROW = 10;
++const LINT_JOB = 0;
++const UNIT_JOB = 1;
++const SCRIPTED_ROWS_SCANNED = 20;
++const LOG_START_MS = Date.parse("2026-10-30T09:00:01.123Z");
++const LINE_STEP_MS = 7;
++const MICROSECONDS = "456";
++const STREAM = "00O ";
++const CONTINUED = "00O+";
++const UNIT_TESTS = 8998;
++const UNIT_FAIL_EVERY = 97;
++const UNIT_COLOUR_EVERY = 2;
++const NOT_OFFERED: JobLogReply = { kind: "notOffered" };
++const E = "\u001b";
++
++const REFUSALS: Readonly<Record<number, Readonly<Record<string, JobLogReply>>>> = {
++  [NO_LOG_IID]: {
++    "lint:docs": { kind: "noLog" },
++    "test:unit": { kind: "failed", message: TIMED_OUT },
++  },
++  [LOGGED_OUT_LOG_IID]: {
++    "lint:docs": { kind: "notLoggedIn", detail: LOGGED_OUT_DETAIL },
++    "test:unit": { kind: "glabMissing" },
++  },
++};
++
++const LINT_LINES: readonly RawLine[] = [
++  `${E}]0;title\u0007Running with gitlab-runner 17.5.0 (8ec04662)\r`,
++  "  on docker-auto-scale-1 ZxAiwUvB, system ID: s_4c1a2b3d5e6f\r",
++  `${E}[0Ksection_start:1730278801:prepare_executor[collapsed=true]\r${E}[0K${E}[36;1mPreparing the "docker+machine" executor${E}[0;m`,
++  "Using Docker executor with image node:22-bookworm ...",
++  "Pulling docker image node:22-bookworm ...",
++  `${E}[0Ksection_end:1730278804:prepare_executor\r${E}[0K`,
++  `section_start:1730278805:prepare_script[collapsed=true]\r${E}[0K${E}[36;1mPreparing environment${E}[0;m`,
++  "Running on runner-zxaiwuvb-project-42-concurrent-0 via runner-manager-1...",
++  `section_end:1730278806:prepare_script\r${E}[0K`,
++  `${E}[0Ksection_start:1730278807:get_sources\r${E}[0K${E}[36;1mGetting source from Git repository${E}[0;m`,
++  `${E}[32;1mFetching changes with git depth set to 20...${E}[0;m`,
++  "Receiving objects:  10% (12/120)\rReceiving objects:  55% (66/120)\rReceiving objects: 100% (120/120), done.",
++  `${E}[32;1mChecking out 3f9c2a1b as detached HEAD (ref is refs/merge-requests/632/head)...${E}[0;m`,
++  `${E}[0Ksection_end:1730278810:get_sources\r${E}[0K`,
++  "",
++  `${E}[0Ksection_start:1730278811:step_script\r${E}[0K${E}[36;1mExecuting "step_script" stage of the job script${E}[0;m`,
++  `${E}[32;1m$ pnpm install --frozen-lockfile${E}[0;m`,
++  "Lockfile is up to date, resolution step is skipped\r",
++  "Progress: resolved 812, reused 812, downloaded 0, added 812, done\r",
++  `${E}[32;1m$ pnpm lint:docs${E}[0;m`,
++  "> taskboard@1.4.0 lint:docs /builds/taskboard/taskboard",
++  '> markdownlint "docs/**/*.md"',
++  "",
++  `docs/setup.md:12 ${E}[31mMD013/line-length${E}[39m Line length [Expected: 120; Actual: 143]`,
++  `docs/setup.md:40 ${E}[91mMD040/fenced-code-language${E}[39m Fenced code blocks should have a language specified`,
++  `docs/api.md:7 ${E}[33mMD025/single-h1${E}[39m Multiple top-level headings in the same document`,
++  `docs/api.md:88 ${E}[93mMD034/no-bare-urls${E}[39m Bare URL used`,
++  `${E}[1mSummary:${E}[22m 4 ${E}[1;31merrors${E}[0m in 2 files`,
++  `${E}[38;5;208mwarning${E}[39m: docs/changelog.md is older than the last release`,
++  `${E}[48;5;196m${E}[97m BLOCKER ${E}[0m the docs build has been broken since 1.3.9`,
++  `${E}[38;2;255;0;0mError${E}[0m: markdownlint found 4 problems`,
++  "<b>not bold</b> &amp; <script>x</script>",
++  "",
++  `${E}[34mhint${E}[39m: run ${E}[36mpnpm lint:docs --fix${E}[39m to fix 2 of them`,
++  `${E}[35mnote${E}[39m: ${E}[90mthe rules live in .markdownlint.jsonc${E}[39m`,
++  "The command stopped at the first error in each file; ",
++  { continues: "see the list above for every error." },
++  `${E}[41m${E}[30m ELIFECYCLE ${E}[0m ${E}[31mCommand failed with exit code 1.${E}[39m`,
++  `${E}[0Ksection_end:1730278838:step_script\r${E}[0K`,
++  `${E}[0Ksection_start:1730278839:upload_artifacts_on_failure[collapsed=true]\r${E}[0K${E}[36;1mUploading artifacts for failed job${E}[0;m`,
++  `${E}[32;1mUploading artifacts...${E}[0;m`,
++  `${E}[0;33mWARNING: report.xml: no matching files. Ensure that the artifact path is relative to the working directory${E}[0;m`,
++  `${E}[31;1mERROR: No files to upload${E}[0;m`,
++  `${E}[0Ksection_end:1730278840:upload_artifacts_on_failure\r${E}[0K`,
++  `${E}[0Ksection_start:1730278841:cleanup_file_variables\r${E}[0K${E}[36;1mCleaning up project directory and file based variables${E}[0;m`,
++  `${E}[0Ksection_end:1730278842:cleanup_file_variables\r${E}[0K`,
++  "",
++  `${E}[31;1mERROR: Job failed: exit code 1${E}[0;m`,
++];
++
++let unitLog: string | null = null;
++
++function stamp(at: number, stream: string): string {
++  const time = new Date(LOG_START_MS + at * LINE_STEP_MS).toISOString();
++  return `${time.replace("Z", `${MICROSECONDS}Z`)} ${stream}`;
++}
++
++function stamped(lines: readonly RawLine[]): string {
++  const physical = lines.map((line, at) =>
++    typeof line === "string" ? stamp(at, STREAM) + line : stamp(at, CONTINUED) + line.continues,
++  );
++  return `${physical.join("\n")}\n`;
++}
++
++function unitLine(test: number): string {
++  const file = `t${test}.ts`;
++  if (test % UNIT_FAIL_EVERY === 0) {
++    return `${E}[31;1mFAIL${E}[0m ${file}`;
++  }
++  return test % UNIT_COLOUR_EVERY === 0 ? `${E}[32mPASS${E}[0m ${file}` : `PASS ${file}`;
++}
++
++function longUnitLog(): string {
++  unitLog ??= stamped([
++    `${E}[32;1m$ pnpm test:unit${E}[0;m`,
++    ...Array.from({ length: UNIT_TESTS }, (_, at) => unitLine(at + 1)),
++    `${E}[31;1mERROR: Job failed: exit code 1${E}[0;m`,
++  ]);
++  return unitLog;
++}
++
++function scriptedRefusal(page: WebPage): JobLogReply | undefined {
++  for (const row of fixtureRows(0, SCRIPTED_ROWS_SCANNED)) {
++    const job = row.pipeline?.failedJobs.find((failed) => failed.page === page);
++    if (job !== undefined) {
++      return REFUSALS[row.iid]?.[job.name];
++    }
++  }
++  return undefined;
++}
++
++function jobNumber(page: WebPage): number | null {
++  const number = page.slice(JOB_PREFIX.length);
++  return page.startsWith(JOB_PREFIX) && JOB_NUMBER.test(number) ? Number(number) : null;
++}
++
++/** The fixture's answer for a job page: a job page of the fixture's list gets a log or a scripted refusal; any other
++ *  page `notOffered` (as Rust, plan §2 row 158). */
++export function fixtureJobLog(page: WebPage): JobLogReply {
++  const refusal = scriptedRefusal(page);
++  if (refusal !== undefined) {
++    return refusal;
++  }
++  const job = jobNumber(page);
++  if (job === null || job < FIRST_JOB) {
++    return NOT_OFFERED;
++  }
++  switch (job % JOBS_PER_ROW) {
++    case LINT_JOB:
++      return { kind: "log", log: { text: stamped(LINT_LINES), cut: false } };
++    case UNIT_JOB:
++      return { kind: "log", log: { text: longUnitLog(), cut: true } };
++    default:
++      return NOT_OFFERED;
++  }
++}
+diff --git a/frontend/src/ipc/fixtureMergeRequests.test.ts b/frontend/src/ipc/fixtureMergeRequests.test.ts
+index 4f018a5..7f4078f 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.test.ts
+@@ -462,3 +462,26 @@ test("re-requesting on a row of the list's second page answers from that row (ca
+   const replied = await answered(source("?mr=list").rerequestReview(iid(606), "anna"));
+   expect(replied.ok && replied.value.kind).toBe("requested");
+ });
++
++test("a_job_log_is_logged_and_paused", async () => {
++  vi.useFakeTimers();
++  const page = "https://gitlab.example/taskboard/taskboard/-/jobs/9000";
++  if (!isWebPage(page)) {
++    throw new Error(`${page} is not a web page`);
++  }
++  const lines: string[] = [];
++  let replied: unknown = null;
++  void source("?mr=list", lines)
++    .readJobLog(page)
++    .then((result) => {
++      replied = result;
++    });
++  expect(lines).toEqual([`mergeRequests.fixture_job_log {"page":"${page}"}`]);
++  await vi.advanceTimersByTimeAsync(399);
++  expect(replied).toBeNull();
++  await vi.advanceTimersByTimeAsync(1);
++  expect(replied).toEqual({
++    ok: true,
++    value: { kind: "log", log: { text: expect.stringContaining("lint:docs"), cut: false } },
++  });
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequests.ts b/frontend/src/ipc/fixtureMergeRequests.ts
+index f989894..b0b9097 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.ts
+@@ -14,6 +14,7 @@ import {
+   REFUSED_MESSAGE,
+   REFUSING_REVIEWER,
+ } from "./fixtureMergeRequestData";
++import { fixtureJobLog } from "./fixtureMergeRequestLogs";
+ import type { Log } from "./log";
+ import {
+   toCheckedRow,
+@@ -65,6 +66,7 @@ const SLOW_PAGE_MS = 1000;
+ const LOCAL_CHECK_MS = 1000;
+ const OPEN_PAUSE_MS = 1000;
+ const RE_REQUEST_PAUSE_MS = 1000;
++const LOG_PAUSE_MS = 400;
+ const REFUSED_REREQUEST = "You are not allowed to re-request a review on this merge request.";
+ const LOADED: Generated.ListEnd = { kind: "loaded" };
+ const CLEAN_IID = 632;
+@@ -225,6 +227,20 @@ function rerequestScript(log: Log): Pick<MergeRequestSource, "rerequestReview">
+   };
+ }
+ 
++function pageScript(log: Log): Pick<MergeRequestSource, "openPage" | "readJobLog"> {
++  return {
++    async openPage(page) {
++      log.info("mergeRequests.fixture_page", { page });
++      return { ok: true, value: { kind: "opened" } };
++    },
++    async readJobLog(page) {
++      log.info("mergeRequests.fixture_job_log", { page });
++      await pause(LOG_PAUSE_MS);
++      return { ok: true, value: fixtureJobLog(page) };
++    },
++  };
++}
++
+ /** `?mr=<script>` scripts GitLab's answers; without it the window has no GitLab project. */
+ export function createFixtureMergeRequests(log: Log, search: string): MergeRequestSource {
+   const script = shownScript(log, search);
+@@ -258,11 +274,8 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
+       await pause(OPEN_PAUSE_MS);
+       return { ok: true, value: toOpenReply(OPEN_REPLIES[iid] ?? { kind: "opened" }) };
+     },
+-    async openPage(page) {
+-      log.info("mergeRequests.fixture_page", { page });
+-      return { ok: true, value: { kind: "opened" } };
+-    },
+     ...localMergeScript(),
+     ...rerequestScript(log),
++    ...pageScript(log),
+   };
+ }
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index f1a5ca6..252638e 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -70,6 +70,7 @@ export type {
+   CheckedRow,
+   ContinueMergeReply,
+   GitLabProject,
++  JobLogReply,
+   ListEnd,
+   LocalMerge,
+   Label,
+diff --git a/frontend/src/ipc/mergeRequestDomain.ts b/frontend/src/ipc/mergeRequestDomain.ts
+index 5463b5a..c193edc 100644
+--- a/frontend/src/ipc/mergeRequestDomain.ts
++++ b/frontend/src/ipc/mergeRequestDomain.ts
+@@ -63,6 +63,7 @@ export type LocalMerge = Readonly<Generated.LocalMerge>;
+ export type RerequestReply =
+   | Readonly<Exclude<Generated.RerequestReply, { kind: "requested" }>>
+   | { readonly kind: "requested"; readonly reviewers: readonly Reviewer[] };
++export type JobLogReply = Readonly<Generated.JobLogReply>;
+ 
+ type UploadedPicture = (username: string) => string;
+ 
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index 21df406..59592a3 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -1,7 +1,7 @@
+ import { beforeEach, expect, test, vi } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+-import { isMergeRequestIid, isWebPage } from "./domain";
++import { isMergeRequestIid, isWebPage, type WebPage } from "./domain";
+ import type { CheckedRow, MergeRequestPage } from "./mergeRequestDomain";
+ import { createTauriMergeRequests, PICTURE_SCHEME } from "./tauriMergeRequests";
+ import { branded } from "./validate";
+@@ -12,6 +12,7 @@ const commands = vi.hoisted(() => ({
+   openMergeRequest: vi.fn(),
+   openPage: vi.fn(),
+   rerequestReview: vi.fn(),
++  readJobLog: vi.fn(),
+ }));
+ 
+ vi.mock("./bindings", () => ({ commands }));
+@@ -50,8 +51,16 @@ const ROW: Generated.MergeRequestRow = {
+ };
+ 
+ const STOPPED = { kind: "WorkerStopped" };
++const JOB_PAGE = "https://gitlab.example/x/-/jobs/9000";
+ const MICROTASKS = 10;
+ 
++function jobPage(): WebPage {
++  if (!isWebPage(JOB_PAGE)) {
++    throw new Error("not a web page");
++  }
++  return JOB_PAGE;
++}
++
+ function page(rows: Generated.MergeRequestRow[]): Generated.ListMessage {
+   return { kind: "page", page: { me: "sam", rows } };
+ }
+@@ -305,10 +314,23 @@ test("a page is passed as it came and its answer comes back", async () => {
+   expect(commands.openPage).toHaveBeenCalledWith(page);
+ });
+ 
++test("readJobLog_calls_the_command_with_the_page_and_returns_its_reply", async () => {
++  const page = jobPage();
++  const reply: Generated.JobLogReply = {
++    kind: "log",
++    log: { text: "\u001b[31mError\u001b[0m\r\n", cut: true },
++  };
++  commands.readJobLog.mockResolvedValue({ status: "ok", data: reply });
++
++  expect(await createTauriMergeRequests().readJobLog(page)).toEqual({ ok: true, value: reply });
++  expect(commands.readJobLog).toHaveBeenCalledWith(page);
++});
++
+ test.each([
+   ["listMergeRequests", { kind: "WorkerStopped" }],
+   ["openMergeRequest", { kind: "WorkerStopped" }],
+   ["rerequestReview", { kind: "WorkerStopped" }],
++  ["readJobLog", { kind: "WorkerStopped" }],
+ ] as const)("a %s failure comes back unchanged", async (name, failure) => {
+   commands[name].mockResolvedValue({ status: "error", error: failure });
+   const source = createTauriMergeRequests();
+@@ -316,6 +338,7 @@ test.each([
+     listMergeRequests: () => source.listMergeRequests(() => undefined, unchecked),
+     openMergeRequest: () => source.openMergeRequest(branded(1, isMergeRequestIid, "iid")),
+     rerequestReview: () => source.rerequestReview(branded(1, isMergeRequestIid, "iid"), "anna"),
++    readJobLog: () => source.readJobLog(jobPage()),
+   };
+   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
+ });
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index c1175ef..8b277c9 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -88,5 +88,8 @@ export function createTauriMergeRequests(): MergeRequestSource {
+         toRerequestReply(reply, uploadedPicture),
+       );
+     },
++    async readJobLog(page) {
++      return toResult(await commands.readJobLog(page));
++    },
+   };
+ }
+diff --git a/frontend/src/ui/mergeRequestJobLogs.test.ts b/frontend/src/ui/mergeRequestJobLogs.test.ts
+new file mode 100644
+index 0000000..7d97877
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestJobLogs.test.ts
+@@ -0,0 +1,302 @@
++import type { StorageLike } from "@vueuse/core";
++import { afterEach, beforeAll, expect, test, vi } from "vitest";
++
++import {
++  createFixtureCompareSource,
++  log,
++  type JobLogReply,
++  type MergeRequestSource,
++  type SourceFailure,
++  type SourceResult,
++  type WebPage,
++} from "../ipc";
++import type * as MergeRequestsCore from "../mergeRequests";
++import { jobLogView } from "../mergeRequests";
++import {
++  createJobLogs,
++  type JobLogLoad,
++  type JobLogs,
++  type LoggedJob,
++  type ShownJobLog,
++} from "./mergeRequestJobLogs";
++
++vi.mock("../mergeRequests", async (original) => {
++  const real = await original<typeof MergeRequestsCore>();
++  return { ...real, jobLogView: vi.fn(real.jobLogView) };
++});
++
++type Ask = {
++  readonly page: WebPage;
++  readonly answer: (result: SourceResult<JobLogReply>) => void;
++  readonly fail: (error: unknown) => void;
++};
++
++type MemoryStorage = StorageLike & { readonly items: Map<string, string> };
++
++type Rig = { readonly logs: JobLogs; readonly asks: Ask[]; readonly storage: MemoryStorage };
++
++const KEY = "yamt.mergeRequests.jobSearches";
++const STOPPED: SourceFailure = { kind: "WorkerStopped" };
++const RAW = "\u001b[31mError\u001b[0m: lint failed\r\nsecond error line\n";
++const LOADING: JobLogLoad = { kind: "loading" };
++
++let LINT: LoggedJob;
++let UNIT: LoggedJob;
++
++beforeAll(async () => {
++  const jobs: LoggedJob[] = [];
++  await createFixtureCompareSource(log, "?mr=list", {}).listMergeRequests(
++    (page) => {
++      for (const job of page.rows.flatMap((row) => row.pipeline?.failedJobs ?? [])) {
++        if (job.page !== null) {
++          jobs.push({ name: job.name, page: job.page });
++        }
++      }
++    },
++    () => undefined,
++  );
++  const [lint, unit] = jobs;
++  if (lint === undefined || unit === undefined) {
++    throw new Error("the fixture lists no two job pages");
++  }
++  LINT = lint;
++  UNIT = unit;
++});
++
++afterEach(() => {
++  vi.restoreAllMocks();
++  vi.mocked(jobLogView).mockClear();
++});
++
++function memoryStorage(stored?: string): MemoryStorage {
++  const items = new Map<string, string>(stored === undefined ? [] : [[KEY, stored]]);
++  return {
++    items,
++    getItem: (key) => items.get(key) ?? null,
++    setItem: (key, value) => {
++      items.set(key, value);
++    },
++    removeItem: (key) => {
++      items.delete(key);
++    },
++  };
++}
++
++function rig(storage = memoryStorage()): Rig {
++  const asks: Ask[] = [];
++  const source: MergeRequestSource = {
++    ...createFixtureCompareSource(log, "", {}),
++    readJobLog: (page) =>
++      new Promise((resolve, reject) => {
++        asks.push({ page, answer: resolve, fail: reject });
++      }),
++  };
++  return { logs: createJobLogs({ source, storage }), asks, storage };
++}
++
++function askAt(live: Rig, index: number): Ask {
++  const ask = live.asks[index];
++  if (ask === undefined) {
++    throw new Error(`no ask ${index}; ${live.asks.length} made`);
++  }
++  return ask;
++}
++
++function logReply(text: string, cut: boolean): SourceResult<JobLogReply> {
++  return { ok: true, value: { kind: "log", log: { text, cut } } };
++}
++
++function shownOf(live: Rig): ShownJobLog | null {
++  return live.logs.jobLog.value;
++}
++
++test("a_job_shows_loading_then_its_parsed_log", async () => {
++  const live = rig();
++  expect(shownOf(live)).toBeNull();
++  const showing = live.logs.showJobLog(LINT);
++  expect(shownOf(live)).toEqual({ job: LINT, load: LOADING });
++  expect(live.asks.map((ask) => ask.page)).toEqual([LINT.page]);
++
++  askAt(live, 0).answer(logReply(RAW, true));
++  await showing;
++  expect(shownOf(live)).toEqual({
++    job: LINT,
++    load: { kind: "shown", view: jobLogView(RAW), cut: true },
++  });
++});
++
++test("a_reply_for_a_job_no_longer_shown_is_dropped", async () => {
++  const live = rig();
++  const first = live.logs.showJobLog(LINT);
++  const second = live.logs.showJobLog(UNIT);
++  expect(live.asks.map((ask) => ask.page)).toEqual([LINT.page, UNIT.page]);
++
++  askAt(live, 0).answer(logReply(RAW, false));
++  await first;
++  expect(shownOf(live)).toEqual({ job: UNIT, load: LOADING });
++  expect(jobLogView).not.toHaveBeenCalled();
++
++  askAt(live, 1).answer(logReply("unit", false));
++  await second;
++  expect(shownOf(live)).toEqual({
++    job: UNIT,
++    load: { kind: "shown", view: jobLogView("unit"), cut: false },
++  });
++});
++
++test("a_reply_after_close_is_dropped", async () => {
++  const live = rig();
++  const info = vi.spyOn(log, "info");
++  const showing = live.logs.showJobLog(LINT);
++  live.logs.closeJobLog();
++  expect(shownOf(live)).toBeNull();
++
++  askAt(live, 0).answer(logReply(RAW, false));
++  await showing;
++  expect(shownOf(live)).toBeNull();
++  expect(info).not.toHaveBeenCalled();
++});
++
++test("the_same_job_while_loading_or_shown_asks_nothing", async () => {
++  const live = rig();
++  const showing = live.logs.showJobLog(LINT);
++  const loading = shownOf(live);
++  await live.logs.showJobLog({ ...LINT });
++  expect(live.asks).toHaveLength(1);
++  expect(shownOf(live)).toBe(loading);
++
++  askAt(live, 0).answer(logReply(RAW, false));
++  await showing;
++  const shown = shownOf(live);
++  await live.logs.showJobLog(LINT);
++  expect(live.asks).toHaveLength(1);
++  expect(shownOf(live)).toBe(shown);
++
++  void live.logs.showJobLog(UNIT);
++  expect(live.asks).toHaveLength(2);
++});
++
++test("a_refused_or_failed_job_is_asked_again", async () => {
++  const live = rig();
++  const refused = live.logs.showJobLog(LINT);
++  askAt(live, 0).answer({ ok: true, value: { kind: "noLog" } });
++  await refused;
++  expect(shownOf(live)?.load.kind).toBe("refused");
++
++  const failed = live.logs.showJobLog(LINT);
++  expect(live.asks).toHaveLength(2);
++  expect(shownOf(live)).toEqual({ job: LINT, load: LOADING });
++  askAt(live, 1).answer({ ok: false, failure: STOPPED });
++  await failed;
++  expect(shownOf(live)?.load.kind).toBe("failed");
++
++  void live.logs.showJobLog(LINT);
++  expect(live.asks.map((ask) => ask.page)).toEqual([LINT.page, LINT.page, LINT.page]);
++  expect(shownOf(live)).toEqual({ job: LINT, load: LOADING });
++});
++
++test.each<Exclude<JobLogReply, { readonly kind: "log" }>>([
++  { kind: "notOffered" },
++  { kind: "noLog" },
++  { kind: "glabMissing" },
++  { kind: "notLoggedIn", detail: "gitlab.example: No token found" },
++  { kind: "failed", message: "glab timed out" },
++])("every_reply_but_a_log_is_kept_as_refused: %j", async (reply) => {
++  const live = rig();
++  const showing = live.logs.showJobLog(UNIT);
++  askAt(live, 0).answer({ ok: true, value: reply });
++  await showing;
++  expect(shownOf(live)).toEqual({ job: UNIT, load: { kind: "refused", reply } });
++});
++
++test("a_source_failure_is_shown_not_reported", async () => {
++  const live = rig();
++  const warn = vi.spyOn(log, "warn");
++  const error = vi.spyOn(log, "error");
++  const failing = live.logs.showJobLog(LINT);
++  askAt(live, 0).answer({ ok: false, failure: STOPPED });
++  await failing;
++  expect(shownOf(live)).toEqual({ job: LINT, load: { kind: "failed", cause: STOPPED } });
++
++  const throwing = live.logs.showJobLog(LINT);
++  askAt(live, 1).fail(new Error("ipc gone"));
++  await throwing;
++  expect(shownOf(live)).toEqual({
++    job: LINT,
++    load: { kind: "failed", cause: { kind: "Unexpected", message: "ipc gone" } },
++  });
++  expect(warn).not.toHaveBeenCalled();
++  expect(error).not.toHaveBeenCalled();
++});
++
++test("the_log_is_parsed_once_per_ask", async () => {
++  const live = rig();
++  const showing = live.logs.showJobLog(LINT);
++  askAt(live, 0).answer(logReply(RAW, false));
++  await showing;
++  const first = shownOf(live);
++  const view = first?.load.kind === "shown" ? first.load.view : null;
++  expect(view).not.toBeNull();
++  await live.logs.showJobLog(LINT);
++  const again = shownOf(live);
++  expect(again?.load.kind === "shown" ? again.load.view : null).toBe(view);
++  expect(jobLogView).toHaveBeenCalledTimes(1);
++  expect(jobLogView).toHaveBeenCalledWith(RAW);
++});
++
++test("a_search_text_is_remembered_per_job_name_for_every_repository", () => {
++  const storage = memoryStorage();
++  const first = rig(storage);
++  expect(first.logs.jobSearch("test:unit")).toBe("");
++  first.logs.setJobSearch("test:unit", "fail");
++  expect(first.logs.jobSearch("test:unit")).toBe("fail");
++  expect(first.logs.jobSearch("lint:docs")).toBe("");
++
++  const second = rig(storage);
++  expect(second.logs.jobSearch("test:unit")).toBe("fail");
++  expect(JSON.parse(storage.items.get(KEY) ?? "null")).toEqual({ "test:unit": "fail" });
++});
++
++test("an_empty_search_text_forgets_the_name", () => {
++  const live = rig();
++  live.logs.setJobSearch("test:unit", "fail");
++  live.logs.setJobSearch("lint:docs", "MD013");
++  live.logs.setJobSearch("test:unit", "");
++  expect(live.logs.jobSearch("test:unit")).toBe("");
++  expect(live.logs.jobSearch("lint:docs")).toBe("MD013");
++  expect(JSON.parse(live.storage.items.get(KEY) ?? "null")).toEqual({ "lint:docs": "MD013" });
++});
++
++test("a_stored_non_string_reads_as_empty", () => {
++  const live = rig(
++    memoryStorage(JSON.stringify({ "test:unit": 3, "lint:docs": "warn", e2e: null })),
++  );
++  expect(live.logs.jobSearch("test:unit")).toBe("");
++  expect(live.logs.jobSearch("e2e")).toBe("");
++  expect(live.logs.jobSearch("lint:docs")).toBe("warn");
++});
++
++test("the_log_event_never_carries_the_text", async () => {
++  const live = rig();
++  const info = vi.spyOn(log, "info");
++  vi.spyOn(performance, "now")
++    .mockReturnValueOnce(1000)
++    .mockReturnValueOnce(1250.4)
++    .mockReturnValueOnce(2000)
++    .mockReturnValueOnce(2007.6);
++  const shown = live.logs.showJobLog(LINT);
++  askAt(live, 0).answer(logReply(RAW, true));
++  await shown;
++  const refused = live.logs.showJobLog(UNIT);
++  askAt(live, 1).answer({ ok: true, value: { kind: "failed", message: "glab timed out" } });
++  await refused;
++
++  expect(info.mock.calls).toEqual([
++    [
++      "mergeRequests.job_log_shown",
++      { page: LINT.page, kind: "shown", lines: 2, cut: true, ms: 250 },
++    ],
++    ["mergeRequests.job_log_shown", { page: UNIT.page, kind: "refused", ms: 8 }],
++  ]);
++  expect(JSON.stringify(info.mock.calls)).not.toContain("lint failed");
++});
+diff --git a/frontend/src/ui/mergeRequestJobLogs.ts b/frontend/src/ui/mergeRequestJobLogs.ts
+new file mode 100644
+index 0000000..6307fbe
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestJobLogs.ts
+@@ -0,0 +1,106 @@
++import type { StorageLike } from "@vueuse/core";
++import { shallowRef, type ShallowRef } from "vue";
++
++import { log, type JobLogReply, type MergeRequestSource, type WebPage } from "../ipc";
++import { jobLogView, type JobLogView } from "../mergeRequests";
++import { attempt, type Outcome, type ProblemCause } from "./problem";
++import { storedRecord, type StoredRecord } from "./windowStorage";
++
++export type LoggedJob = { readonly name: string; readonly page: WebPage };
++export type JobLogLoad =
++  | { readonly kind: "loading" }
++  | { readonly kind: "shown"; readonly view: JobLogView; readonly cut: boolean }
++  | { readonly kind: "refused"; readonly reply: Exclude<JobLogReply, { readonly kind: "log" }> }
++  | { readonly kind: "failed"; readonly cause: ProblemCause };
++export type ShownJobLog = { readonly job: LoggedJob; readonly load: JobLogLoad };
++export type JobLogs = {
++  /** The window's one log box: null when none is open. */
++  readonly jobLog: Readonly<ShallowRef<ShownJobLog | null>>;
++  /** Shows `job`'s log: the same page while loading or shown changes nothing; else loading, then the reply. */
++  showJobLog(job: LoggedJob): Promise<void>;
++  closeJobLog(): void;
++  /** The search text remembered for a job of this name ("" when none). */
++  jobSearch(name: string): string;
++  /** Remembers `text` for every job of this name, in every repository; "" forgets it. */
++  setJobSearch(name: string, text: string): void;
++};
++
++type Shown = ShallowRef<ShownJobLog | null>;
++
++const SEARCHES_KEY = "yamt.mergeRequests.jobSearches";
++const SEARCHES_WARN_EVENT = "mergeRequests.job_searches_storage_failed";
++
++function settledLoad(outcome: Outcome<JobLogReply>): JobLogLoad {
++  if (!outcome.ok) {
++    return { kind: "failed", cause: outcome.cause };
++  }
++  const reply = outcome.value;
++  return reply.kind === "log"
++    ? { kind: "shown", view: jobLogView(reply.log.text), cut: reply.log.cut }
++    : { kind: "refused", reply };
++}
++
++function loggedFields(
++  page: WebPage,
++  load: JobLogLoad,
++  ms: number,
++): Record<string, string | number | boolean> {
++  return load.kind === "shown"
++    ? { page, kind: load.kind, lines: load.view.lines.length, cut: load.cut, ms }
++    : { page, kind: load.kind, ms };
++}
++
++async function showJobLog(shown: Shown, source: MergeRequestSource, job: LoggedJob): Promise<void> {
++  const current = shown.value;
++  if (
++    current?.job.page === job.page &&
++    (current.load.kind === "loading" || current.load.kind === "shown")
++  ) {
++    return;
++  }
++  const entry: ShownJobLog = { job, load: { kind: "loading" } };
++  shown.value = entry;
++  const asked = performance.now();
++  const outcome = await attempt(() => source.readJobLog(job.page));
++  if (shown.value !== entry) {
++    return;
++  }
++  const load = settledLoad(outcome);
++  shown.value = { job, load };
++  log.info(
++    "mergeRequests.job_log_shown",
++    loggedFields(job.page, load, Math.round(performance.now() - asked)),
++  );
++}
++
++function jobSearch(searches: StoredRecord, name: string): string {
++  const text = searches.entryAt(name);
++  return typeof text === "string" ? text : "";
++}
++
++function setJobSearch(searches: StoredRecord, name: string, text: string): void {
++  if (text === "") {
++    searches.remove(name);
++  } else {
++    searches.set(name, text);
++  }
++}
++
++export function createJobLogs(deps: {
++  readonly source: MergeRequestSource;
++  readonly storage?: StorageLike;
++}): JobLogs {
++  const shown: Shown = shallowRef<ShownJobLog | null>(null);
++  const searches = storedRecord(SEARCHES_KEY, SEARCHES_WARN_EVENT, deps.storage);
++  return {
++    jobLog: shown,
++    showJobLog: (job) => showJobLog(shown, deps.source, job),
++    closeJobLog: () => {
++      shown.value = null;
++    },
++    jobSearch: (name) => jobSearch(searches, name),
++    setJobSearch: (name, text) => {
++      setJobSearch(searches, name, text);
++    },
++  };
++}
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index a2608ac..edee07c 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -171,6 +171,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+       new Promise((resolve) => {
+         rerequests.push({ iid: asked, answer: resolve });
+       }),
++    readJobLog: async () => ({ ok: true, value: { kind: "noLog" } }),
+     ...edit,
+   };
+   const screen = shallowRef<Screen>({ kind: "files" });
+@@ -1080,3 +1081,28 @@ test("Refresh keeps the search; show empties it (catches the text surviving a pa
+   expect(live.slice.search.value).toBe("");
+   expect(live.slice.shownRows.value).toHaveLength(40);
+ });
++
++test("the slice shows a job's log through its source and remembers job searches in its storage (catches the job-log calls left out of the slice)", async () => {
++  const pages: WebPage[] = [];
++  const live = rig({
++    readJobLog: async (page) => {
++      pages.push(page);
++      return {
++        ok: true,
++        value: { kind: "log", log: { text: "\u001b[31mError\u001b[0m", cut: false } },
++      };
++    },
++  });
++  const job = { name: "test:unit", page: webPage(JOB) };
++
++  await live.slice.showJobLog(job);
++  expect(pages).toEqual([JOB]);
++  expect(live.slice.jobLog.value?.job).toEqual(job);
++  expect(live.slice.jobLog.value?.load.kind).toBe("shown");
++  live.slice.closeJobLog();
++  expect(live.slice.jobLog.value).toBeNull();
++
++  live.slice.setJobSearch("test:unit", "fail");
++  expect(live.slice.jobSearch("test:unit")).toBe("fail");
++  expect(live.storage.items.get("yamt.mergeRequests.jobSearches")).toBe('{"test:unit":"fail"}');
++});
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 4438f28..8361352 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -17,6 +17,7 @@ import { merged, rechecked, type CalendarDay } from "../mergeRequests";
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
+ import { createDueDates, type DueDates } from "./mergeRequestDueDates";
++import { createJobLogs, type JobLogs } from "./mergeRequestJobLogs";
+ import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
+ import { shownOf, type Shown } from "./mergeRequestsShown";
+ import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
+@@ -36,6 +37,7 @@ export type Opening =
+ 
+ export type MergeRequests = RowActions &
+   Rerequests &
++  JobLogs &
+   Shown & {
+     readonly project: Readonly<ShallowRef<GitLabProject>>;
+     readonly me: Readonly<ShallowRef<string | null>>;
+@@ -276,5 +278,6 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     },
+     ...state.rowActions,
+     ...rerequestsOf(state),
++    ...createJobLogs(deps),
+   };
+ }

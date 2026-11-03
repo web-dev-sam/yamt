@@ -462,3 +462,26 @@ test("re-requesting on a row of the list's second page answers from that row (ca
   const replied = await answered(source("?mr=list").rerequestReview(iid(606), "anna"));
   expect(replied.ok && replied.value.kind).toBe("requested");
 });
+
+test("a_job_log_is_logged_and_paused", async () => {
+  vi.useFakeTimers();
+  const page = "https://gitlab.example/taskboard/taskboard/-/jobs/9000";
+  if (!isWebPage(page)) {
+    throw new Error(`${page} is not a web page`);
+  }
+  const lines: string[] = [];
+  let replied: unknown = null;
+  void source("?mr=list", lines)
+    .readJobLog(page)
+    .then((result) => {
+      replied = result;
+    });
+  expect(lines).toEqual([`mergeRequests.fixture_job_log {"page":"${page}"}`]);
+  await vi.advanceTimersByTimeAsync(399);
+  expect(replied).toBeNull();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(replied).toEqual({
+    ok: true,
+    value: { kind: "log", log: { text: expect.stringContaining("lint:docs"), cut: false } },
+  });
+});

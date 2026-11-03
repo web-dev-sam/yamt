@@ -8,7 +8,7 @@ export const LOGGED_OUT_DETAIL =
 export const REFUSED_MESSAGE = "Field 'approvedBy' doesn't exist on type 'MergeRequest'";
 export const PAGE_FAILED_MESSAGE = "glab api graphql: 502 Bad Gateway";
 
-const ORIGIN = "https://gitlab.example/taskboard/taskboard";
+export const ORIGIN = "https://gitlab.example/taskboard/taskboard";
 const NEWEST_IID = 640;
 export const ALREADY_OPEN_IID = 639;
 export const FETCH_FAILS_IID = 638;

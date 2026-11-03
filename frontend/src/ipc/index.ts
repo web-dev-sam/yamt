@@ -70,6 +70,7 @@ export type {
   CheckedRow,
   ContinueMergeReply,
   GitLabProject,
+  JobLogReply,
   ListEnd,
   LocalMerge,
   Label,

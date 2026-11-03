@@ -14,6 +14,7 @@ import {
   REFUSED_MESSAGE,
   REFUSING_REVIEWER,
 } from "./fixtureMergeRequestData";
+import { fixtureJobLog } from "./fixtureMergeRequestLogs";
 import type { Log } from "./log";
 import {
   toCheckedRow,
@@ -65,6 +66,7 @@ const SLOW_PAGE_MS = 1000;
 const LOCAL_CHECK_MS = 1000;
 const OPEN_PAUSE_MS = 1000;
 const RE_REQUEST_PAUSE_MS = 1000;
+const LOG_PAUSE_MS = 400;
 const REFUSED_REREQUEST = "You are not allowed to re-request a review on this merge request.";
 const LOADED: Generated.ListEnd = { kind: "loaded" };
 const CLEAN_IID = 632;
@@ -225,6 +227,20 @@ function rerequestScript(log: Log): Pick<MergeRequestSource, "rerequestReview"> 
   };
 }
 
+function pageScript(log: Log): Pick<MergeRequestSource, "openPage" | "readJobLog"> {
+  return {
+    async openPage(page) {
+      log.info("mergeRequests.fixture_page", { page });
+      return { ok: true, value: { kind: "opened" } };
+    },
+    async readJobLog(page) {
+      log.info("mergeRequests.fixture_job_log", { page });
+      await pause(LOG_PAUSE_MS);
+      return { ok: true, value: fixtureJobLog(page) };
+    },
+  };
+}
+
 /** `?mr=<script>` scripts GitLab's answers; without it the window has no GitLab project. */
 export function createFixtureMergeRequests(log: Log, search: string): MergeRequestSource {
   const script = shownScript(log, search);
@@ -258,11 +274,8 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
       await pause(OPEN_PAUSE_MS);
       return { ok: true, value: toOpenReply(OPEN_REPLIES[iid] ?? { kind: "opened" }) };
     },
-    async openPage(page) {
-      log.info("mergeRequests.fixture_page", { page });
-      return { ok: true, value: { kind: "opened" } };
-    },
     ...localMergeScript(),
     ...rerequestScript(log),
+    ...pageScript(log),
   };
 }

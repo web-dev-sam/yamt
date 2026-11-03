@@ -1,0 +1,4 @@
+just mutants HEAD → 849 killed, 222 survived, 7 no coverage (78.76%); the survivors outside the lines listed below are on lines this slice did not change
+src/ipc/fixtureMergeRequestLogs.ts:145:7 `job === null ||` → false — equivalent: `null < FIRST_JOB` is true in JS, so the result is still NOT_OFFERED.
+fixtureMergeRequestLogs.ts:11-38 module consts (JOB_PREFIX, JOB_NUMBER, LOG_START_MS, STREAM, E, NOT_OFFERED, REFUSALS…) — gate-covered: static, not re-evaluated under the vitest runner (#732); tests assert each.
+src/ipc/fixtureMergeRequestLogs.ts:40-88 (LINT_LINES array and its 48 line literals) — gate-covered: the same module-level static case (#732); the lint test asserts each construct's text and runs.

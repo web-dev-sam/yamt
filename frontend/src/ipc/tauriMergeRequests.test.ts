@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type * as Generated from "./bindings";
-import { isMergeRequestIid, isWebPage } from "./domain";
+import { isMergeRequestIid, isWebPage, type WebPage } from "./domain";
 import type { CheckedRow, MergeRequestPage } from "./mergeRequestDomain";
 import { createTauriMergeRequests, PICTURE_SCHEME } from "./tauriMergeRequests";
 import { branded } from "./validate";
@@ -12,6 +12,7 @@ const commands = vi.hoisted(() => ({
   openMergeRequest: vi.fn(),
   openPage: vi.fn(),
   rerequestReview: vi.fn(),
+  readJobLog: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -50,7 +51,15 @@ const ROW: Generated.MergeRequestRow = {
 };
 
 const STOPPED = { kind: "WorkerStopped" };
+const JOB_PAGE = "https://gitlab.example/x/-/jobs/9000";
 const MICROTASKS = 10;
+
+function jobPage(): WebPage {
+  if (!isWebPage(JOB_PAGE)) {
+    throw new Error("not a web page");
+  }
+  return JOB_PAGE;
+}
 
 function page(rows: Generated.MergeRequestRow[]): Generated.ListMessage {
   return { kind: "page", page: { me: "sam", rows } };
@@ -305,10 +314,23 @@ test("a page is passed as it came and its answer comes back", async () => {
   expect(commands.openPage).toHaveBeenCalledWith(page);
 });
 
+test("readJobLog_calls_the_command_with_the_page_and_returns_its_reply", async () => {
+  const page = jobPage();
+  const reply: Generated.JobLogReply = {
+    kind: "log",
+    log: { text: "\u001b[31mError\u001b[0m\r\n", cut: true },
+  };
+  commands.readJobLog.mockResolvedValue({ status: "ok", data: reply });
+
+  expect(await createTauriMergeRequests().readJobLog(page)).toEqual({ ok: true, value: reply });
+  expect(commands.readJobLog).toHaveBeenCalledWith(page);
+});
+
 test.each([
   ["listMergeRequests", { kind: "WorkerStopped" }],
   ["openMergeRequest", { kind: "WorkerStopped" }],
   ["rerequestReview", { kind: "WorkerStopped" }],
+  ["readJobLog", { kind: "WorkerStopped" }],
 ] as const)("a %s failure comes back unchanged", async (name, failure) => {
   commands[name].mockResolvedValue({ status: "error", error: failure });
   const source = createTauriMergeRequests();
@@ -316,6 +338,7 @@ test.each([
     listMergeRequests: () => source.listMergeRequests(() => undefined, unchecked),
     openMergeRequest: () => source.openMergeRequest(branded(1, isMergeRequestIid, "iid")),
     rerequestReview: () => source.rerequestReview(branded(1, isMergeRequestIid, "iid"), "anna"),
+    readJobLog: () => source.readJobLog(jobPage()),
   };
   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
 });

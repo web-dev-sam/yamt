@@ -88,5 +88,8 @@ export function createTauriMergeRequests(): MergeRequestSource {
         toRerequestReply(reply, uploadedPicture),
       );
     },
+    async readJobLog(page) {
+      return toResult(await commands.readJobLog(page));
+    },
   };
 }

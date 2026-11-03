@@ -63,6 +63,7 @@ export type LocalMerge = Readonly<Generated.LocalMerge>;
 export type RerequestReply =
   | Readonly<Exclude<Generated.RerequestReply, { kind: "requested" }>>
   | { readonly kind: "requested"; readonly reviewers: readonly Reviewer[] };
+export type JobLogReply = Readonly<Generated.JobLogReply>;
 
 type UploadedPicture = (username: string) => string;
 
