@@ -62,6 +62,12 @@ light. Real app on the fake glab: the same. `just check` passes.
 Other sort choices; sorting outside review mode; assigning reviewers; notifications; a reviewer not on any loaded
 merge request.
 
+## When done (owner #2201)
+
+The session's last reply to the owner ends with the command that starts the next part, verbatim:
+
+`/new`, then `Implement docs/slices/request-mr-starts.md`
+
 ## Slice graph (proposal; the session's orchestrator refines it)
 
 | row | slice                                                         | owner       | needs |

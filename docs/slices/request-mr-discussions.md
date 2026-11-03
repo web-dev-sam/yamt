@@ -83,6 +83,12 @@ showing whole threads; notifications.
   is what makes review mode's order by waiting discussions available.
 - (#2200) Default: load fully.
 
+## When done (owner #2201)
+
+The session's last reply to the owner ends with the command that starts the next part, verbatim:
+
+`/new`, then `Implement docs/slices/request-mr-review-mode.md`
+
 ## Slice graph (proposal; the session's orchestrator refines it)
 
 | row | slice                                                                                                                        | owner       | needs |
