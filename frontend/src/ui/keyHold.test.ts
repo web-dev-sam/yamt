@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { effectScope, nextTick, type EffectScope } from "vue";
 
-import { useKeyHold, type KeyHoldEvent } from "./keyHold";
+import { useKeyHold, type KeyHold, type KeyHoldEvent } from "./keyHold";
 
 const page = vi.hoisted(() => {
   class Target extends EventTarget {
@@ -53,13 +53,17 @@ afterEach(() => {
   scope.stop();
 });
 
-function recording(_held: boolean, event: KeyHoldEvent): boolean {
-  seen.push(event);
-  return answer;
-}
+const RECORDING: KeyHold<boolean> = {
+  start: false,
+  after: (_held, event) => {
+    seen.push(event);
+    return answer;
+  },
+  holding: (held) => held,
+};
 
 function holdIn(pointerEvents: string[] = ["pointermove", "wheel"]): Readonly<{ value: boolean }> {
-  const held = scope.run(() => useKeyHold(recording, pointerEvents));
+  const held = scope.run(() => useKeyHold(RECORDING, pointerEvents));
   if (held === undefined) {
     throw new Error("scope stopped");
   }
@@ -75,10 +79,17 @@ function send(target: EventTarget, type: string, fields: Record<string, unknown>
 test("the rule's answer is the state, fed the state before", () => {
   const passed: boolean[] = [];
   const held = scope.run(() =>
-    useKeyHold((before) => {
-      passed.push(before);
-      return !before;
-    }, []),
+    useKeyHold(
+      {
+        start: false,
+        after: (before) => {
+          passed.push(before);
+          return !before;
+        },
+        holding: () => false,
+      },
+      [],
+    ),
   );
 
   send(page.window, "keydown", { key: "a", repeat: false });
@@ -86,6 +97,67 @@ test("the rule's answer is the state, fed the state before", () => {
   send(page.window, "keydown", { key: "a", repeat: false });
   expect(held?.value).toBe(false);
   expect(passed).toEqual([false, true]);
+});
+
+test("the_state_is_the_rules_own_type", () => {
+  const passed: string[] = [];
+  const keys = scope.run(() =>
+    useKeyHold<string>(
+      {
+        start: "start",
+        after: (before, event) => {
+          passed.push(before);
+          return event.kind === "keydown" ? `${before}+${event.key}` : before;
+        },
+        holding: () => false,
+      },
+      [],
+    ),
+  );
+
+  expect(keys?.value).toBe("start");
+  send(page.window, "keydown", { key: "a", repeat: false });
+  send(page.window, "keydown", { key: "b", repeat: false });
+  expect(keys?.value).toBe("start+a+b");
+  expect(passed).toEqual(["start", "start+a"]);
+});
+
+test("pointer_events_are_heard_only_while_holding", async () => {
+  const counted = scope.run(() =>
+    useKeyHold<number>(
+      {
+        start: 0,
+        after: (count, event) => (event.kind === "keydown" ? count + 1 : count),
+        holding: (count) => count === 1,
+      },
+      ["pointermove"],
+    ),
+  );
+  expect(page.window.listening.has("pointermove")).toBe(false);
+
+  send(page.window, "keydown", { key: "a", repeat: false });
+  await nextTick();
+  expect(counted?.value).toBe(1);
+  expect(page.window.listening.get("pointermove")).toBe("capture passive");
+
+  send(page.window, "keydown", { key: "a", repeat: false });
+  await nextTick();
+  expect(page.window.listening.has("pointermove")).toBe(false);
+});
+
+test("a_pointerdown_is_pressed", async () => {
+  holdIn(["pointerdown", "pointermove", "pointerup"]);
+  send(page.window, "keydown", { key: "a", repeat: false });
+  await nextTick();
+
+  send(page.window, "pointerdown", { altKey: false, shiftKey: true });
+  send(page.window, "pointermove", { altKey: false, shiftKey: true });
+  send(page.window, "pointerup", { altKey: false, shiftKey: true });
+  expect(seen.slice(1)).toEqual([
+    { kind: "pointer", altKey: false, shiftKey: true, pressed: true },
+    { kind: "pointer", altKey: false, shiftKey: true, pressed: false },
+    { kind: "pointer", altKey: false, shiftKey: true, pressed: false },
+  ]);
 });
 
 test("key presses and releases reach the rule with their key, repeat and modifiers", () => {
@@ -141,8 +213,8 @@ test("a pointer event reaches the rule with its modifiers", async () => {
   send(page.window, "pointerdown", { altKey: true, shiftKey: false });
   send(page.window, "wheel", { altKey: false, shiftKey: true });
   expect(seen.slice(1)).toEqual([
-    { kind: "pointer", altKey: true, shiftKey: false },
-    { kind: "pointer", altKey: false, shiftKey: true },
+    { kind: "pointer", altKey: true, shiftKey: false, pressed: true },
+    { kind: "pointer", altKey: false, shiftKey: true, pressed: false },
   ]);
 });
 

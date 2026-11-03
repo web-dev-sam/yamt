@@ -29,6 +29,7 @@ const NAMED_KEYS = [
   "F10",
   "F11",
   "F12",
+  "Shift",
 ] as const;
 type NamedKey = (typeof NAMED_KEYS)[number];
 
@@ -96,6 +97,7 @@ const WEBDRIVER_KEYS: Readonly<Record<NamedKey, string>> = {
   F10: "\uE03A",
   F11: "\uE03B",
   F12: "\uE03C",
+  Shift: WEBDRIVER_MODIFIERS.Shift,
 };
 
 const XDOTOOL_MODIFIERS: Readonly<Record<Modifier, string>> = {
@@ -134,6 +136,7 @@ const XDOTOOL_KEYS: Readonly<Record<NamedKey, string>> = {
   F10: "F10",
   F11: "F11",
   F12: "F12",
+  Shift: "Shift_L",
 };
 
 const PUNCTUATION_KEYSYMS: Readonly<Record<string, string>> = {

@@ -41,6 +41,7 @@ export type MergeRequestStep =
   | "list"
   | "open"
   | "job"
+  | "jobLog"
   | "mergeRequest"
   | "resolve"
   | "continue"

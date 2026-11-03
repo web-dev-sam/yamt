@@ -1,6 +1,6 @@
 import type { ShallowRef } from "vue";
 
-import { useKeyHold } from "./keyHold";
+import { useKeyHold, type KeyHold } from "./keyHold";
 
 export type HoldEvent =
   | { readonly kind: "keydown"; readonly key: string; readonly repeat: boolean }
@@ -30,6 +30,12 @@ export function heldAfter(held: boolean, event: HoldEvent): boolean {
   }
 }
 
+const ALT_HOLD: KeyHold<boolean> = {
+  start: false,
+  after: heldAfter,
+  holding: (held) => held,
+};
+
 export function useAltHold(): Readonly<ShallowRef<boolean>> {
-  return useKeyHold(heldAfter, POINTER_EVENTS);
+  return useKeyHold(ALT_HOLD, POINTER_EVENTS);
 }

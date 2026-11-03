@@ -68,7 +68,7 @@ function focusLeft(held: Held, event: FocusEvent): void {
 }
 
 function keyPressed(held: Held, event: KeyboardEvent): void {
-  if (event.key === "Escape" && held.open.value) {
+  if (event.key === "Escape" && !event.defaultPrevented && held.open.value) {
     event.preventDefault();
     held.open.value = false;
     held.opener()?.focus();

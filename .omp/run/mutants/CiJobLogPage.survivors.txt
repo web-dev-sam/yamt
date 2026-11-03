@@ -1,0 +1,3 @@
+just mutants HEAD → 827 killed, 7 survived, 21 no cov, 96.73% (editor/ and .vue not mutated)
+src/ui/mergeRequestLogText.ts:27 default arm (NoCoverage ×2) — equivalent: the `never` arm cannot be reached once the switch is exhaustive (same as the 7 existing such arms in mergeRequestsText.ts/problemText.ts)
+All other survivors are on lines I did not change: keys.ts:195,208 (parse error strings), problemText.ts:166,167,207, useHoverBox.ts:117.

@@ -95,7 +95,7 @@ export function approvalsText(count: number): string {
 export function jobTitle(name: string, page: string | null): string {
   return page === null
     ? "GitLab gave no address for this job's log"
-    : `Open the log of ${name} on GitLab`;
+    : `Open the log of ${name} on GitLab. Shift: show the log here`;
 }
 
 export function clearFilterTitle(name: string): string {

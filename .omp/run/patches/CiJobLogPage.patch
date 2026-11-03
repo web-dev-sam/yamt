@@ -1,0 +1,1242 @@
+diff --git a/frontend/scripts/app-session/keys.test.ts b/frontend/scripts/app-session/keys.test.ts
+index 0f64af0..58b5f78 100644
+--- a/frontend/scripts/app-session/keys.test.ts
++++ b/frontend/scripts/app-session/keys.test.ts
+@@ -56,6 +56,16 @@ test("Shift+Tab and Alt and Meta use their own modifier codes", () => {
+   expect(xdotoolChord(parseChord("Alt+Meta+a"))).toBe("alt+super+a");
+ });
+ 
++test("a_lone_shift_is_a_key_both_ways", () => {
++  expect(chordActions(parseChord("Shift"))).toEqual([
++    { type: "keyDown", value: SHIFT },
++    { type: "keyUp", value: SHIFT },
++  ]);
++  expect(xdotoolChord(parseChord("shift"))).toBe("Shift_L");
++  expect(xdotoolChord(parseChord("Shift+a"))).toBe("shift+a");
++  expect(parseChord("Shift+a")).toEqual({ modifiers: ["Shift"], key: { kind: "char", char: "a" } });
++});
++
+ test("names and modifiers are case-insensitive and take the usual aliases", () => {
+   expect(parseChord("control+shift+z")).toEqual(parseChord("Ctrl+Shift+Z"));
+   expect(parseChord("esc")).toEqual(parseChord("Escape"));
+diff --git a/frontend/scripts/app-session/keys.ts b/frontend/scripts/app-session/keys.ts
+index 9037861..be8b80a 100644
+--- a/frontend/scripts/app-session/keys.ts
++++ b/frontend/scripts/app-session/keys.ts
+@@ -29,6 +29,7 @@ const NAMED_KEYS = [
+   "F10",
+   "F11",
+   "F12",
++  "Shift",
+ ] as const;
+ type NamedKey = (typeof NAMED_KEYS)[number];
+ 
+@@ -96,6 +97,7 @@ const WEBDRIVER_KEYS: Readonly<Record<NamedKey, string>> = {
+   F10: "\uE03A",
+   F11: "\uE03B",
+   F12: "\uE03C",
++  Shift: WEBDRIVER_MODIFIERS.Shift,
+ };
+ 
+ const XDOTOOL_MODIFIERS: Readonly<Record<Modifier, string>> = {
+@@ -134,6 +136,7 @@ const XDOTOOL_KEYS: Readonly<Record<NamedKey, string>> = {
+   F10: "F10",
+   F11: "F11",
+   F12: "F12",
++  Shift: "Shift_L",
+ };
+ 
+ const PUNCTUATION_KEYSYMS: Readonly<Record<string, string>> = {
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 42632df..c3e739c 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -48,7 +48,9 @@ Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window,
+ 
+ Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). WebKit sends no pointer events to a disabled button, so a control that can be disabled (a CI job without a log, the row action, open changes while fetching) carries its tip on a wrapper and the button `disabled:pointer-events-none`. `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); it and the due-date box close on a scroll outside them (`useScrollOutside`, capture phase, the one copy of that rule). `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter>` for the three filters, finds each filter's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click; Escape with a filter list open closes the list, not the page.
+ 
+-Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (the "created … ago" hover is `dateTimeText`, "30.10.2026, 15:04", no locale; labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date `DD.MM.YYYY` over the days left in the error colour when overdue; its `role="dialog"` box "Choose a due date" holds a text field on its own draft (`v-model`, set to the shown date when the box opens, so a re-render never rewrites it) that `typedDay` reads on Enter — a refused text stays as typed, sets `aria-invalid` and the error border, saves nothing —, `MergeRequestCalendar.vue` and Today (`PICK_TODAY`) / Clear; only Enter, a click or a footer button saves, never blur), then discussions and approvals (`approversText`, one name per line). `MergeRequestCalendar.vue` (`selected`, `today`, emits `pick`) is shadcn's Calendar: it owns the focused day, and the shown month is the focused day's (`monthOf`); the caption between the Previous / Next month chevrons, `WEEKDAYS` and `monthGrid`'s six weeks as `role="grid"` labelled by the caption, each day a button named `dayName` (`aria-selected` on its gridcell, `aria-current="date"` today); one tab stop (roving `tabindex`), the WAI-ARIA date-picker keys by `movedDay` (arrows, Home/End, PageUp/PageDown, Shift for a year; Enter/Space are the button's click), and it focuses its day when it mounts. Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)` with the click's `shiftKey`; while Shift is held (`useShiftHeld.ts`, one instance per window shared by every filter through vueuse `createSharedComposable`: its rule `shiftHeldAfter` on `keyHold.ts`'s listeners, the shell Alt's hold uses too; from Shift's keydown to its keyup by key name, since WebKitGTK on X11 reports Shift still set on its own release; off on blur, a hidden page, or a pointer event without `shiftKey`) every value shows a muted `circle-minus`, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
++Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (the "created … ago" hover is `dateTimeText`, "30.10.2026, 15:04", no locale; labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date `DD.MM.YYYY` over the days left in the error colour when overdue; its `role="dialog"` box "Choose a due date" holds a text field on its own draft (`v-model`, set to the shown date when the box opens, so a re-render never rewrites it) that `typedDay` reads on Enter — a refused text stays as typed, sets `aria-invalid` and the error border, saves nothing —, `MergeRequestCalendar.vue` and Today (`PICK_TODAY`) / Clear; only Enter, a click or a footer button saves, never blur), then discussions and approvals (`approversText`, one name per line). `MergeRequestCalendar.vue` (`selected`, `today`, emits `pick`) is shadcn's Calendar: it owns the focused day, and the shown month is the focused day's (`monthOf`); the caption between the Previous / Next month chevrons, `WEEKDAYS` and `monthGrid`'s six weeks as `role="grid"` labelled by the caption, each day a button named `dayName` (`aria-selected` on its gridcell, `aria-current="date"` today); one tab stop (roving `tabindex`), the WAI-ARIA date-picker keys by `movedDay` (arrows, Home/End, PageUp/PageDown, Shift for a year; Enter/Space are the button's click), and it focuses its day when it mounts. Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)` with the click's `shiftKey`; while Shift is held (`useShiftHeld.ts` `useShiftHeld()`, one state per window shared by every filter and every CI box through vueuse `createSharedComposable`: the rule `shiftAfter` over `ShiftState` — `up` or `held { alone }`, both with a `taps` count — on `keyHold.ts`'s one listener set, `useKeyHold(KeyHold<S>)`, generic over its state, which the shell Alt's boolean hold uses too; held from Shift's keydown to its keyup by key name, since WebKitGTK on X11 reports Shift still set on its own release; up on blur, a hidden page, or a pointer event without `shiftKey`, none of which counts a tap) every value shows a muted `circle-minus`, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
++
++Job logs (request `docs/slices/request-ci-job-log.md`, plan §2 #158–#161): `mergeRequestJobLogs.ts` holds the window's one log box (`jobLog`): Shift over the job already loading or shown changes nothing; any other job writes a new `loading` entry, and a reply is written only into the entry it was asked for (parsed once by `mergeRequests/` `jobLogView`); `closeJobLog` sets null. The search texts are remembered per job name, no repository key (`jobSearch`/`setJobSearch`, key `yamt.mergeRequests.jobSearches`); "" forgets one. A Shift tap is `useShiftTaps()` (`useShiftHeld.ts`): Shift down then up with no other key and no pointer press between, so Shift+Tab, Shift+click and a typed capital never count. `CiStatusBox.vue` watches the count, never `open && held` (a Shift held as the box opens would count), and asks for the pointed job (its `<li>`, since a disabled button gets no pointer events), else the focused one, only while its box is open, the job has a page and focus is in no text field (`rangeKeys.ts` `isTypingTarget`; the log's own field included, so Shift there types a capital and switches nothing). `CiStatusJobLog.vue` is a DOM child of the CI box's hover area, after the box, so `useHoverBox`'s one inside rule holds both and a scroll inside the log closes nothing; it sits left of the CI box, tops level (`useMenuPlacement`, clamped), is keyed by the job's page and closes when the CI box does. Escape in the log is the log's: it prevents the default and closes, and `CiStatusBox` puts focus on that job's button; `useHoverBox` ignores an Escape already `defaultPrevented`, so a second Escape closes the CI box. Lines are static: one `div` per line, one `span` per run with `mergeRequestLogLook.ts` `runClasses` and the run's text as text (never markup); the log opens at its end (`useFollowEnd`). The search (`search/` `matcherOf`, case-insensitive, mapped onto runs by `hitPlaces`) paints CSS Custom Highlights `job-log-match` and `job-log-current` over those text nodes, with no DOM change; the current hit starts at the last one and is centred by `scrollTop` only; Enter / Shift+Enter step it; both highlights are deleted when the log unmounts. Opening fills the field with the remembered text, selected and searched. Words in `mergeRequestLogText.ts`.
+ 
+ Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid (`rechecked`, `mergeRequests/`) among its own load's rows only — `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap, `null` once a failed first load cleared them) is that load, else the load's own buffer (empty unless it is a refresh, read only by a refresh's swap) — so any other is dropped, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
+ 
+diff --git a/frontend/src/ui/CiStatusBox.vue b/frontend/src/ui/CiStatusBox.vue
+index d9b203d..4d4b97f 100644
+--- a/frontend/src/ui/CiStatusBox.vue
++++ b/frontend/src/ui/CiStatusBox.vue
+@@ -1,5 +1,6 @@
+ <script setup lang="ts">
+-import { computed, useTemplateRef, type Component } from "vue";
++import { useElementBounding } from "@vueuse/core";
++import { computed, shallowRef, useTemplateRef, watch, type Component } from "vue";
+ import CircleCheck from "~icons/lucide/circle-check";
+ import CircleDot from "~icons/lucide/circle-dot";
+ import CircleMinus from "~icons/lucide/circle-minus";
+@@ -10,14 +11,18 @@ import Cog from "~icons/lucide/cog";
+ 
+ import type { MergeRequestRow, WebPage } from "../ipc";
+ import { ciBox, ciStatusText, type CiStatusName } from "../mergeRequests";
++import CiStatusJobLog from "./CiStatusJobLog.vue";
++import { useMergeRequests } from "./mergeRequestsStore";
+ import {
+   ALLOWED_TO_FAIL,
+   FAILED_JOBS_TITLE,
+   jobTitle,
+   MORE_FAILED_JOBS,
+ } from "./mergeRequestsText";
++import { isTypingTarget } from "./rangeKeys";
+ import { vTooltip } from "./tooltip";
+ import { useHoverBox } from "./useHoverBox";
++import { useShiftTaps } from "./useShiftHeld";
+ 
+ type Pipeline = NonNullable<MergeRequestRow["pipeline"]>;
+ type FailedJob = Pipeline["failedJobs"][number];
+@@ -36,6 +41,7 @@ const LOOKS: Readonly<Record<CiStatusName, StatusLook>> = {
+   manual: { icon: Cog, tone: "text-fg-muted" },
+ };
+ 
++const { jobLog, showJobLog, closeJobLog } = useMergeRequests();
+ const area = useTemplateRef<HTMLSpanElement>("area");
+ const icon = useTemplateRef<HTMLButtonElement>("icon");
+ const box = useTemplateRef<HTMLDivElement>("box");
+@@ -44,18 +50,69 @@ const { open, placement, on } = useHoverBox({
+   opener: () => icon.value,
+   box,
+ });
++const boxBounds = useElementBounding(box);
++const pointed = shallowRef<FailedJob | null>(null);
++const focused = shallowRef<FailedJob | null>(null);
+ 
+ const look = computed(() => LOOKS[props.pipeline.status]);
+ const view = computed(() =>
+   ciBox(props.pipeline.status, props.pipeline.failedJobs, props.pipeline.moreFailedJobs),
+ );
+ const statusText = computed(() => ciStatusText(props.pipeline.status));
++const ownLog = computed(() => {
++  const shown = jobLog.value;
++  return shown !== null && props.pipeline.failedJobs.some(({ page }) => page === shown.job.page)
++    ? shown
++    : null;
++});
++const anchor = computed(() => ({ left: boxBounds.left.value, top: boxBounds.top.value }));
++
++watch(useShiftTaps(), () => {
++  const job = pointed.value ?? focused.value;
++  if (!open.value || job === null || job.page === null || isTypingTarget(document.activeElement)) {
++    return;
++  }
++  void showJobLog({ name: job.name, page: job.page });
++});
++watch(open, (now) => {
++  if (!now && ownLog.value !== null) {
++    closeJobLog();
++  }
++});
+ 
+ function openJob({ page }: FailedJob): void {
+   if (page !== null) {
+     emit("openJob", page);
+   }
+ }
++
++function point(job: FailedJob): void {
++  pointed.value = job;
++}
++
++function unpoint(job: FailedJob): void {
++  if (pointed.value === job) {
++    pointed.value = null;
++  }
++}
++
++function focus(job: FailedJob): void {
++  focused.value = job;
++}
++
++function unfocus(job: FailedJob): void {
++  if (focused.value === job) {
++    focused.value = null;
++  }
++}
++
++function logClosed(): void {
++  const page = ownLog.value?.job.page;
++  closeJobLog();
++  const index =
++    view.value.kind === "jobs" ? view.value.jobs.findIndex((job) => job.page === page) : -1;
++  box.value?.querySelectorAll<HTMLButtonElement>("li > button")[index]?.focus();
++}
+ </script>
+ 
+ <template>
+@@ -94,12 +151,17 @@ function openJob({ page }: FailedJob): void {
+             v-for="(job, index) in view.jobs"
+             :key="index"
+             v-tooltip="jobTitle(job.name, job.page)"
++            @pointerenter="point(job)"
++            @pointerleave="unpoint(job)"
+           >
+             <button
+               type="button"
+               :disabled="job.page === null"
++              aria-keyshortcuts="Shift"
+               class="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected disabled:pointer-events-none"
+               @click="openJob(job)"
++              @focus="focus(job)"
++              @blur="unfocus(job)"
+             >
+               <span>{{ job.name }}</span>
+               <span class="text-fg-muted">{{ job.stage }}</span>
+@@ -112,5 +174,13 @@ function openJob({ page }: FailedJob): void {
+         <p v-if="view.more" class="px-2 pt-0.5 pb-1 text-fg-muted">{{ MORE_FAILED_JOBS }}</p>
+       </template>
+     </div>
++    <CiStatusJobLog
++      v-if="open && ownLog !== null"
++      :key="ownLog.job.page"
++      :shown="ownLog"
++      :anchor
++      @close="logClosed"
++      @open-job="emit('openJob', $event)"
++    />
+   </span>
+ </template>
+diff --git a/frontend/src/ui/CiStatusJobLog.vue b/frontend/src/ui/CiStatusJobLog.vue
+new file mode 100644
+index 0000000..06c0755
+--- /dev/null
++++ b/frontend/src/ui/CiStatusJobLog.vue
+@@ -0,0 +1,237 @@
++<script setup lang="ts">
++import { useElementSize } from "@vueuse/core";
++import { computed, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch } from "vue";
++
++import type { WebPage } from "../ipc";
++import {
++  firstHit,
++  hitCountText,
++  hitPlaces,
++  NO_RESULTS,
++  steppedHit,
++  type HitPlace,
++} from "../mergeRequests";
++import { matcherOf } from "../search";
++import type { ShownJobLog } from "./mergeRequestJobLogs";
++import { runClasses } from "./mergeRequestLogLook";
++import {
++  JOB_LOG_CUT,
++  JOB_LOG_LOADING,
++  JOB_LOG_SEARCH,
++  JOB_LOG_WHOLE,
++  jobLogRefusalText,
++  jobLogTitle,
++} from "./mergeRequestLogText";
++import { useMergeRequests } from "./mergeRequestsStore";
++import { problemText } from "./problemText";
++import { useFollowEnd } from "./useFollowEnd";
++import { useMenuPlacement } from "./useMenuPlacement";
++
++const props = defineProps<{
++  shown: ShownJobLog;
++  anchor: { readonly left: number; readonly top: number };
++}>();
++const emit = defineEmits<{ close: []; openJob: [page: WebPage] }>();
++
++const MATCHES = "job-log-match";
++const CURRENT = "job-log-current";
++const HALF = 0.5;
++
++const { jobSearch, setJobSearch } = useMergeRequests();
++const box = useTemplateRef<HTMLDivElement>("box");
++const field = useTemplateRef<HTMLInputElement>("field");
++const scroller = useTemplateRef<HTMLDivElement>("scroller");
++const lines = useTemplateRef<HTMLDivElement>("lines");
++const query = shallowRef(jobSearch(props.shown.job.name));
++const places = shallowRef<readonly HitPlace[]>([]);
++const current = shallowRef<number | null>(null);
++const boxSize = useElementSize(box, undefined, { box: "border-box" });
++const placement = useMenuPlacement(box, () => ({
++  x: props.anchor.left - boxSize.width.value,
++  y: props.anchor.top,
++}));
++const follow = useFollowEnd(scroller, () => props.shown.load);
++
++const title = computed(() => jobLogTitle(props.shown.job.name));
++const loaded = computed(() => (props.shown.load.kind === "shown" ? props.shown.load : null));
++const note = computed((): string | null => {
++  const load = props.shown.load;
++  switch (load.kind) {
++    case "loading":
++      return JOB_LOG_LOADING;
++    case "refused":
++      return jobLogRefusalText(load.reply);
++    case "failed":
++      return problemText(
++        { action: "mergeRequests", step: "jobLog", cause: load.cause },
++        navigator.platform,
++      );
++    case "shown":
++      return null;
++    default: {
++      const _exhaustive: never = load;
++      return _exhaustive;
++    }
++  }
++});
++const countText = computed(() => {
++  if (query.value === "" || loaded.value === null) {
++    return "";
++  }
++  return current.value === null ? NO_RESULTS : hitCountText(current.value, places.value.length);
++});
++
++watch(loaded, search, { flush: "post" });
++
++onMounted(() => {
++  field.value?.focus();
++  field.value?.select();
++  search();
++});
++
++onBeforeUnmount(() => {
++  CSS.highlights.delete(MATCHES);
++  CSS.highlights.delete(CURRENT);
++});
++
++function rangeOf(place: HitPlace): Range | null {
++  const line = lines.value?.children[place.line];
++  const start = line?.children[place.start.run]?.firstChild;
++  const end = line?.children[place.end.run]?.firstChild;
++  if (start === undefined || start === null || end === undefined || end === null) {
++    return null;
++  }
++  const range = new Range();
++  range.setStart(start, place.start.offset);
++  range.setEnd(end, place.end.offset);
++  return range;
++}
++
++function centre(range: Range): void {
++  const element = scroller.value;
++  if (element !== null) {
++    const hit = range.getBoundingClientRect();
++    const view = element.getBoundingClientRect();
++    element.scrollTop +=
++      hit.top + hit.height * HALF - (view.top + element.clientTop + element.clientHeight * HALF);
++  }
++}
++
++function showCurrent(): void {
++  const place = current.value === null ? undefined : places.value[current.value];
++  const range = place === undefined ? null : rangeOf(place);
++  if (range === null) {
++    CSS.highlights.delete(CURRENT);
++    return;
++  }
++  CSS.highlights.set(CURRENT, new Highlight(range));
++  centre(range);
++}
++
++function search(): void {
++  const view = loaded.value?.view;
++  const hits =
++    view === undefined
++      ? []
++      : (matcherOf({ text: query.value, matchCase: false })?.hits(view.text, Infinity).hits ?? []);
++  places.value = view === undefined ? [] : hitPlaces(view, hits);
++  current.value = firstHit(places.value.length);
++  const matches = new Highlight();
++  for (const place of places.value) {
++    const range = rangeOf(place);
++    if (range !== null) {
++      matches.add(range);
++    }
++  }
++  CSS.highlights.set(MATCHES, matches);
++  showCurrent();
++}
++
++function typed(event: Event): void {
++  if (event.target instanceof HTMLInputElement) {
++    query.value = event.target.value;
++    setJobSearch(props.shown.job.name, query.value);
++    search();
++  }
++}
++
++function fieldKey(event: KeyboardEvent): void {
++  if (event.key === "Enter" && current.value !== null) {
++    event.preventDefault();
++    current.value = steppedHit(current.value, places.value.length, event.shiftKey);
++    showCurrent();
++  }
++}
++
++function keydown(event: KeyboardEvent): void {
++  if (event.key === "Escape") {
++    event.preventDefault();
++    emit("close");
++  }
++}
++</script>
++
++<template>
++  <div
++    ref="box"
++    role="dialog"
++    :aria-label="title"
++    class="fixed z-10 flex h-[min(36rem,calc(100vh-2rem))] w-[min(56rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border border-control-border text-fg shadow-lg"
++    :style="placement"
++    @keydown="keydown"
++  >
++    <div class="flex items-center gap-2 bg-panel-inline px-2 py-1">
++      <span class="min-w-0 truncate">{{ title }}</span>
++      <input
++        ref="field"
++        type="text"
++        spellcheck="false"
++        :value="query"
++        :aria-label="JOB_LOG_SEARCH"
++        :placeholder="JOB_LOG_SEARCH"
++        class="ml-auto w-72 rounded border border-control-border bg-panel px-2 py-1 outline-none focus:border-primary"
++        @input="typed"
++        @keydown="fieldKey"
++      />
++      <span aria-live="polite" class="w-24 shrink-0 text-fg-muted">{{ countText }}</span>
++    </div>
++    <div
++      ref="scroller"
++      tabindex="0"
++      class="min-h-0 flex-1 overflow-y-auto bg-panel px-2 py-1 font-mono [overflow-wrap:anywhere] whitespace-pre-wrap"
++      @scroll="follow.scrolled"
++    >
++      <p v-if="note !== null">{{ note }}</p>
++      <template v-else-if="loaded !== null">
++        <p v-if="loaded.cut" class="text-fg-muted">
++          {{ JOB_LOG_CUT }}
++          <button
++            type="button"
++            class="rounded px-1 text-primary hover:bg-hover"
++            @click="emit('openJob', shown.job.page)"
++          >
++            {{ JOB_LOG_WHOLE }}
++          </button>
++        </p>
++        <div ref="lines">
++          <div v-for="(line, index) in loaded.view.lines" :key="index">
++            <span v-for="(run, at) in line.runs" :key="at" :class="runClasses(run.style)">{{
++              run.text
++            }}</span>
++          </div>
++        </div>
++      </template>
++    </div>
++  </div>
++</template>
++
++<style>
++::highlight(job-log-match) {
++  background-color: var(--color-search-match);
++}
++
++::highlight(job-log-current) {
++  background-color: var(--color-primary);
++  color: var(--color-on-primary);
++}
++</style>
+diff --git a/frontend/src/ui/altHold.ts b/frontend/src/ui/altHold.ts
+index b421b65..0d53004 100644
+--- a/frontend/src/ui/altHold.ts
++++ b/frontend/src/ui/altHold.ts
+@@ -1,6 +1,6 @@
+ import type { ShallowRef } from "vue";
+ 
+-import { useKeyHold } from "./keyHold";
++import { useKeyHold, type KeyHold } from "./keyHold";
+ 
+ export type HoldEvent =
+   | { readonly kind: "keydown"; readonly key: string; readonly repeat: boolean }
+@@ -30,6 +30,12 @@ export function heldAfter(held: boolean, event: HoldEvent): boolean {
+   }
+ }
+ 
++const ALT_HOLD: KeyHold<boolean> = {
++  start: false,
++  after: heldAfter,
++  holding: (held) => held,
++};
++
+ export function useAltHold(): Readonly<ShallowRef<boolean>> {
+-  return useKeyHold(heldAfter, POINTER_EVENTS);
++  return useKeyHold(ALT_HOLD, POINTER_EVENTS);
+ }
+diff --git a/frontend/src/ui/keyHold.test.ts b/frontend/src/ui/keyHold.test.ts
+index 3dad96f..adc04e7 100644
+--- a/frontend/src/ui/keyHold.test.ts
++++ b/frontend/src/ui/keyHold.test.ts
+@@ -1,7 +1,7 @@
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+ import { effectScope, nextTick, type EffectScope } from "vue";
+ 
+-import { useKeyHold, type KeyHoldEvent } from "./keyHold";
++import { useKeyHold, type KeyHold, type KeyHoldEvent } from "./keyHold";
+ 
+ const page = vi.hoisted(() => {
+   class Target extends EventTarget {
+@@ -53,13 +53,17 @@ afterEach(() => {
+   scope.stop();
+ });
+ 
+-function recording(_held: boolean, event: KeyHoldEvent): boolean {
+-  seen.push(event);
+-  return answer;
+-}
++const RECORDING: KeyHold<boolean> = {
++  start: false,
++  after: (_held, event) => {
++    seen.push(event);
++    return answer;
++  },
++  holding: (held) => held,
++};
+ 
+ function holdIn(pointerEvents: string[] = ["pointermove", "wheel"]): Readonly<{ value: boolean }> {
+-  const held = scope.run(() => useKeyHold(recording, pointerEvents));
++  const held = scope.run(() => useKeyHold(RECORDING, pointerEvents));
+   if (held === undefined) {
+     throw new Error("scope stopped");
+   }
+@@ -75,10 +79,17 @@ function send(target: EventTarget, type: string, fields: Record<string, unknown>
+ test("the rule's answer is the state, fed the state before", () => {
+   const passed: boolean[] = [];
+   const held = scope.run(() =>
+-    useKeyHold((before) => {
+-      passed.push(before);
+-      return !before;
+-    }, []),
++    useKeyHold(
++      {
++        start: false,
++        after: (before) => {
++          passed.push(before);
++          return !before;
++        },
++        holding: () => false,
++      },
++      [],
++    ),
+   );
+ 
+   send(page.window, "keydown", { key: "a", repeat: false });
+@@ -88,6 +99,67 @@ test("the rule's answer is the state, fed the state before", () => {
+   expect(passed).toEqual([false, true]);
+ });
+ 
++test("the_state_is_the_rules_own_type", () => {
++  const passed: string[] = [];
++  const keys = scope.run(() =>
++    useKeyHold<string>(
++      {
++        start: "start",
++        after: (before, event) => {
++          passed.push(before);
++          return event.kind === "keydown" ? `${before}+${event.key}` : before;
++        },
++        holding: () => false,
++      },
++      [],
++    ),
++  );
++
++  expect(keys?.value).toBe("start");
++  send(page.window, "keydown", { key: "a", repeat: false });
++  send(page.window, "keydown", { key: "b", repeat: false });
++  expect(keys?.value).toBe("start+a+b");
++  expect(passed).toEqual(["start", "start+a"]);
++});
++
++test("pointer_events_are_heard_only_while_holding", async () => {
++  const counted = scope.run(() =>
++    useKeyHold<number>(
++      {
++        start: 0,
++        after: (count, event) => (event.kind === "keydown" ? count + 1 : count),
++        holding: (count) => count === 1,
++      },
++      ["pointermove"],
++    ),
++  );
++  expect(page.window.listening.has("pointermove")).toBe(false);
++
++  send(page.window, "keydown", { key: "a", repeat: false });
++  await nextTick();
++  expect(counted?.value).toBe(1);
++  expect(page.window.listening.get("pointermove")).toBe("capture passive");
++
++  send(page.window, "keydown", { key: "a", repeat: false });
++  await nextTick();
++  expect(page.window.listening.has("pointermove")).toBe(false);
++});
++
++test("a_pointerdown_is_pressed", async () => {
++  holdIn(["pointerdown", "pointermove", "pointerup"]);
++  send(page.window, "keydown", { key: "a", repeat: false });
++  await nextTick();
++
++  send(page.window, "pointerdown", { altKey: false, shiftKey: true });
++  send(page.window, "pointermove", { altKey: false, shiftKey: true });
++  send(page.window, "pointerup", { altKey: false, shiftKey: true });
++  expect(seen.slice(1)).toEqual([
++    { kind: "pointer", altKey: false, shiftKey: true, pressed: true },
++    { kind: "pointer", altKey: false, shiftKey: true, pressed: false },
++    { kind: "pointer", altKey: false, shiftKey: true, pressed: false },
++  ]);
++});
++
+ test("key presses and releases reach the rule with their key, repeat and modifiers", () => {
+   holdIn();
+ 
+@@ -141,8 +213,8 @@ test("a pointer event reaches the rule with its modifiers", async () => {
+   send(page.window, "pointerdown", { altKey: true, shiftKey: false });
+   send(page.window, "wheel", { altKey: false, shiftKey: true });
+   expect(seen.slice(1)).toEqual([
+-    { kind: "pointer", altKey: true, shiftKey: false },
+-    { kind: "pointer", altKey: false, shiftKey: true },
++    { kind: "pointer", altKey: true, shiftKey: false, pressed: true },
++    { kind: "pointer", altKey: false, shiftKey: true, pressed: false },
+   ]);
+ });
+ 
+diff --git a/frontend/src/ui/keyHold.ts b/frontend/src/ui/keyHold.ts
+index 742c938..3edb747 100644
+--- a/frontend/src/ui/keyHold.ts
++++ b/frontend/src/ui/keyHold.ts
+@@ -9,15 +9,39 @@ export type KeyHoldEvent =
+       readonly altKey: boolean;
+       readonly shiftKey: boolean;
+     }
+-  | { readonly kind: "pointer"; readonly altKey: boolean; readonly shiftKey: boolean }
++  | {
++      readonly kind: "pointer";
++      readonly altKey: boolean;
++      readonly shiftKey: boolean;
++      readonly pressed: boolean;
++    }
+   | { readonly kind: "left" };
+ 
+-type HoldRule = (held: boolean, event: KeyHoldEvent) => boolean;
++export type KeyHold<S> = {
++  readonly start: S;
++  after(state: S, event: KeyHoldEvent): S;
++  /** Whether pointer events are listened to (only while a key is held). */
++  holding(state: S): boolean;
++};
+ 
+-export function useKeyHold(rule: HoldRule, pointerEvents: string[]): Readonly<ShallowRef<boolean>> {
+-  const held = shallowRef(false);
++function useLeaving(apply: (event: KeyHoldEvent) => void): void {
++  useEventListener(window, "blur", () => {
++    apply({ kind: "left" });
++  });
++  watch(useDocumentVisibility(), (visibility) => {
++    if (visibility === "hidden") {
++      apply({ kind: "left" });
++    }
++  });
++}
++
++export function useKeyHold<S>(
++  hold: KeyHold<S>,
++  pointerEvents: readonly string[],
++): Readonly<ShallowRef<S>> {
++  const state = shallowRef(hold.start);
+   function apply(event: KeyHoldEvent): void {
+-    held.value = rule(held.value, event);
++    state.value = hold.after(state.value, event);
+   }
+ 
+   useEventListener(
+@@ -36,21 +60,19 @@ export function useKeyHold(rule: HoldRule, pointerEvents: string[]): Readonly<Sh
+     },
+     { capture: true },
+   );
+-  useEventListener(window, "blur", () => {
+-    apply({ kind: "left" });
+-  });
+-  watch(useDocumentVisibility(), (visibility) => {
+-    if (visibility === "hidden") {
+-      apply({ kind: "left" });
+-    }
+-  });
++  useLeaving(apply);
+   useEventListener<MouseEvent>(
+-    () => (held.value ? window : null),
+-    pointerEvents,
++    () => (hold.holding(state.value) ? window : null),
++    [...pointerEvents],
+     (event) => {
+-      apply({ kind: "pointer", altKey: event.altKey, shiftKey: event.shiftKey });
++      apply({
++        kind: "pointer",
++        altKey: event.altKey,
++        shiftKey: event.shiftKey,
++        pressed: event.type === "pointerdown",
++      });
+     },
+     { capture: true, passive: true },
+   );
+-  return held;
++  return state;
+ }
+diff --git a/frontend/src/ui/mergeRequestLogLook.test.ts b/frontend/src/ui/mergeRequestLogLook.test.ts
+new file mode 100644
+index 0000000..14b56b6
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestLogLook.test.ts
+@@ -0,0 +1,74 @@
++import { expect, test } from "vitest";
++
++import type { AnsiColour, LogStyle } from "../mergeRequests";
++import { runClasses } from "./mergeRequestLogLook";
++
++const PLAIN: LogStyle = {
++  foreground: null,
++  background: null,
++  bold: false,
++  italic: false,
++  underline: false,
++  struck: false,
++};
++
++const COLOURS: readonly { readonly colour: AnsiColour; readonly token: string }[] = [
++  { colour: "black", token: "black" },
++  { colour: "red", token: "red" },
++  { colour: "green", token: "green" },
++  { colour: "yellow", token: "yellow" },
++  { colour: "blue", token: "blue" },
++  { colour: "magenta", token: "magenta" },
++  { colour: "cyan", token: "cyan" },
++  { colour: "white", token: "white" },
++  { colour: "brightBlack", token: "bright-black" },
++  { colour: "brightRed", token: "bright-red" },
++  { colour: "brightGreen", token: "bright-green" },
++  { colour: "brightYellow", token: "bright-yellow" },
++  { colour: "brightBlue", token: "bright-blue" },
++  { colour: "brightMagenta", token: "bright-magenta" },
++  { colour: "brightCyan", token: "bright-cyan" },
++  { colour: "brightWhite", token: "bright-white" },
++];
++
++test("the_plain_style_has_no_class", () => {
++  expect(runClasses(PLAIN)).toBe("");
++});
++
++test.each(COLOURS)("every_colour_has_its_class_both_ways: $colour", ({ colour, token }) => {
++  expect(runClasses({ ...PLAIN, foreground: colour })).toBe(`text-ansi-${token}`);
++  expect(runClasses({ ...PLAIN, background: colour })).toBe(`bg-ansi-${token}`);
++  expect(runClasses({ ...PLAIN, foreground: colour, background: colour })).toBe(
++    `text-ansi-${token} bg-ansi-${token}`,
++  );
++});
++
++test("every colour is tested once", () => {
++  expect(new Set(COLOURS.map(({ colour }) => colour)).size).toBe(16);
++});
++
++test("bold, italic, underline and strike each have their class", () => {
++  expect(runClasses({ ...PLAIN, bold: true })).toBe("font-bold");
++  expect(runClasses({ ...PLAIN, italic: true })).toBe("italic");
++  expect(runClasses({ ...PLAIN, underline: true })).toBe("underline");
++  expect(runClasses({ ...PLAIN, struck: true })).toBe("line-through");
++});
++
++test("underline_and_strike_together_keep_both_lines", () => {
++  expect(runClasses({ ...PLAIN, underline: true, struck: true })).toBe(
++    "[text-decoration-line:underline_line-through]",
++  );
++});
++
++test("every part together, in one order", () => {
++  expect(
++    runClasses({
++      foreground: "brightRed",
++      background: "blue",
++      bold: true,
++      italic: true,
++      underline: true,
++      struck: false,
++    }),
++  ).toBe("text-ansi-bright-red bg-ansi-blue font-bold italic underline");
++});
+diff --git a/frontend/src/ui/mergeRequestLogLook.ts b/frontend/src/ui/mergeRequestLogLook.ts
+new file mode 100644
+index 0000000..146bafc
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestLogLook.ts
+@@ -0,0 +1,62 @@
++import type { AnsiColour, LogStyle } from "../mergeRequests";
++
++const FOREGROUNDS: Readonly<Record<AnsiColour, string>> = {
++  black: "text-ansi-black",
++  red: "text-ansi-red",
++  green: "text-ansi-green",
++  yellow: "text-ansi-yellow",
++  blue: "text-ansi-blue",
++  magenta: "text-ansi-magenta",
++  cyan: "text-ansi-cyan",
++  white: "text-ansi-white",
++  brightBlack: "text-ansi-bright-black",
++  brightRed: "text-ansi-bright-red",
++  brightGreen: "text-ansi-bright-green",
++  brightYellow: "text-ansi-bright-yellow",
++  brightBlue: "text-ansi-bright-blue",
++  brightMagenta: "text-ansi-bright-magenta",
++  brightCyan: "text-ansi-bright-cyan",
++  brightWhite: "text-ansi-bright-white",
++};
++
++const BACKGROUNDS: Readonly<Record<AnsiColour, string>> = {
++  black: "bg-ansi-black",
++  red: "bg-ansi-red",
++  green: "bg-ansi-green",
++  yellow: "bg-ansi-yellow",
++  blue: "bg-ansi-blue",
++  magenta: "bg-ansi-magenta",
++  cyan: "bg-ansi-cyan",
++  white: "bg-ansi-white",
++  brightBlack: "bg-ansi-bright-black",
++  brightRed: "bg-ansi-bright-red",
++  brightGreen: "bg-ansi-bright-green",
++  brightYellow: "bg-ansi-bright-yellow",
++  brightBlue: "bg-ansi-bright-blue",
++  brightMagenta: "bg-ansi-bright-magenta",
++  brightCyan: "bg-ansi-bright-cyan",
++  brightWhite: "bg-ansi-bright-white",
++};
++
++function linesClass(underline: boolean, struck: boolean): string {
++  if (underline && struck) {
++    return "[text-decoration-line:underline_line-through]";
++  }
++  if (underline) {
++    return "underline";
++  }
++  return struck ? "line-through" : "";
++}
++
++/** The classes of a run: full class names from static tables (Tailwind sees them), "" for the plain style. */
++export function runClasses(style: LogStyle): string {
++  return [
++    style.foreground === null ? "" : FOREGROUNDS[style.foreground],
++    style.background === null ? "" : BACKGROUNDS[style.background],
++    style.bold ? "font-bold" : "",
++    style.italic ? "italic" : "",
++    linesClass(style.underline, style.struck),
++  ]
++    .filter((name) => name !== "")
++    .join(" ");
++}
+diff --git a/frontend/src/ui/mergeRequestLogText.test.ts b/frontend/src/ui/mergeRequestLogText.test.ts
+new file mode 100644
+index 0000000..f2c29da
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestLogText.test.ts
+@@ -0,0 +1,44 @@
++import { expect, test } from "vitest";
++
++import type { JobLogReply } from "../ipc";
++import {
++  JOB_LOG_CUT,
++  JOB_LOG_LOADING,
++  JOB_LOG_SEARCH,
++  JOB_LOG_WHOLE,
++  jobLogRefusalText,
++  jobLogTitle,
++} from "./mergeRequestLogText";
++
++type Refused = Exclude<JobLogReply, { readonly kind: "log" }>;
++
++const REFUSALS: Readonly<Record<Refused["kind"], readonly [Refused, string]>> = {
++  noLog: [{ kind: "noLog" }, "GitLab has no log for this job."],
++  notOffered: [
++    { kind: "notOffered" },
++    "This job's log was not listed by GitLab, so yamt did not read it.",
++  ],
++  glabMissing: [
++    { kind: "glabMissing" },
++    "glab is not installed (not found on PATH) — install glab, then press Shift over the job again.",
++  ],
++  notLoggedIn: [
++    { kind: "notLoggedIn", detail: "gitlab.example: not logged in" },
++    "glab is not logged in: gitlab.example: not logged in — run glab auth login in a terminal, then press Shift over the job again.",
++  ],
++  failed: [{ kind: "failed", message: "glab timed out" }, "Could not read the log: glab timed out"],
++};
++
++test("the log box's words", () => {
++  expect(jobLogTitle("test:unit")).toBe("Log of test:unit");
++  expect([JOB_LOG_LOADING, JOB_LOG_SEARCH, JOB_LOG_CUT, JOB_LOG_WHOLE]).toEqual([
++    "Loading the log…",
++    "Search the log",
++    "Earlier lines are on GitLab.",
++    "Open the whole log on GitLab",
++  ]);
++});
++
++test.each(Object.values(REFUSALS))("a refused log says why: %o", (reply, words) => {
++  expect(jobLogRefusalText(reply)).toBe(words);
++});
+diff --git a/frontend/src/ui/mergeRequestLogText.ts b/frontend/src/ui/mergeRequestLogText.ts
+new file mode 100644
+index 0000000..4ea7a8d
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestLogText.ts
+@@ -0,0 +1,32 @@
++import type { JobLogReply } from "../ipc";
++import { GLAB_MISSING_TEXT, glabNotLoggedInText } from "./glab";
++
++export const JOB_LOG_LOADING = "Loading the log…";
++export const JOB_LOG_SEARCH = "Search the log";
++export const JOB_LOG_CUT = "Earlier lines are on GitLab.";
++export const JOB_LOG_WHOLE = "Open the whole log on GitLab";
++
++const PRESS_AGAIN = "then press Shift over the job again.";
++
++export function jobLogTitle(name: string): string {
++  return `Log of ${name}`;
++}
++
++export function jobLogRefusalText(reply: Exclude<JobLogReply, { readonly kind: "log" }>): string {
++  switch (reply.kind) {
++    case "noLog":
++      return "GitLab has no log for this job.";
++    case "notOffered":
++      return "This job's log was not listed by GitLab, so yamt did not read it.";
++    case "glabMissing":
++      return `${GLAB_MISSING_TEXT} — install glab, ${PRESS_AGAIN}`;
++    case "notLoggedIn":
++      return `${glabNotLoggedInText(reply.detail)} — run glab auth login in a terminal, ${PRESS_AGAIN}`;
++    case "failed":
++      return `Could not read the log: ${reply.message}`;
++    default: {
++      const _exhaustive: never = reply;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index 2b9a002..c535250 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -99,7 +99,7 @@ test("a row's button and a job's title name what they open; a job without a page
+   expect(openChangesTitle()).toBe("Show Diff");
+   expect(openPageTitle(IID, "Fix: the login form")).toBe("Open !13 on GitLab: Fix: the login form");
+   expect(jobTitle("test", "https://gitlab.example/taskboard/taskboard/-/jobs/9001")).toBe(
+-    "Open the log of test on GitLab",
++    "Open the log of test on GitLab. Shift: show the log here",
+   );
+   expect(jobTitle("test", null)).toBe("GitLab gave no address for this job's log");
+ });
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index a304d1d..1f44ec3 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -95,7 +95,7 @@ export function approvalsText(count: number): string {
+ export function jobTitle(name: string, page: string | null): string {
+   return page === null
+     ? "GitLab gave no address for this job's log"
+-    : `Open the log of ${name} on GitLab`;
++    : `Open the log of ${name} on GitLab. Shift: show the log here`;
+ }
+ 
+ export function clearFilterTitle(name: string): string {
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 38c2923..c70283c 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -41,6 +41,7 @@ export type MergeRequestStep =
+   | "list"
+   | "open"
+   | "job"
++  | "jobLog"
+   | "mergeRequest"
+   | "resolve"
+   | "continue"
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index fbd141d..9e8621c 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -291,6 +291,7 @@ test.each([
+   ["resolve", "Could not resolve the merge request's conflicts: yamt's worker stopped; try again."],
+   ["continue", "Could not continue the merge request's merge: yamt's worker stopped; try again."],
+   ["localMerge", "Could not check for an unfinished merge: yamt's worker stopped; try again."],
++  ["jobLog", "Could not read the job's log: yamt's worker stopped; try again."],
+   ["rerequestReview", "Could not re-request the review: yamt's worker stopped; try again."],
+ ] as const)("a failed merge-request call at %s says what failed", (step, words) => {
+   expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index df60980..96df664 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -75,6 +75,7 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
+   list: "Could not list the merge requests",
+   open: "Could not open the merge request's changes",
+   job: "Could not open the job's page",
++  jobLog: "Could not read the job's log",
+   mergeRequest: "Could not open the merge request's page",
+   resolve: "Could not resolve the merge request's conflicts",
+   continue: "Could not continue the merge request's merge",
+diff --git a/frontend/src/ui/useHoverBox.test.ts b/frontend/src/ui/useHoverBox.test.ts
+index 5cc6d77..c94f865 100644
+--- a/frontend/src/ui/useHoverBox.test.ts
++++ b/frontend/src/ui/useHoverBox.test.ts
+@@ -198,6 +198,18 @@ test("Escape closes the box, takes the key and returns focus to the opener", ()
+   expect([box.open.value, escape.defaultPrevented, page.focused]).toEqual([false, true, opener]);
+ });
+ 
++test("an_escape_handled_inside_leaves_the_box_open", () => {
++  const box = hoverBox();
++  box.on.pointerenter();
++  page.focused = item;
++  const escape = key("Escape");
++  escape.preventDefault();
++
++  box.on.keydown(escape);
++
++  expect([box.open.value, page.focused]).toEqual([true, item]);
++});
++
+ test("a scroll outside the box closes it; one inside keeps it", () => {
+   const box = hoverBox();
+   box.on.pointerenter();
+diff --git a/frontend/src/ui/useHoverBox.ts b/frontend/src/ui/useHoverBox.ts
+index 890e9df..8c27414 100644
+--- a/frontend/src/ui/useHoverBox.ts
++++ b/frontend/src/ui/useHoverBox.ts
+@@ -68,7 +68,7 @@ function focusLeft(held: Held, event: FocusEvent): void {
+ }
+ 
+ function keyPressed(held: Held, event: KeyboardEvent): void {
+-  if (event.key === "Escape" && held.open.value) {
++  if (event.key === "Escape" && !event.defaultPrevented && held.open.value) {
+     event.preventDefault();
+     held.open.value = false;
+     held.opener()?.focus();
+diff --git a/frontend/src/ui/useShiftHeld.test.ts b/frontend/src/ui/useShiftHeld.test.ts
+index 8871603..d1dc1c2 100644
+--- a/frontend/src/ui/useShiftHeld.test.ts
++++ b/frontend/src/ui/useShiftHeld.test.ts
+@@ -1,7 +1,23 @@
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+ import { effectScope, nextTick, type EffectScope } from "vue";
+ 
+-import { shiftHeldAfter, useShiftHeld } from "./useShiftHeld";
++import {
++  shiftAfter,
++  useShiftHeld,
++  useShiftTaps,
++  type ShiftEvent,
++  type ShiftState,
++} from "./useShiftHeld";
++
++const UP: ShiftState = { kind: "up", taps: 2 };
++const ALONE: ShiftState = { kind: "held", alone: true, taps: 2 };
++const CHORD: ShiftState = { kind: "held", alone: false, taps: 2 };
++const SHIFT_DOWN: ShiftEvent = { kind: "keydown", key: "Shift" };
++const SHIFT_UP: ShiftEvent = { kind: "keyup", key: "Shift" };
++
++function after(state: ShiftState, ...events: ShiftEvent[]): ShiftState {
++  return events.reduce(shiftAfter, state);
++}
+ 
+ const page = vi.hoisted(() => {
+   class Target extends EventTarget {
+@@ -64,27 +80,66 @@ function send(target: EventTarget, type: string, fields: Record<string, unknown>
+ }
+ 
+ test("Shift's press shows and its release hides", () => {
+-  expect(shiftHeldAfter(false, { kind: "keydown", key: "Shift" })).toBe(true);
+-  expect(shiftHeldAfter(true, { kind: "keydown", key: "Shift" })).toBe(true);
+-  expect(shiftHeldAfter(true, { kind: "keyup", key: "Shift" })).toBe(false);
+-  expect(shiftHeldAfter(false, { kind: "keyup", key: "Shift" })).toBe(false);
++  expect(shiftAfter(UP, SHIFT_DOWN)).toEqual(ALONE);
++  expect(shiftAfter(ALONE, SHIFT_DOWN)).toBe(ALONE);
++  expect(shiftAfter(CHORD, SHIFT_UP)).toEqual(UP);
++  expect(shiftAfter(UP, SHIFT_UP)).toBe(UP);
+ });
+ 
+-test("another key's press or release changes nothing", () => {
+-  expect(shiftHeldAfter(true, { kind: "keydown", key: "A" })).toBe(true);
+-  expect(shiftHeldAfter(false, { kind: "keydown", key: "a" })).toBe(false);
+-  expect(shiftHeldAfter(true, { kind: "keyup", key: "A" })).toBe(true);
+-  expect(shiftHeldAfter(false, { kind: "keyup", key: "a" })).toBe(false);
++test("another key's press or release changes nothing while up, and a release nothing while held", () => {
++  expect(shiftAfter(UP, { kind: "keydown", key: "a" })).toBe(UP);
++  expect(shiftAfter(UP, { kind: "keyup", key: "a" })).toBe(UP);
++  expect(shiftAfter(CHORD, { kind: "keyup", key: "A" })).toBe(CHORD);
++  expect(shiftAfter(ALONE, { kind: "keyup", key: "A" })).toBe(ALONE);
+ });
+ 
+ test("a pointer event without Shift hides, with Shift keeps, and never shows", () => {
+-  expect(shiftHeldAfter(true, { kind: "pointer", shiftKey: false })).toBe(false);
+-  expect(shiftHeldAfter(true, { kind: "pointer", shiftKey: true })).toBe(true);
+-  expect(shiftHeldAfter(false, { kind: "pointer", shiftKey: true })).toBe(false);
++  expect(shiftAfter(ALONE, { kind: "pointer", shiftKey: false, pressed: false })).toEqual(UP);
++  expect(shiftAfter(ALONE, { kind: "pointer", shiftKey: true, pressed: false })).toBe(ALONE);
++  expect(shiftAfter(UP, { kind: "pointer", shiftKey: true, pressed: true })).toBe(UP);
+ });
+ 
+ test("leaving the window hides", () => {
+-  expect(shiftHeldAfter(true, { kind: "left" })).toBe(false);
++  expect(shiftAfter(ALONE, { kind: "left" })).toEqual(UP);
++  expect(shiftAfter(UP, { kind: "left" })).toBe(UP);
++});
++
++test("a_lone_shift_press_and_release_is_a_tap", () => {
++  expect(after(UP, SHIFT_DOWN, SHIFT_UP)).toEqual({ kind: "up", taps: 3 });
++  expect(after(UP, SHIFT_DOWN, SHIFT_UP, SHIFT_DOWN, SHIFT_UP)).toEqual({ kind: "up", taps: 4 });
++});
++
++test("shift_with_another_key_is_no_tap", () => {
++  const shiftE = after(UP, SHIFT_DOWN, { kind: "keydown", key: "E" });
++  expect(shiftE).toEqual(CHORD);
++  expect(after(shiftE, { kind: "keyup", key: "E" }, SHIFT_UP)).toEqual(UP);
++});
++
++test("shift_with_a_pointer_press_is_no_tap", () => {
++  const click = after(UP, SHIFT_DOWN, { kind: "pointer", shiftKey: true, pressed: true });
++  expect(click).toEqual(CHORD);
++  expect(after(click, { kind: "pointer", shiftKey: true, pressed: false }, SHIFT_UP)).toEqual(UP);
++});
++
++test("a_held_repeat_keeps_the_tap", () => {
++  expect(after(UP, SHIFT_DOWN, SHIFT_DOWN, SHIFT_DOWN, SHIFT_UP)).toEqual({ kind: "up", taps: 3 });
++  expect(shiftAfter(CHORD, SHIFT_DOWN)).toBe(CHORD);
++});
++
++test("a_pointer_move_while_shift_is_held_keeps_the_tap", () => {
++  expect(
++    after(UP, SHIFT_DOWN, { kind: "pointer", shiftKey: true, pressed: false }, SHIFT_UP),
++  ).toEqual({ kind: "up", taps: 3 });
++});
++
++test("leaving_the_window_ends_the_hold_without_a_tap", () => {
++  expect(after(UP, SHIFT_DOWN, { kind: "left" }, SHIFT_UP)).toEqual(UP);
++});
++
++test("a_pointer_without_shift_ends_the_hold_without_a_tap", () => {
++  expect(
++    after(UP, SHIFT_DOWN, { kind: "pointer", shiftKey: false, pressed: false }, SHIFT_UP),
++  ).toEqual(UP);
+ });
+ 
+ test("down shows, up hides at once", () => {
+@@ -161,3 +216,24 @@ test("every filter shares one state and one set of listeners until the last one
+   other.stop();
+   expect([...page.window.listening.keys()]).toEqual([]);
+ });
++
++test("held_and_taps_share_one_listener_set", () => {
++  const other = effectScope();
++  const held = heldIn();
++  const taps = other.run(() => useShiftTaps());
++  expect([...page.window.listening.keys()]).toEqual(["keydown", "keyup", "blur"]);
++
++  send(page.window, "keydown", { key: "Shift" });
++  expect(held.value).toBe(true);
++  send(page.window, "keyup", { key: "Shift" });
++  expect(held.value).toBe(false);
++  expect(taps?.value).toBe(1);
++
++  scope.stop();
++  send(page.window, "keydown", { key: "Shift" });
++  send(page.window, "keyup", { key: "Shift" });
++  expect(taps?.value).toBe(2);
++
++  other.stop();
++  expect([...page.window.listening.keys()]).toEqual([]);
++});
+diff --git a/frontend/src/ui/useShiftHeld.ts b/frontend/src/ui/useShiftHeld.ts
+index a653cdc..6513708 100644
+--- a/frontend/src/ui/useShiftHeld.ts
++++ b/frontend/src/ui/useShiftHeld.ts
+@@ -1,31 +1,67 @@
+ import { createSharedComposable } from "@vueuse/core";
++import { computed, type Ref } from "vue";
+ 
+-import { useKeyHold } from "./keyHold";
++import { useKeyHold, type KeyHold } from "./keyHold";
+ 
+ export type ShiftEvent =
+   | { readonly kind: "keydown"; readonly key: string }
+   | { readonly kind: "keyup"; readonly key: string }
+-  | { readonly kind: "pointer"; readonly shiftKey: boolean }
++  | { readonly kind: "pointer"; readonly shiftKey: boolean; readonly pressed: boolean }
+   | { readonly kind: "left" };
+ 
++export type ShiftState =
++  | { readonly kind: "up"; readonly taps: number }
++  | { readonly kind: "held"; readonly alone: boolean; readonly taps: number };
++
+ const SHIFT = "Shift";
+ const POINTER_EVENTS = ["pointerdown", "pointermove", "pointerup"];
+ 
+-export function shiftHeldAfter(held: boolean, event: ShiftEvent): boolean {
++function released(state: ShiftState, tapped: boolean): ShiftState {
++  return { kind: "up", taps: tapped ? state.taps + 1 : state.taps };
++}
++
++function whileHeld(state: Extract<ShiftState, { kind: "held" }>, event: ShiftEvent): ShiftState {
+   switch (event.kind) {
+     case "keydown":
+-      return held || event.key === SHIFT;
++      return event.key === SHIFT ? state : { ...state, alone: false };
+     // X11 sends a key event's modifiers as they were just before it (Xlib XKeyEvent `state`), so WebKitGTK reports
+     // Shift as still set on Shift's own release: only the key name tells.
+     case "keyup":
+-      return held && event.key !== SHIFT;
++      return event.key === SHIFT ? released(state, state.alone) : state;
+     case "pointer":
+-      return held && event.shiftKey;
++      if (!event.shiftKey) {
++        return released(state, false);
++      }
++      return event.pressed ? { ...state, alone: false } : state;
+     case "left":
+-      return false;
++      return released(state, false);
+   }
+ }
+ 
+-export const useShiftHeld = createSharedComposable(() =>
+-  useKeyHold(shiftHeldAfter, POINTER_EVENTS),
+-);
++export function shiftAfter(state: ShiftState, event: ShiftEvent): ShiftState {
++  if (state.kind === "held") {
++    return whileHeld(state, event);
++  }
++  return event.kind === "keydown" && event.key === SHIFT
++    ? { kind: "held", alone: true, taps: state.taps }
++    : state;
++}
++
++const SHIFT_HOLD: KeyHold<ShiftState> = {
++  start: { kind: "up", taps: 0 },
++  after: shiftAfter,
++  holding: (state) => state.kind === "held",
++};
++
++const useShiftState = createSharedComposable(() => useKeyHold(SHIFT_HOLD, POINTER_EVENTS));
++
++export const useShiftHeld = createSharedComposable((): Readonly<Ref<boolean>> => {
++  const state = useShiftState();
++  return computed(() => state.value.kind === "held");
++});
++
++/** Counts Shift taps: Shift down then up with no other key and no pointer press between. */
++export const useShiftTaps = createSharedComposable((): Readonly<Ref<number>> => {
++  const state = useShiftState();
++  return computed(() => state.value.taps);
++});

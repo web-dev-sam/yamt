@@ -9,15 +9,39 @@ export type KeyHoldEvent =
       readonly altKey: boolean;
       readonly shiftKey: boolean;
     }
-  | { readonly kind: "pointer"; readonly altKey: boolean; readonly shiftKey: boolean }
+  | {
+      readonly kind: "pointer";
+      readonly altKey: boolean;
+      readonly shiftKey: boolean;
+      readonly pressed: boolean;
+    }
   | { readonly kind: "left" };
 
-type HoldRule = (held: boolean, event: KeyHoldEvent) => boolean;
+export type KeyHold<S> = {
+  readonly start: S;
+  after(state: S, event: KeyHoldEvent): S;
+  /** Whether pointer events are listened to (only while a key is held). */
+  holding(state: S): boolean;
+};
 
-export function useKeyHold(rule: HoldRule, pointerEvents: string[]): Readonly<ShallowRef<boolean>> {
-  const held = shallowRef(false);
+function useLeaving(apply: (event: KeyHoldEvent) => void): void {
+  useEventListener(window, "blur", () => {
+    apply({ kind: "left" });
+  });
+  watch(useDocumentVisibility(), (visibility) => {
+    if (visibility === "hidden") {
+      apply({ kind: "left" });
+    }
+  });
+}
+
+export function useKeyHold<S>(
+  hold: KeyHold<S>,
+  pointerEvents: readonly string[],
+): Readonly<ShallowRef<S>> {
+  const state = shallowRef(hold.start);
   function apply(event: KeyHoldEvent): void {
-    held.value = rule(held.value, event);
+    state.value = hold.after(state.value, event);
   }
 
   useEventListener(
@@ -36,21 +60,19 @@ export function useKeyHold(rule: HoldRule, pointerEvents: string[]): Readonly<Sh
     },
     { capture: true },
   );
-  useEventListener(window, "blur", () => {
-    apply({ kind: "left" });
-  });
-  watch(useDocumentVisibility(), (visibility) => {
-    if (visibility === "hidden") {
-      apply({ kind: "left" });
-    }
-  });
+  useLeaving(apply);
   useEventListener<MouseEvent>(
-    () => (held.value ? window : null),
-    pointerEvents,
+    () => (hold.holding(state.value) ? window : null),
+    [...pointerEvents],
     (event) => {
-      apply({ kind: "pointer", altKey: event.altKey, shiftKey: event.shiftKey });
+      apply({
+        kind: "pointer",
+        altKey: event.altKey,
+        shiftKey: event.shiftKey,
+        pressed: event.type === "pointerdown",
+      });
     },
     { capture: true, passive: true },
   );
-  return held;
+  return state;
 }

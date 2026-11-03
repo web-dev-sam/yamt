@@ -198,6 +198,18 @@ test("Escape closes the box, takes the key and returns focus to the opener", () 
   expect([box.open.value, escape.defaultPrevented, page.focused]).toEqual([false, true, opener]);
 });
 
+test("an_escape_handled_inside_leaves_the_box_open", () => {
+  const box = hoverBox();
+  box.on.pointerenter();
+  page.focused = item;
+  const escape = key("Escape");
+  escape.preventDefault();
+
+  box.on.keydown(escape);
+
+  expect([box.open.value, page.focused]).toEqual([true, item]);
+});
+
 test("a scroll outside the box closes it; one inside keeps it", () => {
   const box = hoverBox();
   box.on.pointerenter();

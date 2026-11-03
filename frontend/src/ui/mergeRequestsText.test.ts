@@ -99,7 +99,7 @@ test("a row's button and a job's title name what they open; a job without a page
   expect(openChangesTitle()).toBe("Show Diff");
   expect(openPageTitle(IID, "Fix: the login form")).toBe("Open !13 on GitLab: Fix: the login form");
   expect(jobTitle("test", "https://gitlab.example/taskboard/taskboard/-/jobs/9001")).toBe(
-    "Open the log of test on GitLab",
+    "Open the log of test on GitLab. Shift: show the log here",
   );
   expect(jobTitle("test", null)).toBe("GitLab gave no address for this job's log");
 });

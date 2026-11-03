@@ -56,6 +56,16 @@ test("Shift+Tab and Alt and Meta use their own modifier codes", () => {
   expect(xdotoolChord(parseChord("Alt+Meta+a"))).toBe("alt+super+a");
 });
 
+test("a_lone_shift_is_a_key_both_ways", () => {
+  expect(chordActions(parseChord("Shift"))).toEqual([
+    { type: "keyDown", value: SHIFT },
+    { type: "keyUp", value: SHIFT },
+  ]);
+  expect(xdotoolChord(parseChord("shift"))).toBe("Shift_L");
+  expect(xdotoolChord(parseChord("Shift+a"))).toBe("shift+a");
+  expect(parseChord("Shift+a")).toEqual({ modifiers: ["Shift"], key: { kind: "char", char: "a" } });
+});
+
 test("names and modifiers are case-insensitive and take the usual aliases", () => {
   expect(parseChord("control+shift+z")).toEqual(parseChord("Ctrl+Shift+Z"));
   expect(parseChord("esc")).toEqual(parseChord("Escape"));

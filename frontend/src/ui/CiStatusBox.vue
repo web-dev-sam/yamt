@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, useTemplateRef, type Component } from "vue";
+import { useElementBounding } from "@vueuse/core";
+import { computed, shallowRef, useTemplateRef, watch, type Component } from "vue";
 import CircleCheck from "~icons/lucide/circle-check";
 import CircleDot from "~icons/lucide/circle-dot";
 import CircleMinus from "~icons/lucide/circle-minus";
@@ -10,14 +11,18 @@ import Cog from "~icons/lucide/cog";
 
 import type { MergeRequestRow, WebPage } from "../ipc";
 import { ciBox, ciStatusText, type CiStatusName } from "../mergeRequests";
+import CiStatusJobLog from "./CiStatusJobLog.vue";
+import { useMergeRequests } from "./mergeRequestsStore";
 import {
   ALLOWED_TO_FAIL,
   FAILED_JOBS_TITLE,
   jobTitle,
   MORE_FAILED_JOBS,
 } from "./mergeRequestsText";
+import { isTypingTarget } from "./rangeKeys";
 import { vTooltip } from "./tooltip";
 import { useHoverBox } from "./useHoverBox";
+import { useShiftTaps } from "./useShiftHeld";
 
 type Pipeline = NonNullable<MergeRequestRow["pipeline"]>;
 type FailedJob = Pipeline["failedJobs"][number];
@@ -36,6 +41,7 @@ const LOOKS: Readonly<Record<CiStatusName, StatusLook>> = {
   manual: { icon: Cog, tone: "text-fg-muted" },
 };
 
+const { jobLog, showJobLog, closeJobLog } = useMergeRequests();
 const area = useTemplateRef<HTMLSpanElement>("area");
 const icon = useTemplateRef<HTMLButtonElement>("icon");
 const box = useTemplateRef<HTMLDivElement>("box");
@@ -44,17 +50,68 @@ const { open, placement, on } = useHoverBox({
   opener: () => icon.value,
   box,
 });
+const boxBounds = useElementBounding(box);
+const pointed = shallowRef<FailedJob | null>(null);
+const focused = shallowRef<FailedJob | null>(null);
 
 const look = computed(() => LOOKS[props.pipeline.status]);
 const view = computed(() =>
   ciBox(props.pipeline.status, props.pipeline.failedJobs, props.pipeline.moreFailedJobs),
 );
 const statusText = computed(() => ciStatusText(props.pipeline.status));
+const ownLog = computed(() => {
+  const shown = jobLog.value;
+  return shown !== null && props.pipeline.failedJobs.some(({ page }) => page === shown.job.page)
+    ? shown
+    : null;
+});
+const anchor = computed(() => ({ left: boxBounds.left.value, top: boxBounds.top.value }));
+
+watch(useShiftTaps(), () => {
+  const job = pointed.value ?? focused.value;
+  if (!open.value || job === null || job.page === null || isTypingTarget(document.activeElement)) {
+    return;
+  }
+  void showJobLog({ name: job.name, page: job.page });
+});
+watch(open, (now) => {
+  if (!now && ownLog.value !== null) {
+    closeJobLog();
+  }
+});
 
 function openJob({ page }: FailedJob): void {
   if (page !== null) {
     emit("openJob", page);
   }
+}
+
+function point(job: FailedJob): void {
+  pointed.value = job;
+}
+
+function unpoint(job: FailedJob): void {
+  if (pointed.value === job) {
+    pointed.value = null;
+  }
+}
+
+function focus(job: FailedJob): void {
+  focused.value = job;
+}
+
+function unfocus(job: FailedJob): void {
+  if (focused.value === job) {
+    focused.value = null;
+  }
+}
+
+function logClosed(): void {
+  const page = ownLog.value?.job.page;
+  closeJobLog();
+  const index =
+    view.value.kind === "jobs" ? view.value.jobs.findIndex((job) => job.page === page) : -1;
+  box.value?.querySelectorAll<HTMLButtonElement>("li > button")[index]?.focus();
 }
 </script>
 
@@ -94,12 +151,17 @@ function openJob({ page }: FailedJob): void {
             v-for="(job, index) in view.jobs"
             :key="index"
             v-tooltip="jobTitle(job.name, job.page)"
+            @pointerenter="point(job)"
+            @pointerleave="unpoint(job)"
           >
             <button
               type="button"
               :disabled="job.page === null"
+              aria-keyshortcuts="Shift"
               class="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected disabled:pointer-events-none"
               @click="openJob(job)"
+              @focus="focus(job)"
+              @blur="unfocus(job)"
             >
               <span>{{ job.name }}</span>
               <span class="text-fg-muted">{{ job.stage }}</span>
@@ -112,5 +174,13 @@ function openJob({ page }: FailedJob): void {
         <p v-if="view.more" class="px-2 pt-0.5 pb-1 text-fg-muted">{{ MORE_FAILED_JOBS }}</p>
       </template>
     </div>
+    <CiStatusJobLog
+      v-if="open && ownLog !== null"
+      :key="ownLog.job.page"
+      :shown="ownLog"
+      :anchor
+      @close="logClosed"
+      @open-job="emit('openJob', $event)"
+    />
   </span>
 </template>
