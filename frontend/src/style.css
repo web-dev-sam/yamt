@@ -59,6 +59,23 @@
   --color-search-match: #78bf7b40;
   --color-diff-wave: #565362;
 
+  --color-ansi-black: #878787; /* Islands Dark → Darcula CONSOLE_BLACK_OUTPUT #000000, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-red: #f0524f; /* Islands Dark → Darcula CONSOLE_RED_OUTPUT */
+  --color-ansi-green: #5c962c; /* Islands Dark → Darcula CONSOLE_GREEN_OUTPUT */
+  --color-ansi-yellow: #a68a0d; /* Islands Dark → Darcula CONSOLE_YELLOW_OUTPUT */
+  --color-ansi-blue: #3993d4; /* Islands Dark → Darcula CONSOLE_BLUE_OUTPUT */
+  --color-ansi-magenta: #a771bf; /* Islands Dark → Darcula CONSOLE_MAGENTA_OUTPUT */
+  --color-ansi-cyan: #00a3a3; /* Islands Dark → Darcula CONSOLE_CYAN_OUTPUT */
+  --color-ansi-white: #808080; /* Islands Dark → Darcula CONSOLE_GRAY_OUTPUT */
+  --color-ansi-bright-black: #878787; /* Islands Dark → Darcula CONSOLE_DARKGRAY_OUTPUT #595959, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-red: #ff4050; /* Islands Dark → Darcula CONSOLE_RED_BRIGHT_OUTPUT */
+  --color-ansi-bright-green: #4fc414; /* Islands Dark → Darcula CONSOLE_GREEN_BRIGHT_OUTPUT */
+  --color-ansi-bright-yellow: #e5bf00; /* Islands Dark → Darcula CONSOLE_YELLOW_BRIGHT_OUTPUT */
+  --color-ansi-bright-blue: #1fb0ff; /* Islands Dark → Darcula CONSOLE_BLUE_BRIGHT_OUTPUT */
+  --color-ansi-bright-magenta: #ed7eed; /* Islands Dark → Darcula CONSOLE_MAGENTA_BRIGHT_OUTPUT */
+  --color-ansi-bright-cyan: #00e5e5; /* Islands Dark → Darcula CONSOLE_CYAN_BRIGHT_OUTPUT */
+  --color-ansi-bright-white: #ffffff; /* Islands Dark → Darcula CONSOLE_WHITE_OUTPUT */
+
   --color-syntax-keyword: #e0986b;
   --color-syntax-control-keyword: #e0986b;
   --color-syntax-definition-keyword: #e0986b;

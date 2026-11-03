@@ -6,6 +6,10 @@
  * JD = plugins/javascript-plugin/lib/modules/intellij.javascript.backend.jar:colorSchemes/Darcula.xml,
  * TDF = intellij-community idea/262.10968.63 TextDiffTypeFactory.java (getIgnoredColor: c + 0.6·(TEXT bg − c)).
  * "→ X" names the fallback the key resolves to; "gap" names the closest element for what WebStorm has no colour for.
+ * ansi: CONSOLE_*_OUTPUT in the ANSI order of lib/intellij.platform.ide.jar ColoredOutputTypeRegistryImpl (GRAY = white,
+ * DARKGRAY = bright black, WHITE = bright white). A value below 4.5:1 over --color-panel is moved by xterm.js
+ * ensureContrastRatio (xtermjs/xterm.js@08829c7e src/common/Color.ts:296-361), as VS Code's terminal does with its
+ * default terminal.integrated.minimumContrastRatio 4.5 (VS Code 1.144.0 workbench.desktop.main.js:4384@894).
  */
 :root[data-theme="webstorm-dark"] {
   --radius-island: 10px; /* ID ui Island.arc 20 */
@@ -49,6 +53,23 @@
   --color-on-info: #d1d3d9; /* ID ui *.foreground */
   --color-search-match: #114957; /* SD TEXT_SEARCH_RESULT_ATTRIBUTES background */
   --color-diff-wave: #555555; /* DC:1616 DIFF_SEPARATOR_WAVE */
+
+  --color-ansi-black: #878787; /* SD → DC:1737 CONSOLE_BLACK_OUTPUT #000000, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-red: #f0524f; /* SD → DC:1825 CONSOLE_RED_OUTPUT */
+  --color-ansi-green: #5c962c; /* SD → DC:1785 CONSOLE_GREEN_OUTPUT */
+  --color-ansi-yellow: #a68a0d; /* SD → DC:1848 CONSOLE_YELLOW_OUTPUT */
+  --color-ansi-blue: #3993d4; /* SD → DC:1743 CONSOLE_BLUE_OUTPUT */
+  --color-ansi-magenta: #a771bf; /* SD → DC:1797 CONSOLE_MAGENTA_OUTPUT */
+  --color-ansi-cyan: #00a3a3; /* SD → DC:1755 CONSOLE_CYAN_OUTPUT */
+  --color-ansi-white: #8d8d8d; /* SD → DC:1779 CONSOLE_GRAY_OUTPUT #808080, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-black: #878787; /* SD → DC:1767 CONSOLE_DARKGRAY_OUTPUT #595959, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-red: #ff4050; /* SD → DC:1831 CONSOLE_RED_BRIGHT_OUTPUT */
+  --color-ansi-bright-green: #4fc414; /* SD → DC:1791 CONSOLE_GREEN_BRIGHT_OUTPUT */
+  --color-ansi-bright-yellow: #e5bf00; /* SD → DC:1854 CONSOLE_YELLOW_BRIGHT_OUTPUT */
+  --color-ansi-bright-blue: #1fb0ff; /* SD → DC:1749 CONSOLE_BLUE_BRIGHT_OUTPUT */
+  --color-ansi-bright-magenta: #ed7eed; /* SD → DC:1803 CONSOLE_MAGENTA_BRIGHT_OUTPUT */
+  --color-ansi-bright-cyan: #00e5e5; /* SD → DC:1761 CONSOLE_CYAN_BRIGHT_OUTPUT */
+  --color-ansi-bright-white: #ffffff; /* SD → DC:1842 CONSOLE_WHITE_OUTPUT */
 
   --color-syntax-keyword: #cf8e6d; /* SD DEFAULT_KEYWORD (TS.KEYWORD → JS.KEYWORD) */
   --color-syntax-control-keyword: #cf8e6d; /* SD DEFAULT_KEYWORD */

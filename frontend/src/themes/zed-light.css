@@ -4,6 +4,9 @@
  * omitted keys), dc = crates/theme/src/default_colors.rs (code defaults), cv = crates/git_ui/src/conflict_view.rs,
  * dock = crates/workspace/src/dock.rs. Syntax: the tree-sitter capture's key (longest dot prefix); "no key" takes
  * editor.foreground. "gap" names the closest element for what Zed has no colour for.
+ * ansi: one terminal.ansi.*. A value below 4.5:1 over --color-panel is moved by xterm.js ensureContrastRatio
+ * (xtermjs/xterm.js@08829c7e src/common/Color.ts:296-361), as VS Code's terminal does with its default
+ * terminal.integrated.minimumContrastRatio 4.5 (VS Code 1.144.0 workbench.desktop.main.js:4384@894).
  */
 :root[data-theme="zed-light"] {
   --radius-island: 0px; /* dock:1341 flat panels */
@@ -47,6 +50,23 @@
   --color-on-info: #242529; /* one:449 text */
   --color-search-match: #5c79e266; /* one:466 search.match_background */
   --color-diff-wave: #7e8086; /* gap: one:451 text.placeholder (fold placeholder) */
+
+  --color-ansi-black: #000000; /* one:494 terminal.ansi.black */
+  --color-ansi-red: #c7372f; /* one:497 terminal.ansi.red #de3e35, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-green: #32782e; /* one:500 terminal.ansi.green #3f953a, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-yellow: #7b6948; /* one:503 terminal.ansi.yellow #d2b67c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-blue: #2f5af3; /* one:506 terminal.ansi.blue */
+  --color-ansi-magenta: #950095; /* one:509 terminal.ansi.magenta */
+  --color-ansi-cyan: #077990; /* one:512 terminal.ansi.cyan #0997b3, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-white: #6c6c6c; /* one:515 terminal.ansi.white #bbbbbb, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-black: #000000; /* one:495 terminal.ansi.bright_black */
+  --color-ansi-bright-red: #c7372f; /* one:498 terminal.ansi.bright_red #de3e35, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-green: #32782e; /* one:501 terminal.ansi.bright_green #3f953a, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-yellow: #7b6948; /* one:504 terminal.ansi.bright_yellow #d2b67c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-blue: #2f5af3; /* one:507 terminal.ansi.bright_blue */
+  --color-ansi-bright-magenta: #a00095; /* one:510 terminal.ansi.bright_magenta */
+  --color-ansi-bright-cyan: #067a8a; /* one:513 terminal.ansi.bright_cyan #0bbcd6, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-white: #6c6c6c; /* one:516 terminal.ansi.bright_white #ffffff, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
 
   --color-syntax-keyword: #a449ab; /* one:670 keyword */
   --color-syntax-control-keyword: #a449ab; /* one:670 keyword (@keyword.control) */

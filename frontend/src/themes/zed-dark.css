@@ -3,6 +3,9 @@
  * one = assets/themes/one/one.json (One Dark), schema = crates/theme_settings/src/schema.rs (fallbacks of omitted keys),
  * cv = crates/git_ui/src/conflict_view.rs, dock = crates/workspace/src/dock.rs. Syntax: the tree-sitter capture's key
  * (longest dot prefix); "no key" takes editor.foreground. "gap" names the closest element for what Zed has no colour for.
+ * ansi: one terminal.ansi.*. A value below 4.5:1 over --color-panel is moved by xterm.js ensureContrastRatio
+ * (xtermjs/xterm.js@08829c7e src/common/Color.ts:296-361), as VS Code's terminal does with its default
+ * terminal.integrated.minimumContrastRatio 4.5 (VS Code 1.144.0 workbench.desktop.main.js:4384@894).
  */
 :root[data-theme="zed-dark"] {
   --radius-island: 0px; /* dock:1341 flat panels */
@@ -46,6 +49,23 @@
   --color-on-info: #dce0e5; /* one:30 text */
   --color-search-match: #74ade866; /* one:47 search.match_background */
   --color-diff-wave: #878a98; /* gap: one:32 text.placeholder (fold placeholder) */
+
+  --color-ansi-black: #9b9ca1; /* one:75 terminal.ansi.black #282c34, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-red: #e47b83; /* one:78 terminal.ansi.red #e06c75, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-green: #98c379; /* one:81 terminal.ansi.green */
+  --color-ansi-yellow: #e5c07b; /* one:84 terminal.ansi.yellow */
+  --color-ansi-blue: #61afef; /* one:87 terminal.ansi.blue */
+  --color-ansi-magenta: #c678dd; /* one:90 terminal.ansi.magenta */
+  --color-ansi-cyan: #56b6c2; /* one:93 terminal.ansi.cyan */
+  --color-ansi-white: #abb2bf; /* one:96 terminal.ansi.white */
+  --color-ansi-bright-black: #8e96a6; /* one:76 terminal.ansi.bright_black #636d83, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-red: #ea858b; /* one:79 terminal.ansi.bright_red */
+  --color-ansi-bright-green: #aad581; /* one:82 terminal.ansi.bright_green */
+  --color-ansi-bright-yellow: #ffd885; /* one:85 terminal.ansi.bright_yellow */
+  --color-ansi-bright-blue: #85c1ff; /* one:88 terminal.ansi.bright_blue */
+  --color-ansi-bright-magenta: #d398eb; /* one:91 terminal.ansi.bright_magenta */
+  --color-ansi-bright-cyan: #6ed5de; /* one:94 terminal.ansi.bright_cyan */
+  --color-ansi-bright-white: #fafafa; /* one:97 terminal.ansi.bright_white */
 
   --color-syntax-keyword: #b477cf; /* one:253 keyword */
   --color-syntax-control-keyword: #b477cf; /* one:253 keyword (@keyword.control) */

@@ -5,6 +5,9 @@
  * js:N@c = …/out/vs/workbench/workbench.desktop.main.js line N column c (registered defaults),
  * css:4@c = …/workbench.desktop.main.css line 4 column c. workbench.experimental.modernUI is on (js:867@13723).
  * "gap" names the closest element for what VS Code has no colour for.
+ * ansi: terminal.ansi* registered defaults at js:732@c of the installed 1.144.0 bundle (no file of the chain sets them).
+ * A value below 4.5:1 over --color-panel is moved by xterm.js ensureContrastRatio (xtermjs/xterm.js@08829c7e
+ * src/common/Color.ts:296-361), as the terminal does with terminal.integrated.minimumContrastRatio 4.5 (js:4384@894).
  */
 :root[data-theme="vscode-light"] {
   --radius-island: 8px; /* css:4@202798 cornerRadius.large (modern-UI cards) */
@@ -48,6 +51,23 @@
   --color-on-info: #202020; /* L26 foreground */
   --color-search-match: #0069cc1a; /* L26 editor.findMatchHighlightBackground */
   --color-diff-wave: #22222233; /* gap: js:108@11618 diffEditor.diagonalFill */
+
+  --color-ansi-black: #000000; /* js:732@14794 terminal.ansiBlack light */
+  --color-ansi-red: #cd3131; /* js:732@14902 terminal.ansiRed light */
+  --color-ansi-green: #107c10; /* js:732@15008 terminal.ansiGreen light */
+  --color-ansi-yellow: #777a00; /* js:732@15116 terminal.ansiYellow light #949800, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-blue: #0451a5; /* js:732@15225 terminal.ansiBlue light */
+  --color-ansi-magenta: #bc05bc; /* js:732@15332 terminal.ansiMagenta light */
+  --color-ansi-cyan: #037a98; /* js:732@15442 terminal.ansiCyan light #0598bc, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-white: #555555; /* js:732@15549 terminal.ansiWhite light */
+  --color-ansi-bright-black: #666666; /* js:732@15657 terminal.ansiBrightBlack light */
+  --color-ansi-bright-red: #c23d3d; /* js:732@15771 terminal.ansiBrightRed light #f14c4c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-green: #0c860c; /* js:732@15883 terminal.ansiBrightGreen light #14ce14, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-yellow: #757900; /* js:732@15998 terminal.ansiBrightYellow light #b5ba00, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-blue: #2f72bd; /* js:732@16114 terminal.ansiBrightBlue light #3b8eea, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-magenta: #9a519a; /* js:732@16228 terminal.ansiBrightMagenta light #d670d6, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-cyan: #19778f; /* js:732@16345 terminal.ansiBrightCyan light #29b8db, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-white: #6b6b6b; /* js:732@16459 terminal.ansiBrightWhite light #a5a5a5, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
 
   --color-syntax-keyword: #0000ff; /* Lvs storage.modifier, keyword.operator.expression, keyword.operator.new */
   --color-syntax-control-keyword: #af00db; /* L+ keyword.control */

@@ -1,4 +1,5 @@
 /* yamt Light (plan §2 #57): yamt's own light palette, after WebStorm 2026.2 Islands Light. */
+/* ansi: Islands Light → Default CONSOLE_*_OUTPUT; below 4.5:1 over --color-panel moved as in webstorm-light.css. */
 :root[data-theme="light"] {
   --radius-island: 10px;
   --spacing-island: 5px;
@@ -41,6 +42,23 @@
   --color-on-info: #000000;
   --color-search-match: #ccccff;
   --color-diff-wave: #d0d0d0;
+
+  --color-ansi-black: #000000; /* Islands Light → Default CONSOLE_BLACK_OUTPUT */
+  --color-ansi-red: #ce0505; /* Islands Light → Default CONSOLE_RED_OUTPUT */
+  --color-ansi-green: #067d17; /* Islands Light → Default CONSOLE_GREEN_OUTPUT */
+  --color-ansi-yellow: #907100; /* Islands Light → Default CONSOLE_YELLOW_OUTPUT #b28c00, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-blue: #063fdb; /* Islands Light → Default CONSOLE_BLUE_OUTPUT */
+  --color-ansi-magenta: #b309b3; /* Islands Light → Default CONSOLE_MAGENTA_OUTPUT */
+  --color-ansi-cyan: #017f7f; /* Islands Light → Default CONSOLE_CYAN_OUTPUT #028e8e, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-white: #757575; /* Islands Light → Default CONSOLE_GRAY_OUTPUT #929292, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-black: #656565; /* Islands Light → Default CONSOLE_DARKGRAY_OUTPUT */
+  --color-ansi-bright-red: #e51313; /* Islands Light → Default CONSOLE_RED_BRIGHT_OUTPUT #ff1616, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-green: #0f821f; /* Islands Light → Default CONSOLE_GREEN_BRIGHT_OUTPUT #16b42c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-yellow: #897118; /* Islands Light → Default CONSOLE_YELLOW_BRIGHT_OUTPUT #ecc32c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-blue: #2d61f0; /* Islands Light → Default CONSOLE_BLUE_BRIGHT_OUTPUT */
+  --color-ansi-bright-magenta: #cf14cf; /* Islands Light → Default CONSOLE_MAGENTA_BRIGHT_OUTPUT #e617e6, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-cyan: #0c7d7d; /* Islands Light → Default CONSOLE_CYAN_BRIGHT_OUTPUT #15c1c1, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-white: #757575; /* Islands Light → Default CONSOLE_WHITE_OUTPUT #c9c9c9, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
 
   --color-syntax-keyword: #0033b3;
   --color-syntax-control-keyword: #0033b3;

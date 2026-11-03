@@ -6,6 +6,11 @@
  * nt = atom/notifications@v0.72.1 styles/notifications.less; gh/<f> = atom/github@v0.36.9 styles/<f>.
  * Syntax: tree-sitter scopes (config-schema.js:395-397); "unscoped" takes @syntax-text-color.
  * "gap" names the closest element for what Atom has no colour for.
+ * ansi: Atom has no terminal, so every line is a "gap" on colors: @hue-1 cyan, @hue-2 blue, @hue-3 magenta, @hue-4 green,
+ * @hue-5 red, @hue-6-2 yellow, @mono-3/-2/-1 black, bright black, white; @hue-5-2 and @hue-6 are no brighter, so a bright
+ * colour repeats its hue. A value below 4.5:1 over --color-panel is moved by xterm.js ensureContrastRatio
+ * (xtermjs/xterm.js@08829c7e src/common/Color.ts:296-361), as VS Code's terminal does with its default
+ * terminal.integrated.minimumContrastRatio 4.5 (VS Code 1.144.0 workbench.desktop.main.js:4384@894).
  */
 :root[data-theme="atom-dark"] {
   --radius-island: 0px; /* ui/panes.less#L5-6 flat panes */
@@ -49,6 +54,23 @@
   --color-on-info: #0e3377; /* nt#L258 darken(@text-color-info, 40%) */
   --color-search-match: #528bff3d; /* sv:18 @syntax-result-marker-color */
   --color-diff-wave: #abb2bf; /* gap: editor.less .fold-marker:after = @syntax-gutter-text-color-selected */
+
+  --color-ansi-black: #969aa3; /* gap: colors:11 @mono-3 (darkest grey) #5c6370, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-red: #e47b83; /* gap: colors:19 @hue-5 (red) #e06c75, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-green: #98c379; /* gap: colors:17 @hue-4 (green) */
+  --color-ansi-yellow: #e5c07b; /* gap: colors:23 @hue-6-2 (yellow) */
+  --color-ansi-blue: #61afef; /* gap: colors:15 @hue-2 (blue) */
+  --color-ansi-magenta: #c678dd; /* gap: colors:16 @hue-3 (magenta) */
+  --color-ansi-cyan: #56b6c2; /* gap: colors:14 @hue-1 (cyan) */
+  --color-ansi-white: #abb2bf; /* gap: colors:9 @mono-1 (lightest grey) */
+  --color-ansi-bright-black: #8f95a2; /* gap: colors:10 @mono-2 (middle grey) #828997, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-red: #e47b83; /* gap: colors:19 @hue-5 (red; no brighter @hue) #e06c75, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-green: #98c379; /* gap: colors:17 @hue-4 (green; no brighter @hue) */
+  --color-ansi-bright-yellow: #e5c07b; /* gap: colors:23 @hue-6-2 (yellow; no brighter @hue) */
+  --color-ansi-bright-blue: #61afef; /* gap: colors:15 @hue-2 (blue; no brighter @hue) */
+  --color-ansi-bright-magenta: #c678dd; /* gap: colors:16 @hue-3 (magenta; no brighter @hue) */
+  --color-ansi-bright-cyan: #56b6c2; /* gap: colors:14 @hue-1 (cyan; no brighter @hue) */
+  --color-ansi-bright-white: #abb2bf; /* gap: colors:9 @mono-1 (lightest grey; no lighter @mono) */
 
   --color-syntax-keyword: #c678dd; /* L:23 .syntax--keyword @hue-3 */
   --color-syntax-control-keyword: #c678dd; /* L:23 .syntax--keyword @hue-3 */

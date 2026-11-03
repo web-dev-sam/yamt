@@ -1,6 +1,7 @@
 import { existsSync, globSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { ansiContrastFindings, OPAQUE_HEX } from "./contrast";
 import type { SourceFile } from "./fences";
 
 export type ThemeViolation = {
@@ -12,7 +13,8 @@ export type ThemeViolation = {
     | "bad-value"
     | "no-source"
     | "window-background"
-    | "window-arm";
+    | "window-arm"
+    | "ansi-contrast";
   readonly file: string;
   readonly line: number;
   readonly match: string;
@@ -54,6 +56,7 @@ const ALLOWED_VALUES: readonly { readonly name: RegExp; readonly value: RegExp }
   { name: /^--syntax-[\w-]+-weight$/, value: /^(?:normal|bold)$/ },
   { name: /^--syntax-[\w-]+-line$/, value: /^(?:none|underline|line-through)$/ },
   { name: /^--(?:radius-island|spacing-island|island-line)$/, value: /^\d+px$/ },
+  { name: /^--color-ansi-/, value: OPAQUE_HEX },
 ];
 const WINDOW_TOKEN = "--color-window";
 const BACKGROUND_CONSTANT =
@@ -187,12 +190,9 @@ function sourceFindings(block: Block): ThemeViolation[] {
   if (YAMT_THEMES[block.theme] === true) return [];
   return block.definitions
     .filter(({ sourced }) => !sourced)
-    .map(({ name, line }): ThemeViolation => ({
-      rule: "no-source",
-      file: block.file,
-      line,
-      match: name,
-    }));
+    .map(({ name, line }): ThemeViolation => {
+      return { rule: "no-source", file: block.file, line, match: name };
+    });
 }
 
 function blockFindings(placed: ReadonlyMap<string, Block>): ThemeViolation[] {
@@ -202,6 +202,7 @@ function blockFindings(placed: ReadonlyMap<string, Block>): ThemeViolation[] {
     ...(block.theme === DEFAULT_THEME ? [] : tokenFindings(block, reference)),
     ...valueFindings(block),
     ...sourceFindings(block),
+    ...ansiContrastFindings(block),
   ]);
 }
 

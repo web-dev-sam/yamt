@@ -8,6 +8,10 @@
  * MDL = plugins/markdown/lib/intellij.markdown.jar:colorSchemes/MarkdownDefault.xml,
  * TDF = intellij-community idea/262.10968.63 TextDiffTypeFactory.java (getIgnoredColor: c + 0.6·(TEXT bg − c)).
  * "→ X" names the fallback the key resolves to; "gap" names the closest element for what WebStorm has no colour for.
+ * ansi: CONSOLE_*_OUTPUT in the ANSI order of lib/intellij.platform.ide.jar ColoredOutputTypeRegistryImpl (GRAY = white,
+ * DARKGRAY = bright black, WHITE = bright white). A value below 4.5:1 over --color-panel is moved by xterm.js
+ * ensureContrastRatio (xtermjs/xterm.js@08829c7e src/common/Color.ts:296-361), as VS Code's terminal does with its
+ * default terminal.integrated.minimumContrastRatio 4.5 (VS Code 1.144.0 workbench.desktop.main.js:4384@894).
  */
 :root[data-theme="webstorm-light"] {
   --radius-island: 10px; /* IL:404-414 Island.arc 20 */
@@ -51,6 +55,23 @@
   --color-on-info: #000000; /* IJ:56 *.foreground */
   --color-search-match: #fcd47e; /* SL:458 TEXT_SEARCH_RESULT_ATTRIBUTES background */
   --color-diff-wave: #d0d0d0; /* DC:47 DIFF_SEPARATOR_WAVE */
+
+  --color-ansi-black: #000000; /* SL → DC:1076 CONSOLE_BLACK_OUTPUT */
+  --color-ansi-red: #ce0505; /* SL → DC:1186 CONSOLE_RED_OUTPUT */
+  --color-ansi-green: #067d17; /* SL → DC:1146 CONSOLE_GREEN_OUTPUT */
+  --color-ansi-yellow: #907100; /* SL → DC:1206 CONSOLE_YELLOW_OUTPUT #b28c00, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-blue: #063fdb; /* SL → DC:1086 CONSOLE_BLUE_OUTPUT */
+  --color-ansi-magenta: #b309b3; /* SL → DC:1166 CONSOLE_MAGENTA_OUTPUT */
+  --color-ansi-cyan: #017f7f; /* SL → DC:1106 CONSOLE_CYAN_OUTPUT #028e8e, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-white: #757575; /* SL → DC:1136 CONSOLE_GRAY_OUTPUT #929292, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-black: #656565; /* SL → DC:1126 CONSOLE_DARKGRAY_OUTPUT */
+  --color-ansi-bright-red: #e51313; /* SL → DC:1196 CONSOLE_RED_BRIGHT_OUTPUT #ff1616, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-green: #0f821f; /* SL → DC:1156 CONSOLE_GREEN_BRIGHT_OUTPUT #16b42c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-yellow: #897118; /* SL → DC:1216 CONSOLE_YELLOW_BRIGHT_OUTPUT #ecc32c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-blue: #2d61f0; /* SL → DC:1096 CONSOLE_BLUE_BRIGHT_OUTPUT */
+  --color-ansi-bright-magenta: #cf14cf; /* SL → DC:1176 CONSOLE_MAGENTA_BRIGHT_OUTPUT #e617e6, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-cyan: #0c7d7d; /* SL → DC:1116 CONSOLE_CYAN_BRIGHT_OUTPUT #15c1c1, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
+  --color-ansi-bright-white: #757575; /* SL → DC:1226 CONSOLE_WHITE_OUTPUT #c9c9c9, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
 
   --color-syntax-keyword: #0033b3; /* SL:205 DEFAULT_KEYWORD (TS.KEYWORD → JS.KEYWORD) */
   --color-syntax-control-keyword: #0033b3; /* SL:205 DEFAULT_KEYWORD */

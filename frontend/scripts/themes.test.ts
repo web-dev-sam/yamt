@@ -281,6 +281,91 @@ test("a tree without the window file reports every theme's background", () => {
   ]);
 });
 
+type Ansi = { readonly panel: string; readonly token: string; readonly colour: string };
+
+function withAnsi(file: SourceFile, { panel, token, colour }: Ansi): SourceFile {
+  const sourced = file.path === ZED.path ? " /* one:75 */" : "";
+  return edited(
+    file,
+    "  --color-code:",
+    `  --color-panel: ${panel};${sourced}\n  --color-ansi-${token}: ${colour};${sourced}\n  --color-code:`,
+  );
+}
+
+test("an_ansi_colour_below_4_5_to_1_against_its_panel_is_reported", () => {
+  const files = tree(
+    withAnsi(DARK, { panel: "#17161c", token: "black", colour: "#000000" }),
+    withAnsi(LIGHT, { panel: "#ffffff", token: "black", colour: "#000000" }),
+    withAnsi(ZED, { panel: "#282c33", token: "black", colour: "#9b9ca1" }),
+  );
+
+  expect(findThemeViolations(files)).toEqual([
+    {
+      rule: "ansi-contrast",
+      file: "src/style.css",
+      line: 12,
+      match: "--color-ansi-black: #000000 1.1:1",
+    },
+  ]);
+});
+
+test("an_ansi_colour_with_alpha_or_three_digits_is_a_bad_value", () => {
+  const files = tree(
+    withAnsi(DARK, { panel: "#17161c", token: "red", colour: "#ff000080" }),
+    withAnsi(LIGHT, { panel: "#ffffff", token: "red", colour: "#c00" }),
+    withAnsi(ZED, { panel: "#282c33", token: "red", colour: "#E47B83" }),
+  );
+
+  expect(findThemeViolations(files)).toEqual([
+    { rule: "bad-value", file: "src/style.css", line: 12, match: "--color-ansi-red: #ff000080" },
+    { rule: "bad-value", file: "src/themes/light.css", line: 8, match: "--color-ansi-red: #c00" },
+  ]);
+});
+
+test("the_contrast_uses_the_same_blocks_panel", () => {
+  const files = tree(
+    withAnsi(DARK, { panel: "#17161c", token: "white", colour: "#ffffff" }),
+    withAnsi(LIGHT, { panel: "#ffffff", token: "white", colour: "#ffffff" }),
+    withAnsi(ZED, { panel: "#282c33", token: "white", colour: "#abb2bf" }),
+  );
+
+  expect(findThemeViolations(files)).toEqual([
+    {
+      rule: "ansi-contrast",
+      file: "src/themes/light.css",
+      line: 8,
+      match: "--color-ansi-white: #ffffff 1.0:1",
+    },
+  ]);
+});
+
+test("4.54:1 and black's 4.56:1 (linear below the sRGB knee) pass; 4.48:1 reports 4.4:1, rounded down", () => {
+  const files = tree(
+    withAnsi(DARK, { panel: "#ffffff", token: "grey", colour: "#767676" }),
+    withAnsi(LIGHT, { panel: "#ffffff", token: "grey", colour: "#777777" }),
+    withAnsi(ZED, { panel: "#757575", token: "grey", colour: "#000000" }),
+  );
+
+  expect(findThemeViolations(files)).toEqual([
+    {
+      rule: "ansi-contrast",
+      file: "src/themes/light.css",
+      line: 8,
+      match: "--color-ansi-grey: #777777 4.4:1",
+    },
+  ]);
+});
+
+test("an ansi colour is not measured in a block whose panel is no #rrggbb", () => {
+  const files = tree(
+    withAnsi(DARK, { panel: "#17161c", token: "black", colour: "#878787" }),
+    withAnsi(LIGHT, { panel: "#fff", token: "black", colour: "#ffffff" }),
+    withAnsi(ZED, { panel: "#282c33", token: "black", colour: "#9b9ca1" }),
+  );
+
+  expect(findThemeViolations(files)).toEqual([]);
+});
+
 function placeWindowFile(folder: string, text: string): void {
   mkdirSync(join(folder, "src-tauri/src"), { recursive: true });
   writeFileSync(join(folder, WINDOW_FILE), text);

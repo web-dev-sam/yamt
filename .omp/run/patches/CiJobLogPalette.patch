@@ -1,0 +1,583 @@
+diff --git a/frontend/scripts/contrast.ts b/frontend/scripts/contrast.ts
+new file mode 100644
+index 0000000..0385b59
+--- /dev/null
++++ b/frontend/scripts/contrast.ts
+@@ -0,0 +1,55 @@
++export const OPAQUE_HEX = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/;
++
++type Definition = { readonly name: string; readonly value: string; readonly line: number };
++type ContrastViolation = {
++  readonly rule: "ansi-contrast";
++  readonly file: string;
++  readonly line: number;
++  readonly match: string;
++};
++
++const ANSI_TOKEN = /^--color-ansi-/;
++const PANEL_TOKEN = "--color-panel";
++const MINIMUM_CONTRAST = 4.5;
++const TENTHS = 10;
++const HEX_RADIX = 16;
++const CHANNEL_MAX = 255;
++const SRGB = { knee: 0.04045, slope: 12.92, offset: 0.055, gamma: 2.4 };
++const WEIGHTS = { red: 0.2126, green: 0.7152, blue: 0.0722 };
++const FLARE = 0.05;
++
++function linear(pair: string): number {
++  const channel = Number.parseInt(pair, HEX_RADIX) / CHANNEL_MAX;
++  if (channel <= SRGB.knee) return channel / SRGB.slope;
++  return ((channel + SRGB.offset) / (1 + SRGB.offset)) ** SRGB.gamma;
++}
++
++function luminance(hex: string): number | undefined {
++  const channels = OPAQUE_HEX.exec(hex)?.slice(1).map(linear);
++  if (channels === undefined) return undefined;
++  const [red = 0, green = 0, blue = 0] = channels;
++  return WEIGHTS.red * red + WEIGHTS.green * green + WEIGHTS.blue * blue;
++}
++
++function contrastRatio(first: string, second: string): number | undefined {
++  const [one, other] = [luminance(first), luminance(second)];
++  if (one === undefined || other === undefined) return undefined;
++  return (Math.max(one, other) + FLARE) / (Math.min(one, other) + FLARE);
++}
++
++export function ansiContrastFindings(block: {
++  readonly file: string;
++  readonly definitions: readonly Definition[];
++}): ContrastViolation[] {
++  const panel = block.definitions.find(({ name }) => name === PANEL_TOKEN)?.value ?? "";
++  return block.definitions
++    .filter(({ name }) => ANSI_TOKEN.test(name))
++    .flatMap(({ name, value, line }): ContrastViolation[] => {
++      const ratio = contrastRatio(value, panel);
++      if (ratio === undefined || ratio >= MINIMUM_CONTRAST) return [];
++      const shown = (Math.floor(ratio * TENTHS) / TENTHS).toFixed(1);
++      return [
++        { rule: "ansi-contrast", file: block.file, line, match: `${name}: ${value} ${shown}:1` },
++      ];
++    });
++}
+diff --git a/frontend/scripts/themes.test.ts b/frontend/scripts/themes.test.ts
+index dc19390..ad8f9bd 100644
+--- a/frontend/scripts/themes.test.ts
++++ b/frontend/scripts/themes.test.ts
+@@ -281,6 +281,91 @@ test("a tree without the window file reports every theme's background", () => {
+   ]);
+ });
+ 
++type Ansi = { readonly panel: string; readonly token: string; readonly colour: string };
++
++function withAnsi(file: SourceFile, { panel, token, colour }: Ansi): SourceFile {
++  const sourced = file.path === ZED.path ? " /* one:75 */" : "";
++  return edited(
++    file,
++    "  --color-code:",
++    `  --color-panel: ${panel};${sourced}\n  --color-ansi-${token}: ${colour};${sourced}\n  --color-code:`,
++  );
++}
++
++test("an_ansi_colour_below_4_5_to_1_against_its_panel_is_reported", () => {
++  const files = tree(
++    withAnsi(DARK, { panel: "#17161c", token: "black", colour: "#000000" }),
++    withAnsi(LIGHT, { panel: "#ffffff", token: "black", colour: "#000000" }),
++    withAnsi(ZED, { panel: "#282c33", token: "black", colour: "#9b9ca1" }),
++  );
++
++  expect(findThemeViolations(files)).toEqual([
++    {
++      rule: "ansi-contrast",
++      file: "src/style.css",
++      line: 12,
++      match: "--color-ansi-black: #000000 1.1:1",
++    },
++  ]);
++});
++
++test("an_ansi_colour_with_alpha_or_three_digits_is_a_bad_value", () => {
++  const files = tree(
++    withAnsi(DARK, { panel: "#17161c", token: "red", colour: "#ff000080" }),
++    withAnsi(LIGHT, { panel: "#ffffff", token: "red", colour: "#c00" }),
++    withAnsi(ZED, { panel: "#282c33", token: "red", colour: "#E47B83" }),
++  );
++
++  expect(findThemeViolations(files)).toEqual([
++    { rule: "bad-value", file: "src/style.css", line: 12, match: "--color-ansi-red: #ff000080" },
++    { rule: "bad-value", file: "src/themes/light.css", line: 8, match: "--color-ansi-red: #c00" },
++  ]);
++});
++
++test("the_contrast_uses_the_same_blocks_panel", () => {
++  const files = tree(
++    withAnsi(DARK, { panel: "#17161c", token: "white", colour: "#ffffff" }),
++    withAnsi(LIGHT, { panel: "#ffffff", token: "white", colour: "#ffffff" }),
++    withAnsi(ZED, { panel: "#282c33", token: "white", colour: "#abb2bf" }),
++  );
++
++  expect(findThemeViolations(files)).toEqual([
++    {
++      rule: "ansi-contrast",
++      file: "src/themes/light.css",
++      line: 8,
++      match: "--color-ansi-white: #ffffff 1.0:1",
++    },
++  ]);
++});
++
++test("4.54:1 and black's 4.56:1 (linear below the sRGB knee) pass; 4.48:1 reports 4.4:1, rounded down", () => {
++  const files = tree(
++    withAnsi(DARK, { panel: "#ffffff", token: "grey", colour: "#767676" }),
++    withAnsi(LIGHT, { panel: "#ffffff", token: "grey", colour: "#777777" }),
++    withAnsi(ZED, { panel: "#757575", token: "grey", colour: "#000000" }),
++  );
++
++  expect(findThemeViolations(files)).toEqual([
++    {
++      rule: "ansi-contrast",
++      file: "src/themes/light.css",
++      line: 8,
++      match: "--color-ansi-grey: #777777 4.4:1",
++    },
++  ]);
++});
++
++test("an ansi colour is not measured in a block whose panel is no #rrggbb", () => {
++  const files = tree(
++    withAnsi(DARK, { panel: "#17161c", token: "black", colour: "#878787" }),
++    withAnsi(LIGHT, { panel: "#fff", token: "black", colour: "#ffffff" }),
++    withAnsi(ZED, { panel: "#282c33", token: "black", colour: "#9b9ca1" }),
++  );
++
++  expect(findThemeViolations(files)).toEqual([]);
++});
++
+ function placeWindowFile(folder: string, text: string): void {
+   mkdirSync(join(folder, "src-tauri/src"), { recursive: true });
+   writeFileSync(join(folder, WINDOW_FILE), text);
+diff --git a/frontend/scripts/themes.ts b/frontend/scripts/themes.ts
+index 3cfdce9..466b65a 100644
+--- a/frontend/scripts/themes.ts
++++ b/frontend/scripts/themes.ts
+@@ -1,6 +1,7 @@
+ import { existsSync, globSync, readFileSync } from "node:fs";
+ import { dirname, join } from "node:path";
+ 
++import { ansiContrastFindings, OPAQUE_HEX } from "./contrast";
+ import type { SourceFile } from "./fences";
+ 
+ export type ThemeViolation = {
+@@ -12,7 +13,8 @@ export type ThemeViolation = {
+     | "bad-value"
+     | "no-source"
+     | "window-background"
+-    | "window-arm";
++    | "window-arm"
++    | "ansi-contrast";
+   readonly file: string;
+   readonly line: number;
+   readonly match: string;
+@@ -54,6 +56,7 @@ const ALLOWED_VALUES: readonly { readonly name: RegExp; readonly value: RegExp }
+   { name: /^--syntax-[\w-]+-weight$/, value: /^(?:normal|bold)$/ },
+   { name: /^--syntax-[\w-]+-line$/, value: /^(?:none|underline|line-through)$/ },
+   { name: /^--(?:radius-island|spacing-island|island-line)$/, value: /^\d+px$/ },
++  { name: /^--color-ansi-/, value: OPAQUE_HEX },
+ ];
+ const WINDOW_TOKEN = "--color-window";
+ const BACKGROUND_CONSTANT =
+@@ -187,12 +190,9 @@ function sourceFindings(block: Block): ThemeViolation[] {
+   if (YAMT_THEMES[block.theme] === true) return [];
+   return block.definitions
+     .filter(({ sourced }) => !sourced)
+-    .map(({ name, line }): ThemeViolation => ({
+-      rule: "no-source",
+-      file: block.file,
+-      line,
+-      match: name,
+-    }));
++    .map(({ name, line }): ThemeViolation => {
++      return { rule: "no-source", file: block.file, line, match: name };
++    });
+ }
+ 
+ function blockFindings(placed: ReadonlyMap<string, Block>): ThemeViolation[] {
+@@ -202,6 +202,7 @@ function blockFindings(placed: ReadonlyMap<string, Block>): ThemeViolation[] {
+     ...(block.theme === DEFAULT_THEME ? [] : tokenFindings(block, reference)),
+     ...valueFindings(block),
+     ...sourceFindings(block),
++    ...ansiContrastFindings(block),
+   ]);
+ }
+ 
+diff --git a/frontend/src/style.css b/frontend/src/style.css
+index 1438521..e8d603f 100644
+--- a/frontend/src/style.css
++++ b/frontend/src/style.css
+@@ -59,6 +59,23 @@
+   --color-search-match: #78bf7b40;
+   --color-diff-wave: #565362;
+ 
++  --color-ansi-black: #878787; /* Islands Dark → Darcula CONSOLE_BLACK_OUTPUT #000000, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-red: #f0524f; /* Islands Dark → Darcula CONSOLE_RED_OUTPUT */
++  --color-ansi-green: #5c962c; /* Islands Dark → Darcula CONSOLE_GREEN_OUTPUT */
++  --color-ansi-yellow: #a68a0d; /* Islands Dark → Darcula CONSOLE_YELLOW_OUTPUT */
++  --color-ansi-blue: #3993d4; /* Islands Dark → Darcula CONSOLE_BLUE_OUTPUT */
++  --color-ansi-magenta: #a771bf; /* Islands Dark → Darcula CONSOLE_MAGENTA_OUTPUT */
++  --color-ansi-cyan: #00a3a3; /* Islands Dark → Darcula CONSOLE_CYAN_OUTPUT */
++  --color-ansi-white: #808080; /* Islands Dark → Darcula CONSOLE_GRAY_OUTPUT */
++  --color-ansi-bright-black: #878787; /* Islands Dark → Darcula CONSOLE_DARKGRAY_OUTPUT #595959, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-red: #ff4050; /* Islands Dark → Darcula CONSOLE_RED_BRIGHT_OUTPUT */
++  --color-ansi-bright-green: #4fc414; /* Islands Dark → Darcula CONSOLE_GREEN_BRIGHT_OUTPUT */
++  --color-ansi-bright-yellow: #e5bf00; /* Islands Dark → Darcula CONSOLE_YELLOW_BRIGHT_OUTPUT */
++  --color-ansi-bright-blue: #1fb0ff; /* Islands Dark → Darcula CONSOLE_BLUE_BRIGHT_OUTPUT */
++  --color-ansi-bright-magenta: #ed7eed; /* Islands Dark → Darcula CONSOLE_MAGENTA_BRIGHT_OUTPUT */
++  --color-ansi-bright-cyan: #00e5e5; /* Islands Dark → Darcula CONSOLE_CYAN_BRIGHT_OUTPUT */
++  --color-ansi-bright-white: #ffffff; /* Islands Dark → Darcula CONSOLE_WHITE_OUTPUT */
++
+   --color-syntax-keyword: #e0986b;
+   --color-syntax-control-keyword: #e0986b;
+   --color-syntax-definition-keyword: #e0986b;
+diff --git a/frontend/src/themes/atom-dark.css b/frontend/src/themes/atom-dark.css
+index 1b5d445..ea0f654 100644
+--- a/frontend/src/themes/atom-dark.css
++++ b/frontend/src/themes/atom-dark.css
+@@ -6,6 +6,11 @@
+  * nt = atom/notifications@v0.72.1 styles/notifications.less; gh/<f> = atom/github@v0.36.9 styles/<f>.
+  * Syntax: tree-sitter scopes (config-schema.js:395-397); "unscoped" takes @syntax-text-color.
+  * "gap" names the closest element for what Atom has no colour for.
++ * ansi: Atom has no terminal, so every line is a "gap" on colors: @hue-1 cyan, @hue-2 blue, @hue-3 magenta, @hue-4 green,
++ * @hue-5 red, @hue-6-2 yellow, @mono-3/-2/-1 black, bright black, white; @hue-5-2 and @hue-6 are no brighter, so a bright
++ * colour repeats its hue. A value below 4.5:1 over --color-panel is moved by xterm.js ensureContrastRatio
++ * (xtermjs/xterm.js@08829c7e src/common/Color.ts:296-361), as VS Code's terminal does with its default
++ * terminal.integrated.minimumContrastRatio 4.5 (VS Code 1.144.0 workbench.desktop.main.js:4384@894).
+  */
+ :root[data-theme="atom-dark"] {
+   --radius-island: 0px; /* ui/panes.less#L5-6 flat panes */
+@@ -50,6 +55,23 @@
+   --color-search-match: #528bff3d; /* sv:18 @syntax-result-marker-color */
+   --color-diff-wave: #abb2bf; /* gap: editor.less .fold-marker:after = @syntax-gutter-text-color-selected */
+ 
++  --color-ansi-black: #969aa3; /* gap: colors:11 @mono-3 (darkest grey) #5c6370, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-red: #e47b83; /* gap: colors:19 @hue-5 (red) #e06c75, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-green: #98c379; /* gap: colors:17 @hue-4 (green) */
++  --color-ansi-yellow: #e5c07b; /* gap: colors:23 @hue-6-2 (yellow) */
++  --color-ansi-blue: #61afef; /* gap: colors:15 @hue-2 (blue) */
++  --color-ansi-magenta: #c678dd; /* gap: colors:16 @hue-3 (magenta) */
++  --color-ansi-cyan: #56b6c2; /* gap: colors:14 @hue-1 (cyan) */
++  --color-ansi-white: #abb2bf; /* gap: colors:9 @mono-1 (lightest grey) */
++  --color-ansi-bright-black: #8f95a2; /* gap: colors:10 @mono-2 (middle grey) #828997, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-red: #e47b83; /* gap: colors:19 @hue-5 (red; no brighter @hue) #e06c75, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-green: #98c379; /* gap: colors:17 @hue-4 (green; no brighter @hue) */
++  --color-ansi-bright-yellow: #e5c07b; /* gap: colors:23 @hue-6-2 (yellow; no brighter @hue) */
++  --color-ansi-bright-blue: #61afef; /* gap: colors:15 @hue-2 (blue; no brighter @hue) */
++  --color-ansi-bright-magenta: #c678dd; /* gap: colors:16 @hue-3 (magenta; no brighter @hue) */
++  --color-ansi-bright-cyan: #56b6c2; /* gap: colors:14 @hue-1 (cyan; no brighter @hue) */
++  --color-ansi-bright-white: #abb2bf; /* gap: colors:9 @mono-1 (lightest grey; no lighter @mono) */
++
+   --color-syntax-keyword: #c678dd; /* L:23 .syntax--keyword @hue-3 */
+   --color-syntax-control-keyword: #c678dd; /* L:23 .syntax--keyword @hue-3 */
+   --color-syntax-definition-keyword: #c678dd; /* L:43 .syntax--storage @hue-3 */
+diff --git a/frontend/src/themes/atom-light.css b/frontend/src/themes/atom-light.css
+index 32f6c20..f4371ce 100644
+--- a/frontend/src/themes/atom-light.css
++++ b/frontend/src/themes/atom-light.css
+@@ -7,6 +7,11 @@
+  * Syntax: tree-sitter scopes (config-schema.js:395-397); "unscoped" takes @syntax-text-color. L:/N: line numbers are
+  * one-dark-syntax's, whose _base.less and base.less hold the same rules.
+  * "gap" names the closest element for what Atom has no colour for.
++ * ansi: Atom has no terminal, so every line is a "gap" on colors: @hue-1 cyan, @hue-2 blue, @hue-3 magenta, @hue-4 green,
++ * @hue-5 red, @hue-6-2 yellow, @mono-1/-2/-3 black, bright black, white; @hue-5-2 and @hue-6 are no brighter, so a bright
++ * colour repeats its hue. A value below 4.5:1 over --color-panel is moved by xterm.js ensureContrastRatio
++ * (xtermjs/xterm.js@08829c7e src/common/Color.ts:296-361), as VS Code's terminal does with its default
++ * terminal.integrated.minimumContrastRatio 4.5 (VS Code 1.144.0 workbench.desktop.main.js:4384@894).
+  */
+ :root[data-theme="atom-light"] {
+   --radius-island: 0px; /* ui/panes.less#L5-6 flat panes */
+@@ -51,6 +56,23 @@
+   --color-search-match: #526fff33; /* sv:18 @syntax-result-marker-color */
+   --color-diff-wave: #383a42; /* gap: editor.less .fold-marker:after = @syntax-gutter-text-color-selected */
+ 
++  --color-ansi-black: #383a42; /* gap: colors:9 @mono-1 (darkest grey) */
++  --color-ansi-red: #b8453a; /* gap: colors:19 @hue-5 (red) #e45649, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-green: #40813f; /* gap: colors:17 @hue-4 (green) #50a14f, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-yellow: #a36000; /* gap: colors:23 @hue-6-2 (yellow) #cb7701, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-blue: #396cd9; /* gap: colors:15 @hue-2 (blue) #4078f2, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-magenta: #a626a4; /* gap: colors:16 @hue-3 (magenta) */
++  --color-ansi-cyan: #0076a9; /* gap: colors:14 @hue-1 (cyan) #0184bc, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-white: #68686c; /* gap: colors:11 @mono-3 (lightest grey) #a0a1a7, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-black: #696c77; /* gap: colors:10 @mono-2 (middle grey) */
++  --color-ansi-bright-red: #b8453a; /* gap: colors:19 @hue-5 (red; no brighter @hue) #e45649, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-green: #40813f; /* gap: colors:17 @hue-4 (green; no brighter @hue) #50a14f, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-yellow: #a36000; /* gap: colors:23 @hue-6-2 (yellow; no brighter @hue) #cb7701, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-blue: #396cd9; /* gap: colors:15 @hue-2 (blue; no brighter @hue) #4078f2, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-magenta: #a626a4; /* gap: colors:16 @hue-3 (magenta; no brighter @hue) */
++  --color-ansi-bright-cyan: #0076a9; /* gap: colors:14 @hue-1 (cyan; no brighter @hue) #0184bc, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-white: #68686c; /* gap: colors:11 @mono-3 (lightest grey; no lighter @mono) #a0a1a7, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++
+   --color-syntax-keyword: #a626a4; /* L:23 .syntax--keyword @hue-3 */
+   --color-syntax-control-keyword: #a626a4; /* L:23 .syntax--keyword @hue-3 */
+   --color-syntax-definition-keyword: #a626a4; /* L:43 .syntax--storage @hue-3 */
+diff --git a/frontend/src/themes/light.css b/frontend/src/themes/light.css
+index 65e88c8..4e4e20a 100644
+--- a/frontend/src/themes/light.css
++++ b/frontend/src/themes/light.css
+@@ -1,4 +1,5 @@
+ /* yamt Light (plan §2 #57): yamt's own light palette, after WebStorm 2026.2 Islands Light. */
++/* ansi: Islands Light → Default CONSOLE_*_OUTPUT; below 4.5:1 over --color-panel moved as in webstorm-light.css. */
+ :root[data-theme="light"] {
+   --radius-island: 10px;
+   --spacing-island: 5px;
+@@ -42,6 +43,23 @@
+   --color-search-match: #ccccff;
+   --color-diff-wave: #d0d0d0;
+ 
++  --color-ansi-black: #000000; /* Islands Light → Default CONSOLE_BLACK_OUTPUT */
++  --color-ansi-red: #ce0505; /* Islands Light → Default CONSOLE_RED_OUTPUT */
++  --color-ansi-green: #067d17; /* Islands Light → Default CONSOLE_GREEN_OUTPUT */
++  --color-ansi-yellow: #907100; /* Islands Light → Default CONSOLE_YELLOW_OUTPUT #b28c00, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-blue: #063fdb; /* Islands Light → Default CONSOLE_BLUE_OUTPUT */
++  --color-ansi-magenta: #b309b3; /* Islands Light → Default CONSOLE_MAGENTA_OUTPUT */
++  --color-ansi-cyan: #017f7f; /* Islands Light → Default CONSOLE_CYAN_OUTPUT #028e8e, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-white: #757575; /* Islands Light → Default CONSOLE_GRAY_OUTPUT #929292, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-black: #656565; /* Islands Light → Default CONSOLE_DARKGRAY_OUTPUT */
++  --color-ansi-bright-red: #e51313; /* Islands Light → Default CONSOLE_RED_BRIGHT_OUTPUT #ff1616, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-green: #0f821f; /* Islands Light → Default CONSOLE_GREEN_BRIGHT_OUTPUT #16b42c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-yellow: #897118; /* Islands Light → Default CONSOLE_YELLOW_BRIGHT_OUTPUT #ecc32c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-blue: #2d61f0; /* Islands Light → Default CONSOLE_BLUE_BRIGHT_OUTPUT */
++  --color-ansi-bright-magenta: #cf14cf; /* Islands Light → Default CONSOLE_MAGENTA_BRIGHT_OUTPUT #e617e6, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-cyan: #0c7d7d; /* Islands Light → Default CONSOLE_CYAN_BRIGHT_OUTPUT #15c1c1, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-white: #757575; /* Islands Light → Default CONSOLE_WHITE_OUTPUT #c9c9c9, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++
+   --color-syntax-keyword: #0033b3;
+   --color-syntax-control-keyword: #0033b3;
+   --color-syntax-definition-keyword: #0033b3;
+diff --git a/frontend/src/themes/vscode-dark.css b/frontend/src/themes/vscode-dark.css
+index a4266a2..ed09e00 100644
+--- a/frontend/src/themes/vscode-dark.css
++++ b/frontend/src/themes/vscode-dark.css
+@@ -5,6 +5,9 @@
+  * js:N@c = …/out/vs/workbench/workbench.desktop.main.js line N column c (registered defaults),
+  * css:4@c = …/workbench.desktop.main.css line 4 column c. workbench.experimental.modernUI is on (js:867@13723).
+  * "gap" names the closest element for what VS Code has no colour for.
++ * ansi: terminal.ansi* registered defaults at js:732@c of the installed 1.144.0 bundle (no file of the chain sets them).
++ * A value below 4.5:1 over --color-panel is moved by xterm.js ensureContrastRatio (xtermjs/xterm.js@08829c7e
++ * src/common/Color.ts:296-361), as the terminal does with terminal.integrated.minimumContrastRatio 4.5 (js:4384@894).
+  */
+ :root[data-theme="vscode-dark"] {
+   --radius-island: 8px; /* css:4@202798 cornerRadius.large (modern-UI cards) */
+@@ -49,6 +52,23 @@
+   --color-search-match: #27678280; /* D26 editor.findMatchHighlightBackground */
+   --color-diff-wave: #cccccc33; /* gap: js:108@11618 diffEditor.diagonalFill */
+ 
++  --color-ansi-black: #878787; /* js:732@14794 terminal.ansiBlack dark #000000, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-red: #d75959; /* js:732@14902 terminal.ansiRed dark #cd3131, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-green: #0dbc79; /* js:732@15008 terminal.ansiGreen dark */
++  --color-ansi-yellow: #e5e510; /* js:732@15116 terminal.ansiYellow dark */
++  --color-ansi-blue: #3a81ce; /* js:732@15225 terminal.ansiBlue dark #2472c8, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-magenta: #c353c3; /* js:732@15332 terminal.ansiMagenta dark #bc3fbc, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-cyan: #11a8cd; /* js:732@15442 terminal.ansiCyan dark */
++  --color-ansi-white: #e5e5e5; /* js:732@15549 terminal.ansiWhite dark */
++  --color-ansi-bright-black: #848484; /* js:732@15657 terminal.ansiBrightBlack dark #666666, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-red: #f14c4c; /* js:732@15771 terminal.ansiBrightRed dark */
++  --color-ansi-bright-green: #23d18b; /* js:732@15883 terminal.ansiBrightGreen dark */
++  --color-ansi-bright-yellow: #f5f543; /* js:732@15998 terminal.ansiBrightYellow dark */
++  --color-ansi-bright-blue: #3b8eea; /* js:732@16114 terminal.ansiBrightBlue dark */
++  --color-ansi-bright-magenta: #d670d6; /* js:732@16228 terminal.ansiBrightMagenta dark */
++  --color-ansi-bright-cyan: #29b8db; /* js:732@16345 terminal.ansiBrightCyan dark */
++  --color-ansi-bright-white: #e5e5e5; /* js:732@16459 terminal.ansiBrightWhite dark */
++
+   --color-syntax-keyword: #569cd6; /* Dvs storage.modifier, keyword.operator.expression, keyword.operator.new */
+   --color-syntax-control-keyword: #c586c0; /* D+ keyword.control */
+   --color-syntax-definition-keyword: #ff7b72; /* D26 storage.type */
+diff --git a/frontend/src/themes/vscode-light.css b/frontend/src/themes/vscode-light.css
+index fe9a946..86200ff 100644
+--- a/frontend/src/themes/vscode-light.css
++++ b/frontend/src/themes/vscode-light.css
+@@ -5,6 +5,9 @@
+  * js:N@c = …/out/vs/workbench/workbench.desktop.main.js line N column c (registered defaults),
+  * css:4@c = …/workbench.desktop.main.css line 4 column c. workbench.experimental.modernUI is on (js:867@13723).
+  * "gap" names the closest element for what VS Code has no colour for.
++ * ansi: terminal.ansi* registered defaults at js:732@c of the installed 1.144.0 bundle (no file of the chain sets them).
++ * A value below 4.5:1 over --color-panel is moved by xterm.js ensureContrastRatio (xtermjs/xterm.js@08829c7e
++ * src/common/Color.ts:296-361), as the terminal does with terminal.integrated.minimumContrastRatio 4.5 (js:4384@894).
+  */
+ :root[data-theme="vscode-light"] {
+   --radius-island: 8px; /* css:4@202798 cornerRadius.large (modern-UI cards) */
+@@ -49,6 +52,23 @@
+   --color-search-match: #0069cc1a; /* L26 editor.findMatchHighlightBackground */
+   --color-diff-wave: #22222233; /* gap: js:108@11618 diffEditor.diagonalFill */
+ 
++  --color-ansi-black: #000000; /* js:732@14794 terminal.ansiBlack light */
++  --color-ansi-red: #cd3131; /* js:732@14902 terminal.ansiRed light */
++  --color-ansi-green: #107c10; /* js:732@15008 terminal.ansiGreen light */
++  --color-ansi-yellow: #777a00; /* js:732@15116 terminal.ansiYellow light #949800, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-blue: #0451a5; /* js:732@15225 terminal.ansiBlue light */
++  --color-ansi-magenta: #bc05bc; /* js:732@15332 terminal.ansiMagenta light */
++  --color-ansi-cyan: #037a98; /* js:732@15442 terminal.ansiCyan light #0598bc, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-white: #555555; /* js:732@15549 terminal.ansiWhite light */
++  --color-ansi-bright-black: #666666; /* js:732@15657 terminal.ansiBrightBlack light */
++  --color-ansi-bright-red: #c23d3d; /* js:732@15771 terminal.ansiBrightRed light #f14c4c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-green: #0c860c; /* js:732@15883 terminal.ansiBrightGreen light #14ce14, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-yellow: #757900; /* js:732@15998 terminal.ansiBrightYellow light #b5ba00, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-blue: #2f72bd; /* js:732@16114 terminal.ansiBrightBlue light #3b8eea, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-magenta: #9a519a; /* js:732@16228 terminal.ansiBrightMagenta light #d670d6, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-cyan: #19778f; /* js:732@16345 terminal.ansiBrightCyan light #29b8db, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-white: #6b6b6b; /* js:732@16459 terminal.ansiBrightWhite light #a5a5a5, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++
+   --color-syntax-keyword: #0000ff; /* Lvs storage.modifier, keyword.operator.expression, keyword.operator.new */
+   --color-syntax-control-keyword: #af00db; /* L+ keyword.control */
+   --color-syntax-definition-keyword: #cf222e; /* L26 storage.type */
+diff --git a/frontend/src/themes/webstorm-dark.css b/frontend/src/themes/webstorm-dark.css
+index e6a4f23..3df988e 100644
+--- a/frontend/src/themes/webstorm-dark.css
++++ b/frontend/src/themes/webstorm-dark.css
+@@ -6,6 +6,10 @@
+  * JD = plugins/javascript-plugin/lib/modules/intellij.javascript.backend.jar:colorSchemes/Darcula.xml,
+  * TDF = intellij-community idea/262.10968.63 TextDiffTypeFactory.java (getIgnoredColor: c + 0.6·(TEXT bg − c)).
+  * "→ X" names the fallback the key resolves to; "gap" names the closest element for what WebStorm has no colour for.
++ * ansi: CONSOLE_*_OUTPUT in the ANSI order of lib/intellij.platform.ide.jar ColoredOutputTypeRegistryImpl (GRAY = white,
++ * DARKGRAY = bright black, WHITE = bright white). A value below 4.5:1 over --color-panel is moved by xterm.js
++ * ensureContrastRatio (xtermjs/xterm.js@08829c7e src/common/Color.ts:296-361), as VS Code's terminal does with its
++ * default terminal.integrated.minimumContrastRatio 4.5 (VS Code 1.144.0 workbench.desktop.main.js:4384@894).
+  */
+ :root[data-theme="webstorm-dark"] {
+   --radius-island: 10px; /* ID ui Island.arc 20 */
+@@ -50,6 +54,23 @@
+   --color-search-match: #114957; /* SD TEXT_SEARCH_RESULT_ATTRIBUTES background */
+   --color-diff-wave: #555555; /* DC:1616 DIFF_SEPARATOR_WAVE */
+ 
++  --color-ansi-black: #878787; /* SD → DC:1737 CONSOLE_BLACK_OUTPUT #000000, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-red: #f0524f; /* SD → DC:1825 CONSOLE_RED_OUTPUT */
++  --color-ansi-green: #5c962c; /* SD → DC:1785 CONSOLE_GREEN_OUTPUT */
++  --color-ansi-yellow: #a68a0d; /* SD → DC:1848 CONSOLE_YELLOW_OUTPUT */
++  --color-ansi-blue: #3993d4; /* SD → DC:1743 CONSOLE_BLUE_OUTPUT */
++  --color-ansi-magenta: #a771bf; /* SD → DC:1797 CONSOLE_MAGENTA_OUTPUT */
++  --color-ansi-cyan: #00a3a3; /* SD → DC:1755 CONSOLE_CYAN_OUTPUT */
++  --color-ansi-white: #8d8d8d; /* SD → DC:1779 CONSOLE_GRAY_OUTPUT #808080, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-black: #878787; /* SD → DC:1767 CONSOLE_DARKGRAY_OUTPUT #595959, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-red: #ff4050; /* SD → DC:1831 CONSOLE_RED_BRIGHT_OUTPUT */
++  --color-ansi-bright-green: #4fc414; /* SD → DC:1791 CONSOLE_GREEN_BRIGHT_OUTPUT */
++  --color-ansi-bright-yellow: #e5bf00; /* SD → DC:1854 CONSOLE_YELLOW_BRIGHT_OUTPUT */
++  --color-ansi-bright-blue: #1fb0ff; /* SD → DC:1749 CONSOLE_BLUE_BRIGHT_OUTPUT */
++  --color-ansi-bright-magenta: #ed7eed; /* SD → DC:1803 CONSOLE_MAGENTA_BRIGHT_OUTPUT */
++  --color-ansi-bright-cyan: #00e5e5; /* SD → DC:1761 CONSOLE_CYAN_BRIGHT_OUTPUT */
++  --color-ansi-bright-white: #ffffff; /* SD → DC:1842 CONSOLE_WHITE_OUTPUT */
++
+   --color-syntax-keyword: #cf8e6d; /* SD DEFAULT_KEYWORD (TS.KEYWORD → JS.KEYWORD) */
+   --color-syntax-control-keyword: #cf8e6d; /* SD DEFAULT_KEYWORD */
+   --color-syntax-definition-keyword: #cf8e6d; /* SD DEFAULT_KEYWORD */
+diff --git a/frontend/src/themes/webstorm-light.css b/frontend/src/themes/webstorm-light.css
+index c2822b0..37587a9 100644
+--- a/frontend/src/themes/webstorm-light.css
++++ b/frontend/src/themes/webstorm-light.css
+@@ -8,6 +8,10 @@
+  * MDL = plugins/markdown/lib/intellij.markdown.jar:colorSchemes/MarkdownDefault.xml,
+  * TDF = intellij-community idea/262.10968.63 TextDiffTypeFactory.java (getIgnoredColor: c + 0.6·(TEXT bg − c)).
+  * "→ X" names the fallback the key resolves to; "gap" names the closest element for what WebStorm has no colour for.
++ * ansi: CONSOLE_*_OUTPUT in the ANSI order of lib/intellij.platform.ide.jar ColoredOutputTypeRegistryImpl (GRAY = white,
++ * DARKGRAY = bright black, WHITE = bright white). A value below 4.5:1 over --color-panel is moved by xterm.js
++ * ensureContrastRatio (xtermjs/xterm.js@08829c7e src/common/Color.ts:296-361), as VS Code's terminal does with its
++ * default terminal.integrated.minimumContrastRatio 4.5 (VS Code 1.144.0 workbench.desktop.main.js:4384@894).
+  */
+ :root[data-theme="webstorm-light"] {
+   --radius-island: 10px; /* IL:404-414 Island.arc 20 */
+@@ -52,6 +56,23 @@
+   --color-search-match: #fcd47e; /* SL:458 TEXT_SEARCH_RESULT_ATTRIBUTES background */
+   --color-diff-wave: #d0d0d0; /* DC:47 DIFF_SEPARATOR_WAVE */
+ 
++  --color-ansi-black: #000000; /* SL → DC:1076 CONSOLE_BLACK_OUTPUT */
++  --color-ansi-red: #ce0505; /* SL → DC:1186 CONSOLE_RED_OUTPUT */
++  --color-ansi-green: #067d17; /* SL → DC:1146 CONSOLE_GREEN_OUTPUT */
++  --color-ansi-yellow: #907100; /* SL → DC:1206 CONSOLE_YELLOW_OUTPUT #b28c00, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-blue: #063fdb; /* SL → DC:1086 CONSOLE_BLUE_OUTPUT */
++  --color-ansi-magenta: #b309b3; /* SL → DC:1166 CONSOLE_MAGENTA_OUTPUT */
++  --color-ansi-cyan: #017f7f; /* SL → DC:1106 CONSOLE_CYAN_OUTPUT #028e8e, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-white: #757575; /* SL → DC:1136 CONSOLE_GRAY_OUTPUT #929292, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-black: #656565; /* SL → DC:1126 CONSOLE_DARKGRAY_OUTPUT */
++  --color-ansi-bright-red: #e51313; /* SL → DC:1196 CONSOLE_RED_BRIGHT_OUTPUT #ff1616, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-green: #0f821f; /* SL → DC:1156 CONSOLE_GREEN_BRIGHT_OUTPUT #16b42c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-yellow: #897118; /* SL → DC:1216 CONSOLE_YELLOW_BRIGHT_OUTPUT #ecc32c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-blue: #2d61f0; /* SL → DC:1096 CONSOLE_BLUE_BRIGHT_OUTPUT */
++  --color-ansi-bright-magenta: #cf14cf; /* SL → DC:1176 CONSOLE_MAGENTA_BRIGHT_OUTPUT #e617e6, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-cyan: #0c7d7d; /* SL → DC:1116 CONSOLE_CYAN_BRIGHT_OUTPUT #15c1c1, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-white: #757575; /* SL → DC:1226 CONSOLE_WHITE_OUTPUT #c9c9c9, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++
+   --color-syntax-keyword: #0033b3; /* SL:205 DEFAULT_KEYWORD (TS.KEYWORD → JS.KEYWORD) */
+   --color-syntax-control-keyword: #0033b3; /* SL:205 DEFAULT_KEYWORD */
+   --color-syntax-definition-keyword: #0033b3; /* SL:205 DEFAULT_KEYWORD */
+diff --git a/frontend/src/themes/zed-dark.css b/frontend/src/themes/zed-dark.css
+index 97240e7..0749005 100644
+--- a/frontend/src/themes/zed-dark.css
++++ b/frontend/src/themes/zed-dark.css
+@@ -3,6 +3,9 @@
+  * one = assets/themes/one/one.json (One Dark), schema = crates/theme_settings/src/schema.rs (fallbacks of omitted keys),
+  * cv = crates/git_ui/src/conflict_view.rs, dock = crates/workspace/src/dock.rs. Syntax: the tree-sitter capture's key
+  * (longest dot prefix); "no key" takes editor.foreground. "gap" names the closest element for what Zed has no colour for.
++ * ansi: one terminal.ansi.*. A value below 4.5:1 over --color-panel is moved by xterm.js ensureContrastRatio
++ * (xtermjs/xterm.js@08829c7e src/common/Color.ts:296-361), as VS Code's terminal does with its default
++ * terminal.integrated.minimumContrastRatio 4.5 (VS Code 1.144.0 workbench.desktop.main.js:4384@894).
+  */
+ :root[data-theme="zed-dark"] {
+   --radius-island: 0px; /* dock:1341 flat panels */
+@@ -47,6 +50,23 @@
+   --color-search-match: #74ade866; /* one:47 search.match_background */
+   --color-diff-wave: #878a98; /* gap: one:32 text.placeholder (fold placeholder) */
+ 
++  --color-ansi-black: #9b9ca1; /* one:75 terminal.ansi.black #282c34, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-red: #e47b83; /* one:78 terminal.ansi.red #e06c75, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-green: #98c379; /* one:81 terminal.ansi.green */
++  --color-ansi-yellow: #e5c07b; /* one:84 terminal.ansi.yellow */
++  --color-ansi-blue: #61afef; /* one:87 terminal.ansi.blue */
++  --color-ansi-magenta: #c678dd; /* one:90 terminal.ansi.magenta */
++  --color-ansi-cyan: #56b6c2; /* one:93 terminal.ansi.cyan */
++  --color-ansi-white: #abb2bf; /* one:96 terminal.ansi.white */
++  --color-ansi-bright-black: #8e96a6; /* one:76 terminal.ansi.bright_black #636d83, raised to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-red: #ea858b; /* one:79 terminal.ansi.bright_red */
++  --color-ansi-bright-green: #aad581; /* one:82 terminal.ansi.bright_green */
++  --color-ansi-bright-yellow: #ffd885; /* one:85 terminal.ansi.bright_yellow */
++  --color-ansi-bright-blue: #85c1ff; /* one:88 terminal.ansi.bright_blue */
++  --color-ansi-bright-magenta: #d398eb; /* one:91 terminal.ansi.bright_magenta */
++  --color-ansi-bright-cyan: #6ed5de; /* one:94 terminal.ansi.bright_cyan */
++  --color-ansi-bright-white: #fafafa; /* one:97 terminal.ansi.bright_white */
++
+   --color-syntax-keyword: #b477cf; /* one:253 keyword */
+   --color-syntax-control-keyword: #b477cf; /* one:253 keyword (@keyword.control) */
+   --color-syntax-definition-keyword: #b477cf; /* one:253 keyword (@keyword.declaration) */
+diff --git a/frontend/src/themes/zed-light.css b/frontend/src/themes/zed-light.css
+index 2acc616..b237f70 100644
+--- a/frontend/src/themes/zed-light.css
++++ b/frontend/src/themes/zed-light.css
+@@ -4,6 +4,9 @@
+  * omitted keys), dc = crates/theme/src/default_colors.rs (code defaults), cv = crates/git_ui/src/conflict_view.rs,
+  * dock = crates/workspace/src/dock.rs. Syntax: the tree-sitter capture's key (longest dot prefix); "no key" takes
+  * editor.foreground. "gap" names the closest element for what Zed has no colour for.
++ * ansi: one terminal.ansi.*. A value below 4.5:1 over --color-panel is moved by xterm.js ensureContrastRatio
++ * (xtermjs/xterm.js@08829c7e src/common/Color.ts:296-361), as VS Code's terminal does with its default
++ * terminal.integrated.minimumContrastRatio 4.5 (VS Code 1.144.0 workbench.desktop.main.js:4384@894).
+  */
+ :root[data-theme="zed-light"] {
+   --radius-island: 0px; /* dock:1341 flat panels */
+@@ -48,6 +51,23 @@
+   --color-search-match: #5c79e266; /* one:466 search.match_background */
+   --color-diff-wave: #7e8086; /* gap: one:451 text.placeholder (fold placeholder) */
+ 
++  --color-ansi-black: #000000; /* one:494 terminal.ansi.black */
++  --color-ansi-red: #c7372f; /* one:497 terminal.ansi.red #de3e35, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-green: #32782e; /* one:500 terminal.ansi.green #3f953a, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-yellow: #7b6948; /* one:503 terminal.ansi.yellow #d2b67c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-blue: #2f5af3; /* one:506 terminal.ansi.blue */
++  --color-ansi-magenta: #950095; /* one:509 terminal.ansi.magenta */
++  --color-ansi-cyan: #077990; /* one:512 terminal.ansi.cyan #0997b3, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-white: #6c6c6c; /* one:515 terminal.ansi.white #bbbbbb, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-black: #000000; /* one:495 terminal.ansi.bright_black */
++  --color-ansi-bright-red: #c7372f; /* one:498 terminal.ansi.bright_red #de3e35, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-green: #32782e; /* one:501 terminal.ansi.bright_green #3f953a, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-yellow: #7b6948; /* one:504 terminal.ansi.bright_yellow #d2b67c, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-blue: #2f5af3; /* one:507 terminal.ansi.bright_blue */
++  --color-ansi-bright-magenta: #a00095; /* one:510 terminal.ansi.bright_magenta */
++  --color-ansi-bright-cyan: #067a8a; /* one:513 terminal.ansi.bright_cyan #0bbcd6, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++  --color-ansi-bright-white: #6c6c6c; /* one:516 terminal.ansi.bright_white #ffffff, lowered to 4.5:1 over --color-panel (VS Code minimumContrastRatio) */
++
+   --color-syntax-keyword: #a449ab; /* one:670 keyword */
+   --color-syntax-control-keyword: #a449ab; /* one:670 keyword (@keyword.control) */
+   --color-syntax-definition-keyword: #a449ab; /* one:670 keyword (@keyword.declaration) */

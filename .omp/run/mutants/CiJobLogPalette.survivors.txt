@@ -1,0 +1,4 @@
+just mutants HEAD → All files 92.53% (320 killed, 2 timeout, 14 survived, 12 no cov); contrast.ts 95.08% (58/3); themes.ts none on changed lines
+frontend/scripts/contrast.ts:23 `<=` → `<` at SRGB.knee — equivalent: no 8-bit channel c/255 equals 0.04045
+frontend/scripts/contrast.ts:44 `?? ""` → `?? "Stryker was here!"` — equivalent: both defaults fail OPAQUE_HEX, so the ratio is undefined either way
+frontend/scripts/contrast.ts:49 `>=` → `>` MINIMUM_CONTRAST — equivalent [INFERENCE]: no pair of 8-bit sRGB colours gives a ratio of exactly 4.5 in float64
