@@ -137,38 +137,33 @@ graphql() {
 	reply "$scenario/graphql-page-$page" '200 OK'
 }
 
-# A picture asked by its full address: the file at the address's path after its host (its query dropped) under
-# $scenario/pictures, printed with cat (answer's printf would drop NUL bytes), after its .sleep seconds; "answered:
-# <address>" is logged before the answer, so a test sees which fetches overlapped.
-picture() {
-	path=${endpoint#*://}
-	path=${path#*/}
-	file="$scenario/pictures/${path%%\?*}"
-	if [ -f "$file.sleep" ]; then
-		sleep "$(cat "$file.sleep")"
+# $1: a file under $scenario, printed with cat (answer's printf would drop NUL bytes) after its .sleep seconds;
+# "answered: <endpoint>" is logged before the answer, so a test sees which fetches overlapped. No such file answers
+# 404.
+serve_file() {
+	if [ -f "$1.sleep" ]; then
+		sleep "$(cat "$1.sleep")"
 	fi
 	log "answered: $endpoint"
-	if [ -f "$file" ]; then
-		cat "$file"
+	if [ -f "$1" ]; then
+		cat "$1"
 		exit 0
 	fi
 	answer '404 Not Found' '{"message":"404 Not Found"}'
 }
 
-# A job's log, GET projects/<project>/jobs/<n>/trace: $scenario/traces/<n>.log printed with cat (bytes as they are),
-# after its .sleep seconds; "answered: <endpoint>" is logged before the answer. No such file answers 404.
+# A picture asked by its full address: the file at the address's path after its host (its query dropped) under
+# $scenario/pictures.
+picture() {
+	path=${endpoint#*://}
+	path=${path#*/}
+	serve_file "$scenario/pictures/${path%%\?*}"
+}
+
+# A job's log, GET projects/<project>/jobs/<n>/trace: $scenario/traces/<n>.log.
 trace() {
 	job=${endpoint#*/jobs/}
-	file="$scenario/traces/${job%/trace}.log"
-	if [ -f "$file.sleep" ]; then
-		sleep "$(cat "$file.sleep")"
-	fi
-	log "answered: $endpoint"
-	if [ -f "$file" ]; then
-		cat "$file"
-		exit 0
-	fi
-	answer '404 Not Found' '{"message":"404 Not Found"}'
+	serve_file "$scenario/traces/${job%/trace}.log"
 }
 
 api() {

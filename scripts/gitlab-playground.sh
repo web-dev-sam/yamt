@@ -40,12 +40,13 @@ trap 'rm -rf "$seed"' EXIT
 "$here/mr-conflict-repo.sh" "$seed/repo" > /dev/null
 bare="$seed/repo/.git/fake-gitlab.git"
 
-# feature/failing-ci: main and one commit with a fixed author and date, as mr-conflict-repo.sh's commits.
-seed_git() {
-    git -C "$seed/repo" -c commit.gpgsign=false -c core.autocrlf=false -c core.hooksPath=/dev/null "$@"
-}
-seed_git checkout -q -b feature/failing-ci main
-cat > "$seed/repo/.gitlab-ci.yml" << 'YAML'
+# feature/failing-ci: main and one commit built as mr-conflict-repo.sh's commits, so its id is fixed too.
+(
+    . "$here/git-sandbox.sh"
+    isolate_git_config
+    dir="$seed/repo"
+    repo_git checkout -q -b feature/failing-ci main
+    cat > "$dir/.gitlab-ci.yml" << 'YAML'
 image: alpine:3.20
 
 phpunit:
@@ -70,11 +71,10 @@ long-log:
       done
       exit 1
 YAML
-seed_git add .gitlab-ci.yml
-GIT_AUTHOR_NAME=yamt GIT_AUTHOR_EMAIL=yamt@example.invalid GIT_AUTHOR_DATE=2026-10-08T10:00:00+02:00 \
-    GIT_COMMITTER_NAME=yamt GIT_COMMITTER_EMAIL=yamt@example.invalid GIT_COMMITTER_DATE=2026-10-08T10:00:00+02:00 \
-    seed_git commit -q -m "CI: two failing jobs"
-seed_git push -q "$bare" refs/heads/feature/failing-ci
+    repo_git add .gitlab-ci.yml
+    commit_at 2026-10-08T10:00:00+02:00 "CI: two failing jobs"
+    repo_git push -q "$bare" refs/heads/feature/failing-ci
+)
 
 # Runs "$@" and shows its output only when it fails (GitLab's "To create a merge request …" lines are noise here).
 quiet() {

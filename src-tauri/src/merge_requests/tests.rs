@@ -240,6 +240,14 @@ mod through_glab {
         ran.unwrap_or_else(|error| panic!("{error}"));
     }
 
+    /// The fake glab's log lines that start with `prefix`, in the order it wrote them.
+    pub(super) fn glab_log(prefix: &str) -> Vec<String> {
+        let log = std::env::var_os("YAMT_FAKE_GLAB_LOG").unwrap();
+        let log = std::fs::read_to_string(log).unwrap_or_default();
+        let lines = log.lines().filter(|line| line.starts_with(prefix));
+        lines.map(str::to_owned).collect()
+    }
+
     fn iids(page: &Value) -> Vec<u64> {
         let rows = page["rows"].as_array().unwrap();
         rows.iter()

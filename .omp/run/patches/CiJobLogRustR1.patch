@@ -1,0 +1,211 @@
+diff --git a/scripts/fake-glab/glab b/scripts/fake-glab/glab
+index 37d0a6e..921142e 100755
+--- a/scripts/fake-glab/glab
++++ b/scripts/fake-glab/glab
+@@ -137,38 +137,33 @@ graphql() {
+ 	reply "$scenario/graphql-page-$page" '200 OK'
+ }
+ 
+-# A picture asked by its full address: the file at the address's path after its host (its query dropped) under
+-# $scenario/pictures, printed with cat (answer's printf would drop NUL bytes), after its .sleep seconds; "answered:
+-# <address>" is logged before the answer, so a test sees which fetches overlapped.
+-picture() {
+-	path=${endpoint#*://}
+-	path=${path#*/}
+-	file="$scenario/pictures/${path%%\?*}"
+-	if [ -f "$file.sleep" ]; then
+-		sleep "$(cat "$file.sleep")"
++# $1: a file under $scenario, printed with cat (answer's printf would drop NUL bytes) after its .sleep seconds;
++# "answered: <endpoint>" is logged before the answer, so a test sees which fetches overlapped. No such file answers
++# 404.
++serve_file() {
++	if [ -f "$1.sleep" ]; then
++		sleep "$(cat "$1.sleep")"
+ 	fi
+ 	log "answered: $endpoint"
+-	if [ -f "$file" ]; then
+-		cat "$file"
++	if [ -f "$1" ]; then
++		cat "$1"
+ 		exit 0
+ 	fi
+ 	answer '404 Not Found' '{"message":"404 Not Found"}'
+ }
+ 
+-# A job's log, GET projects/<project>/jobs/<n>/trace: $scenario/traces/<n>.log printed with cat (bytes as they are),
+-# after its .sleep seconds; "answered: <endpoint>" is logged before the answer. No such file answers 404.
++# A picture asked by its full address: the file at the address's path after its host (its query dropped) under
++# $scenario/pictures.
++picture() {
++	path=${endpoint#*://}
++	path=${path#*/}
++	serve_file "$scenario/pictures/${path%%\?*}"
++}
++
++# A job's log, GET projects/<project>/jobs/<n>/trace: $scenario/traces/<n>.log.
+ trace() {
+ 	job=${endpoint#*/jobs/}
+-	file="$scenario/traces/${job%/trace}.log"
+-	if [ -f "$file.sleep" ]; then
+-		sleep "$(cat "$file.sleep")"
+-	fi
+-	log "answered: $endpoint"
+-	if [ -f "$file" ]; then
+-		cat "$file"
+-		exit 0
+-	fi
+-	answer '404 Not Found' '{"message":"404 Not Found"}'
++	serve_file "$scenario/traces/${job%/trace}.log"
+ }
+ 
+ api() {
+diff --git a/scripts/git-sandbox.sh b/scripts/git-sandbox.sh
+index a83d89a..a924447 100644
+--- a/scripts/git-sandbox.sh
++++ b/scripts/git-sandbox.sh
+@@ -1,6 +1,6 @@
+-# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, local-conflicts-repo.sh, lsp-repo.sh,
+-# lsp-servers.sh, mr-conflict-repo.sh, operations-repo.sh and range-repo.sh: the shared prelude for building a
+-# scripted repository in "$dir" without any user or system git config (risk RK19).
++# Sourced by scripts/conflict-repo.sh, demo-repo.sh, gitlab-playground.sh, golden-repo.sh, local-conflicts-repo.sh,
++# lsp-repo.sh, lsp-servers.sh, mr-conflict-repo.sh, operations-repo.sh and range-repo.sh: the shared prelude for
++# building a scripted repository in "$dir" without any user or system git config (risk RK19).
+ # GIT_CONFIG_GLOBAL needs git >= 2.32 (git-config(1), ENVIRONMENT).
+ 
+ sandbox_name=$(basename "$0" .sh)
+diff --git a/scripts/gitlab-playground.sh b/scripts/gitlab-playground.sh
+index 0a8c0db..1af82b8 100755
+--- a/scripts/gitlab-playground.sh
++++ b/scripts/gitlab-playground.sh
+@@ -40,12 +40,13 @@ trap 'rm -rf "$seed"' EXIT
+ "$here/mr-conflict-repo.sh" "$seed/repo" > /dev/null
+ bare="$seed/repo/.git/fake-gitlab.git"
+ 
+-# feature/failing-ci: main and one commit with a fixed author and date, as mr-conflict-repo.sh's commits.
+-seed_git() {
+-    git -C "$seed/repo" -c commit.gpgsign=false -c core.autocrlf=false -c core.hooksPath=/dev/null "$@"
+-}
+-seed_git checkout -q -b feature/failing-ci main
+-cat > "$seed/repo/.gitlab-ci.yml" << 'YAML'
++# feature/failing-ci: main and one commit built as mr-conflict-repo.sh's commits, so its id is fixed too.
++(
++    . "$here/git-sandbox.sh"
++    isolate_git_config
++    dir="$seed/repo"
++    repo_git checkout -q -b feature/failing-ci main
++    cat > "$dir/.gitlab-ci.yml" << 'YAML'
+ image: alpine:3.20
+ 
+ phpunit:
+@@ -70,11 +71,10 @@ long-log:
+       done
+       exit 1
+ YAML
+-seed_git add .gitlab-ci.yml
+-GIT_AUTHOR_NAME=yamt GIT_AUTHOR_EMAIL=yamt@example.invalid GIT_AUTHOR_DATE=2026-10-08T10:00:00+02:00 \
+-    GIT_COMMITTER_NAME=yamt GIT_COMMITTER_EMAIL=yamt@example.invalid GIT_COMMITTER_DATE=2026-10-08T10:00:00+02:00 \
+-    seed_git commit -q -m "CI: two failing jobs"
+-seed_git push -q "$bare" refs/heads/feature/failing-ci
++    repo_git add .gitlab-ci.yml
++    commit_at 2026-10-08T10:00:00+02:00 "CI: two failing jobs"
++    repo_git push -q "$bare" refs/heads/feature/failing-ci
++)
+ 
+ # Runs "$@" and shows its output only when it fails (GitLab's "To create a merge request …" lines are noise here).
+ quiet() {
+diff --git a/src-tauri/src/merge_requests/tests.rs b/src-tauri/src/merge_requests/tests.rs
+index b734ece..e59eabe 100644
+--- a/src-tauri/src/merge_requests/tests.rs
++++ b/src-tauri/src/merge_requests/tests.rs
+@@ -240,6 +240,14 @@ mod through_glab {
+         ran.unwrap_or_else(|error| panic!("{error}"));
+     }
+ 
++    /// The fake glab's log lines that start with `prefix`, in the order it wrote them.
++    pub(super) fn glab_log(prefix: &str) -> Vec<String> {
++        let log = std::env::var_os("YAMT_FAKE_GLAB_LOG").unwrap();
++        let log = std::fs::read_to_string(log).unwrap_or_default();
++        let lines = log.lines().filter(|line| line.starts_with(prefix));
++        lines.map(str::to_owned).collect()
++    }
++
+     fn iids(page: &Value) -> Vec<u64> {
+         let rows = page["rows"].as_array().unwrap();
+         rows.iter()
+diff --git a/src-tauri/src/merge_requests/tests/job_log.rs b/src-tauri/src/merge_requests/tests/job_log.rs
+index 0c0d241..3d95347 100644
+--- a/src-tauri/src/merge_requests/tests/job_log.rs
++++ b/src-tauri/src/merge_requests/tests/job_log.rs
+@@ -1,4 +1,4 @@
+-use super::through_glab::{in_this_repository, run_with_fakes};
++use super::through_glab::{glab_log, in_this_repository, run_with_fakes};
+ use super::*;
+ 
+ const SCENARIO: &str = "ci-job-log";
+@@ -21,13 +21,6 @@ fn read(window: &MergeRequestWindow, page: &str) -> Value {
+     serde_json::to_value(reply.unwrap()).unwrap()
+ }
+ 
+-fn glab_log(prefix: &str) -> Vec<String> {
+-    let log = std::env::var_os("YAMT_FAKE_GLAB_LOG").unwrap();
+-    let log = std::fs::read_to_string(log).unwrap_or_default();
+-    let lines = log.lines().filter(|line| line.starts_with(prefix));
+-    lines.map(str::to_owned).collect()
+-}
+-
+ fn count(lines: &[String], line: &str) -> usize {
+     lines.iter().filter(|logged| *logged == line).count()
+ }
+diff --git a/src-tauri/src/merge_requests/tests/picture_scheme.rs b/src-tauri/src/merge_requests/tests/picture_scheme.rs
+index 32a7b4c..ddbabb8 100644
+--- a/src-tauri/src/merge_requests/tests/picture_scheme.rs
++++ b/src-tauri/src/merge_requests/tests/picture_scheme.rs
+@@ -3,7 +3,7 @@ use std::thread;
+ use tauri::http::header::{CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS};
+ use tauri::http::{Response, StatusCode};
+ 
+-use super::through_glab::{in_this_repository, run_with_fakes};
++use super::through_glab::{glab_log, in_this_repository, run_with_fakes};
+ use super::*;
+ use crate::merge_requests::pictures::picture_answer;
+ 
+@@ -23,12 +23,6 @@ fn asked(window: &MergeRequestWindow, path: &str) -> Response<Vec<u8>> {
+     picture_answer(&window.webview.state(), Glab::find().as_ref(), path)
+ }
+ 
+-fn glab_log() -> Vec<String> {
+-    let log = std::env::var_os("YAMT_FAKE_GLAB_LOG").unwrap();
+-    let log = std::fs::read_to_string(log).unwrap_or_default();
+-    log.lines().map(str::to_owned).collect()
+-}
+-
+ fn is_not_found(answer: &Response<Vec<u8>>) -> bool {
+     answer.status() == StatusCode::NOT_FOUND && answer.body().is_empty()
+ }
+@@ -72,7 +66,7 @@ fn offered_pictures_on_path_s_glab() {
+         None,
+         "/anna"
+     )));
+-    let log = glab_log();
++    let log = glab_log("");
+     let fetched: Vec<&String> = log
+         .iter()
+         .filter(|line| line.starts_with(FETCH_START))
+@@ -103,7 +97,7 @@ fn one_fetch_per_picture_on_path_s_glab() {
+     assert!(refused.iter().all(is_not_found));
+     let offered_but_not_a_username = asked(&window, "/plus+one");
+     assert!(is_not_found(&offered_but_not_a_username));
+-    let log = glab_log();
++    let log = glab_log("");
+     let fetches = |address: &str| {
+         let started = format!("{FETCH_START}gitlab.example/uploads/-/system/user/avatar/{address}");
+         log.iter().filter(|line| **line == started).count()
+@@ -134,7 +128,7 @@ fn slow_pictures_on_path_s_glab() {
+     let mut running = 0;
+     let mut most = 0;
+     let mut ended = 0;
+-    for line in glab_log() {
++    for line in glab_log("") {
+         if line.starts_with(FETCH_START) {
+             running += 1;
+             most = most.max(running);

@@ -1,6 +1,6 @@
-# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, local-conflicts-repo.sh, lsp-repo.sh,
-# lsp-servers.sh, mr-conflict-repo.sh, operations-repo.sh and range-repo.sh: the shared prelude for building a
-# scripted repository in "$dir" without any user or system git config (risk RK19).
+# Sourced by scripts/conflict-repo.sh, demo-repo.sh, gitlab-playground.sh, golden-repo.sh, local-conflicts-repo.sh,
+# lsp-repo.sh, lsp-servers.sh, mr-conflict-repo.sh, operations-repo.sh and range-repo.sh: the shared prelude for
+# building a scripted repository in "$dir" without any user or system git config (risk RK19).
 # GIT_CONFIG_GLOBAL needs git >= 2.32 (git-config(1), ENVIRONMENT).
 
 sandbox_name=$(basename "$0" .sh)

@@ -1,4 +1,4 @@
-use super::through_glab::{in_this_repository, run_with_fakes};
+use super::through_glab::{glab_log, in_this_repository, run_with_fakes};
 use super::*;
 
 const SCENARIO: &str = "ci-job-log";
@@ -19,13 +19,6 @@ fn read(window: &MergeRequestWindow, page: &str) -> Value {
     let page = serde_json::from_value(json!(page)).unwrap();
     let reply = block_on(read_job_log(window.webview.clone(), page));
     serde_json::to_value(reply.unwrap()).unwrap()
-}
-
-fn glab_log(prefix: &str) -> Vec<String> {
-    let log = std::env::var_os("YAMT_FAKE_GLAB_LOG").unwrap();
-    let log = std::fs::read_to_string(log).unwrap_or_default();
-    let lines = log.lines().filter(|line| line.starts_with(prefix));
-    lines.map(str::to_owned).collect()
 }
 
 fn count(lines: &[String], line: &str) -> usize {

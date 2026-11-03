@@ -3,7 +3,7 @@ use std::thread;
 use tauri::http::header::{CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS};
 use tauri::http::{Response, StatusCode};
 
-use super::through_glab::{in_this_repository, run_with_fakes};
+use super::through_glab::{glab_log, in_this_repository, run_with_fakes};
 use super::*;
 use crate::merge_requests::pictures::picture_answer;
 
@@ -21,12 +21,6 @@ const SLOW_PICTURES: usize = 6;
 /// The picture the window gets for `path` (`/<username>`) through PATH's glab.
 fn asked(window: &MergeRequestWindow, path: &str) -> Response<Vec<u8>> {
     picture_answer(&window.webview.state(), Glab::find().as_ref(), path)
-}
-
-fn glab_log() -> Vec<String> {
-    let log = std::env::var_os("YAMT_FAKE_GLAB_LOG").unwrap();
-    let log = std::fs::read_to_string(log).unwrap_or_default();
-    log.lines().map(str::to_owned).collect()
 }
 
 fn is_not_found(answer: &Response<Vec<u8>>) -> bool {
@@ -72,7 +66,7 @@ fn offered_pictures_on_path_s_glab() {
         None,
         "/anna"
     )));
-    let log = glab_log();
+    let log = glab_log("");
     let fetched: Vec<&String> = log
         .iter()
         .filter(|line| line.starts_with(FETCH_START))
@@ -103,7 +97,7 @@ fn one_fetch_per_picture_on_path_s_glab() {
     assert!(refused.iter().all(is_not_found));
     let offered_but_not_a_username = asked(&window, "/plus+one");
     assert!(is_not_found(&offered_but_not_a_username));
-    let log = glab_log();
+    let log = glab_log("");
     let fetches = |address: &str| {
         let started = format!("{FETCH_START}gitlab.example/uploads/-/system/user/avatar/{address}");
         log.iter().filter(|line| **line == started).count()
@@ -134,7 +128,7 @@ fn slow_pictures_on_path_s_glab() {
     let mut running = 0;
     let mut most = 0;
     let mut ended = 0;
-    for line in glab_log() {
+    for line in glab_log("") {
         if line.starts_with(FETCH_START) {
             running += 1;
             most = most.max(running);
