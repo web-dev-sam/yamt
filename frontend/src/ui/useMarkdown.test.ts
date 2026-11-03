@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { effectScope, nextTick, shallowRef, type EffectScope, type ShallowRef } from "vue";
 
-import { useMarkdown } from "./useMarkdown";
+import { useMarkdown, useMarkdownCode } from "./useMarkdown";
 
 const editor = vi.hoisted(() => {
   const state = { built: 0, calls: new Array<string>() };
@@ -14,6 +14,9 @@ const editor = vi.hoisted(() => {
     }
     show(text: string): void {
       state.calls.push(`show ${this.#id} ${text}`);
+    }
+    showCode(language: string | null, text: string): void {
+      state.calls.push(`code ${this.#id} ${String(language)} ${text}`);
     }
     destroy(): void {
       state.calls.push(`destroy ${this.#id}`);
@@ -83,6 +86,62 @@ test("a host swap destroys the old view and shows the text in a new one; a null 
     "destroy 1",
     "build 2",
     "show 2 a",
+    "destroy 2",
+  ]);
+});
+
+type Code = { readonly language: string | null; readonly text: string };
+
+function mountCode(host: ShallowRef<HTMLElement | null>, code: ShallowRef<Code>): EffectScope {
+  const scope = effectScope();
+  scope.run(() => {
+    useMarkdownCode(host, () => code.value);
+  });
+  return scope;
+}
+
+test("useMarkdownCode with a null host builds nothing, even when the code changes", async () => {
+  const code = shallowRef<Code>({ language: "ruby", text: "a" });
+  const scope = mountCode(shallowRef(null), code);
+  await nextTick();
+  code.value = { language: null, text: "b" };
+  await nextTick();
+
+  expect(editor.state.calls).toEqual([]);
+  scope.stop();
+  expect(editor.state.calls).toEqual([]);
+});
+
+test("useMarkdownCode shows the code in a set host, again on a change, and stopping the scope destroys", async () => {
+  const code = shallowRef<Code>({ language: "ruby", text: "a" });
+  const scope = mountCode(shallowRef(element()), code);
+  await nextTick();
+  code.value = { language: null, text: "b" };
+  await nextTick();
+  scope.stop();
+
+  expect(editor.state.calls).toEqual(["build 1", "code 1 ruby a", "code 1 null b", "destroy 1"]);
+});
+
+test("useMarkdownCode on a host swap destroys the old view and shows the code in a new one; a null host only destroys", async () => {
+  const host = shallowRef<HTMLElement | null>(element());
+  const code = shallowRef<Code>({ language: "ts", text: "a" });
+  const scope = mountCode(host, code);
+  await nextTick();
+  host.value = element();
+  await nextTick();
+  host.value = null;
+  await nextTick();
+  code.value = { language: "ts", text: "b" };
+  await nextTick();
+  scope.stop();
+
+  expect(editor.state.calls).toEqual([
+    "build 1",
+    "code 1 ts a",
+    "destroy 1",
+    "build 2",
+    "code 2 ts a",
     "destroy 2",
   ]);
 });

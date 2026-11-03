@@ -1,0 +1,2 @@
+just mutants HEAD → StrykerJS on src/ui/useMarkdown.ts: 26 killed, 0 timeout, 2 survived, 0 no-cov; editor/ (markdown.ts) and test/config files are not mutated
+frontend/src/ui/useMarkdown.ts:44 flush "post" → "" — wiring: flush post runs the host watch after Vue's DOM patch, so a template ref is set first. Only a mounted component shows this. useMarkdown's unchanged :18 survives the same mutation.

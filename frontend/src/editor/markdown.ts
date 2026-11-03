@@ -3,7 +3,7 @@ import { paintCode } from "./internal/codeBlock";
 import { parseBlocks } from "./internal/markdownBlocks";
 import { blockNode, type CodePainter } from "./internal/markdownDom";
 
-type ShownBlock = { readonly source: string; readonly node: HTMLElement };
+type ShownBlock = { readonly source: string | null; readonly node: HTMLElement };
 
 export class MarkdownView {
   readonly #host: HTMLElement;
@@ -36,6 +36,22 @@ export class MarkdownView {
       this.#host.append(node);
       this.#shown.push({ source, node });
     }
+  }
+
+  /** Shows one code block in yamt's Markdown look (`pre.markdown-block.markdown-code > code`), replacing whatever the
+   *  view showed: the text at once as text, then coloured by the panes' highlighters when `language` names one yamt
+   *  knows (`languageNamed`); plain for null, "" or an unknown name. Never reads `text` as markup. */
+  showCode(language: string | null, text: string): void {
+    if (this.#destroyed) {
+      return;
+    }
+    const node = blockNode(
+      this.#host.ownerDocument,
+      { kind: "code", info: language ?? "", code: text },
+      this.#paint,
+    );
+    this.#host.replaceChildren(node);
+    this.#shown = [{ source: null, node }];
   }
 
   destroy(): void {

@@ -1,0 +1,362 @@
+diff --git a/frontend/eslint.config.js b/frontend/eslint.config.js
+index 8442c84..357b1ec 100644
+--- a/frontend/eslint.config.js
++++ b/frontend/eslint.config.js
+@@ -25,6 +25,7 @@ export default [
+       "vue/define-props-declaration": ["error", "type-based"],
+       "vue/define-emits-declaration": ["error", "type-based"],
+       "vue/require-typed-ref": "error",
++      "vue/no-v-html": "error",
+     },
+   },
+ ];
+diff --git a/frontend/scripts/eslintRules.test.ts b/frontend/scripts/eslintRules.test.ts
+new file mode 100644
+index 0000000..adfb1c3
+--- /dev/null
++++ b/frontend/scripts/eslintRules.test.ts
+@@ -0,0 +1,30 @@
++import { fileURLToPath } from "node:url";
++
++import { ESLint } from "eslint";
++import { expect, test } from "vitest";
++
++const eslint = new ESLint({
++  cwd: fileURLToPath(new URL("..", import.meta.url)),
++  overrideConfigFile: fileURLToPath(new URL("../eslint.config.js", import.meta.url)),
++});
++
++async function noVHtmlSeverities(template: string): Promise<number[]> {
++  const sample = `<script setup lang="ts">
++const x = "<b>x</b>";
++</script>
++<template>${template}</template>
++`;
++  const results = await eslint.lintText(sample, { filePath: "src/ui/Sample.vue" });
++  return results
++    .flatMap((result) => result.messages)
++    .filter((message) => message.ruleId === "vue/no-v-html")
++    .map((message) => message.severity);
++}
++
++test("v_html_is_an_error_in_a_vue_file", async () => {
++  expect(await noVHtmlSeverities('<div v-html="x" />')).toEqual([2]);
++});
++
++test("a_vue_file_without_v_html_reports_no_v_html", async () => {
++  expect(await noVHtmlSeverities("<div>{{ x }}</div>")).toEqual([]);
++});
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index a5875c3..582861e 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -16,6 +16,8 @@ Themes (plan §2 #102): `internal/syntax.ts` holds the code colours — one row
+ 
+ Markdown (plan §2 #112): `markdown.ts` (`MarkdownView`, reached from `ui/` only through `ui/useMarkdown.ts`, fence PM2 in `scripts/fences.ts`) renders yamt's own subset of the AI's answers. `internal/markdownBlocks.ts` (pure: lines → `Block`s, each top-level block with its source lines) and `internal/markdownInline.ts` (pure: a block's text → `Inline`s; code spans and escapes are skipped while an emphasis looks for its closer, so backticks win) never build markup; anything outside the subset, raw HTML included, stays literal text; images become `alt (url)` text and links their text plus the address in `.markdown-address`, never navigable. `internal/markdownDom.ts` builds nodes with `createElement`, `createTextNode`, `textContent` and `className` only, from a fixed tag set, `class` the only attribute — never `innerHTML` or a URL attribute, since the page reaches the IPC. `show(text)` keeps every leading block whose source is unchanged and rebuilds from the first that differs (streaming). `internal/codeBlock.ts` colours a fenced block by its info string through `languageNamed` and `highlightCode` with the panes' own `paletteHighlight` + `fontHighlight` (their rules in one `<style class="markdown-highlight-styles">`, mounted once per document; style-mod's `StyleModule.mount` is not reachable from yamt's own packages), after `load()` only while the block is still in a live view; an unknown language stays plain. The answer's look (spacing, code block, table, quote, list numbers, muted address) is the `.markdown-*` rules in `theme.css`, palette tokens only.
+ 
++`MarkdownView.showCode(language, text)` (plan §2 #171, a merge request's description): one code block through the same `blockNode` and `paintCode`, replacing whatever the view showed (it stays in `#shown` with no source, so a later `show` rebuilds from the top); `ui/useMarkdown.ts` `useMarkdownCode` is its one caller.
++
+ Range threads (plan §2 #116, #145): `range.ts` (`RangeController`) shows the review's threads as block rows inside its two read-only columns; Vue fills them through the hosts `RangeEvents.hosts` hands out, never through the editor. A thread's `ThreadPlace` has two ends: `start` (a `DiffLine`, no column) and `end` (a `ThreadLine`, whose column holds the box and the count badge). `diffOrder.ts` (pure) is GitLab's one-column order over the differences (an unchanged line once, a change's removed lines, then its added ones), built by one walk whose segments carry their difference; its `segmentAt` (a column line's unchanged stretch or its side of a difference) is the one rule for whether a line is inside a difference and for an unchanged line's partner line, and `internal/threadAnchor.ts` (`linePlace`, `anchorAt`: a column line to its place and to a `ThreadLine`) is built on it; which column and line a `ThreadLine` shows in is `ipc`'s `shownLine`; `diffOrder.ts` also gives `orderIndex`/`lineAtIndex`, `placeBetween` (the earlier of press and pointer is `start`, the later `end`, keeping its column), `shownEnd` (the pointer clamped before a collapsed run), `placeSpans` (each column's lines of a place) and `unchangedRuns` (its unchanged stretches); `threadRows.ts` (pure) groups the shown threads by the aligned place of `place.end` (a removed or added line's gap after its difference's other side, an unchanged line's after its partner; collapsed threads place no row), gives each row its `kind` (`unchanged`, `changed`, or `leftEmpty`/`rightEmpty` when the gap is on a difference's empty side) and `rowHeight` (the larger column's summed host heights); `threadField.ts` holds each column's rows and count marks from `showThreadRows` and provides one `block` widget per row (`side: 1 + k` at the end of line `place − 1`; on its empty side a row sits before line `place` with a negative side, so it joins that line's block), plus `threadAnchors` (the text bottom above and the next line's block top below each unchanged row) that `CompareFrame` merges, sorted, into its scroll anchors; `CompareFrame` measures an empty difference side from its joined block's top to its text's top, so the empty side's rows are inside the band; `threadWidget.ts` (`ThreadRowWidget`) `eq`s by row key, column and keys only, so a height change keeps its DOM; `threadHosts.ts` (`ThreadHosts`, built after the views) keeps one host per shown key for as long as the key is shown, one `ResizeObserver` on every host (disconnected hosts skipped) and on both scrollers and gutters writes the row height on both cells and calls `requestMeasure`, writes `--thread-left`/`--thread-width` on each column host (the rows are `position: sticky`), gives focus back to a field inside a host after CodeMirror re-attaches it, unless a press outside every host left that field, and reports `hovered(key | null)` from each host's `pointerenter`/`pointerleave` (the hover reaches the editor through its own hosts, never through Vue); `threadNumbers.ts` merges a `mousedown` into the number gutter (returning `true`, so `@codemirror/view` calls `preventDefault` and no text selection starts; a number starts a drag, the count badge toggles that line's threads; `pressedLine`: the empty line after a last newline and an empty column's line are no line of the file and do nothing; `lineCounts` counts by `place.end`) and draws the number plus the badge as a `lineNumberMarkers` marker; the hover icon is a `theme.css` mask from `--thread-icon`. `threadDrag.ts` (`ThreadDrag`) runs the drag with capture-phase listeners on `document` (`pointermove`, `pointerup` starts the thread through `RangeEvents.startThread`, `pointercancel` and Escape cancel, Escape taken by the drag alone), `scroll` on both scrollers and window `blur` (cancel), all removed at release, cancel and `destroy`; a pointer move or a scroll asks for one `requestAnimationFrame` (a pending one is reused, cancelled at stop), which reads the line under the last pointer position after each column's own scroll-handler measure and moves the end, and a release reads it once more; the pointer's column is the one on the pointer's side of the strip's middle, and over a thread row, a column's end or an empty column the other column's line at that height. `threadTint.ts` (`threadTint`, `showTint`, `tintOf`) is a per-column field of tinted spans (`cm-thread-tint` on lines and gutter cells; `theme.css` paints `--color-selection` mixed at 45 % with transparent, a translucent layer over the difference colours whatever the theme's alpha); the controller sets it to the union of the drag's place, every draft's and the hovered host's thread (spans joined by `foldRuns.ts` `joinSpans`, the one overlap-or-touch rule, which `columnFolds.ts` also joins its runs with), dispatching only when a column's spans differ from that column's field (`tintOf`).
+ 
+ Collapsed unchanged lines in both windows (plan §2 #63, #64, #68, #126): one fold core serves the merge panes and the range columns — `foldRuns.ts` (runs and their 4/8/16 steps; `waveStartsIn`, where each run's wave starts in a pane), `foldSteps.ts` (the step state), `foldView.ts` `paneFoldView` (wave line, gutter wave, atomic ranges), `folding.ts` (hover and click), `geometry.ts` `waveTops` (wave starts to block tops, under `waveRows` and `columnWaves`), `wavePhase.ts` (`chainEnds`/`chainPhases`/`ChainPhases` over a chain of panes and strips — the one phase rule; `WavePhases` is the merge's three-pane chain, `panePhases` its mapping), `gap.ts` `joinPaints` and `strips.ts` `WaveLayer` (the strip's wave joins). The merge's state lives in the middle pane (`folds.ts`); the range's lives in the left column (`columnFolds.ts`: `ownerSteps`, the right's `mirrorSteps` copied by a push, `hiddenIn` each column's shown folds, `hiddenLeft` the left's hidden lines as spans), its view, hover, click and phases in `rangeFolds.ts` (`RangeFolds`, `columnWaves`), reaching `CompareFrame` through its opt-in `waves` part and `CompareStrip` only when given `hovered`, so the compare window paints as before. A press on a wave's gutter cell starts no thread (`threadNumbers.ts`) and shows no comment icon (`theme.css`). A thread's unchanged lines (`diffOrder.ts` `unchangedRuns`, one per stretch between differences; overlapping or touching ones merged, since `columnRuns` assumes changes that do not overlap) are run edges, so no line of a range hides; runs are computed at build and at each `setCollapsed(true)`, never on a thread change. Realigning after a fold change (both windows) or a merge go-to that selected a match is `ScrollSync.follow(source)`: the followed pane leads the next sync, and no other pane's scroll event (a clamped one from the change) replaces it before then.
+diff --git a/frontend/src/editor/markdown.browser.test.ts b/frontend/src/editor/markdown.browser.test.ts
+new file mode 100644
+index 0000000..72b30b5
+--- /dev/null
++++ b/frontend/src/editor/markdown.browser.test.ts
+@@ -0,0 +1,142 @@
++import "../style.css";
++import type { HighlightStyle } from "@codemirror/language";
++import { tags, type Tag } from "@lezer/highlight";
++import { afterEach, expect, test } from "vitest";
++
++import { MarkdownView } from "./index";
++import { paletteHighlight } from "./internal/syntax";
++
++const HOSTILE = '<img src=x onerror="window.ran = true"><script>window.ran = true</script>';
++
++const ALLOWED_TAGS: Readonly<Record<string, true>> = { PRE: true, CODE: true, SPAN: true };
++
++const hosts: HTMLElement[] = [];
++const views: MarkdownView[] = [];
++
++function mounted(): { readonly host: HTMLElement; readonly view: MarkdownView } {
++  const host = document.createElement("div");
++  document.body.append(host);
++  const view = new MarkdownView(host);
++  hosts.push(host);
++  views.push(view);
++  return { host, view };
++}
++
++function classOf(highlighter: HighlightStyle, tag: Tag): string {
++  const name = highlighter.style([tag]);
++  if (name === null) {
++    throw new Error("the highlighter styles no such tag");
++  }
++  return name;
++}
++
++function spanWith(host: HTMLElement, text: string): Element | undefined {
++  return [...host.querySelectorAll("pre code span")].find((span) => span.textContent === text);
++}
++
++function codeOf(host: HTMLElement): Element {
++  const code = host.querySelector(":scope > pre.markdown-block.markdown-code > code");
++  if (code === null) {
++    throw new Error("no code block");
++  }
++  return code;
++}
++
++afterEach(() => {
++  for (const view of views.splice(0)) {
++    view.destroy();
++  }
++  for (const host of hosts.splice(0)) {
++    host.remove();
++  }
++});
++
++test("showCode_colours_a_known_language_with_the_panes_classes", async () => {
++  const { host, view } = mounted();
++  view.showCode("ruby", "def answer\n  42\nend");
++
++  expect(codeOf(host).textContent).toBe("def answer\n  42\nend");
++  await expect
++    .poll(() => spanWith(host, "def")?.className, { timeout: 5000 })
++    .toContain(classOf(paletteHighlight, tags.keyword));
++  const probe = document.createElement("span");
++  probe.style.color = "var(--color-syntax-keyword)";
++  host.append(probe);
++  const keyword = spanWith(host, "def");
++  if (keyword === undefined) {
++    throw new Error("no keyword span");
++  }
++  expect(getComputedStyle(keyword).color).toBe(getComputedStyle(probe).color);
++  expect(spanWith(host, "42")?.className).toContain(classOf(paletteHighlight, tags.number));
++  expect(codeOf(host).textContent).toBe("def answer\n  42\nend");
++});
++
++test("showCode_keeps_null_empty_and_unknown_languages_plain", async () => {
++  const plain = [null, "", "mermaid"].map((language) => {
++    const { host, view } = mounted();
++    view.showCode(language, "def graph\n  42\nend");
++    return host;
++  });
++  const painted = mounted();
++  painted.view.showCode("ruby", "def graph\n  42\nend");
++  await expect.poll(() => spanWith(painted.host, "def"), { timeout: 5000 }).toBeDefined();
++
++  for (const host of plain) {
++    expect(host.children).toHaveLength(1);
++    const code = codeOf(host);
++    expect(code.childNodes).toHaveLength(1);
++    expect(code.firstChild?.nodeType).toBe(Node.TEXT_NODE);
++    expect(code.textContent).toBe("def graph\n  42\nend");
++  }
++});
++
++test("showCode_never_reads_its_text_as_markup", async () => {
++  const plain = mounted();
++  plain.view.showCode(null, HOSTILE);
++  const painted = mounted();
++  painted.view.showCode("html", HOSTILE);
++  await expect
++    .poll(() => painted.host.querySelectorAll("pre code span").length, { timeout: 5000 })
++    .toBeGreaterThan(0);
++
++  for (const { host } of [plain, painted]) {
++    const elements = [...host.querySelectorAll("*")];
++    expect(
++      elements.map((element) => element.tagName).filter((tag) => !Object.hasOwn(ALLOWED_TAGS, tag)),
++    ).toEqual([]);
++    expect(
++      elements.flatMap((element) => element.getAttributeNames().filter((name) => name !== "class")),
++    ).toEqual([]);
++    expect(codeOf(host).textContent).toBe(HOSTILE);
++    expect(host.querySelector("img, script")).toBeNull();
++  }
++  expect(Reflect.get(window, "ran")).toBeUndefined();
++});
++
++test("showCode_and_show_replace_each_other", () => {
++  const { host, view } = mounted();
++  view.show("# Title\n\nA paragraph.");
++
++  view.showCode(null, "plain code");
++  expect(host.children).toHaveLength(1);
++  expect(codeOf(host).textContent).toBe("plain code");
++
++  view.show("# Title\n\nA paragraph.");
++  expect([...host.children].map((child) => child.tagName)).toEqual(["H1", "P"]);
++  expect(host.textContent).toBe("TitleA paragraph.");
++
++  view.showCode(null, "first");
++  view.showCode(null, "second");
++  expect(host.children).toHaveLength(1);
++  expect(codeOf(host).textContent).toBe("second");
++});
++
++test("showCode_after_destroy_does_nothing", () => {
++  const { host, view } = mounted();
++  view.showCode(null, "before");
++  view.destroy();
++
++  view.showCode(null, "after");
++
++  expect(host.childNodes).toHaveLength(0);
++});
+diff --git a/frontend/src/editor/markdown.ts b/frontend/src/editor/markdown.ts
+index 2e4de60..1a06781 100644
+--- a/frontend/src/editor/markdown.ts
++++ b/frontend/src/editor/markdown.ts
+@@ -3,7 +3,7 @@ import { paintCode } from "./internal/codeBlock";
+ import { parseBlocks } from "./internal/markdownBlocks";
+ import { blockNode, type CodePainter } from "./internal/markdownDom";
+ 
+-type ShownBlock = { readonly source: string; readonly node: HTMLElement };
++type ShownBlock = { readonly source: string | null; readonly node: HTMLElement };
+ 
+ export class MarkdownView {
+   readonly #host: HTMLElement;
+@@ -38,6 +38,22 @@ export class MarkdownView {
+     }
+   }
+ 
++  /** Shows one code block in yamt's Markdown look (`pre.markdown-block.markdown-code > code`), replacing whatever the
++   *  view showed: the text at once as text, then coloured by the panes' highlighters when `language` names one yamt
++   *  knows (`languageNamed`); plain for null, "" or an unknown name. Never reads `text` as markup. */
++  showCode(language: string | null, text: string): void {
++    if (this.#destroyed) {
++      return;
++    }
++    const node = blockNode(
++      this.#host.ownerDocument,
++      { kind: "code", info: language ?? "", code: text },
++      this.#paint,
++    );
++    this.#host.replaceChildren(node);
++    this.#shown = [{ source: null, node }];
++  }
++
+   destroy(): void {
+     this.#destroyed = true;
+     this.#shown = [];
+diff --git a/frontend/src/ui/useMarkdown.test.ts b/frontend/src/ui/useMarkdown.test.ts
+index ea9b9d9..8b15d03 100644
+--- a/frontend/src/ui/useMarkdown.test.ts
++++ b/frontend/src/ui/useMarkdown.test.ts
+@@ -1,7 +1,7 @@
+ import { afterEach, expect, test, vi } from "vitest";
+ import { effectScope, nextTick, shallowRef, type EffectScope, type ShallowRef } from "vue";
+ 
+-import { useMarkdown } from "./useMarkdown";
++import { useMarkdown, useMarkdownCode } from "./useMarkdown";
+ 
+ const editor = vi.hoisted(() => {
+   const state = { built: 0, calls: new Array<string>() };
+@@ -15,6 +15,9 @@ const editor = vi.hoisted(() => {
+     show(text: string): void {
+       state.calls.push(`show ${this.#id} ${text}`);
+     }
++    showCode(language: string | null, text: string): void {
++      state.calls.push(`code ${this.#id} ${String(language)} ${text}`);
++    }
+     destroy(): void {
+       state.calls.push(`destroy ${this.#id}`);
+     }
+@@ -86,3 +89,59 @@ test("a host swap destroys the old view and shows the text in a new one; a null
+     "destroy 2",
+   ]);
+ });
++
++type Code = { readonly language: string | null; readonly text: string };
++
++function mountCode(host: ShallowRef<HTMLElement | null>, code: ShallowRef<Code>): EffectScope {
++  const scope = effectScope();
++  scope.run(() => {
++    useMarkdownCode(host, () => code.value);
++  });
++  return scope;
++}
++
++test("useMarkdownCode with a null host builds nothing, even when the code changes", async () => {
++  const code = shallowRef<Code>({ language: "ruby", text: "a" });
++  const scope = mountCode(shallowRef(null), code);
++  await nextTick();
++  code.value = { language: null, text: "b" };
++  await nextTick();
++
++  expect(editor.state.calls).toEqual([]);
++  scope.stop();
++  expect(editor.state.calls).toEqual([]);
++});
++
++test("useMarkdownCode shows the code in a set host, again on a change, and stopping the scope destroys", async () => {
++  const code = shallowRef<Code>({ language: "ruby", text: "a" });
++  const scope = mountCode(shallowRef(element()), code);
++  await nextTick();
++  code.value = { language: null, text: "b" };
++  await nextTick();
++  scope.stop();
++
++  expect(editor.state.calls).toEqual(["build 1", "code 1 ruby a", "code 1 null b", "destroy 1"]);
++});
++
++test("useMarkdownCode on a host swap destroys the old view and shows the code in a new one; a null host only destroys", async () => {
++  const host = shallowRef<HTMLElement | null>(element());
++  const code = shallowRef<Code>({ language: "ts", text: "a" });
++  const scope = mountCode(host, code);
++  await nextTick();
++  host.value = element();
++  await nextTick();
++  host.value = null;
++  await nextTick();
++  code.value = { language: "ts", text: "b" };
++  await nextTick();
++  scope.stop();
++
++  expect(editor.state.calls).toEqual([
++    "build 1",
++    "code 1 ts a",
++    "destroy 1",
++    "build 2",
++    "code 2 ts a",
++    "destroy 2",
++  ]);
++});
+diff --git a/frontend/src/ui/useMarkdown.ts b/frontend/src/ui/useMarkdown.ts
+index fda1553..369a533 100644
+--- a/frontend/src/ui/useMarkdown.ts
++++ b/frontend/src/ui/useMarkdown.ts
+@@ -26,3 +26,29 @@ export function useMarkdown(
+     view = null;
+   });
+ }
++
++export function useMarkdownCode(
++  host: Readonly<ShallowRef<HTMLElement | null>>,
++  code: () => { readonly language: string | null; readonly text: string },
++): void {
++  let view: MarkdownView | null = null;
++
++  watch(
++    host,
++    (element) => {
++      view?.destroy();
++      view = element === null ? null : new MarkdownView(element);
++      const { language, text } = code();
++      view?.showCode(language, text);
++    },
++    { immediate: true, flush: "post" },
++  );
++  watch(code, ({ language, text }) => {
++    view?.showCode(language, text);
++  });
++
++  onScopeDispose(() => {
++    view?.destroy();
++    view = null;
++  });
++}

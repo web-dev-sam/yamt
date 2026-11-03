@@ -25,6 +25,7 @@ export default [
       "vue/define-props-declaration": ["error", "type-based"],
       "vue/define-emits-declaration": ["error", "type-based"],
       "vue/require-typed-ref": "error",
+      "vue/no-v-html": "error",
     },
   },
 ];
