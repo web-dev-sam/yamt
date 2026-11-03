@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `2a5cf8b2` (the merge-request filters' Shift icons, owner #2145/#2146: `ui/useShiftHeld.ts` with the pure `shiftHeldAfter`, Shift held by key name because WebKitGTK/X11 reports Shift set on its own release, used by `MergeRequestFilter.vue` instead of `useKeyModifier`; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `8b9b2b6b` (one key-hold shell, #2147/#2148: `ui/keyHold.ts` `useKeyHold(rule, pointerEvents)` owns the hold's window listeners for `altHold.ts` (`heldAfter`) and `useShiftHeld.ts` (`shiftHeldAfter`, Shift told by key name because WebKitGTK/X11 reports Shift set on its own release); `useShiftHeld` is one shared instance per window via `createSharedComposable`; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 

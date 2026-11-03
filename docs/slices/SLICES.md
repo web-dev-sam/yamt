@@ -94,10 +94,10 @@ Brief `briefs/mr-due-picker.md` (rules 1–5): yamt's own calendar box replaces 
 Brief `briefs/mr-shift-held.md`: the muted "not" icons show only while Shift is held; Shift+click unchanged. Earlier
 passes never sent a real Shift release (synthetic keydown only), so they missed it.
 
-| row | slice                                                     | owner    | status  | evidence |
-| --- | --------------------------------------------------------- | -------- | ------- | -------- |
-| 1   | fix (`briefs/mr-shift-held.md`), reproduce with real keys | web-impl | running |          |
-| 2   | verify: `just check`, real-key WebKit and real-app steps  | verifier | todo    |          |
+| row | slice                                                     | owner    | status  | evidence                                                                                                                                                                                                                                                                         |
+| --- | --------------------------------------------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | fix (`briefs/mr-shift-held.md`), reproduce with real keys | web-impl | running | `2a5cf8b2`: reproduced with real X11 keys (WebDriver keys don't), fixed in fixture + real app; 58/58 mutants; correctness pass; boundary #2147 #2148 → R1 `MrShiftHeldR1` (one hold shell with Alt's, one shared state); #2149 dropped. Docs `e4caf12d`. Notes `MrShiftHeld*.md` |
+| 2   | verify: `just check`, real-key WebKit and real-app steps  | verifier | todo    |                                                                                                                                                                                                                                                                                  |
 
 ## Open product questions
 
