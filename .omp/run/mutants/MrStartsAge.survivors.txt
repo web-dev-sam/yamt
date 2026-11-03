@@ -1,2 +1,8 @@
 just mutants HEAD → no Rust changes; Stryker on dueDate.ts and ui/mergeRequests.ts: 284 mutants, 258 killed, 26 survived, 90.85%
 
+None on a changed line (read by MrStartsAgeCorrectness from the implementer's transcript, #2234):
+frontend/src/mergeRequests/internal/dueDate.ts:4 ×8 — static regex, unchanged line
+frontend/src/mergeRequests/internal/dueDate.ts:6 ×15 — static regex, unchanged line
+frontend/src/ui/mergeRequests.ts:177 — unchanged line
+frontend/src/ui/mergeRequests.ts:187 — unchanged line
+frontend/src/ui/mergeRequests.ts:239 — unchanged line
