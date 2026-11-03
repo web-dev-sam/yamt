@@ -72,7 +72,7 @@ private display (VF8, VF9).
   windows (`--diff` and `--range-case review --mr list`) unless noted.
 - Store the five due dates and reload before opening the page:
   ```
-  read "localStorage.setItem('yamt.mergeRequests.dueDates', JSON.stringify({'/home/sam/taskboard/.git': {'618': '2026-11-04', '633': '2026-11-05', '623': '2026-11-05', '622': '2026-11-01', '602': '2026-11-06'}})); setTimeout(() => location.reload(), 0)"
+  read "(() => { localStorage.setItem('yamt.mergeRequests.dueDates', JSON.stringify({'/home/sam/taskboard/.git': {'618': '2026-11-04', '633': '2026-11-05', '623': '2026-11-05', '622': '2026-11-01', '602': '2026-11-06'}})); setTimeout(() => location.reload(), 0); return 'ok'; })()"
   ```
 - Read row orders as the `!iid`s of the list's rows.
 
