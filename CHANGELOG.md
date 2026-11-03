@@ -26,12 +26,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Search in the merge-request list: the field left of the filters keeps the rows whose title contains the text (any
   case), and the merge request whose number appears anywhere in it (`!1234`, `#1234`, a pasted merge-request link).
   It works together with the filters; Escape empties it.
+- A failed CI job's log inside yamt: with the pointer over a failed job in the CI box (or keyboard focus on it), one
+  press of Shift opens the job's log to the left of the box, scrolled to its last line, coloured as on GitLab's job
+  page and readable in every theme. A search field at the top highlights every match (any case), counts them
+  ("3 of 17") and steps with Enter and Shift+Enter, starting from the last match. The search text is remembered per
+  job name, for every merge request and across restarts. Logs over 500 KB show their last 500 KB, as GitLab's page
+  does, with a link to the whole log. Each log is read from GitLab once per run; Escape closes the log, a second
+  Escape the CI box.
 
 ### Changed
 
 - The merge-request filters open on hover and close shortly after the pointer leaves; their values are sorted by
   count, with "Me" and "None" first.
 - Every hover text on the merge-request page is yamt's own tooltip, shown after a short delay.
+- A failed job's hover text names the Shift key: "Open the log of <name> on GitLab. Shift: show the log here".
 - The merge-request list decides each open row's conflicts by merging the two commits GitLab shows on the user's
   machine, in the background, after GitLab's answers appear. A stale "has conflicts" or "still checking" from GitLab
   is corrected without opening the merge request, and a row GitLab calls mergeable that does conflict shows "Has

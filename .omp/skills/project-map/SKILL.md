@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `87ef3c98` (merge-request search, #2150: `MergeRequestSearch.vue` first in the filter bar; the slice's `search`, written by `setSearch` and emptied by `show`, never stored; core `searched` keeps a row whose title contains the trimmed text in any case or whose iid is a number the text names; `ui/mergeRequestsShown.ts` `shownOf` derives `shownRows` = `datedFirst(searched(filtered(…)))`, choices and summary; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `ce28a718` (CI job log, plan §2 #158–#161: `read_job_log(page)` reads an offered failed job's trace through glab, GitLab's 500 KiB tail, a `Log` kept per page in `MergeRequestState.job_logs`; core `jobLogView` styles it by GitLab's job-page rules; `ui/mergeRequestJobLogs.ts` owns the one shown log and the per-name search texts; a `useShiftTaps` tap opens `CiStatusJobLog.vue` beside the CI box; `shiftAfter` on the generic `useKeyHold(KeyHold<S>)`; 16 `--color-ansi-*` per theme ≥ 4.5:1 by `scripts/contrast.ts`; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 
