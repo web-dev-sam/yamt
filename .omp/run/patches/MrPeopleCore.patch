@@ -1,0 +1,395 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index 55a3204..74d5df8 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -23,3 +23,5 @@ The viewer's possessive is `viewerPossessive(viewer, at)` alone ("Your"/"your" b
+ Review mode (request `docs/slices/request-mr-review-mode.md` rules 1–3, 5, 6, design `docs/slices/briefs/mr-review-mode-design.md` option A §1.1–1.5): `ReviewFor` is Me or a person, never "None"; it is `Filters.review` (null: the normal order). `reviewing(who)` is Reviewer = who included, Draft ready, every other filter off; every other edit spreads the filters, so it keeps `review`; `NO_FILTERS` has none, so Clear filters ends it; `isFiltered` counts it. `stored` writes it as a fifth key `review`, `"me"` or `"user:<username>"` (the person words), only while it is set, so the four other keys are exactly what an older yamt reads; "none", junk or a non-string reads as off. `reviewChoices` is the picker: the Reviewer filter's choices without "None", in their order, the chosen one `included`. `reviewOrdered(rows, reviewer, dueOf, detailsOf)` (`reviewOrder`): the normal order (`byDueDate`); the first row in it whose `ReviewDetails` are `failed` gives `failed` with that row and the window's own failure value, the rows left in the normal order; else one stable sort: due rows with at least one discussion that is the reviewer's turn first (keeping the normal order), then the rest by fewest waiting on the author (`turnCounts`; `none` and `loading` count as no discussion), and `loading` is how many rows have not arrived. Words: `reviewSortedText` "Sorted for your review: due with your turn first, then fewest waiting on the author" (a person: "Sorted for Anna Berg's review: due with their turn first, …"), plus " (the discussions of 1 merge request are still loading; it moves when they arrive)" or "… of 3 merge requests … they move …"; `reviewFailedText` "Not sorted for your review: the discussions of !633 could not be read. <reason>".
+ 
+ Job log (request `docs/slices/request-ci-job-log.md` rules 4–6, design `docs/slices/briefs/ci-job-log-design.md` §1.2, §1.7–1.9, plan §2 #159): `jobLogView(raw)` turns the raw `/trace` text into `LogLine`s of styled `LogRun`s as GitLab's job page shows it (`lib/gitlab/ci/ansi2json/converter.rb`, `parser.rb`, `style.rb`, `line.rb`; bold from `ansi2html.rb`), in one scan: a break is `\r*\n`; the 32-character timestamp prefix is stripped from every line when the first line has it, and a line whose prefix ends in `+` continues the one before (only the `\n` goes, a `\r` before it then clears); `section_start`/`section_end` markers vanish and end a line that has text; a lone `\r` clears the line; only `ESC[…m` (SGR) is applied, by GitLab's exact-text code table (`sgr.ts` `penAfter`: `01` is nothing, `38;5;n` an indexed colour, `38;2;…` no truecolor, its numbers read as codes); every other escape, and C0 controls but tab, vanish; an escape cut off at a line's end drops the rest; 30–37 show bright while bold; the style carries across lines; a line without text is not shown; neighbouring text in equal styles is one run. Run text is text, never markup (RK57). `text` is the shown lines joined by `"\n"`: what the page's `search/` matcher runs over; `hitPlaces` maps its `{ line, from, to }` hits onto runs (a `from` at a run's end starts the next run, a `to` there ends in that run; a hit outside the view is left out). `basicColour` turns a 256-colour index into one of the 16 `AnsiColour`s, 16–255 the nearest on xterm's default palette (the triples classify, never paint: the page maps `AnsiColour` to the `--color-ansi-*` tokens). `jobLogSearch`: `firstHit` the last match, `steppedHit` wraps both ways, `hitCountText` "3 of 17", `NO_RESULTS`; for the page's highlights only the lines near the view count: `firstLineBelow(count, edge, y)` the first line whose growing `edge` is past `y` (binary search), `placesOnLines(places, first, end)` the places on lines `first` to `end` exclusive (binary search on the line order `hitPlaces` gives).
++
++People on a merge request (request `docs/slices/request-mr-people.md` rule 2, design `docs/slices/briefs/mr-people-design.md` option A §1.1, §1.6, §1.8, plan §2 #169): `peopleSuggestions(rows, row, group, me)` is the empty add field's list, each username once, at most `SUGGESTED_PEOPLE` (20, GitLab's autocomplete `LIMIT`): "Me" first when there is a viewer (their person from the row or any loaded row, else `null`: initials), then the row's own author, assignees, reviewers and approvers in that order, then everyone else on the loaded rows by how many rows hold them in `group`, then by `displayName` (`choices`'s `peopleOf` and `byCountThenLabel`, shared, never copied). People already in `group` stay listed; the page marks them. `KnownPeople` and `Suggestion` are generic in the person, so the window's rows and pictures pass through. `searchedText` is what GitLab is asked for: trimmed, one leading `@` dropped, trimmed again; `""` is the empty field, never sent. `ME_WORD` (`filters`) is the one spelling of "Me", read by the filters' words and the choices.
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+index 003d8b3..00743d2 100644
+--- a/frontend/src/mergeRequests/index.ts
++++ b/frontend/src/mergeRequests/index.ts
+@@ -1,4 +1,5 @@
+ export {
++  ME_WORD,
+   NO_FILTERS,
+   cleared,
+   clicked,
+@@ -33,6 +34,13 @@ export {
+   reviewChoices,
+   type Choice,
+ } from "./internal/choices";
++export {
++  SUGGESTED_PEOPLE,
++  peopleSuggestions,
++  searchedText,
++  type KnownPeople,
++  type Suggestion,
++} from "./internal/suggestions";
+ export { byDueDate, merged } from "./internal/order";
+ export {
+   reviewFailedText,
+diff --git a/frontend/src/mergeRequests/internal/choices.ts b/frontend/src/mergeRequests/internal/choices.ts
+index 999cfd1..288bb21 100644
+--- a/frontend/src/mergeRequests/internal/choices.ts
++++ b/frontend/src/mergeRequests/internal/choices.ts
+@@ -1,8 +1,10 @@
+ import {
++  ME_WORD,
+   rowPeople,
+   sameValue,
+   stateOf,
+   type ChoiceState,
++  type GroupedPeople,
+   type Held,
+   type LabelValue,
+   type ListedRequest,
+@@ -23,7 +25,9 @@ const ME: PersonValue = { kind: "me" };
+ const NO_PERSON: PersonValue = { kind: "none" };
+ const NO_LABEL: LabelValue = { kind: "none" };
+ 
+-function byCountThenLabel<V>(a: Choice<V>, b: Choice<V>): number {
++type Counted = { readonly label: string; readonly count: number };
++
++export function byCountThenLabel(a: Counted, b: Counted): number {
+   return a.count === b.count ? a.label.localeCompare(b.label, "en") : b.count - a.count;
+ }
+ 
+@@ -38,8 +42,8 @@ function choice<V extends PersonValue | LabelValue>(
+ 
+ type Seen = { readonly name: string; count: number };
+ 
+-function peopleOf(
+-  rows: readonly ListedRequest[],
++export function peopleOf(
++  rows: readonly GroupedPeople[],
+   field: "assignees" | "reviewers",
+ ): ReadonlyMap<string, Readonly<Seen>> {
+   const people = new Map<string, Seen>();
+@@ -62,9 +66,9 @@ function meChoice(
+   held: readonly Held<PersonValue>[],
+ ): readonly Choice<PersonValue>[] {
+   if (me !== null) {
+-    return [choice(ME, "Me", people.get(me)?.count ?? 0, held)];
++    return [choice(ME, ME_WORD, people.get(me)?.count ?? 0, held)];
+   }
+-  return held.some((entry) => entry.value.kind === "me") ? [choice(ME, "Me", 0, held)] : [];
++  return held.some((entry) => entry.value.kind === "me") ? [choice(ME, ME_WORD, 0, held)] : [];
+ }
+ 
+ export function personChoices(
+diff --git a/frontend/src/mergeRequests/internal/filters.ts b/frontend/src/mergeRequests/internal/filters.ts
+index d30c10c..15fc4d5 100644
+--- a/frontend/src/mergeRequests/internal/filters.ts
++++ b/frontend/src/mergeRequests/internal/filters.ts
+@@ -34,6 +34,14 @@ export type ListedRequest = {
+   readonly labels: readonly ListedLabel[];
+ };
+ 
++/** The two groups a row holds people in; `ListedRequest` and the people box's rows fit it. */
++export type GroupedPeople = {
++  readonly assignees: readonly Person[];
++  readonly reviewers: readonly { readonly person: Person }[];
++};
++
++export const ME_WORD = "Me";
++
+ export const NO_FILTERS: Filters = {
+   assignee: [],
+   reviewer: [],
+@@ -87,7 +95,7 @@ function heldPasses<V>(held: readonly Held<V>[], matches: (value: V) => boolean)
+   );
+ }
+ 
+-export function rowPeople(row: ListedRequest, field: "assignees" | "reviewers"): readonly Person[] {
++export function rowPeople(row: GroupedPeople, field: "assignees" | "reviewers"): readonly Person[] {
+   return field === "reviewers" ? row.reviewers.map((reviewer) => reviewer.person) : row.assignees;
+ }
+ 
+@@ -201,7 +209,7 @@ export function isFiltered(filters: Filters): boolean {
+ function valueWord(value: PersonValue | LabelValue): string {
+   switch (value.kind) {
+     case "me":
+-      return "Me";
++      return ME_WORD;
+     case "none":
+       return "None";
+     case "person":
+diff --git a/frontend/src/mergeRequests/internal/suggestions.test.ts b/frontend/src/mergeRequests/internal/suggestions.test.ts
+new file mode 100644
+index 0000000..a68d416
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/suggestions.test.ts
+@@ -0,0 +1,185 @@
++import { expect, test } from "vitest";
++
++import {
++  SUGGESTED_PEOPLE,
++  peopleSuggestions,
++  searchedText,
++  type KnownPeople,
++  type Person,
++  type Suggestion,
++} from "../index";
++
++type Face = Person & { readonly picture: string };
++
++function face(username: string, name: string): Face {
++  return { username, name, picture: `${username}.png` };
++}
++
++const SAM = face("sam", "Sam Lee");
++const ANNA = face("anna", "Anna Berg");
++const BEN = face("ben", "Ben Ode");
++const CARL = face("carl", "Carl Ray");
++const DORA = face("dora", "Dora Fox");
++const ZED = face("zed", "Zed Ash");
++const ABE = face("abe", "Abe Moss");
++
++type Fields = {
++  readonly author?: Face;
++  readonly assignees?: readonly Face[];
++  readonly reviewers?: readonly Face[];
++  readonly approvedBy?: readonly Face[];
++};
++
++function row(fields: Fields = {}): KnownPeople<Face> {
++  return {
++    author: fields.author ?? null,
++    assignees: fields.assignees ?? [],
++    reviewers: (fields.reviewers ?? []).map((person) => ({ person })),
++    approvedBy: fields.approvedBy ?? [],
++  };
++}
++
++function lines(suggestions: readonly Suggestion<Face>[]): readonly string[] {
++  return suggestions.map((line) =>
++    line.kind === "me"
++      ? `Me @${line.username} ${line.person?.picture ?? "initials"}`
++      : line.person.username,
++  );
++}
++
++test("me_comes_first_with_their_picture_from_any_loaded_row", () => {
++  const open = row({ author: ANNA });
++  const elsewhere = row({ approvedBy: [SAM] });
++  expect(lines(peopleSuggestions([open, elsewhere], open, "assignees", "sam"))).toEqual([
++    "Me @sam sam.png",
++    "anna",
++  ]);
++
++  const onlyHere = row({ reviewers: [SAM], author: ANNA });
++  expect(lines(peopleSuggestions([], onlyHere, "reviewers", "sam"))).toEqual([
++    "Me @sam sam.png",
++    "anna",
++  ]);
++});
++
++test("me_unknown_on_every_row_has_no_person", () => {
++  const open = row({ author: ANNA, assignees: [BEN] });
++  const suggestions = peopleSuggestions(
++    [open, row({ reviewers: [CARL] })],
++    open,
++    "assignees",
++    "sam",
++  );
++  expect(suggestions[0]).toEqual({ kind: "me", username: "sam", person: null });
++  expect(lines(suggestions)).toEqual(["Me @sam initials", "anna", "ben", "carl"]);
++  expect(suggestions[1]).toEqual({ kind: "known", person: ANNA });
++});
++
++test("no_me_entry_without_a_viewer", () => {
++  const open = row({ author: SAM, assignees: [ANNA] });
++  expect(lines(peopleSuggestions([open], open, "assignees", null))).toEqual(["sam", "anna"]);
++  expect(peopleSuggestions([], row(), "reviewers", null)).toEqual([]);
++});
++
++test("the_rows_own_people_follow_me_author_assignees_reviewers_approvers", () => {
++  const open = row({ author: ZED, assignees: [DORA], reviewers: [CARL], approvedBy: [ABE] });
++  const busy = row({ assignees: [ANNA, BEN], reviewers: [ANNA, BEN] });
++  const rows = [open, busy, busy, busy];
++  expect(lines(peopleSuggestions(rows, open, "assignees", "sam"))).toEqual([
++    "Me @sam initials",
++    "zed",
++    "dora",
++    "carl",
++    "abe",
++    "anna",
++    "ben",
++  ]);
++});
++
++test("others_are_ordered_by_rows_holding_them_in_the_group_then_by_name", () => {
++  const nameless = face("zack", "");
++  const open = row({ author: SAM });
++  const rows = [
++    open,
++    row({ assignees: [DORA], reviewers: [BEN] }),
++    row({ assignees: [DORA, CARL], reviewers: [BEN] }),
++    row({ assignees: [ANNA], reviewers: [CARL, ANNA] }),
++    row({ author: nameless, approvedBy: [ZED] }),
++    row({ author: ABE }),
++  ];
++  expect(lines(peopleSuggestions(rows, open, "assignees", null))).toEqual([
++    "sam",
++    "dora",
++    "anna",
++    "carl",
++    "abe",
++    "ben",
++    "zack",
++    "zed",
++  ]);
++  expect(lines(peopleSuggestions(rows, open, "reviewers", null))).toEqual([
++    "sam",
++    "ben",
++    "anna",
++    "carl",
++    "abe",
++    "dora",
++    "zack",
++    "zed",
++  ]);
++});
++
++test("each_username_appears_once", () => {
++  const open = row({
++    author: ANNA,
++    assignees: [SAM, BEN],
++    reviewers: [BEN, SAM],
++    approvedBy: [ANNA],
++  });
++  const rows = [open, row({ assignees: [BEN], reviewers: [SAM, CARL] }), row({ author: CARL })];
++  expect(lines(peopleSuggestions(rows, open, "reviewers", "sam"))).toEqual([
++    "Me @sam sam.png",
++    "anna",
++    "ben",
++    "carl",
++  ]);
++});
++
++test("at_most_twenty_lines_me_included", () => {
++  const many = Array.from({ length: SUGGESTED_PEOPLE + 5 }, (_, index) =>
++    face(`user${String(index).padStart(2, "0")}`, `User ${String(index).padStart(2, "0")}`),
++  );
++  const open = row({ author: SAM });
++  const suggestions = peopleSuggestions([open, row({ assignees: many })], open, "assignees", "sam");
++  expect(SUGGESTED_PEOPLE).toBe(20);
++  expect(suggestions).toHaveLength(SUGGESTED_PEOPLE);
++  expect(lines(suggestions).slice(0, 2)).toEqual(["Me @sam sam.png", "user00"]);
++  expect(lines(suggestions).at(-1)).toBe("user18");
++});
++
++test("people_already_in_the_group_stay_listed", () => {
++  const open = row({ assignees: [ANNA], reviewers: [BEN] });
++  const rows = [open, row({ assignees: [CARL], reviewers: [DORA] })];
++  expect(lines(peopleSuggestions(rows, open, "assignees", null))).toEqual([
++    "anna",
++    "ben",
++    "carl",
++    "dora",
++  ]);
++  expect(lines(peopleSuggestions(rows, open, "reviewers", null))).toEqual([
++    "anna",
++    "ben",
++    "dora",
++    "carl",
++  ]);
++});
++
++test("searched_text_trims_and_drops_one_leading_at", () => {
++  expect(searchedText("  @ben ")).toBe("ben");
++  expect(searchedText("@")).toBe("");
++  expect(searchedText("@@x")).toBe("@x");
++  expect(searchedText("a b")).toBe("a b");
++  expect(searchedText(" @ ben")).toBe("ben");
++  expect(searchedText("b@n")).toBe("b@n");
++  expect(searchedText("   ")).toBe("");
++});
+diff --git a/frontend/src/mergeRequests/internal/suggestions.ts b/frontend/src/mergeRequests/internal/suggestions.ts
+new file mode 100644
+index 0000000..35193e7
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/suggestions.ts
+@@ -0,0 +1,78 @@
++import { byCountThenLabel, peopleOf } from "./choices";
++import type { Person } from "./filters";
++import { displayName } from "./people";
++
++/** GitLab's autocomplete answers at most 20 (`Autocomplete::UsersFinder::LIMIT`); the empty field shows as many. */
++export const SUGGESTED_PEOPLE = 20;
++
++/** A row's people as the suggestions read them; the window's `MergeRequestRow` fits it. */
++export type KnownPeople<P extends Person> = {
++  readonly author: P | null;
++  readonly assignees: readonly P[];
++  readonly reviewers: readonly { readonly person: P }[];
++  readonly approvedBy: readonly P[];
++};
++
++export type Suggestion<P extends Person> =
++  /** The viewer: `person` is their entry on `row` or a loaded row when there is one, else null (initials). */
++  | { readonly kind: "me"; readonly username: string; readonly person: P | null }
++  | { readonly kind: "known"; readonly person: P };
++
++function peopleOnRow<P extends Person>(row: KnownPeople<P>): readonly P[] {
++  return [
++    ...(row.author === null ? [] : [row.author]),
++    ...row.assignees,
++    ...row.reviewers.map((reviewer) => reviewer.person),
++    ...row.approvedBy,
++  ];
++}
++
++/**
++ * What the empty add field offers for `group` of `row` (rule 2), each username once, at most SUGGESTED_PEOPLE:
++ * 1. Me, when `me` is not null.
++ * 2. `row`'s own people: its author, assignees, reviewers, then approvers, in that order.
++ * 3. Every other person on `rows` (authors, assignees, reviewers, approvers), most rows holding them in `group` first
++ *    (the count rule of `choices.ts` `peopleOf`), then by display name (`byCountThenLabel`).
++ * People already in `group` are kept: the page marks them.
++ */
++export function peopleSuggestions<P extends Person>(
++  rows: readonly KnownPeople<P>[],
++  row: KnownPeople<P>,
++  group: "assignees" | "reviewers",
++  me: string | null,
++): readonly Suggestion<P>[] {
++  const own = new Map<string, P>(peopleOnRow(row).map((person) => [person.username, person]));
++  const counts = peopleOf(rows, group);
++  const loaded = new Map<string, P>(
++    rows.flatMap(peopleOnRow).map((person) => [person.username, person]),
++  );
++  const others = [...loaded.values()]
++    .filter((person) => !own.has(person.username))
++    .map((person) => ({
++      person,
++      label: displayName(person),
++      count: counts.get(person.username)?.count ?? 0,
++    }))
++    .toSorted(byCountThenLabel)
++    .map(({ person }) => person);
++  const known = [...own.values(), ...others]
++    .filter((person) => person.username !== me)
++    .map((person): Suggestion<P> => ({ kind: "known", person }));
++  const viewer: readonly Suggestion<P>[] =
++    me === null
++      ? []
++      : [
++          {
++            kind: "me",
++            username: me,
++            person: own.get(me) ?? others.find((person) => person.username === me) ?? null,
++          },
++        ];
++  return [...viewer, ...known].slice(0, SUGGESTED_PEOPLE);
++}
++
++/** The text GitLab is asked for: trimmed, one leading "@" dropped, trimmed again; "" means the empty field. */
++export function searchedText(typed: string): string {
++  const trimmed = typed.trim();
++  return (trimmed.startsWith("@") ? trimmed.slice(1) : trimmed).trim();
++}

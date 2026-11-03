@@ -1,8 +1,10 @@
 import {
+  ME_WORD,
   rowPeople,
   sameValue,
   stateOf,
   type ChoiceState,
+  type GroupedPeople,
   type Held,
   type LabelValue,
   type ListedRequest,
@@ -23,7 +25,9 @@ const ME: PersonValue = { kind: "me" };
 const NO_PERSON: PersonValue = { kind: "none" };
 const NO_LABEL: LabelValue = { kind: "none" };
 
-function byCountThenLabel<V>(a: Choice<V>, b: Choice<V>): number {
+type Counted = { readonly label: string; readonly count: number };
+
+export function byCountThenLabel(a: Counted, b: Counted): number {
   return a.count === b.count ? a.label.localeCompare(b.label, "en") : b.count - a.count;
 }
 
@@ -38,8 +42,8 @@ function choice<V extends PersonValue | LabelValue>(
 
 type Seen = { readonly name: string; count: number };
 
-function peopleOf(
-  rows: readonly ListedRequest[],
+export function peopleOf(
+  rows: readonly GroupedPeople[],
   field: "assignees" | "reviewers",
 ): ReadonlyMap<string, Readonly<Seen>> {
   const people = new Map<string, Seen>();
@@ -62,9 +66,9 @@ function meChoice(
   held: readonly Held<PersonValue>[],
 ): readonly Choice<PersonValue>[] {
   if (me !== null) {
-    return [choice(ME, "Me", people.get(me)?.count ?? 0, held)];
+    return [choice(ME, ME_WORD, people.get(me)?.count ?? 0, held)];
   }
-  return held.some((entry) => entry.value.kind === "me") ? [choice(ME, "Me", 0, held)] : [];
+  return held.some((entry) => entry.value.kind === "me") ? [choice(ME, ME_WORD, 0, held)] : [];
 }
 
 export function personChoices(

@@ -34,6 +34,14 @@ export type ListedRequest = {
   readonly labels: readonly ListedLabel[];
 };
 
+/** The two groups a row holds people in; `ListedRequest` and the people box's rows fit it. */
+export type GroupedPeople = {
+  readonly assignees: readonly Person[];
+  readonly reviewers: readonly { readonly person: Person }[];
+};
+
+export const ME_WORD = "Me";
+
 export const NO_FILTERS: Filters = {
   assignee: [],
   reviewer: [],
@@ -87,7 +95,7 @@ function heldPasses<V>(held: readonly Held<V>[], matches: (value: V) => boolean)
   );
 }
 
-export function rowPeople(row: ListedRequest, field: "assignees" | "reviewers"): readonly Person[] {
+export function rowPeople(row: GroupedPeople, field: "assignees" | "reviewers"): readonly Person[] {
   return field === "reviewers" ? row.reviewers.map((reviewer) => reviewer.person) : row.assignees;
 }
 
@@ -201,7 +209,7 @@ export function isFiltered(filters: Filters): boolean {
 function valueWord(value: PersonValue | LabelValue): string {
   switch (value.kind) {
     case "me":
-      return "Me";
+      return ME_WORD;
     case "none":
       return "None";
     case "person":

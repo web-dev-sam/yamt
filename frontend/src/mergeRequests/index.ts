@@ -1,4 +1,5 @@
 export {
+  ME_WORD,
   NO_FILTERS,
   cleared,
   clicked,
@@ -33,6 +34,13 @@ export {
   reviewChoices,
   type Choice,
 } from "./internal/choices";
+export {
+  SUGGESTED_PEOPLE,
+  peopleSuggestions,
+  searchedText,
+  type KnownPeople,
+  type Suggestion,
+} from "./internal/suggestions";
 export { byDueDate, merged } from "./internal/order";
 export {
   reviewFailedText,

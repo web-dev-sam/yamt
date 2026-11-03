@@ -1,0 +1,2 @@
+just mutants HEAD → choices.ts 120 killed/6 survived, filters.ts 228/12 (+8 no cov), suggestions.ts 52/0 (100%); total 400 killed, 18 survived
+frontend/src/mergeRequests/internal/filters.ts:43 ME_WORD "Me"→"" — gate-covered: static mutant the vitest runner never re-evaluates (#732); choices.test.ts asserts "Me". The other survivors are on unchanged lines.
