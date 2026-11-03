@@ -82,7 +82,7 @@ fn rows_for(asked: &[u32], batch: &[Value]) -> Vec<RowDiscussions> {
         assert_eq!(after, None);
         Ok(answer(batch))
     };
-    answered(&iids(asked), &project(), &mut fetch).0.rows
+    answered(&iids(asked), &project(), &mut fetch).read.rows
 }
 
 /// The open discussions of the one row asked.
@@ -215,7 +215,7 @@ fn graphql_errors_fail_each_row_of_the_batch() {
     let refused = json!({ "data": null, "errors": [{ "message": "Field 'x' doesn't exist" }] });
     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(refused.to_string().into_bytes());
 
-    let (read, complexity) = answered(&iids(&[2, 1]), &project(), &mut fetch);
+    let call = answered(&iids(&[2, 1]), &project(), &mut fetch);
 
     let answer = failed("Field 'x' doesn't exist");
     let expected = [
@@ -228,32 +228,19 @@ fn graphql_errors_fail_each_row_of_the_batch() {
             answer,
         },
     ];
-    assert_eq!(read.rows, expected);
-    assert_eq!(complexity, None);
+    assert_eq!(call.read.rows, expected);
+    assert_eq!(call.complexity, None);
 }
 
 #[test]
 fn a_failed_batch_call_fails_each_row_with_glab_s_words() {
     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Err("glab: timed out".to_owned());
 
-    let (read, _) = answered(&iids(&[2, 1]), &project(), &mut fetch);
+    let call = answered(&iids(&[2, 1]), &project(), &mut fetch);
 
-    let answers: Vec<&DiscussionsAnswer> = read.rows.iter().map(|row| &row.answer).collect();
+    let answers: Vec<&DiscussionsAnswer> = call.read.rows.iter().map(|row| &row.answer).collect();
     assert_eq!(answers, [&failed("glab: timed out"); 2]);
-}
-
-#[test]
-fn the_batch_answers_gitlab_s_complexity() {
-    let mut fetch =
-        |_: &[MergeRequestIid], _: Option<&str>| Ok(answer(&[merge_request(1, &[], None)]));
-
-    let (_, complexity) = answered(&iids(&[1]), &project(), &mut fetch);
-
-    let measured = Complexity {
-        score: 58,
-        limit: 250,
-    };
-    assert_eq!(complexity, Some(measured));
+    assert_eq!(call.queries, 1);
 }
 
 #[test]
@@ -285,7 +272,7 @@ fn an_uploaded_avatar_is_offered_once_per_username() {
     ];
     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(answer(&batch));
 
-    let (read, _) = answered(&iids(&[1, 2]), &project(), &mut fetch);
+    let read = answered(&iids(&[1, 2]), &project(), &mut fetch).read;
 
     let AvatarSource::Uploaded(address) = avatar_source(Some(ORIGIN), Some(ANNA_S_AVATAR)) else {
         panic!("{ANNA_S_AVATAR} is no uploaded avatar");
@@ -314,7 +301,7 @@ fn paged(pages: u32) -> (Vec<RowDiscussions>, Vec<Option<String>>) {
         }
         Ok(page(n))
     };
-    let rows = answered(&iids(&[1]), &project(), &mut fetch).0.rows;
+    let rows = answered(&iids(&[1]), &project(), &mut fetch).read.rows;
     (rows, asked)
 }
 
@@ -352,7 +339,9 @@ fn a_failing_later_page_fails_its_row_alone() {
         Some(_) => Ok(answer(&[])),
     };
 
-    let rows = answered(&iids(&[1, 2, 3]), &project(), &mut fetch).0.rows;
+    let rows = answered(&iids(&[1, 2, 3]), &project(), &mut fetch)
+        .read
+        .rows;
 
     assert_eq!(rows[0].answer, failed("glab: page 2 failed"));
     assert!(matches!(rows[1].answer, DiscussionsAnswer::Open { .. }));
@@ -388,36 +377,31 @@ fn no_project_in_the_answer_fails_each_row() {
     let refused = json!({ "data": { "queryComplexity": null, "project": null } });
     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(refused.to_string().into_bytes());
 
-    let rows = answered(&iids(&[1]), &project(), &mut fetch).0.rows;
+    let rows = answered(&iids(&[1]), &project(), &mut fetch).read.rows;
 
     assert_eq!(rows[0].answer, failed(NO_PROJECT));
 }
 
-/// The fake glab on `tests/glab/mr-discussions/` through a symlink beside its `glab.env` (`tests/glab/README.md`).
-#[cfg(unix)]
 #[test]
 fn each_query_of_a_call_is_counted_and_the_batch_s_complexity_kept() {
-    let folder = tempfile::tempdir().unwrap();
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let scenario = repository.join("tests/glab/mr-discussions");
-    let settings = format!("YAMT_FAKE_GLAB={}\n", scenario.display());
-    std::fs::write(folder.path().join("glab.env"), settings).unwrap();
-    let link = folder.path().join("glab");
-    std::os::unix::fs::symlink(repository.join("scripts/fake-glab/glab"), &link).unwrap();
-    let mut tally = Tally::default();
+    let batch = [
+        merge_request(1, &[], Some("d-2")),
+        merge_request(2, &[], Some("d-2")),
+    ];
+    let mut later: Value = serde_json::from_slice(&answer(&[merge_request(1, &[], None)])).unwrap();
+    later["data"]["queryComplexity"]["score"] = json!(5);
+    let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| match after {
+        None => Ok(answer(&batch)),
+        Some(_) if iids == [MergeRequestIid(1)] => Ok(later.to_string().into_bytes()),
+        Some(_) => Err("glab: page 2 failed".to_owned()),
+    };
 
-    let read = through_glab(
-        folder.path(),
-        Some(&Glab::at(link)),
-        &iids(&[82, 81, 79, 78]),
-        &mut tally,
-    );
+    let call = answered(&iids(&[1, 2]), &project(), &mut fetch);
 
-    assert_eq!(read.rows.len(), 4);
-    assert_eq!(tally.queries, 2);
+    assert_eq!(call.queries, 3);
     let measured = Complexity {
         score: 58,
         limit: 250,
     };
-    assert_eq!(tally.complexity, Some(measured));
+    assert_eq!(call.complexity, Some(measured));
 }

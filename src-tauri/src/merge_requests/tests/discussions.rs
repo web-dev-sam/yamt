@@ -2,6 +2,7 @@ use tauri::http::StatusCode;
 
 use super::through_glab::{glab_log, in_this_repository, run_with_fakes};
 use super::*;
+use crate::frontend_log::tests::logged;
 use crate::merge_requests::discussions::discussions_reply;
 use crate::merge_requests::pictures::picture_answer;
 
@@ -10,6 +11,7 @@ const OFFERED_TEST: &str = "merge_requests::tests::discussions::note_pages_on_pa
 const PICTURE_TEST: &str = "merge_requests::tests::discussions::an_authors_picture_on_paths_glab";
 const READ_TEST: &str =
     "merge_requests::tests::discussions::read_discussions_replies_on_paths_glab";
+const LOG_TEST: &str = "merge_requests::tests::discussions::the_log_line_on_paths_glab";
 const BATCH: [u32; 4] = [82, 81, 79, 78];
 const NOTE_103: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_103";
 const UNLISTED_NOTE: &str =
@@ -135,4 +137,24 @@ fn read_discussions_replies_on_paths_glab() {
     assert_eq!(read(&window, &[]), json!([]));
     let queries = glab_log("argv: api graphql");
     assert_eq!(queries.len(), 1, "{queries:?}");
+}
+
+#[test]
+fn a_read_logs_its_counts_and_score_but_no_name_or_body() {
+    run_with_fakes(LOG_TEST, SCENARIO);
+}
+
+#[test]
+#[ignore = "run by a_read_logs_its_counts_and_score_but_no_name_or_body"]
+fn the_log_line_on_paths_glab() {
+    let window = open_window_in(gitlab_repo());
+
+    let iids = BATCH.map(MergeRequestIid);
+    let reply = || discussions_reply(&window.webview.state(), Glab::find().as_ref(), &iids);
+    let (_, log) = logged(reply);
+
+    let lines: Vec<&str> = log.lines().filter(|line| line.contains(" INFO ")).collect();
+    let line = " INFO yamt_merge_requests::discussions: read merge requests' open discussions asked=4 \
+                answered=3 failed=1 queries=2 score=58 limit=250";
+    assert_eq!(lines, [line], "{log}");
 }

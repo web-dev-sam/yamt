@@ -9,9 +9,9 @@ use tauri::{App, Manager, Runtime, State, WebviewWindow};
 use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
 use yamt_merge_requests::{
     CheckedRow, GitLabProject, GitLabRepository, Glab, JobLogReply, ListEnd, ListedPage,
-    MergeRequestIid, MergeRequestPage, MergedPairs, OpenReply, PageOpened, RerequestReply,
-    ResolveRefusal, RowDiscussions, WebPage, check_conflicts, gitlab_repository, prepare_open,
-    prepare_resolve,
+    MergeRequestIid, MergeRequestPage, MergeRequestRow, MergedPairs, OfferedPicture, OpenReply,
+    PageOpened, RerequestReply, ResolveRefusal, RowDiscussions, WebPage, check_conflicts,
+    gitlab_repository, prepare_open, prepare_resolve,
 };
 
 use crate::args::Ai;
@@ -64,8 +64,9 @@ pub(crate) enum ContinueMergeReply {
 }
 
 /// The window's GitLab project, found once at start, the folder pair locks live in, the window's `--ai` that "Show
-/// Diff" passes on, and every merge request's and failed job's page a list sent in this run: only those may be
-/// opened or have their log read (plan §2 #128–#137); `pages` is never locked together with another `Mutex`.
+/// Diff" passes on, and every merge request's and failed job's page a list sent and every note's page
+/// `read_discussions` sent in this run: only those may be opened or have their log read (plan §2 #128–#137); `pages`
+/// is never locked together with another `Mutex`.
 pub(crate) struct MergeRequestState {
     gitlab: Option<GitLabRepository>,
     range_dir: PathBuf,
@@ -95,20 +96,33 @@ fn offered(pages: &Mutex<BTreeSet<WebPage>>) -> MutexGuard<'_, BTreeSet<WebPage>
     pages.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Remembers the page's merge request and failed job pages and its uploaded pictures as offered, then sends the page
-/// to the window.
+/// Remembers `pages` and `pictures` as offered, so the window may open or ask for them once it gets the reply that
+/// names them; holds `pages` and the pictures' lock one after the other, never together.
+fn offer(
+    state: &MergeRequestState,
+    pages: impl IntoIterator<Item = WebPage>,
+    pictures: Vec<OfferedPicture>,
+) {
+    offered(&state.pages).extend(pages);
+    state.pictures.offer(pictures);
+}
+
+/// The page of `row` and of each of its failed jobs.
+fn row_pages(row: &MergeRequestRow) -> impl Iterator<Item = WebPage> + '_ {
+    let jobs = row
+        .pipeline
+        .iter()
+        .flat_map(|pipeline| &pipeline.failed_jobs);
+    row.page
+        .clone()
+        .into_iter()
+        .chain(jobs.filter_map(|job| job.page.clone()))
+}
+
+/// Offers the page's merge request and failed job pages and its uploaded pictures, then sends the page to the window.
 fn forward_page(state: &MergeRequestState, channel: &Channel<ListMessage>, listed: ListedPage) {
-    let mut pages = offered(&state.pages);
-    for row in &listed.page.rows {
-        pages.extend(row.page.clone());
-        let jobs = row
-            .pipeline
-            .iter()
-            .flat_map(|pipeline| &pipeline.failed_jobs);
-        pages.extend(jobs.filter_map(|job| job.page.clone()));
-    }
-    drop(pages);
-    state.pictures.offer(listed.pictures);
+    let pages = listed.page.rows.iter().flat_map(row_pages);
+    offer(state, pages, listed.pictures);
     send(channel, ListMessage::Page { page: listed.page });
 }
 
@@ -386,7 +400,10 @@ fn local_merge(state: &MergeRequestState) -> LocalMerge {
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
 pub(crate) fn open_page(state: State<'_, MergeRequestState>, page: WebPage) -> PageOpened {
     if !offered(&state.pages).contains(&page) {
-        tracing::warn!(page = page.as_str(), "a GitLab page no list sent");
+        tracing::warn!(
+            page = page.as_str(),
+            "a GitLab page this window was never sent"
+        );
         return PageOpened::NotOffered;
     }
     yamt_merge_requests::open_page(&page)

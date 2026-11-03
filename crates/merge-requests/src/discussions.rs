@@ -110,10 +110,12 @@ pub struct ReadDiscussions {
 /// Asks GitLab for the discussions of `iids` (all of them, or one merge request's after a cursor).
 type Fetch<'a> = dyn FnMut(&[MergeRequestIid], Option<&str>) -> Result<Vec<u8>, String> + 'a;
 
-/// What one call did, for its log line.
-#[derive(Default)]
-struct Tally {
+/// One call's rows and pictures, and what its log line counts besides them.
+struct Answered {
+    read: ReadDiscussions,
+    /// The discussions queries run: the batch's and each later page's.
     queries: u32,
+    /// GitLab's score of the batch's query; `None` when it sent none.
     complexity: Option<Complexity>,
 }
 
@@ -128,17 +130,20 @@ pub fn read_discussions(
     iids: &[MergeRequestIid],
 ) -> ReadDiscussions {
     let asked = batch(iids);
-    let mut tally = Tally::default();
-    let read = if asked.is_empty() {
-        ReadDiscussions {
-            rows: Vec::new(),
-            pictures: Vec::new(),
+    let call = if asked.is_empty() {
+        Answered {
+            read: ReadDiscussions {
+                rows: Vec::new(),
+                pictures: Vec::new(),
+            },
+            queries: 0,
+            complexity: None,
         }
     } else {
-        through_glab(repository.root(), glab, &asked, &mut tally)
+        through_glab(repository.root(), glab, &asked)
     };
-    log_read(&read, &tally);
-    read
+    log_read(&call);
+    call.read
 }
 
 /// The same batch cut, each `Failed { message }`: for a window without a GitLab project, and for a failed call.
@@ -147,7 +152,7 @@ pub fn unread_discussions(iids: &[MergeRequestIid], message: &str) -> Vec<RowDis
     let failed = DiscussionsAnswer::Failed {
         message: message.to_owned(),
     };
-    unanswered(&batch(iids), &failed).rows
+    unanswered(&batch(iids), &failed).read.rows
 }
 
 /// The first `DISCUSSION_BATCH` distinct iids, in their order.
@@ -164,23 +169,24 @@ fn batch(iids: &[MergeRequestIid]) -> Vec<MergeRequestIid> {
     batch
 }
 
-fn unanswered(asked: &[MergeRequestIid], answer: &DiscussionsAnswer) -> ReadDiscussions {
+/// Each of `asked` answered `answer`, without a query.
+fn unanswered(asked: &[MergeRequestIid], answer: &DiscussionsAnswer) -> Answered {
     let row = |&iid| RowDiscussions {
         iid,
         answer: answer.clone(),
     };
-    ReadDiscussions {
+    let read = ReadDiscussions {
         rows: asked.iter().map(row).collect(),
         pictures: Vec::new(),
+    };
+    Answered {
+        read,
+        queries: 0,
+        complexity: None,
     }
 }
 
-fn through_glab(
-    root: &Path,
-    glab: Option<&Glab>,
-    asked: &[MergeRequestIid],
-    tally: &mut Tally,
-) -> ReadDiscussions {
+fn through_glab(root: &Path, glab: Option<&Glab>, asked: &[MergeRequestIid]) -> Answered {
     let Some(glab) = glab else {
         return unanswered(asked, &DiscussionsAnswer::GlabMissing);
     };
@@ -189,27 +195,27 @@ fn through_glab(
         Err(refused) => return unanswered(asked, &refused.into()),
     };
     let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| {
-        tally.queries += 1;
         let args = discussions_args(&project.full_path, iids, after);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         glab.get(root, &args)
     };
-    let (read, complexity) = answered(asked, &project, &mut fetch);
-    tally.complexity = complexity;
-    read
+    answered(asked, &project, &mut fetch)
 }
 
 /// Each asked row from the batch's answer and its later pages; a failing batch fails each row.
-fn answered(
-    asked: &[MergeRequestIid],
-    project: &Project,
-    fetch: &mut Fetch,
-) -> (ReadDiscussions, Option<Complexity>) {
-    let first = match fetch(asked, None).and_then(|json| parsed_batch(&json)) {
+fn answered(asked: &[MergeRequestIid], project: &Project, fetch: &mut Fetch) -> Answered {
+    let mut queries = 0;
+    let mut counted = |iids: &[MergeRequestIid], after: Option<&str>| {
+        queries += 1;
+        fetch(iids, after)
+    };
+    let first = match counted(asked, None).and_then(|json| parsed_batch(&json)) {
         Ok(first) => first,
         Err(message) => {
-            let failed = DiscussionsAnswer::Failed { message };
-            return (unanswered(asked, &failed), None);
+            return Answered {
+                queries,
+                ..unanswered(asked, &DiscussionsAnswer::Failed { message })
+            };
         }
     };
     let mut found = first.merge_requests;
@@ -219,7 +225,7 @@ fn answered(
         let notes = found
             .remove(&iid)
             .ok_or_else(|| not_sent(iid))
-            .and_then(|discussions| every_discussion(iid, discussions, fetch))
+            .and_then(|discussions| every_discussion(iid, discussions, &mut counted))
             .and_then(last_persons_notes);
         let answer = match notes {
             Ok(notes) => DiscussionsAnswer::Open {
@@ -233,7 +239,11 @@ fn answered(
         rows.push(RowDiscussions { iid, answer });
     }
     let pictures = one_per_username(people.pictures);
-    (ReadDiscussions { rows, pictures }, first.complexity)
+    Answered {
+        read: ReadDiscussions { rows, pictures },
+        queries,
+        complexity: first.complexity,
+    }
 }
 
 fn not_sent(iid: MergeRequestIid) -> String {
@@ -314,19 +324,19 @@ fn open_discussion(
 }
 
 /// Counts and GitLab's score only: never a name, a body or an address.
-fn log_read(read: &ReadDiscussions, tally: &Tally) {
-    let answered = read
-        .rows
+fn log_read(call: &Answered) {
+    let rows = &call.read.rows;
+    let open = rows
         .iter()
         .filter(|row| matches!(row.answer, DiscussionsAnswer::Open { .. }))
         .count();
     tracing::info!(
-        asked = read.rows.len(),
-        answered,
-        failed = read.rows.len() - answered,
-        queries = tally.queries,
-        score = tally.complexity.map(|complexity| complexity.score),
-        limit = tally.complexity.map(|complexity| complexity.limit),
+        asked = rows.len(),
+        answered = open,
+        failed = rows.len() - open,
+        queries = call.queries,
+        score = call.complexity.map(|complexity| complexity.score),
+        limit = call.complexity.map(|complexity| complexity.limit),
         "read merge requests' open discussions"
     );
 }

@@ -1,12 +1,12 @@
 use yamt_merge_requests::{
-    DiscussionsAnswer, Glab, MergeRequestIid, RowDiscussions, read_discussions, unread_discussions,
+    DiscussionsAnswer, Glab, MergeRequestIid, OpenDiscussion, RowDiscussions, read_discussions,
+    unread_discussions,
 };
 
-use super::{MergeRequestState, NO_PROJECT, offered};
+use super::{MergeRequestState, NO_PROJECT, offer};
 
-/// No GitLab project → each asked row fails; else glab reads them, and every answered note's page joins `pages` and
-/// the authors' uploaded pictures are offered, both before the rows are returned. Never holds `pages` while glab
-/// runs.
+/// No GitLab project → each asked row fails; else glab reads them, and every answered note's page and the authors'
+/// uploaded pictures are offered before the rows are returned. Never holds `pages` while glab runs.
 pub(super) fn discussions_reply(
     state: &MergeRequestState,
     glab: Option<&Glab>,
@@ -16,13 +16,18 @@ pub(super) fn discussions_reply(
         return unread_discussions(iids, NO_PROJECT);
     };
     let read = read_discussions(repository, glab, iids);
-    let mut pages = offered(&state.pages);
-    for row in &read.rows {
-        if let DiscussionsAnswer::Open { discussions } = &row.answer {
-            pages.extend(discussions.iter().filter_map(|open| open.last.page.clone()));
-        }
-    }
-    drop(pages);
-    state.pictures.offer(read.pictures);
+    let notes = read.rows.iter().flat_map(open_discussions);
+    offer(
+        state,
+        notes.filter_map(|open| open.last.page.clone()),
+        read.pictures,
+    );
     read.rows
+}
+
+fn open_discussions(row: &RowDiscussions) -> &[OpenDiscussion] {
+    let DiscussionsAnswer::Open { discussions } = &row.answer else {
+        return &[];
+    };
+    discussions
 }

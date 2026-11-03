@@ -1,0 +1,504 @@
+diff --git a/crates/merge-requests/src/discussions.rs b/crates/merge-requests/src/discussions.rs
+index 7967504..dd70e52 100644
+--- a/crates/merge-requests/src/discussions.rs
++++ b/crates/merge-requests/src/discussions.rs
+@@ -110,10 +110,12 @@ pub struct ReadDiscussions {
+ /// Asks GitLab for the discussions of `iids` (all of them, or one merge request's after a cursor).
+ type Fetch<'a> = dyn FnMut(&[MergeRequestIid], Option<&str>) -> Result<Vec<u8>, String> + 'a;
+ 
+-/// What one call did, for its log line.
+-#[derive(Default)]
+-struct Tally {
++/// One call's rows and pictures, and what its log line counts besides them.
++struct Answered {
++    read: ReadDiscussions,
++    /// The discussions queries run: the batch's and each later page's.
+     queries: u32,
++    /// GitLab's score of the batch's query; `None` when it sent none.
+     complexity: Option<Complexity>,
+ }
+ 
+@@ -128,17 +130,20 @@ pub fn read_discussions(
+     iids: &[MergeRequestIid],
+ ) -> ReadDiscussions {
+     let asked = batch(iids);
+-    let mut tally = Tally::default();
+-    let read = if asked.is_empty() {
+-        ReadDiscussions {
+-            rows: Vec::new(),
+-            pictures: Vec::new(),
++    let call = if asked.is_empty() {
++        Answered {
++            read: ReadDiscussions {
++                rows: Vec::new(),
++                pictures: Vec::new(),
++            },
++            queries: 0,
++            complexity: None,
+         }
+     } else {
+-        through_glab(repository.root(), glab, &asked, &mut tally)
++        through_glab(repository.root(), glab, &asked)
+     };
+-    log_read(&read, &tally);
+-    read
++    log_read(&call);
++    call.read
+ }
+ 
+ /// The same batch cut, each `Failed { message }`: for a window without a GitLab project, and for a failed call.
+@@ -147,7 +152,7 @@ pub fn unread_discussions(iids: &[MergeRequestIid], message: &str) -> Vec<RowDis
+     let failed = DiscussionsAnswer::Failed {
+         message: message.to_owned(),
+     };
+-    unanswered(&batch(iids), &failed).rows
++    unanswered(&batch(iids), &failed).read.rows
+ }
+ 
+ /// The first `DISCUSSION_BATCH` distinct iids, in their order.
+@@ -164,23 +169,24 @@ fn batch(iids: &[MergeRequestIid]) -> Vec<MergeRequestIid> {
+     batch
+ }
+ 
+-fn unanswered(asked: &[MergeRequestIid], answer: &DiscussionsAnswer) -> ReadDiscussions {
++/// Each of `asked` answered `answer`, without a query.
++fn unanswered(asked: &[MergeRequestIid], answer: &DiscussionsAnswer) -> Answered {
+     let row = |&iid| RowDiscussions {
+         iid,
+         answer: answer.clone(),
+     };
+-    ReadDiscussions {
++    let read = ReadDiscussions {
+         rows: asked.iter().map(row).collect(),
+         pictures: Vec::new(),
++    };
++    Answered {
++        read,
++        queries: 0,
++        complexity: None,
+     }
+ }
+ 
+-fn through_glab(
+-    root: &Path,
+-    glab: Option<&Glab>,
+-    asked: &[MergeRequestIid],
+-    tally: &mut Tally,
+-) -> ReadDiscussions {
++fn through_glab(root: &Path, glab: Option<&Glab>, asked: &[MergeRequestIid]) -> Answered {
+     let Some(glab) = glab else {
+         return unanswered(asked, &DiscussionsAnswer::GlabMissing);
+     };
+@@ -189,27 +195,27 @@ fn through_glab(
+         Err(refused) => return unanswered(asked, &refused.into()),
+     };
+     let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| {
+-        tally.queries += 1;
+         let args = discussions_args(&project.full_path, iids, after);
+         let args: Vec<&str> = args.iter().map(String::as_str).collect();
+         glab.get(root, &args)
+     };
+-    let (read, complexity) = answered(asked, &project, &mut fetch);
+-    tally.complexity = complexity;
+-    read
++    answered(asked, &project, &mut fetch)
+ }
+ 
+ /// Each asked row from the batch's answer and its later pages; a failing batch fails each row.
+-fn answered(
+-    asked: &[MergeRequestIid],
+-    project: &Project,
+-    fetch: &mut Fetch,
+-) -> (ReadDiscussions, Option<Complexity>) {
+-    let first = match fetch(asked, None).and_then(|json| parsed_batch(&json)) {
++fn answered(asked: &[MergeRequestIid], project: &Project, fetch: &mut Fetch) -> Answered {
++    let mut queries = 0;
++    let mut counted = |iids: &[MergeRequestIid], after: Option<&str>| {
++        queries += 1;
++        fetch(iids, after)
++    };
++    let first = match counted(asked, None).and_then(|json| parsed_batch(&json)) {
+         Ok(first) => first,
+         Err(message) => {
+-            let failed = DiscussionsAnswer::Failed { message };
+-            return (unanswered(asked, &failed), None);
++            return Answered {
++                queries,
++                ..unanswered(asked, &DiscussionsAnswer::Failed { message })
++            };
+         }
+     };
+     let mut found = first.merge_requests;
+@@ -219,7 +225,7 @@ fn answered(
+         let notes = found
+             .remove(&iid)
+             .ok_or_else(|| not_sent(iid))
+-            .and_then(|discussions| every_discussion(iid, discussions, fetch))
++            .and_then(|discussions| every_discussion(iid, discussions, &mut counted))
+             .and_then(last_persons_notes);
+         let answer = match notes {
+             Ok(notes) => DiscussionsAnswer::Open {
+@@ -233,7 +239,11 @@ fn answered(
+         rows.push(RowDiscussions { iid, answer });
+     }
+     let pictures = one_per_username(people.pictures);
+-    (ReadDiscussions { rows, pictures }, first.complexity)
++    Answered {
++        read: ReadDiscussions { rows, pictures },
++        queries,
++        complexity: first.complexity,
++    }
+ }
+ 
+ fn not_sent(iid: MergeRequestIid) -> String {
+@@ -314,19 +324,19 @@ fn open_discussion(
+ }
+ 
+ /// Counts and GitLab's score only: never a name, a body or an address.
+-fn log_read(read: &ReadDiscussions, tally: &Tally) {
+-    let answered = read
+-        .rows
++fn log_read(call: &Answered) {
++    let rows = &call.read.rows;
++    let open = rows
+         .iter()
+         .filter(|row| matches!(row.answer, DiscussionsAnswer::Open { .. }))
+         .count();
+     tracing::info!(
+-        asked = read.rows.len(),
+-        answered,
+-        failed = read.rows.len() - answered,
+-        queries = tally.queries,
+-        score = tally.complexity.map(|complexity| complexity.score),
+-        limit = tally.complexity.map(|complexity| complexity.limit),
++        asked = rows.len(),
++        answered = open,
++        failed = rows.len() - open,
++        queries = call.queries,
++        score = call.complexity.map(|complexity| complexity.score),
++        limit = call.complexity.map(|complexity| complexity.limit),
+         "read merge requests' open discussions"
+     );
+ }
+diff --git a/crates/merge-requests/src/discussions/tests.rs b/crates/merge-requests/src/discussions/tests.rs
+index 203d4fd..8b0e8d0 100644
+--- a/crates/merge-requests/src/discussions/tests.rs
++++ b/crates/merge-requests/src/discussions/tests.rs
+@@ -82,7 +82,7 @@ fn rows_for(asked: &[u32], batch: &[Value]) -> Vec<RowDiscussions> {
+         assert_eq!(after, None);
+         Ok(answer(batch))
+     };
+-    answered(&iids(asked), &project(), &mut fetch).0.rows
++    answered(&iids(asked), &project(), &mut fetch).read.rows
+ }
+ 
+ /// The open discussions of the one row asked.
+@@ -215,7 +215,7 @@ fn graphql_errors_fail_each_row_of_the_batch() {
+     let refused = json!({ "data": null, "errors": [{ "message": "Field 'x' doesn't exist" }] });
+     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(refused.to_string().into_bytes());
+ 
+-    let (read, complexity) = answered(&iids(&[2, 1]), &project(), &mut fetch);
++    let call = answered(&iids(&[2, 1]), &project(), &mut fetch);
+ 
+     let answer = failed("Field 'x' doesn't exist");
+     let expected = [
+@@ -228,32 +228,19 @@ fn graphql_errors_fail_each_row_of_the_batch() {
+             answer,
+         },
+     ];
+-    assert_eq!(read.rows, expected);
+-    assert_eq!(complexity, None);
++    assert_eq!(call.read.rows, expected);
++    assert_eq!(call.complexity, None);
+ }
+ 
+ #[test]
+ fn a_failed_batch_call_fails_each_row_with_glab_s_words() {
+     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Err("glab: timed out".to_owned());
+ 
+-    let (read, _) = answered(&iids(&[2, 1]), &project(), &mut fetch);
++    let call = answered(&iids(&[2, 1]), &project(), &mut fetch);
+ 
+-    let answers: Vec<&DiscussionsAnswer> = read.rows.iter().map(|row| &row.answer).collect();
++    let answers: Vec<&DiscussionsAnswer> = call.read.rows.iter().map(|row| &row.answer).collect();
+     assert_eq!(answers, [&failed("glab: timed out"); 2]);
+-}
+-
+-#[test]
+-fn the_batch_answers_gitlab_s_complexity() {
+-    let mut fetch =
+-        |_: &[MergeRequestIid], _: Option<&str>| Ok(answer(&[merge_request(1, &[], None)]));
+-
+-    let (_, complexity) = answered(&iids(&[1]), &project(), &mut fetch);
+-
+-    let measured = Complexity {
+-        score: 58,
+-        limit: 250,
+-    };
+-    assert_eq!(complexity, Some(measured));
++    assert_eq!(call.queries, 1);
+ }
+ 
+ #[test]
+@@ -285,7 +272,7 @@ fn an_uploaded_avatar_is_offered_once_per_username() {
+     ];
+     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(answer(&batch));
+ 
+-    let (read, _) = answered(&iids(&[1, 2]), &project(), &mut fetch);
++    let read = answered(&iids(&[1, 2]), &project(), &mut fetch).read;
+ 
+     let AvatarSource::Uploaded(address) = avatar_source(Some(ORIGIN), Some(ANNA_S_AVATAR)) else {
+         panic!("{ANNA_S_AVATAR} is no uploaded avatar");
+@@ -314,7 +301,7 @@ fn paged(pages: u32) -> (Vec<RowDiscussions>, Vec<Option<String>>) {
+         }
+         Ok(page(n))
+     };
+-    let rows = answered(&iids(&[1]), &project(), &mut fetch).0.rows;
++    let rows = answered(&iids(&[1]), &project(), &mut fetch).read.rows;
+     (rows, asked)
+ }
+ 
+@@ -352,7 +339,9 @@ fn a_failing_later_page_fails_its_row_alone() {
+         Some(_) => Ok(answer(&[])),
+     };
+ 
+-    let rows = answered(&iids(&[1, 2, 3]), &project(), &mut fetch).0.rows;
++    let rows = answered(&iids(&[1, 2, 3]), &project(), &mut fetch)
++        .read
++        .rows;
+ 
+     assert_eq!(rows[0].answer, failed("glab: page 2 failed"));
+     assert!(matches!(rows[1].answer, DiscussionsAnswer::Open { .. }));
+@@ -388,36 +377,31 @@ fn no_project_in_the_answer_fails_each_row() {
+     let refused = json!({ "data": { "queryComplexity": null, "project": null } });
+     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(refused.to_string().into_bytes());
+ 
+-    let rows = answered(&iids(&[1]), &project(), &mut fetch).0.rows;
++    let rows = answered(&iids(&[1]), &project(), &mut fetch).read.rows;
+ 
+     assert_eq!(rows[0].answer, failed(NO_PROJECT));
+ }
+ 
+-/// The fake glab on `tests/glab/mr-discussions/` through a symlink beside its `glab.env` (`tests/glab/README.md`).
+-#[cfg(unix)]
+ #[test]
+ fn each_query_of_a_call_is_counted_and_the_batch_s_complexity_kept() {
+-    let folder = tempfile::tempdir().unwrap();
+-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+-    let scenario = repository.join("tests/glab/mr-discussions");
+-    let settings = format!("YAMT_FAKE_GLAB={}\n", scenario.display());
+-    std::fs::write(folder.path().join("glab.env"), settings).unwrap();
+-    let link = folder.path().join("glab");
+-    std::os::unix::fs::symlink(repository.join("scripts/fake-glab/glab"), &link).unwrap();
+-    let mut tally = Tally::default();
++    let batch = [
++        merge_request(1, &[], Some("d-2")),
++        merge_request(2, &[], Some("d-2")),
++    ];
++    let mut later: Value = serde_json::from_slice(&answer(&[merge_request(1, &[], None)])).unwrap();
++    later["data"]["queryComplexity"]["score"] = json!(5);
++    let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| match after {
++        None => Ok(answer(&batch)),
++        Some(_) if iids == [MergeRequestIid(1)] => Ok(later.to_string().into_bytes()),
++        Some(_) => Err("glab: page 2 failed".to_owned()),
++    };
+ 
+-    let read = through_glab(
+-        folder.path(),
+-        Some(&Glab::at(link)),
+-        &iids(&[82, 81, 79, 78]),
+-        &mut tally,
+-    );
++    let call = answered(&iids(&[1, 2]), &project(), &mut fetch);
+ 
+-    assert_eq!(read.rows.len(), 4);
+-    assert_eq!(tally.queries, 2);
++    assert_eq!(call.queries, 3);
+     let measured = Complexity {
+         score: 58,
+         limit: 250,
+     };
+-    assert_eq!(tally.complexity, Some(measured));
++    assert_eq!(call.complexity, Some(measured));
+ }
+diff --git a/src-tauri/src/merge_requests.rs b/src-tauri/src/merge_requests.rs
+index beaa55e..a8daf14 100644
+--- a/src-tauri/src/merge_requests.rs
++++ b/src-tauri/src/merge_requests.rs
+@@ -9,9 +9,9 @@ use tauri::{App, Manager, Runtime, State, WebviewWindow};
+ use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
+ use yamt_merge_requests::{
+     CheckedRow, GitLabProject, GitLabRepository, Glab, JobLogReply, ListEnd, ListedPage,
+-    MergeRequestIid, MergeRequestPage, MergedPairs, OpenReply, PageOpened, RerequestReply,
+-    ResolveRefusal, RowDiscussions, WebPage, check_conflicts, gitlab_repository, prepare_open,
+-    prepare_resolve,
++    MergeRequestIid, MergeRequestPage, MergeRequestRow, MergedPairs, OfferedPicture, OpenReply,
++    PageOpened, RerequestReply, ResolveRefusal, RowDiscussions, WebPage, check_conflicts,
++    gitlab_repository, prepare_open, prepare_resolve,
+ };
+ 
+ use crate::args::Ai;
+@@ -64,8 +64,9 @@ pub(crate) enum ContinueMergeReply {
+ }
+ 
+ /// The window's GitLab project, found once at start, the folder pair locks live in, the window's `--ai` that "Show
+-/// Diff" passes on, and every merge request's and failed job's page a list sent in this run: only those may be
+-/// opened or have their log read (plan §2 #128–#137); `pages` is never locked together with another `Mutex`.
++/// Diff" passes on, and every merge request's and failed job's page a list sent and every note's page
++/// `read_discussions` sent in this run: only those may be opened or have their log read (plan §2 #128–#137); `pages`
++/// is never locked together with another `Mutex`.
+ pub(crate) struct MergeRequestState {
+     gitlab: Option<GitLabRepository>,
+     range_dir: PathBuf,
+@@ -95,20 +96,33 @@ fn offered(pages: &Mutex<BTreeSet<WebPage>>) -> MutexGuard<'_, BTreeSet<WebPage>
+     pages.lock().unwrap_or_else(PoisonError::into_inner)
+ }
+ 
+-/// Remembers the page's merge request and failed job pages and its uploaded pictures as offered, then sends the page
+-/// to the window.
++/// Remembers `pages` and `pictures` as offered, so the window may open or ask for them once it gets the reply that
++/// names them; holds `pages` and the pictures' lock one after the other, never together.
++fn offer(
++    state: &MergeRequestState,
++    pages: impl IntoIterator<Item = WebPage>,
++    pictures: Vec<OfferedPicture>,
++) {
++    offered(&state.pages).extend(pages);
++    state.pictures.offer(pictures);
++}
++
++/// The page of `row` and of each of its failed jobs.
++fn row_pages(row: &MergeRequestRow) -> impl Iterator<Item = WebPage> + '_ {
++    let jobs = row
++        .pipeline
++        .iter()
++        .flat_map(|pipeline| &pipeline.failed_jobs);
++    row.page
++        .clone()
++        .into_iter()
++        .chain(jobs.filter_map(|job| job.page.clone()))
++}
++
++/// Offers the page's merge request and failed job pages and its uploaded pictures, then sends the page to the window.
+ fn forward_page(state: &MergeRequestState, channel: &Channel<ListMessage>, listed: ListedPage) {
+-    let mut pages = offered(&state.pages);
+-    for row in &listed.page.rows {
+-        pages.extend(row.page.clone());
+-        let jobs = row
+-            .pipeline
+-            .iter()
+-            .flat_map(|pipeline| &pipeline.failed_jobs);
+-        pages.extend(jobs.filter_map(|job| job.page.clone()));
+-    }
+-    drop(pages);
+-    state.pictures.offer(listed.pictures);
++    let pages = listed.page.rows.iter().flat_map(row_pages);
++    offer(state, pages, listed.pictures);
+     send(channel, ListMessage::Page { page: listed.page });
+ }
+ 
+@@ -386,7 +400,10 @@ fn local_merge(state: &MergeRequestState) -> LocalMerge {
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+ pub(crate) fn open_page(state: State<'_, MergeRequestState>, page: WebPage) -> PageOpened {
+     if !offered(&state.pages).contains(&page) {
+-        tracing::warn!(page = page.as_str(), "a GitLab page no list sent");
++        tracing::warn!(
++            page = page.as_str(),
++            "a GitLab page this window was never sent"
++        );
+         return PageOpened::NotOffered;
+     }
+     yamt_merge_requests::open_page(&page)
+diff --git a/src-tauri/src/merge_requests/discussions.rs b/src-tauri/src/merge_requests/discussions.rs
+index 6a71a8e..0f22672 100644
+--- a/src-tauri/src/merge_requests/discussions.rs
++++ b/src-tauri/src/merge_requests/discussions.rs
+@@ -1,12 +1,12 @@
+ use yamt_merge_requests::{
+-    DiscussionsAnswer, Glab, MergeRequestIid, RowDiscussions, read_discussions, unread_discussions,
++    DiscussionsAnswer, Glab, MergeRequestIid, OpenDiscussion, RowDiscussions, read_discussions,
++    unread_discussions,
+ };
+ 
+-use super::{MergeRequestState, NO_PROJECT, offered};
++use super::{MergeRequestState, NO_PROJECT, offer};
+ 
+-/// No GitLab project → each asked row fails; else glab reads them, and every answered note's page joins `pages` and
+-/// the authors' uploaded pictures are offered, both before the rows are returned. Never holds `pages` while glab
+-/// runs.
++/// No GitLab project → each asked row fails; else glab reads them, and every answered note's page and the authors'
++/// uploaded pictures are offered before the rows are returned. Never holds `pages` while glab runs.
+ pub(super) fn discussions_reply(
+     state: &MergeRequestState,
+     glab: Option<&Glab>,
+@@ -16,13 +16,18 @@ pub(super) fn discussions_reply(
+         return unread_discussions(iids, NO_PROJECT);
+     };
+     let read = read_discussions(repository, glab, iids);
+-    let mut pages = offered(&state.pages);
+-    for row in &read.rows {
+-        if let DiscussionsAnswer::Open { discussions } = &row.answer {
+-            pages.extend(discussions.iter().filter_map(|open| open.last.page.clone()));
+-        }
+-    }
+-    drop(pages);
+-    state.pictures.offer(read.pictures);
++    let notes = read.rows.iter().flat_map(open_discussions);
++    offer(
++        state,
++        notes.filter_map(|open| open.last.page.clone()),
++        read.pictures,
++    );
+     read.rows
+ }
++
++fn open_discussions(row: &RowDiscussions) -> &[OpenDiscussion] {
++    let DiscussionsAnswer::Open { discussions } = &row.answer else {
++        return &[];
++    };
++    discussions
++}
+diff --git a/src-tauri/src/merge_requests/tests/discussions.rs b/src-tauri/src/merge_requests/tests/discussions.rs
+index 5ac4b3b..e86d392 100644
+--- a/src-tauri/src/merge_requests/tests/discussions.rs
++++ b/src-tauri/src/merge_requests/tests/discussions.rs
+@@ -2,6 +2,7 @@ use tauri::http::StatusCode;
+ 
+ use super::through_glab::{glab_log, in_this_repository, run_with_fakes};
+ use super::*;
++use crate::frontend_log::tests::logged;
+ use crate::merge_requests::discussions::discussions_reply;
+ use crate::merge_requests::pictures::picture_answer;
+ 
+@@ -10,6 +11,7 @@ const OFFERED_TEST: &str = "merge_requests::tests::discussions::note_pages_on_pa
+ const PICTURE_TEST: &str = "merge_requests::tests::discussions::an_authors_picture_on_paths_glab";
+ const READ_TEST: &str =
+     "merge_requests::tests::discussions::read_discussions_replies_on_paths_glab";
++const LOG_TEST: &str = "merge_requests::tests::discussions::the_log_line_on_paths_glab";
+ const BATCH: [u32; 4] = [82, 81, 79, 78];
+ const NOTE_103: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_103";
+ const UNLISTED_NOTE: &str =
+@@ -136,3 +138,23 @@ fn read_discussions_replies_on_paths_glab() {
+     let queries = glab_log("argv: api graphql");
+     assert_eq!(queries.len(), 1, "{queries:?}");
+ }
++
++#[test]
++fn a_read_logs_its_counts_and_score_but_no_name_or_body() {
++    run_with_fakes(LOG_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by a_read_logs_its_counts_and_score_but_no_name_or_body"]
++fn the_log_line_on_paths_glab() {
++    let window = open_window_in(gitlab_repo());
++
++    let iids = BATCH.map(MergeRequestIid);
++    let reply = || discussions_reply(&window.webview.state(), Glab::find().as_ref(), &iids);
++    let (_, log) = logged(reply);
++
++    let lines: Vec<&str> = log.lines().filter(|line| line.contains(" INFO ")).collect();
++    let line = " INFO yamt_merge_requests::discussions: read merge requests' open discussions asked=4 \
++                answered=3 failed=1 queries=2 score=58 limit=250";
++    assert_eq!(lines, [line], "{log}");
++}
