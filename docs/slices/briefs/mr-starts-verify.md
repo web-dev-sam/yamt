@@ -44,10 +44,10 @@ display; screenshots come only from the session or that display (VF8, VF9).
    <scratch>/mr --mr`: the `--diff … takes no --repo` refusal, exit code non-zero.
 2. `just app-session start-app --name mr --diff --dir <scratch>/mr --glab mr-conflicts --mr`: the page with rows at
    once (`shot`); `dataset.open` reads `"mergeRequests"`. Without `--mr`: the compare tabs, `dataset.open` undefined.
-3. `YAMT_AI=1 just app-session start-app --name ai --diff --dir <scratch>/mr --glab mr-conflicts --mr`: click "Show
-   Diff" on one row; `pgrep -af 'yamt --diff='` shows the child ending with `--ai`; a screenshot of the private display
-   shows the child's window with "Ask AI" on a thread (open or start one if needed). Repeat with `YAMT_AI=0`: the child
-   has no `--ai`.
+3. `scripts/range-repo.sh <scratch>/plain`, then `YAMT_AI=1 just app-session start-app --name ai --diff --dir
+   <scratch>/plain --glab merge-requests --mr` (`mr-conflicts` has no diff refs, #2240): click "Show Diff" on row 0;
+   `pgrep -af 'yamt --diff='` shows the child ending with `--ai`; a screenshot of the private display shows the child's
+   window with "Ask AI" on a thread (open or start one if needed). Repeat with `YAMT_AI=0`: the child has no `--ai`.
 4. A folder without a GitLab remote (`scripts/range-repo.sh <scratch>/plain` or any repo with no remote) and
    `start-app --diff --dir <scratch>/plain --mr`: the compare tabs, no page, no problem bar.
 5. Stop every session; leave no yamt from this run.

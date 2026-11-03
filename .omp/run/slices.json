@@ -1,1 +1,10 @@
-{}
+{
+  "MrStartsAgeR1": {
+    "owned": [
+      "frontend/src/ui/MergeRequestsView.vue",
+      "frontend/src/ui/useListAge.ts",
+      "frontend/src/ui/useListAge.test.ts",
+      "frontend/src/ui/AGENTS.md"
+    ]
+  }
+}
