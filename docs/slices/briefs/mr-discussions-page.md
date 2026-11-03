@@ -1,6 +1,7 @@
 # Slice mr-discussions-page — the count's box of open discussions, whose turn first; the Settings choice
 
 Feature: whose turn it is, per open discussion. Sources:
+
 - Request `docs/slices/request-mr-discussions.md`: rules 1–8 and the WebKit-fixture acceptance.
 - Design `docs/slices/briefs/mr-discussions-design.md` option A, §1.7–1.10.
 - Proposed plan §2 #163, #164; proposed RK60.
@@ -12,6 +13,7 @@ landed. **Wires the window:** the last implementer slice.
 ## Target
 
 **Owned:**
+
 - `frontend/src/ui/`:
   - New components: `MergeRequestDiscussions.vue`, `MergeRequestDiscussionSetting.vue`.
   - `MergeRequestRow.vue`.
@@ -22,6 +24,7 @@ landed. **Wires the window:** the last implementer slice.
   - `AGENTS.md`.
 
 **Read-only:** everything else.
+
 - The state, used as contracted: `ui/mergeRequests.ts`, `ui/mergeRequestDiscussions.ts`, `ui/settings.ts`, `ipc/**`
   and its fixtures.
 - `mergeRequests/**`: use its exports.
@@ -32,6 +35,7 @@ landed. **Wires the window:** the last implementer slice.
 - `docs/**`.
 
 **Non-goals:**
+
 - Replying, resolving or reacting.
 - Resolved discussions, whole threads.
 - Review mode and its words.
@@ -42,6 +46,7 @@ landed. **Wires the window:** the last implementer slice.
 ## Contract
 
 Existing and fixed by the earlier slices:
+
 - `useMergeRequests()` gives `discussions`, `discussionDetails`, `askDiscussions(iid)`, `me` and `openPage(clicked,
   page)`; `DiscussionLoad` (brief `mr-discussions-state.md`).
 - `SettingsActions.setDiscussionDetails(details)`.
@@ -70,6 +75,7 @@ export function discussionsRefusedText(answer: Exclude<DiscussionsAnswer, { read
 ```
 
 **`MergeRequestDiscussions.vue`**:
+
 - Props `{ row: MergeRequestRow; now: number }`. It reads the slice through `useMergeRequests()` (PM10).
 - **Off, or `row.openDiscussions === 0`:** exactly today's count span, moved from `MergeRequestRow.vue:163-171`:
   `v-tooltip` of `discussionsText`, `aria-label`, `MessageSquare` and the number, muted at 0. No box, no ask.
@@ -101,6 +107,7 @@ export function discussionsRefusedText(answer: Exclude<DiscussionsAnswer, { read
 :now /></span>`. Drop what is then unused.
 
 `MergeRequestDiscussionSetting.vue`:
+
 - `<section aria-labelledby="settings-discussion-details">`, an `<h3>` `DISCUSSION_DETAILS`, then `ChoiceButtons
   :options="DISCUSSION_DETAILS_OPTIONS" :pressed="settings.discussionDetails" @pick="setDiscussionDetails"`, then a
   `<p class="mt-1 text-fg-muted">` hint. The same shape as the Antialiasing section (`SettingsView.vue:82-90`).
@@ -120,12 +127,14 @@ export function discussionsRefusedText(answer: Exclude<DiscussionsAnswer, { read
 ## Acceptance
 
 **Vitest**, each test named for the bug it catches:
+
 - Texts: every new word and each refused answer (exhaustive).
 - `pageProblemText` for `discussion`.
 - `problemText`'s two rows.
 - `settingsStore`: the seam carries `setDiscussionDetails`.
 
 **Commands:**
+
 - `pnpm -C frontend lint`, `typecheck`, `test` (including `mergeRequestTitles.test.ts` and the fences, PM10):
   summary lines.
 - `just map-check`: list its findings for the docs keeper.
@@ -140,7 +149,9 @@ session's log for `mergeRequests.fixture_discussions`.
    - Each line has a picture, name, "… ago", "Your turn" or "Waiting for an answer", and its place.
    - The markup text shows as typed: `read` finds no `b` and no `script` element in the box, and its `innerText`
      holds `<b>not bold</b>` and `**not bold**`.
-   - The fixture log shows `fixture_discussions` calls of at most 10 iids, each made once, with no count-0 row's iid.
+   - The fixture log shows `fixture_discussions` calls, one at a time, each asking the queue's not yet answered
+     rows (the fixture answers the first 10, the state brief's rule 1 sends the rest again), so every row with a count
+     above 0 is answered exactly once and no count-0 row's iid is ever asked.
 2. **Click a line with a page:** `mergeRequests.fixture_page` with `…#note_…`, and no MR-page open from the row. A
    pageless line is no button.
 3. **Load lazily.** Settings → Discussion details → Load lazily → Back. Refresh.

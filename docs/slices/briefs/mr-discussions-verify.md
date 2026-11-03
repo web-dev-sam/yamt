@@ -12,6 +12,7 @@ private display.
 **Read-only:** the whole tree.
 
 **Needs:**
+
 - `mr-discussions-rust` (with `just bindings` applied), `-core`, `-state` and `-page` committed.
 - **Smoke pass** (steps B–C, no `just check`): as soon as `-page` is committed, beside its reviewers.
 - **Final pass**: once the docs keeper has named every new file in the project map (`just map-check`, PM6) and
@@ -24,6 +25,7 @@ mutants`.
 ## Contract
 
 **Fixture `?mr=list`**, as `mr-discussions-state` built it:
+
 - A row with `openDiscussions` k has k discussions.
 - Discussion 0's last author cycles through `PEOPLE` from index + 2. Its place is Overview on even indexes and
   `src/board/card.ts:<10+index>` on odd ones.
@@ -37,17 +39,18 @@ mutants`.
 
 **Scenario `tests/glab/mr-discussions/`**, as `mr-discussions-rust` recorded it:
 
-| row | open | what the box should show |
-| --- | --- | --- |
-| !82 | 3 | (a) last sam, `src/…:<line>`; (b) last ben, with a system note after his comment; (c) anna on the Overview, no link |
-| !81 | 1 | ben on the Overview, markup in the body |
-| !80 | 0 | — |
-| !79 | 1 | its open one on a second discussions page |
-| !78 | 1 | GitLab names no such merge request |
+| row | open | what the box should show                                                                                            |
+| --- | ---- | ------------------------------------------------------------------------------------------------------------------- |
+| !82 | 3    | (a) last sam, `src/…:<line>`; (b) last ben, with a system note after his comment; (c) anna on the Overview, no link |
+| !81 | 1    | ben on the Overview, markup in the body                                                                             |
+| !80 | 0    | —                                                                                                                   |
+| !79 | 1    | its open one on a second discussions page                                                                           |
+| !78 | 1    | GitLab names no such merge request                                                                                  |
 
 The user is `sam`.
 
 **Words:**
+
 - Core: "Your turn", "Waiting for an answer", "N of M wait(s) for you", "No open discussions", "Overview",
   `path:line`, "… ago", "Someone".
 - Page: "Loading discussions…", "Discussion details" with "Load fully", "Load lazily", "Off".
@@ -65,8 +68,9 @@ merge requests page. Run every step in both windows (`--diff` and `--range-case 
    - Hover !638's count. The box opens without a loading wait; its header sums the turns, viewer's-turn lines come
      first, and newest first within each.
    - Each line: picture, name, "… ago", turn words, place, at most three lines ending in "…" where cut.
-   - The session log has `fixture_discussions` calls of ≤ 10 iids that together name each row with a count > 0
-     exactly once, and no count-0 row.
+   - The session log has `fixture_discussions` calls, one at a time, each asking the not yet answered rows (the
+     fixture answers 10 per call; the queue sends the rest again, state brief rule 1); together the answers cover
+     each row with a count > 0 exactly once, and no count-0 row is asked.
 2. **Text and links.**
    - A markup discussion: `read` finds no `b`/`script` element in the box; `innerText` holds `<b>not bold</b>`,
      `**not bold**` and `RENAME` in capitals.
@@ -117,6 +121,7 @@ Each step: pass or fail with the observed words, the `read` results, and the app
 verbatim, plus the screenshots' paths.
 
 **Owner check** (hand on, not run): the playground's !1 "Due dates on cards" (4 open discussions, all by `samubr`).
+
 1. The owner, as `samubr` in the real app, sees each discussion "Waiting for an answer" and the header "0 of 4 wait
    for you".
 2. Then he answers one of them **by hand as a second GitLab user**: the author's side. No script can do it; `glab` is
