@@ -1,18 +1,13 @@
 {
-  "MrDescriptionRust": {
+  "MrDescriptionApp": {
     "owned": [
-      "crates/merge-requests/src/**",
-      "crates/merge-requests/tests/**",
-      "crates/merge-requests/AGENTS.md",
-      "scripts/fake-glab/glab",
-      "tests/glab/mr-description/**",
-      "tests/glab/README.md"
+      "src-tauri/src/merge_requests.rs",
+      "src-tauri/src/merge_requests/**",
+      "src-tauri/src/commands.rs",
+      "src-tauri/tauri.conf.json"
     ]
   },
-  "MrDescriptionLookR1": {
-    "owned": [
-      "frontend/src/ui/useMarkdown.ts",
-      "frontend/src/ui/useMarkdown.test.ts"
-    ]
+  "MrPeopleFinal": {
+    "owned": []
   }
 }
