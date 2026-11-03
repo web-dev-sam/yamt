@@ -145,13 +145,29 @@ Order: 2 ∥ 3, `just bindings`, 4, 5, 6 ∥ 7 smoke, 7 final.
 | 7   | verify (`briefs/mr-discussions-verify.md`): smoke after 5; final `just check`, WebKit, real app                     | verifier     | done        | smoke `96103a1f` (B6 = stale reload, #2217); final `MrDiscussionsFinal` at `2fe58a24`: `just check` pass (74.9 s, 4076 tests), B1–B8 both windows, C1–C6 pass. Notes `MrDiscussions{Smoke,Final}.md`                                                             |
 | 8   | owner check on the GitLab playground: a discussion answered by the author shows "Your turn" to the reviewer         | human        | handed over | the verify brief's "Owner check" (!1, four discussions by `samubr`; a second user's reply needed)                                                                                                                                                                |
 
+## Starts: the list's age, `yamt --mr`, `YAMT_AI` (session 48; owner #2195–#2198)
+
+Request `docs/slices/request-mr-starts.md` (parts A–C, acceptance, non-goals); base `6c34a149`. Shape given, short
+briefs by the orchestrator (no designer). Decided as owner (OR13, may veto, request A1/B3): the age uses the rows'
+words ("3 minutes ago", not "3 min ago"); without a GitLab remote `--mr` opens the files as `--diff` does. Start
+marker `data-open="mergeRequests"` / fixture `?open=mergeRequests` (briefs). No product question open.
+Order: 1 ∥ 2, then 3 (after the first of them lands), 4, 5.
+
+| row | slice                                                                     | owner       | status  | evidence |
+| --- | ------------------------------------------------------------------------- | ----------- | ------- | -------- |
+| 1   | rust (`briefs/mr-starts-rust.md`): `--mr`, `YAMT_AI`, start marker, usage | rust-impl   | running |          |
+| 2   | age (`briefs/mr-starts-age.md`): core hover words, shown-list time, view  | web-impl    | running |          |
+| 3   | open (`briefs/mr-starts-open.md`): start screen, stores, app-session      | web-impl    | planned |          |
+| 4   | docs keeper: architecture, map, plan rows; README + CHANGELOG by me       | docs-keeper | todo    |          |
+| 5   | verify (`briefs/mr-starts-verify.md`): final `just check`, WebKit, app    | verifier    | todo    |          |
+
 ## Next, in the owner's order (session 45; owner #2193–#2198)
 
 One request per session (OR14), each started with `/new`, then `Implement docs/slices/request-<x>.md`:
 
 1. `request-mr-discussions.md`: done (section above); owner check handed over.
 2. `request-mr-review-mode.md`: done (archived, session 47).
-3. `request-mr-starts.md`: the list's age left of Refresh, `yamt --mr`, `YAMT_AI=1`.
+3. `request-mr-starts.md`: running (section above).
 
 ## Open product questions
 

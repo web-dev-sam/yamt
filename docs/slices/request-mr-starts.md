@@ -19,7 +19,9 @@ README (`.readmer/readme.json` + `readmer`).
 **A. The list's age.**
 
 1. Left of the refresh button, in muted text: how long ago the shown list finished loading, in the rows' own words
-   ("just now" under a minute, "3 min ago", "2 h ago", as `created … ago`), updated every minute while shown.
+   (`agoText`, the words of `created … ago`: "just now" under a minute, "3 minutes ago", "2 hours ago"), updated
+   every minute while shown. The owner's "3min ago" is the example; the rows' words win, so the page has one way of
+   saying an age (orchestrator, owner may veto). No list loaded yet (first load running or failed): no age.
 2. Its hover gives the exact time (`14:32`, or `03.11.2026, 14:32` when not today).
 3. During a refresh the old age stays until the new list has arrived; a failed refresh keeps the last good list's
    age (the failure shows as today).
@@ -30,7 +32,8 @@ README (`.readmer/readme.json` + `readmer`).
    `yamt --diff --mr` is the same; `yamt --diff=<range> --mr` opens the range window with its page open.
 2. `--mr` alone with a merge (`yamt --repo <p> --mr`) follows `--diff`'s rules: the compare window takes no
    `--repo`, refused with the same message.
-3. Without a GitLab remote the page shows what it shows today. `--help` and the README list `--mr`.
+3. Without a GitLab remote the window opens as `yamt --diff` (or the range window) does today: its files, no page,
+   no button; a failed project lookup shows its problem as today. `--help` and the README list `--mr`.
 
 **C. AI mode everywhere.**
 
@@ -40,7 +43,7 @@ README (`.readmer/readme.json` + `readmer`).
 
 ## Acceptance
 
-A: core/unit tests for the words and the minute update; WebKit fixture shows "just now", then "1 min ago" (clock
+A: core/unit tests for the words and the minute update; WebKit fixture shows "just now", then "1 minute ago" (clock
 moved), hover the exact time; refresh keeps the old age until loaded. B: argument tests for every combination above;
 real app `yamt --mr` in a repository with the fake glab opens the list at once. C: argument tests with the variable
 set, unset, `0`; real app with `YAMT_AI=1 yamt --mr` → a changes window opened from the list has "Ask AI". `just
