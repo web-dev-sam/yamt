@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Whose turn it is in a merge request's open discussions: hovering or focusing a row's discussion count opens a box
+  that says how many wait for you ("1 of 2 waits for you") and lists each open discussion — yours to answer first, the
+  newest first — with the last commenter's picture and name, when they wrote, "Your turn" or "Waiting for an answer",
+  where it is ("Overview" or `file.ts:12`) and the first lines of the comment as plain text. A click on a line opens
+  that comment on GitLab. Settings → "Discussion details" chooses when yamt reads them: "Load fully" (default, right
+  after the list), "Load lazily" (on the first hover of a count) or "Off" (only the count, as before); a choice
+  applies at once.
+
 ## [0.6.6] - 2026-11-03
 
 ### Added
