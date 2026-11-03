@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Adding and removing assignees and reviewers from the merge-request page: in a row's people box, the add button
+  beside "Assignees" or "Reviewers" opens a search over the GitLab project's people (you and the people already on
+  the page are offered before typing); a pick adds that person on GitLab at once. Each person's "More" menu holds
+  "Remove assignee" / "Remove reviewer". The row shows what GitLab answered; when GitLab did not make a change (GitLab
+  Free keeps one assignee and one reviewer) or refused it, the box says so in one sentence. A row whose box is open
+  stays on the list until the box closes, even when the change takes it out of the filters.
+
 ## [0.6.7] - 2026-11-03
 
 ### Added

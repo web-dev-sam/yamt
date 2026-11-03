@@ -115,6 +115,9 @@ Assigning or removing people; requesting a review from someone not yet on the me
 GitLab's own due date or milestone; sharing due dates; editing labels; exclude filters for Draft; sort choices; the
 custom tooltip outside the merge-request page; notifications for due dates.
 
+Reopened by `request-mr-people.md` (owner #2243): assigning and removing people, and adding a reviewer, are now
+allowed (rule 3's "no adding anyone" included).
+
 ## Reopens (DR4: the owner's changed requirement)
 
 - `request-merge-requests.md` non-goals "avatars; labels, assignees, reviewers … on a row (filters only)" and
