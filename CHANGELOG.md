@@ -16,6 +16,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that comment on GitLab. Settings → "Discussion details" chooses when yamt reads them: "Load fully" (default, right
   after the list), "Load lazily" (on the first hover of a count) or "Off" (only the count, as before); a choice
   applies at once.
+- Review mode on the merge-request page: the "Review mode" button after the filters picks a reviewer — you or anyone
+  the list names as a reviewer — and shows that person's ready merge requests in the order to review them: due ones
+  where it is their turn in a discussion first, then those with the fewest discussions waiting on the author. Rows
+  move as each merge request's discussions arrive. A sort icon says whose review the list is sorted for, or which
+  merge request's discussions could not be read (the list then keeps its usual order). The discussions box then speaks
+  for that reviewer ("Anna Berg's turn"). The choice is remembered with the filters; Clear filters ends it. Review mode
+  needs Settings → "Discussion details" set to "Load fully"; switching away turns it off and keeps the filters.
 
 ## [0.6.6] - 2026-11-03
 
