@@ -16,6 +16,10 @@ the link's folder), one `NAME=value` line per variable, the value taken as writt
 exits 2. The Rust tests run the fake this way: a symlink `glab` beside its `glab.env` in a temporary folder, so no
 test ever runs a file it has just written (ETXTBSY).
 
+A Rust test that needs post n without making posts 1 to n − 1 first calls `Fake::answered_posts(n - 1)`
+(`crates/merge-requests/tests/fake_glab/mod.rs`): it writes n − 1 to the state file, so the next post answers
+`post-<n>`.
+
 ## Scenario folder
 
 | file                                          | answers                                                                                                                                                                                                                                                                                                                      |
@@ -27,14 +31,15 @@ test ever runs a file it has just written (ETXTBSY).
 | `merge-request-<iid>.json`                    | `glab api` GET `…/merge_requests/<iid>` for that iid                                                                                                                                                                                                                                                                         |
 | `merge-request.json`                          | `glab api` GET `…/merge_requests/<iid>` for any iid without its own file                                                                                                                                                                                                                                                     |
 | `draft-notes.json`                            | `glab api` GET `…/draft_notes` (`--paginate` accepted)                                                                                                                                                                                                                                                                       |
-| `post-<n>.json`                               | the body of the n-th POST `…/draft_notes` or `glab api graphql --input -` (the re-request mutation; n from 1, counted in the state file)                                                                                                                                                                                     |
+| `post-<n>.json`                               | the body of the n-th POST `…/draft_notes` or `glab api graphql --input -` (a GraphQL mutation: the re-request, or adding or removing an assignee or a reviewer; n from 1, counted in the state file)                                                                                                                         |
 | `post-<n>.status`                             | its HTTP status line (missing = `201 Created`)                                                                                                                                                                                                                                                                               |
 | `post-<n>.err`                                | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body")                                                                                      |
 | `post-<n>.exit`                               | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout                                                                                                                                                                                                                   |
 | `post-<n>.sleep`                              | seconds to wait before answering (a post that hangs)                                                                                                                                                                                                                                                                         |
-| `graphql-page-<n>.json`                       | `glab api graphql` without `--input -` and without a field `iids` or `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`)                                                                                                                                         |
+| `graphql-page-<n>.json`                       | `glab api graphql` without `--input -` and without a field `iids`, `search` or `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`)                                                                                                                               |
 | `graphql-discussions-<iids>.json`             | `glab api graphql` without `--input -`, with a field `iids=<JSON array>` (the discussions query): `<iids>` is the array without its quotes, brackets and spaces, its commas as `-` (`iids=["82","81"]` → `graphql-discussions-82-81`); with a field `discussionsAfter=<cursor>`, `graphql-discussions-<iids>-after-<cursor>` |
-| `graphql-merge-request-<iid>.json`            | `glab api graphql` without `--input -` and without a field `iids`, with a field `iid=<iid>`                                                                                                                                                                                                                                  |
+| `graphql-people-<text>.json`                  | `glab api graphql` without `--input -` and without a field `iids`, with a field `search=<text>` (the project's people search): `<text>` as given (`search=er` → `graphql-people-er`)                                                                                                                                         |
+| `graphql-merge-request-<iid>.json`            | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `iid=<iid>`                                                                                                                                                                                                                      |
 | `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`)                                                                                                                                                                                                                                                  |
 | `pictures/<path>`                             | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`                                                                                                         |
 | `pictures/<path>.sleep`                       | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists                                                                                                                                                                                                                             |
@@ -193,6 +198,22 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   `src/board/filters.ts` line 4, ben, then (b) Overview, sam, newer; !95 Overview, anna; !94 `src/board/week.ts` line
   12, anna; !93 (a) `src/export/csv.ts` line 8, sam, then (b) Overview, sam; !92 Overview, anna. !90 is absent from
   the answer. Every `url` is `https://gitlab.example/taskboard/taskboard/-/merge_requests/<iid>#note_<n>`.
+- `mr-people/` — adding and removing assignees and reviewers and searching the project's people
+  (`crates/merge-requests/tests/people.rs`, the people app tests in `src-tauri/src/merge_requests/tests/people.rs`):
+  logged in; `mr-row-details/`'s project and page 1 (!52 assignee sam, reviewers ben, chiara (approved) and dmitri;
+  !51 nobody; !50 `updateMergeRequest` false; user `sam`). Searches: `graphql-people-er.json` erik "Erik Lund"
+  (`/uploads/-/system/user/avatar/7/avatar.png`), then ben (his Gravatar as in `mr-row-details/`);
+  `graphql-people-an.json` anna (`/2/avatar.png`); `graphql-people-gh.json` ghost "Ghost User" (no avatar);
+  `graphql-people-nobody.json` nobody (`autocompleteUsers: []`); `graphql-people-broken.err` and `.exit` (1) fail
+  before any answer with "glab: a deadline line". Posts (`200 OK`), in the real app's order, each `changed` payload
+  with GitLab's answered assignees and reviewers: 1, !52 add assignee erik → assignees sam, erik, reviewers as !52; 2,
+  add reviewer erik → reviewers ben, chiara (approved), dmitri, erik (`UNREVIEWED`); 3, remove assignee sam →
+  assignees erik; 4, remove reviewer chiara → reviewers ben, dmitri, erik; 5, add assignee anna on GitLab Free →
+  `errors: []`, assignees erik only; 6, add reviewer ghost → `errors: ["Reviewers not able to be set: ghost"]`; 7, any
+  change → the top-level error "The resource that you are attempting to access does not exist or you don't have
+  permission to perform this action" with `data: {"changed": null}`; 8, remove reviewer ben, not made → reviewers
+  still ben, dmitri, erik. `pictures/uploads/-/system/user/avatar/1/avatar.png` and `/2/avatar.png` are
+  `mr-row-details/`'s PNGs, `/7/avatar.png` erik's small PNG.
 
 ## Fake browser opener
 

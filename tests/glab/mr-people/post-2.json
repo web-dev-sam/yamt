@@ -1,0 +1,47 @@
+{
+  "data": {
+    "changed": {
+      "errors": [],
+      "mergeRequest": {
+        "assignees": {
+          "nodes": [
+            {
+              "username": "sam",
+              "name": "Sam Doe",
+              "avatarUrl": "https://gitlab.example/uploads/-/system/user/avatar/1/avatar.png"
+            },
+            { "username": "erik", "name": "Erik Lund", "avatarUrl": "/uploads/-/system/user/avatar/7/avatar.png" }
+          ]
+        },
+        "reviewers": {
+          "nodes": [
+            {
+              "username": "ben",
+              "name": "Ben Okafor",
+              "avatarUrl": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon",
+              "mergeRequestInteraction": { "approved": false, "reviewState": "REVIEWED" }
+            },
+            {
+              "username": "chiara",
+              "name": "Chiara Rossi",
+              "avatarUrl": null,
+              "mergeRequestInteraction": { "approved": true, "reviewState": "REVIEWED" }
+            },
+            {
+              "username": "dmitri",
+              "name": "Dmitri Volkov",
+              "avatarUrl": "https://seccdn.libravatar.org/avatar/5d41402abc4b2a76b9719d911017c592?s=80&d=identicon",
+              "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
+            },
+            {
+              "username": "erik",
+              "name": "Erik Lund",
+              "avatarUrl": "/uploads/-/system/user/avatar/7/avatar.png",
+              "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

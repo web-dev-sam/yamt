@@ -40,4 +40,9 @@ impl Fake {
         let lines = log.lines().filter(|line| line.starts_with(prefix));
         lines.map(str::to_owned).collect()
     }
+
+    /// Counts `count` posts as answered, so the next post gets `post-<count + 1>`.
+    pub fn answered_posts(&self, count: u32) {
+        fs::write(self.dir.path().join("state"), format!("{count}\n")).unwrap();
+    }
 }

@@ -1,6 +1,7 @@
 #![cfg(test)]
 #![cfg(unix)]
 
+#[expect(dead_code, reason = "these tests use part of the shared helpers")]
 mod fake_glab;
 
 use serde_json::{Value, json};
@@ -102,7 +103,7 @@ fn a_reviewer_still_awaiting_review_is_not_asked_again() {
 }
 
 #[test]
-fn the_only_write_is_the_rereview_mutation() {
+fn the_rerequest_path_writes_only_the_rereview_mutation() {
     let (_repo, repository) = gitlab_repo();
     let fake = Fake::new(SCENARIO);
 

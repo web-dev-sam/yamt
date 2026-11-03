@@ -85,6 +85,8 @@ export const commands = {
 	rerequestReview: (iid: MergeRequestIid, username: string) => typedError<RerequestReply, IpcError>(__TAURI_INVOKE("rerequest_review", { iid, username })),
 	readJobLog: (page: WebPage) => typedError<JobLogReply, IpcError>(__TAURI_INVOKE("read_job_log", { page })),
 	readDiscussions: (iids: MergeRequestIid[]) => typedError<RowDiscussions[], IpcError>(__TAURI_INVOKE("read_discussions", { iids })),
+	searchPeople: (text: string) => typedError<PeopleSearchReply, IpcError>(__TAURI_INVOKE("search_people", { text })),
+	changePeople: (iid: MergeRequestIid, change: PeopleChange) => typedError<PeopleChangeReply, IpcError>(__TAURI_INVOKE("change_people", { iid, change })),
 };
 
 /* Types */
@@ -657,6 +659,14 @@ export type MergeRequestPage = {
 	rows: MergeRequestRow[],
 };
 
+/**  A merge request's assignees and reviewers as GitLab answered. */
+export type MergeRequestPeople = {
+	/**  Its assignees. */
+	assignees: Person[],
+	/**  Its reviewers and how far each review is. */
+	reviewers: Reviewer[],
+};
+
 /**  A merge request as the window names it. */
 export type MergeRequestRef = {
 	/**  Its short reference, "!12". */
@@ -689,7 +699,10 @@ export type MergeRequestRow = {
 	openDiscussions: number,
 	/**  Who approved it. */
 	approvedBy: Person[],
-	/**  Whether you may ask a reviewer for their review again: GitLab's `updateMergeRequest` permission for you. */
+	/**
+	 *  GitLab's `updateMergeRequest` permission for you: whether you may re-request a review and add or remove
+	 *  assignees and reviewers.
+	 */
 	mayRerequest: boolean,
 	/**  Its latest pipeline; `None` when it has none. */
 	pipeline: Pipeline | null,
@@ -849,6 +862,75 @@ export type PageOpened =
 /**  The browser could not be asked. */
 { kind: "failed"; 
 /**  Why, in the system's words. */
+message: string };
+
+/**  Whether a change adds a person to a list or removes them from it. */
+export type PeopleAction = 
+/**  Add them to GitLab's list as it is then (`APPEND`). */
+"add" | 
+/**  Remove them from GitLab's list as it is then (`REMOVE`). */
+"remove";
+
+/**  One person added to or removed from one list of a merge request. */
+export type PeopleChange = {
+	/**  The list. */
+	group: PeopleGroup,
+	/**  Add or remove. */
+	action: PeopleAction,
+	/**  Who, by their login name without "@". */
+	username: string,
+};
+
+/**  How asking GitLab for one change ended. */
+export type PeopleChangeReply = 
+/**  GitLab's answered list shows the change: both lists as answered. */
+{ kind: "changed"; 
+/**  Both lists as GitLab answered. */
+people: MergeRequestPeople } | 
+/**
+ *  GitLab answered without an error but its list does not show the change (GitLab Free keeps one assignee and one
+ *  reviewer; no permission; an unknown user): both lists as answered.
+ */
+{ kind: "unchanged"; 
+/**  Both lists as GitLab answered. */
+people: MergeRequestPeople } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first line, which names the instance. */
+detail: string } | 
+/**  GitLab refused, in its words: the payload's first `errors` entry. */
+{ kind: "refused"; 
+/**  GitLab's sentence. */
+message: string } | 
+/**  glab failed, GitLab's top-level error, or an answer naming no merge request. */
+{ kind: "failed"; 
+/**  What went wrong. */
+message: string };
+
+/**  Which list of a merge request a change is for. */
+export type PeopleGroup = 
+/**  Its assignees. */
+"assignees" | 
+/**  Its reviewers. */
+"reviewers";
+
+/**  How searching the project's people ended. */
+export type PeopleSearchReply = 
+/**  Who matched, in GitLab's order: at most 20 (GitLab's `Autocomplete::UsersFinder::LIMIT`). */
+{ kind: "found"; 
+/**  The people found. */
+people: Person[] } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first line, which names the instance. */
+detail: string } | 
+/**  glab's, GitLab's or yamt's words (an older GitLab's "Field 'autocompleteUsers' doesn't exist…" included). */
+{ kind: "failed"; 
+/**  What went wrong. */
 message: string };
 
 /**  A GitLab user and the picture the window may show for them. */

@@ -1,6 +1,7 @@
 #![cfg(test)]
 #![cfg(unix)]
 
+#[expect(dead_code, reason = "these tests use part of the shared helpers")]
 mod fake_glab;
 
 use yamt_conflict_repo::{TempDir, git_ok};

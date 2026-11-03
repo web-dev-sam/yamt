@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use crate::discussions::{DISCUSSIONS_PER_PAGE, NOTES_READ};
-use crate::{MAX_FAILED_JOBS, MergeRequestIid, PAGE_SIZE};
+use crate::{MAX_FAILED_JOBS, MergeRequestIid, PAGE_SIZE, PeopleAction, PeopleChange, PeopleGroup};
 
 /// A merge request's state, target branch and the two commits of its diff, asked afresh on each open so a push
 /// since the list loaded counts.
@@ -22,8 +22,7 @@ const REVIEWERS_QUERY: &str = "query MergeRequestReviewers($fullPath: ID!, $iid:
      state reviewers { nodes { id username name avatarUrl \
      mergeRequestInteraction { approved reviewState } } } } } }";
 
-/// Asks a reviewer for their review again (GitLab's "Re-request review"), answering the merge request's reviewers: the
-/// only write of the crate.
+/// Asks a reviewer for their review again (GitLab's "Re-request review"), answering the merge request's reviewers.
 const REREQUEST_MUTATION: &str = "mutation RerequestReview($projectPath: ID!, $iid: String!, $userId: UserID!) { \
      mergeRequestReviewerRereview(input: { projectPath: $projectPath, iid: $iid, userId: $userId }) { \
      errors mergeRequest { reviewers { nodes { username name avatarUrl \
@@ -31,6 +30,27 @@ const REREQUEST_MUTATION: &str = "mutation RerequestReview($projectPath: ID!, $i
 
 /// `glab api graphql` reading the request's JSON body from stdin.
 pub(crate) const GRAPHQL_BODY_ARGS: [&str; 4] = ["api", "graphql", "--input", "-"];
+
+/// The project's people whose name, username or public email matches `$search`, as GitLab's own merge-request
+/// dropdown asks (`project_autocomplete_users_with_mr_permissions.query.graphql`): at most 20, sorted by name; 13 of
+/// GitLab's limit of 250 on gitlab-org/gitlab, measured on gitlab.com on 2026-11-03.
+const PEOPLE_SEARCH_QUERY: &str = "query PeopleSearch($fullPath: ID!, $search: String!) { \
+     project(fullPath: $fullPath) { autocompleteUsers(search: $search) { username name avatarUrl } } }";
+
+/// Adds or removes assignees by username against GitLab's list at that moment, answering both of the merge
+/// request's lists with the list query's fields.
+const SET_ASSIGNEES_MUTATION: &str = "mutation SetAssignees($projectPath: ID!, $iid: String!, \
+     $usernames: [String!]!, $mode: MutationOperationMode!) { changed: mergeRequestSetAssignees(input: { \
+     projectPath: $projectPath, iid: $iid, assigneeUsernames: $usernames, operationMode: $mode }) { errors \
+     mergeRequest { assignees { nodes { username name avatarUrl } } \
+     reviewers { nodes { username name avatarUrl mergeRequestInteraction { approved reviewState } } } } } }";
+
+/// The same for reviewers.
+const SET_REVIEWERS_MUTATION: &str = "mutation SetReviewers($projectPath: ID!, $iid: String!, \
+     $usernames: [String!]!, $mode: MutationOperationMode!) { changed: mergeRequestSetReviewers(input: { \
+     projectPath: $projectPath, iid: $iid, reviewerUsernames: $usernames, operationMode: $mode }) { errors \
+     mergeRequest { assignees { nodes { username name avatarUrl } } \
+     reviewers { nodes { username name avatarUrl mergeRequestInteraction { approved reviewState } } } } } }";
 
 /// One page of the project's open merge requests, newest created first, each with its latest pipeline's failed
 /// jobs (the latest run of each), its merge status and size, its people, labels and your permission to update it, and
@@ -142,12 +162,54 @@ pub(crate) fn discussions_args(
     args
 }
 
+/// `glab api graphql` for the project's people matching `text`: `-f search=<text>`, a raw string glab never reads as
+/// `@file` (measured with glab 1.126.0 on gitlab.com on 2026-11-03: `search=@sam` searched the text).
+pub(crate) fn people_search_args(full_path: &str, text: &str) -> Vec<String> {
+    vec![
+        "api".to_owned(),
+        "graphql".to_owned(),
+        "-f".to_owned(),
+        format!("query={PEOPLE_SEARCH_QUERY}"),
+        "-f".to_owned(),
+        format!("fullPath={full_path}"),
+        "-f".to_owned(),
+        format!("search={text}"),
+    ]
+}
+
 /// The JSON body asking the reviewer with global id `user_id` (`gid://gitlab/User/<n>`) for their review of merge
 /// request `iid` again; the id travels as a variable, never inside the query text.
 pub(crate) fn rerequest_body(full_path: &str, iid: MergeRequestIid, user_id: &str) -> Vec<u8> {
     let body = json!({
         "query": REREQUEST_MUTATION,
         "variables": { "projectPath": full_path, "iid": iid.0.to_string(), "userId": user_id },
+    });
+    body.to_string().into_bytes()
+}
+
+/// The JSON body asking for `change` on merge request `iid`: the group's mutation, one username, `APPEND` or
+/// `REMOVE`; the username travels as a variable, never inside the query text.
+pub(crate) fn people_change_body(
+    full_path: &str,
+    iid: MergeRequestIid,
+    change: &PeopleChange,
+) -> Vec<u8> {
+    let mutation = match change.group {
+        PeopleGroup::Assignees => SET_ASSIGNEES_MUTATION,
+        PeopleGroup::Reviewers => SET_REVIEWERS_MUTATION,
+    };
+    let mode = match change.action {
+        PeopleAction::Add => "APPEND",
+        PeopleAction::Remove => "REMOVE",
+    };
+    let body = json!({
+        "query": mutation,
+        "variables": {
+            "projectPath": full_path,
+            "iid": iid.0.to_string(),
+            "usernames": [change.username],
+            "mode": mode,
+        },
     });
     body.to_string().into_bytes()
 }
@@ -166,147 +228,4 @@ fn merge_request_args(query: &str, full_path: &str, iid: MergeRequestIid) -> Vec
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_query_is_one_line_with_balanced_braces_the_failed_job_limit_and_the_merge_fields() {
-        let query = list_query();
-        assert!(!query.contains('\n'), "{query}");
-        assert_eq!(query.matches('{').count(), query.matches('}').count());
-        assert!(query.contains("first: 50)"), "{query}");
-        let merge_fields = "resolvedDiscussionsCount detailedMergeStatus conflicts \
-             diffStats { additions deletions } diffRefs { baseSha } sourceProjectId targetProjectId targetBranch \
-             diffHeadSha headPipeline";
-        assert!(query.contains(merge_fields), "{query}");
-    }
-
-    #[test]
-    fn the_list_query_asks_per_file_diff_stats_never_the_summary() {
-        // gitlab.com, 2026-10-31 (`docs/slices/briefs/mr-diff-stats.md`): beside `diffStatsSummary` in a
-        // `mergeRequests` list, GitLab answers `detailedMergeStatus: CONFLICT` for merge requests that merge clean.
-        let query = list_query();
-        assert!(query.contains("diffStats {"), "{query}");
-        assert!(!query.contains("diffStatsSummary"), "{query}");
-    }
-
-    #[test]
-    fn the_list_query_asks_people_with_pictures_review_states_the_permission_and_label_colours() {
-        let query = list_query();
-        let people = "iid title createdAt draft author { username name avatarUrl } \
-             labels { nodes { title color textColor } } assignees { nodes { username name avatarUrl } } \
-             reviewers { nodes { username name avatarUrl mergeRequestInteraction { approved reviewState } } } \
-             approvedBy { nodes { username name avatarUrl } } userPermissions { updateMergeRequest } \
-             resolvableDiscussionsCount";
-        assert!(query.contains(people), "{query}");
-    }
-
-    #[test]
-    fn the_reviewers_query_is_one_line_with_balanced_braces_and_its_argv_is_exact() {
-        let query = "query=query MergeRequestReviewers($fullPath: ID!, $iid: String!) { \
-             project(fullPath: $fullPath) { mergeRequest(iid: $iid) { state reviewers { nodes { id username name \
-             avatarUrl mergeRequestInteraction { approved reviewState } } } } } }";
-        assert_eq!(query.matches('{').count(), query.matches('}').count());
-
-        let args = reviewers_args("taskboard/taskboard", MergeRequestIid(52));
-
-        let expected = [
-            "api",
-            "graphql",
-            "-f",
-            query,
-            "-f",
-            "fullPath=taskboard/taskboard",
-            "-f",
-            "iid=52",
-        ];
-        assert_eq!(args, expected);
-    }
-
-    #[test]
-    fn the_rerequest_body_names_the_rereview_mutation_and_carries_the_id_as_a_variable() {
-        let mutation = "mutation RerequestReview($projectPath: ID!, $iid: String!, $userId: UserID!) { \
-             mergeRequestReviewerRereview(input: { projectPath: $projectPath, iid: $iid, userId: $userId }) { \
-             errors mergeRequest { reviewers { nodes { username name avatarUrl \
-             mergeRequestInteraction { approved reviewState } } } } } }";
-        assert_eq!(mutation.matches('{').count(), mutation.matches('}').count());
-
-        let body = rerequest_body(
-            "taskboard/taskboard",
-            MergeRequestIid(52),
-            "gid://gitlab/User/3",
-        );
-
-        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let expected = json!({ "query": mutation, "variables": {
-            "projectPath": "taskboard/taskboard", "iid": "52", "userId": "gid://gitlab/User/3" } });
-        assert_eq!(body, expected);
-        assert_eq!(GRAPHQL_BODY_ARGS, ["api", "graphql", "--input", "-"]);
-    }
-
-    #[test]
-    fn the_details_query_is_one_line_with_balanced_braces() {
-        assert!(!DETAILS_QUERY.contains('\n'), "{DETAILS_QUERY}");
-        let braces = DETAILS_QUERY.matches('{').count();
-        assert_eq!(braces, DETAILS_QUERY.matches('}').count());
-        let args = details_args("taskboard/taskboard", MergeRequestIid(13));
-        assert_eq!(
-            args[4..],
-            ["-f", "fullPath=taskboard/taskboard", "-f", "iid=13"]
-        );
-        assert!(args[3].starts_with("query=query MergeRequestDetails("));
-    }
-
-    #[test]
-    fn the_branches_query_is_one_line_with_balanced_braces_and_its_argv_is_exact() {
-        assert!(!BRANCHES_QUERY.contains('\n'), "{BRANCHES_QUERY}");
-        let braces = BRANCHES_QUERY.matches('{').count();
-        assert_eq!(braces, BRANCHES_QUERY.matches('}').count());
-        let query = "query=query MergeRequestBranches($fullPath: ID!, $iid: String!) { \
-             project(fullPath: $fullPath) { mergeRequest(iid: $iid) { \
-             state sourceBranch targetBranch sourceProjectId targetProjectId } } }";
-
-        let args = branches_args("taskboard/taskboard", MergeRequestIid(21));
-
-        let expected = [
-            "api",
-            "graphql",
-            "-f",
-            query,
-            "-f",
-            "fullPath=taskboard/taskboard",
-            "-f",
-            "iid=21",
-        ];
-        assert_eq!(args, expected);
-    }
-
-    #[test]
-    fn the_discussions_query_is_one_line_as_designed_and_its_argv_is_exact() {
-        let query = "query=query MergeRequestDiscussions($fullPath: ID!, $iids: [String!], $first: Int!, \
-             $discussionsAfter: String) { queryComplexity { score limit } project(fullPath: $fullPath) { \
-             mergeRequests(iids: $iids, first: $first) { nodes { iid discussions(first: 100, after: \
-             $discussionsAfter) { pageInfo { hasNextPage endCursor } nodes { resolvable resolved notes(last: 20) { \
-             pageInfo { hasPreviousPage } nodes { system author { username name avatarUrl } body createdAt url \
-             position { filePath newLine oldLine } } } } } } } } }";
-        assert_eq!(query.matches('{').count(), query.matches('}').count());
-        let iids = [MergeRequestIid(82), MergeRequestIid(7)];
-
-        let batch = discussions_args("taskboard/taskboard", &iids, None);
-        let later = discussions_args("taskboard/taskboard", &iids[..1], Some("d-2"));
-
-        let common = [
-            "api",
-            "graphql",
-            "-f",
-            query,
-            "-f",
-            "fullPath=taskboard/taskboard",
-        ];
-        let batch_fields = ["-F", r#"iids=["82","7"]"#, "-F", "first=2"];
-        assert_eq!(batch, [common.as_slice(), &batch_fields].concat());
-        let later_fields = ["-F", r#"iids=["82"]"#, "-F", "first=1"];
-        let after = ["-f", "discussionsAfter=d-2"];
-        assert_eq!(later, [common.as_slice(), &later_fields, &after].concat());
-    }
-}
+mod tests;

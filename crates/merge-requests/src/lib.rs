@@ -1,7 +1,7 @@
 //! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab,
 //! each row's conflicts checked by yamt's own merge of GitLab's two commits, each one's changes prepared for a window
 //! of their own, its page or a failed job's opened in the browser, a failed job's log read, each row's open
-//! discussions read with their last person's note.
+//! discussions read with their last person's note, its assignees and reviewers added and removed.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
@@ -14,6 +14,8 @@ mod list;
 mod open;
 mod page;
 mod people;
+mod people_change;
+mod people_search;
 mod picture;
 mod project;
 mod query;
@@ -39,6 +41,11 @@ pub use labels::{Label, LabelColors};
 pub use list::{Listed, ListedPage, OfferedPicture, list_merge_requests};
 pub use open::prepare_open;
 pub use people::{Person, PersonPicture, ReviewState, Reviewer};
+pub use people_change::{
+    ChangedPeople, MergeRequestPeople, PeopleAction, PeopleChange, PeopleChangeReply, PeopleGroup,
+    change_people,
+};
+pub use people_search::{FoundPeople, PeopleSearchReply, search_people};
 pub use picture::{
     GravatarAddress, ImageKind, MAX_PICTURE_BYTES, Picture, PictureAddress, fetch_picture,
 };
@@ -240,7 +247,8 @@ pub struct MergeRequestRow {
     pub open_discussions: u32,
     /// Who approved it.
     pub approved_by: Vec<Person>,
-    /// Whether you may ask a reviewer for their review again: GitLab's `updateMergeRequest` permission for you.
+    /// GitLab's `updateMergeRequest` permission for you: whether you may re-request a review and add or remove
+    /// assignees and reviewers.
     pub may_rerequest: bool,
     /// Its latest pipeline; `None` when it has none.
     pub pipeline: Option<Pipeline>,

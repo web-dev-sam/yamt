@@ -11,7 +11,7 @@ use crate::project::{Project, logged_in_project};
 use crate::query::{GRAPHQL_BODY_ARGS, rerequest_body, reviewers_args};
 use crate::{GitLabRepository, MergeRequestIid, Reviewer};
 
-const NO_MERGE_REQUEST: &str = "GitLab's answer names no merge request";
+pub(crate) const NO_MERGE_REQUEST: &str = "GitLab's answer names no merge request";
 
 /// How asking GitLab to re-request a reviewer's review ended.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]

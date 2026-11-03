@@ -122,8 +122,9 @@ post() {
 }
 
 # Merge requests' discussions with a field iids=<JSON array>: graphql-discussions-<the iids joined by "-">, with
-# -after-<cursor> for a field discussionsAfter. Else a merge request's details with a field iid=<n>; else a page of
-# the list: the first without a field after, the n-th for after=page-<n>.
+# -after-<cursor> for a field discussionsAfter. Else the project's people with a field search=<text>:
+# graphql-people-<text>. Else a merge request's details with a field iid=<n>; else a page of the list: the first
+# without a field after, the n-th for after=page-<n>.
 graphql() {
 	iids=$(field iids)
 	if [ -n "$iids" ]; then
@@ -133,6 +134,10 @@ graphql() {
 			name="$name-after-$after"
 		fi
 		reply "$scenario/graphql-discussions-$name" '200 OK'
+	fi
+	search=$(field search)
+	if [ -n "$search" ]; then
+		reply "$scenario/graphql-people-$search" '200 OK'
 	fi
 	iid=$(field iid)
 	if [ -n "$iid" ]; then

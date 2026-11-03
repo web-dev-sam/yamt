@@ -128,6 +128,9 @@ mod job_log;
 #[cfg(unix)]
 mod discussions;
 
+#[cfg(unix)]
+mod people;
+
 mod csp;
 
 #[cfg(unix)]

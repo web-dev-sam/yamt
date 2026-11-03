@@ -10,8 +10,8 @@ use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
 use yamt_merge_requests::{
     CheckedRow, GitLabProject, GitLabRepository, Glab, JobLogReply, ListEnd, ListedPage,
     MergeRequestIid, MergeRequestPage, MergeRequestRow, MergedPairs, OfferedPicture, OpenReply,
-    PageOpened, RerequestReply, ResolveRefusal, RowDiscussions, WebPage, check_conflicts,
-    gitlab_repository, prepare_open, prepare_resolve,
+    PageOpened, PeopleChange, PeopleChangeReply, PeopleSearchReply, RerequestReply, ResolveRefusal,
+    RowDiscussions, WebPage, check_conflicts, gitlab_repository, prepare_open, prepare_resolve,
 };
 
 use crate::args::Ai;
@@ -21,6 +21,7 @@ use crate::second_window;
 
 mod discussions;
 mod job_logs;
+mod people;
 mod pictures;
 
 pub(crate) use pictures::{PICTURE_SCHEME, answer_picture};
@@ -343,6 +344,38 @@ pub(crate) async fn read_discussions<R: Runtime>(
             &window.state(),
             Glab::find().as_ref(),
             &iids,
+        ))
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn search_people<R: Runtime>(
+    window: WebviewWindow<R>,
+    text: String,
+) -> Result<PeopleSearchReply, IpcError> {
+    blocking_reply(move || {
+        let glab = Glab::find();
+        Ok(people::search_reply(&window.state(), glab.as_ref(), &text))
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn change_people<R: Runtime>(
+    window: WebviewWindow<R>,
+    iid: MergeRequestIid,
+    change: PeopleChange,
+) -> Result<PeopleChangeReply, IpcError> {
+    blocking_reply(move || {
+        let glab = Glab::find();
+        Ok(people::change_reply(
+            &window.state(),
+            glab.as_ref(),
+            iid,
+            &change,
         ))
     })
     .await

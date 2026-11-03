@@ -1,0 +1,180 @@
+{
+  "data": {
+    "queryComplexity": { "score": 170, "limit": 250 },
+    "currentUser": { "username": "sam" },
+    "project": {
+      "mergeRequests": {
+        "pageInfo": { "hasNextPage": false, "endCursor": null },
+        "nodes": [
+          {
+            "iid": "52",
+            "title": "Colour the card labels",
+            "createdAt": "2026-11-01T10:00:00Z",
+            "draft": false,
+            "author": {
+              "username": "anna",
+              "name": "Anna Berg",
+              "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+            },
+            "labels": {
+              "nodes": [
+                { "title": "frontend", "color": "#428BCA", "textColor": "#FFFFFF" },
+                { "title": "bug", "color": "#D9534F", "textColor": "#FFFFFF" },
+                { "title": "odd", "color": "red", "textColor": "#FFFFFF" }
+              ]
+            },
+            "assignees": {
+              "nodes": [
+                {
+                  "username": "sam",
+                  "name": "Sam Doe",
+                  "avatarUrl": "https://gitlab.example/uploads/-/system/user/avatar/1/avatar.png"
+                }
+              ]
+            },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "ben",
+                  "name": "Ben Okafor",
+                  "avatarUrl": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon",
+                  "mergeRequestInteraction": { "approved": false, "reviewState": "REVIEWED" }
+                },
+                {
+                  "username": "chiara",
+                  "name": "Chiara Rossi",
+                  "avatarUrl": null,
+                  "mergeRequestInteraction": { "approved": true, "reviewState": "REVIEWED" }
+                },
+                {
+                  "username": "dmitri",
+                  "name": "Dmitri Volkov",
+                  "avatarUrl": "https://seccdn.libravatar.org/avatar/5d41402abc4b2a76b9719d911017c592?s=80&d=identicon",
+                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
+                }
+              ]
+            },
+            "approvedBy": {
+              "nodes": [{ "username": "chiara", "name": "Chiara Rossi", "avatarUrl": null }]
+            },
+            "userPermissions": { "updateMergeRequest": true },
+            "resolvableDiscussionsCount": 1,
+            "resolvedDiscussionsCount": 1,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "diffStats": [],
+            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main",
+            "diffHeadSha": null,
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            }
+          },
+          {
+            "iid": "51",
+            "title": "Archive old boards",
+            "createdAt": "2026-10-31T15:30:00Z",
+            "draft": false,
+            "author": null,
+            "labels": { "nodes": [] },
+            "assignees": { "nodes": [] },
+            "reviewers": { "nodes": [] },
+            "approvedBy": { "nodes": [] },
+            "userPermissions": { "updateMergeRequest": true },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "detailedMergeStatus": "PREPARING",
+            "conflicts": false,
+            "diffStats": [],
+            "diffRefs": null,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main",
+            "diffHeadSha": null,
+            "headPipeline": null
+          },
+          {
+            "iid": "50",
+            "title": "Keyboard shortcuts for cards",
+            "createdAt": "2026-10-30T08:45:00Z",
+            "draft": false,
+            "author": {
+              "username": "ben",
+              "name": "Ben Okafor",
+              "avatarUrl": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon"
+            },
+            "labels": { "nodes": [{ "title": "frontend", "color": "#428BCA", "textColor": "#FFFFFF" }] },
+            "assignees": {
+              "nodes": [
+                {
+                  "username": "dmitri",
+                  "name": "Dmitri Volkov",
+                  "avatarUrl": "https://seccdn.libravatar.org/avatar/5d41402abc4b2a76b9719d911017c592?s=80&d=identicon"
+                }
+              ]
+            },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "anna",
+                  "name": "Anna Berg",
+                  "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png",
+                  "mergeRequestInteraction": { "approved": false, "reviewState": "REQUESTED_CHANGES" }
+                },
+                {
+                  "username": "sam",
+                  "name": "Sam Doe",
+                  "avatarUrl": "https://gitlab.example/uploads/-/system/user/avatar/1/avatar.png",
+                  "mergeRequestInteraction": { "approved": false, "reviewState": "REVIEW_STARTED" }
+                },
+                {
+                  "username": "ben",
+                  "name": "Ben Okafor",
+                  "avatarUrl": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon",
+                  "mergeRequestInteraction": { "approved": false, "reviewState": "REVIEWED" }
+                },
+                {
+                  "username": "erik",
+                  "name": "Erik Lund",
+                  "avatarUrl": null,
+                  "mergeRequestInteraction": { "approved": false, "reviewState": "MERGE_TRAIN_REVIEW" }
+                }
+              ]
+            },
+            "approvedBy": {
+              "nodes": [
+                { "username": "anna", "name": "Anna Berg", "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png" },
+                {
+                  "username": "sam",
+                  "name": "Sam Doe",
+                  "avatarUrl": "https://gitlab.example/uploads/-/system/user/avatar/1/avatar.png"
+                }
+              ]
+            },
+            "userPermissions": { "updateMergeRequest": false },
+            "resolvableDiscussionsCount": 3,
+            "resolvedDiscussionsCount": 1,
+            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
+            "conflicts": false,
+            "diffStats": [
+              { "additions": 40, "deletions": 6 },
+              { "additions": 12, "deletions": 0 }
+            ],
+            "diffRefs": { "baseSha": "78eb21fb062932be44eb1852e91ea6fbc2cab985" },
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main",
+            "diffHeadSha": null,
+            "headPipeline": {
+              "status": "RUNNING",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
