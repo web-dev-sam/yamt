@@ -1,13 +1,14 @@
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use yamt_range::RangeSpec;
 
 pub(crate) const USAGE: &str = "\
 usage: yamt [--repo <path>]
-       yamt --diff
-       yamt --diff=<a>..<b> [--repo <path>]
-       yamt --diff=<a>...<b> [--repo <path>]
+       yamt --mr
+       yamt --diff [--mr]
+       yamt --diff=<a>..<b> [--repo <path>] [--mr]
+       yamt --diff=<a>...<b> [--repo <path>] [--mr]
 
 Resolves the conflicted files of the merge in progress in <path> (default: the current directory).
 With --diff, compares any two pasted texts in two columns: no repository needed, its tabs kept between runs.
@@ -18,8 +19,10 @@ name git knows (branch, tag, commit id, HEAD~3); an empty side is HEAD.
   --repo <path>     any directory inside the work tree
   --diff            compare pasted texts instead of merging
   --diff=<range>    review a commit range
+  --mr              open the merge-request page at start; without --diff=<range> it means --diff
   --ai              with --diff=<range>: an AI agent answers review comments in its own checkout; with --diff or
                     --diff=<range>: the changes windows its merge-request page opens get it too
+  YAMT_AI=1         in the environment: every start behaves as with --ai (unset, empty or 0: off)
   --help            print this help
   --version         print the version
 ";
@@ -38,22 +41,31 @@ pub(crate) enum Invocation {
     },
     Compare {
         ai: Ai,
+        start: StartScreen,
     },
     Range {
         spec: RangeSpec,
         repo: PathBuf,
         ai: Ai,
+        start: StartScreen,
     },
     Help,
     Version,
 }
 
-/// `--ai`: accepted with every mode, kept by a range window and by the compare window for the range windows its
-/// merge-request page opens (plan §2 #108, #144).
+/// `--ai` or `YAMT_AI`: accepted with every mode, kept by a range window and by the compare window for the range
+/// windows its merge-request page opens (plan §2 #108, #144).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Ai {
     Off,
     On,
+}
+
+/// `--mr`: the compare or range window opens on its merge-request page instead of its files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StartScreen {
+    Files,
+    MergeRequests,
 }
 
 /// What the `--diff` flags seen so far ask for.
@@ -79,18 +91,38 @@ impl Window {
             Window::Compare | Window::Range(_) => Err(DIFF_TWICE.to_owned()),
         }
     }
+
+    fn started_on(self, start: StartScreen) -> Window {
+        match (self, start) {
+            (Window::Merge, StartScreen::MergeRequests) => Window::Compare,
+            (window, StartScreen::Files | StartScreen::MergeRequests) => window,
+        }
+    }
 }
 
-pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
+fn ai_from_variable(value: Option<&OsStr>) -> Ai {
+    match value {
+        None => Ai::Off,
+        Some(value) if value.is_empty() || value == "0" => Ai::Off,
+        Some(_) => Ai::On,
+    }
+}
+
+pub(crate) fn parse(
+    args: Vec<OsString>,
+    ai_variable: Option<&OsStr>,
+) -> Result<Invocation, String> {
     let mut args = args.into_iter();
     let mut repo = None;
-    let mut ai = Ai::Off;
+    let mut ai = ai_from_variable(ai_variable);
+    let mut start = StartScreen::Files;
     let mut window = Ok(Window::Merge);
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--help") => return Ok(Invocation::Help),
             Some("--version") => return Ok(Invocation::Version),
             Some("--diff") => window = window.and_then(Window::with_compare),
+            Some("--mr") => start = StartScreen::MergeRequests,
             Some("--ai") => ai = Ai::On,
             Some("--repo") => {
                 repo = Some(
@@ -105,13 +137,14 @@ pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
             _ => return Err(format!("unknown argument {}", arg.to_string_lossy())),
         }
     }
-    match (window?, repo) {
+    match (window?.started_on(start), repo) {
         (Window::Compare, Some(_)) => Err(DIFF_WITH_REPO.to_owned()),
-        (Window::Compare, None) => Ok(Invocation::Compare { ai }),
+        (Window::Compare, None) => Ok(Invocation::Compare { ai, start }),
         (Window::Range(spec), repo) => Ok(Invocation::Range {
             spec,
             repo: repo.unwrap_or_else(|| PathBuf::from(START_FOLDER)),
             ai,
+            start,
         }),
         (Window::Merge, repo) => Ok(Invocation::Merge {
             repo: repo.unwrap_or_else(|| PathBuf::from(START_FOLDER)),
@@ -124,7 +157,21 @@ mod tests {
     use super::*;
 
     fn parsed(args: &[&str]) -> Result<Invocation, String> {
-        parse(args.iter().map(OsString::from).collect())
+        parsed_with_variable(args, None)
+    }
+
+    fn parsed_with_variable(
+        args: &[&str],
+        ai_variable: Option<&str>,
+    ) -> Result<Invocation, String> {
+        parse(
+            args.iter().map(OsString::from).collect(),
+            ai_variable.map(OsStr::new),
+        )
+    }
+
+    fn compare(ai: Ai, start: StartScreen) -> Invocation {
+        Invocation::Compare { ai, start }
     }
 
     #[test]
@@ -168,7 +215,10 @@ mod tests {
 
     #[test]
     fn diff_opens_the_compare_window() {
-        assert_eq!(parsed(&["--diff"]), Ok(Invocation::Compare { ai: Ai::Off }));
+        assert_eq!(
+            parsed(&["--diff"]),
+            Ok(compare(Ai::Off, StartScreen::Files))
+        );
     }
 
     #[test]
@@ -201,15 +251,20 @@ mod tests {
 
     #[test]
     fn the_usage_names_diff() {
-        assert!(USAGE.contains("       yamt --diff\n"), "{USAGE}");
+        assert!(USAGE.contains("       yamt --diff [--mr]\n"), "{USAGE}");
         assert!(USAGE.contains("  --diff  "), "{USAGE}");
     }
 
     fn range(text: &str, repo: &str) -> Invocation {
+        range_on(text, repo, StartScreen::Files)
+    }
+
+    fn range_on(text: &str, repo: &str, start: StartScreen) -> Invocation {
         Invocation::Range {
             spec: RangeSpec::parse(text).unwrap(),
             repo: PathBuf::from(repo),
             ai: Ai::Off,
+            start,
         }
     }
 
@@ -222,11 +277,11 @@ mod tests {
         assert_eq!(parsed(&["--ai", "--repo", "p"]), Ok(merge));
         assert_eq!(
             parsed(&["--diff", "--ai"]),
-            Ok(Invocation::Compare { ai: Ai::On })
+            Ok(compare(Ai::On, StartScreen::Files))
         );
         assert_eq!(
             parsed(&["--ai", "--diff"]),
-            Ok(Invocation::Compare { ai: Ai::On })
+            Ok(compare(Ai::On, StartScreen::Files))
         );
         assert_eq!(parsed(&["--ai", "--help"]), Ok(Invocation::Help));
         assert_eq!(parsed(&["--ai", "--version"]), Ok(Invocation::Version));
@@ -234,6 +289,7 @@ mod tests {
             spec: RangeSpec::parse("a...b").unwrap(),
             repo: PathBuf::from("."),
             ai: Ai::On,
+            start: StartScreen::Files,
         };
         assert_eq!(parsed(&["--diff=a...b", "--ai"]), Ok(with_ai));
         assert_eq!(parsed(&["--diff=a...b"]), Ok(range("a...b", ".")));
@@ -293,13 +349,91 @@ mod tests {
     #[test]
     fn the_usage_names_the_range_forms() {
         assert!(
-            USAGE.contains("       yamt --diff=<a>..<b> [--repo <path>]\n"),
+            USAGE.contains("       yamt --diff=<a>..<b> [--repo <path>] [--mr]\n"),
             "{USAGE}"
         );
         assert!(
-            USAGE.contains("       yamt --diff=<a>...<b> [--repo <path>]\n"),
+            USAGE.contains("       yamt --diff=<a>...<b> [--repo <path>] [--mr]\n"),
             "{USAGE}"
         );
         assert!(USAGE.contains("  --diff=<range>    "), "{USAGE}");
+    }
+
+    #[test]
+    fn mr_alone_or_with_diff_in_either_order_opens_the_compare_window_on_its_page() {
+        let on_the_page = Ok(compare(Ai::Off, StartScreen::MergeRequests));
+        assert_eq!(parsed(&["--mr"]), on_the_page);
+        assert_eq!(parsed(&["--diff", "--mr"]), on_the_page);
+        assert_eq!(parsed(&["--mr", "--diff"]), on_the_page);
+        assert_eq!(parsed(&["--mr", "--mr"]), on_the_page);
+    }
+
+    #[test]
+    fn mr_with_a_range_opens_the_range_window_on_its_page() {
+        assert_eq!(
+            parsed(&["--diff=a..b", "--mr"]),
+            Ok(range_on("a..b", ".", StartScreen::MergeRequests))
+        );
+        assert_eq!(
+            parsed(&["--mr", "--diff=a..b", "--repo", "p"]),
+            Ok(range_on("a..b", "p", StartScreen::MergeRequests))
+        );
+    }
+
+    #[test]
+    fn mr_with_a_repo_and_no_range_is_refused_as_diff_with_a_repo() {
+        let refused = Err(DIFF_WITH_REPO.to_owned());
+        assert_eq!(parsed(&["--mr", "--repo", "p"]), refused);
+        assert_eq!(parsed(&["--repo", "p", "--mr"]), refused);
+    }
+
+    #[test]
+    fn help_and_version_win_over_mr() {
+        assert_eq!(parsed(&["--mr", "--help"]), Ok(Invocation::Help));
+        assert_eq!(parsed(&["--mr", "--version"]), Ok(Invocation::Version));
+    }
+
+    #[test]
+    fn the_usage_names_mr() {
+        assert!(USAGE.contains("       yamt --mr\n"), "{USAGE}");
+        assert!(USAGE.contains("  --mr              "), "{USAGE}");
+    }
+
+    #[test]
+    fn yamt_ai_unset_empty_or_zero_is_off_and_any_other_value_on() {
+        let cases = [
+            (None, Ai::Off),
+            (Some(""), Ai::Off),
+            (Some("0"), Ai::Off),
+            (Some("1"), Ai::On),
+            (Some("yes"), Ai::On),
+        ];
+        for (variable, ai) in cases {
+            assert_eq!(
+                parsed_with_variable(&["--diff"], variable),
+                Ok(compare(ai, StartScreen::Files)),
+                "{variable:?}"
+            );
+        }
+        assert!(USAGE.contains("  YAMT_AI=1         "), "{USAGE}");
+    }
+
+    #[test]
+    fn ai_flag_wins_over_yamt_ai_zero() {
+        assert_eq!(
+            parsed_with_variable(&["--diff", "--ai"], Some("0")),
+            Ok(compare(Ai::On, StartScreen::Files))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn yamt_ai_that_is_not_utf8_is_on() {
+        use std::os::unix::ffi::OsStrExt;
+        let variable = OsStr::from_bytes(&[0xff]);
+        assert_eq!(
+            parse(vec![OsString::from("--diff")], Some(variable)),
+            Ok(compare(Ai::On, StartScreen::Files))
+        );
     }
 }

@@ -8,7 +8,7 @@ use yamt_range::{
 use yamt_review::ThreadStore;
 
 use crate::ai;
-use crate::args::Ai;
+use crate::args::{Ai, StartScreen};
 use crate::ipc_error::{IpcError, blocking_reply};
 use crate::merge_requests;
 use crate::outcome::Ending;
@@ -27,7 +27,7 @@ pub(crate) struct RangeState {
 
 /// `yamt --diff=<range>`: every refusal before the window is one line and exit 2; a closed window is
 /// exit 0, after the AI's workspace ended (plan §2 #111).
-pub(crate) fn run_range(repo: &Path, spec: &RangeSpec, ai: Ai) -> Ending {
+pub(crate) fn run_range(repo: &Path, spec: &RangeSpec, ai: Ai, start: StartScreen) -> Ending {
     let resolved = match Resolved::resolve(repo, spec) {
         Ok(resolved) => resolved,
         Err(error) => return Ending::failure(error.to_string()),
@@ -35,7 +35,7 @@ pub(crate) fn run_range(repo: &Path, spec: &RangeSpec, ai: Ai) -> Ending {
     let title = range_title(spec, resolved.root());
     let manage = |app: &App, app_folder: &Path| manage_range_in(app, app_folder, resolved, ai);
     let at_exit = |app: &AppHandle| ai::end_at_exit(&app.state());
-    match open_with_data_folder(&title, WindowKind::Range, ai, manage, at_exit) {
+    match open_with_data_folder(&title, WindowKind::Range, ai, start, manage, at_exit) {
         Ok(ending) => ending,
         Err(error) => Ending::failure(error.to_string()),
     }

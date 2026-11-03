@@ -40,13 +40,18 @@ use crate::args::{Invocation, START_FOLDER, USAGE};
 use crate::outcome::{Ending, Startup, startup};
 
 const LOG_FILTER_VAR: &str = "YAMT_LOG";
+const AI_VAR: &str = "YAMT_AI";
 
 #[must_use]
 pub fn run() -> ExitCode {
     #[cfg(target_os = "linux")]
     graphics::disable_dmabuf_on_nvidia();
     init_tracing();
-    match args::parse(std::env::args_os().skip(1).collect()) {
+    let ai_variable = std::env::var_os(AI_VAR);
+    match args::parse(
+        std::env::args_os().skip(1).collect(),
+        ai_variable.as_deref(),
+    ) {
         Ok(Invocation::Help) => {
             print!("{USAGE}");
             ExitCode::SUCCESS
@@ -55,13 +60,16 @@ pub fn run() -> ExitCode {
             println!("yamt {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Ok(Invocation::Compare { ai }) => {
-            window::run_compare(&from_start_dir(PathBuf::from(START_FOLDER)), ai).report()
+        Ok(Invocation::Compare { ai, start }) => {
+            window::run_compare(&from_start_dir(PathBuf::from(START_FOLDER)), ai, start).report()
         }
         Ok(Invocation::Merge { repo }) => merge(&from_start_dir(repo)).report(),
-        Ok(Invocation::Range { spec, repo, ai }) => {
-            range::run_range(&from_start_dir(repo), &spec, ai).report()
-        }
+        Ok(Invocation::Range {
+            spec,
+            repo,
+            ai,
+            start,
+        }) => range::run_range(&from_start_dir(repo), &spec, ai, start).report(),
         Err(problem) => Ending::failure(format!("{problem}\n{USAGE}")).report(),
     }
 }

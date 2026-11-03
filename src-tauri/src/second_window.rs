@@ -106,7 +106,7 @@ mod tests {
     use yamt_range::RangeSpec;
 
     use super::*;
-    use crate::args::Invocation;
+    use crate::args::{Invocation, StartScreen};
 
     const EXE: &str = "/tmp/.mount_yamtAbC/usr/bin/yamt";
     const APPIMAGE: &str = "/home/sam/yamt.AppImage";
@@ -121,12 +121,13 @@ mod tests {
             spec: SPEC.to_owned(),
         };
         for ai in [Ai::Off, Ai::On] {
-            let invocation = crate::args::parse(range_arguments(&range, ai));
+            let invocation = crate::args::parse(range_arguments(&range, ai), None);
 
             let wanted = Invocation::Range {
                 spec: RangeSpec::parse(SPEC).unwrap(),
                 repo: ROOT.into(),
                 ai,
+                start: StartScreen::Files,
             };
             assert_eq!(invocation, Ok(wanted), "{ai:?}");
         }
@@ -138,7 +139,7 @@ mod tests {
 
         assert_eq!(arguments, [OsString::from("--repo"), OsString::from(ROOT)]);
         let wanted = Invocation::Merge { repo: ROOT.into() };
-        assert_eq!(crate::args::parse(arguments), Ok(wanted));
+        assert_eq!(crate::args::parse(arguments, None), Ok(wanted));
     }
 
     #[test]
