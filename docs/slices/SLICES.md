@@ -167,13 +167,17 @@ Order: 2 ∥ 3, `just bindings`, 4, 5, 6 ∥ 7 smoke, 7 final.
 | 7   | verify (`briefs/mr-discussions-verify.md`): smoke after 5; final `just check`, WebKit, real app                     | verifier     | done        | smoke `96103a1f` (B6 = stale reload, #2217); final `MrDiscussionsFinal` at `2fe58a24`: `just check` pass (74.9 s, 4076 tests), B1–B8 both windows, C1–C6 pass. Notes `MrDiscussions{Smoke,Final}.md`                                                             |
 | 8   | owner check on the GitLab playground: a discussion answered by the author shows "Your turn" to the reviewer         | human        | handed over | the verify brief's "Owner check" (!1, four discussions by `samubr`; a second user's reply needed)                                                                                                                                                                |
 
-## Next, in the owner's order (session 45; owner #2193–#2198)
+## Next, in the owner's order (session 45, owner #2193–#2198; session 49, owner #2247–#2250, #2252)
 
 One request per session (OR14), each started with `/new`, then `Implement docs/slices/request-<x>.md`:
 
 1. `request-mr-discussions.md`: done (section above); owner check handed over.
 2. `request-mr-review-mode.md`: done (archived, session 47).
 3. `request-mr-starts.md`: done (archived, session 48).
+4. `request-mr-description.md`: after "People on a merge request" closes. Owner's answers #2248 (any web link
+   opens), #2249 (all images load). Facts `.omp/run/notes/PlanScoutMrDescriptionFacts.md`. No product question open.
+5. `request-mr-links.md`: after 4 closes (reads the description through 4's path). Owner's answer #2250 (asked on
+   first hover). No product question open.
 
 ## Open product questions
 
