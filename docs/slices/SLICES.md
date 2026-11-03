@@ -12,11 +12,11 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 turn in open discussions, review mode, the list's age, `yamt --mr`, `YAMT_AI` (archived sections; GitLab playground
 checks still open). The owner pushes `main`, waits for green ci, then tags.
 
-| row | slice                                                                                                        | owner        | status  | evidence   |
-| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ------- | ---------- |
-| 1   | release commit 0.6.7: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done    | `4f2b4084` |
-| 2   | final run 0.6.7 before tagging (`briefs/release-0.6.7-verify.md`)                                            | verifier     | running |            |
-| 3   | push `main`, ci green on all four jobs, tag `v0.6.7`, publish                                                | human        | todo    |            |
+| row | slice                                                                                                        | owner        | status      | evidence                                                                                                                                                                                                                                                                              |
+| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | release commit 0.6.7: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done        | `4f2b4084`                                                                                                                                                                                                                                                                            |
+| 2   | final run 0.6.7 before tagging (`briefs/release-0.6.7-verify.md`)                                            | verifier     | done        | `Release067Verify`: gate pass (68 s), readmer, licences; `yamt_0.6.7_amd64.deb` Version `0.6.7`, `yamt 0.6.7`, help names `--mr`/`YAMT_AI=1`; release binary with `YAMT_AI=1 --mr`: page at once, "just now" + hover, Show Diff child `--ai` with Ask AI. Notes `Release067Verify.md` |
+| 3   | push `main`, ci green on all four jobs, tag `v0.6.7`, publish                                                | human        | handed over |                                                                                                                                                                                                                                                                                       |
 
 ## Line-range threads (session 42; owner #2051: "open discussions on a range of lines by dragging, like in gitlab")
 
