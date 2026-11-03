@@ -6,17 +6,17 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
-## Release 0.6.6 (session 45, owner: "release the next patch version")
+## Release 0.6.7 (session 48, owner: "release the next patch")
 
-0.6.6 = 0.6.5 (published, tag `v0.6.5` on origin; section archived) plus the merge-request page work since: row
-details, due dates, exclude filters, list search, local conflict check, CI job log (sections below; their GitLab
-playground checks still open). The owner pushes `main`, waits for green ci, then tags.
+0.6.7 = 0.6.6 (published, tag `v0.6.6` on origin; section archived) plus the merge-request page work since: whose
+turn in open discussions, review mode, the list's age, `yamt --mr`, `YAMT_AI` (archived sections; GitLab playground
+checks still open). The owner pushes `main`, waits for green ci, then tags.
 
-| row | slice                                                                                                        | owner        | status      | evidence                                                                                                                                                                                                                                   |
-| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | release commit 0.6.6: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done        | `b99c9fb8`                                                                                                                                                                                                                                 |
-| 2   | final run 0.6.6 before tagging (`briefs/release-0.6.6-verify.md`)                                            | verifier     | done        | `Release066Verify`: gate pass (72 s), readmer, licences; `yamt_0.6.6_amd64.deb` Version `0.6.6`, `yamt 0.6.6`; release binary: job log opens, "fail" 6 of 6, remembered after restart, one trace call per run. Notes `Release066Verify.md` |
-| 3   | push `main`, ci green on all four jobs, tag `v0.6.6`, publish                                                | human        | handed over |                                                                                                                                                                                                                                            |
+| row | slice                                                                                                        | owner        | status  | evidence   |
+| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ------- | ---------- |
+| 1   | release commit 0.6.7: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done    | `4f2b4084` |
+| 2   | final run 0.6.7 before tagging (`briefs/release-0.6.7-verify.md`)                                            | verifier     | running |            |
+| 3   | push `main`, ci green on all four jobs, tag `v0.6.7`, publish                                                | human        | todo    |            |
 
 ## Line-range threads (session 42; owner #2051: "open discussions on a range of lines by dragging, like in gitlab")
 
