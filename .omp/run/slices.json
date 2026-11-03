@@ -9,27 +9,10 @@
       "tests/glab/README.md"
     ]
   },
-  "MrPeopleDocs": {
+  "MrDescriptionLookR1": {
     "owned": [
-      "docs/architecture.md",
-      "docs/plan.md",
-      ".omp/skills/project-map/**",
-      ".omp/skills/ipc-contract/SKILL.md",
-      ".omp/skills/risk-register/SKILL.md",
-      "src-tauri/AGENTS.md"
-    ]
-  },
-  "MrPeoplePageR1": {
-    "owned": [
-      "frontend/src/ui/MergeRequestPeople.vue",
-      "frontend/src/ui/MergeRequestPeopleSearch.vue",
-      "frontend/src/ui/MergeRequestPersonMenu.vue",
-      "frontend/src/ui/mergeRequestPeopleLines.ts",
-      "frontend/src/ui/mergeRequestPeopleLines.test.ts",
-      "frontend/src/ui/mergeRequestPeople.ts",
-      "frontend/src/ui/mergeRequestPeople.test.ts",
-      "frontend/src/ui/mergeRequests.ts",
-      "frontend/src/ui/AGENTS.md"
+      "frontend/src/ui/useMarkdown.ts",
+      "frontend/src/ui/useMarkdown.test.ts"
     ]
   }
 }

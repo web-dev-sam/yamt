@@ -1891,8 +1891,9 @@ error colour; people already in the group are `aria-disabled` "Already an assign
 Typing calls `searchPeople` (core `searchedText`, `SEARCH_PAUSE_MS` 250 after the last key, an older answer dropped);
 arrows move over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines
 change (`keptHighlight`); Enter or a click (its `mousedown` prevented) calls `changePeople`, the line spinning until the
-add is answered; then the field clears if its text is unchanged since the pick and keeps focus only if it still has
-it. Escape closes the field (focus to its add button, `endPeopleSearch`), a second Escape the box. Each person ends
+add is answered; then the field clears if its text is unchanged since the pick and takes focus back only from the
+page body, never from another control. Escape closes the field (focus to its add button, `endPeopleSearch`), a second
+Escape the box. Each person ends
 with `MergeRequestPersonMenu.vue`: Lucide `ellipsis-vertical` "More" and one `useDropdownMenu<true>` menu, `position:
 fixed` inside the box so the hover box holds it, with "Remove assignee"/"Remove reviewer"; while that remove is queued or
 running the spinner, `aria-disabled` and no menu. The slice (`ui/mergeRequestPeople.ts`) runs one change per merge
