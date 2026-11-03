@@ -1,0 +1,9 @@
+just mutants HEAD → 395 killed, 22 timeout, 103 survived, 2 no coverage (79.89 %); only the 3 below sit outside module-level constants
+jobLog.ts:223 pointAt(runs, to, "") — equivalent: any edge other than "start" takes the end branch (<=), as "end" does
+jobLog.ts:57 physical[0] ?? "…" (NoCoverage) — equivalent: split always returns at least one element; the fallback exists for noUncheckedIndexedAccess
+sgr.ts:89 code = "…" default (NoCoverage) — equivalent: slice(at, …) with at < length always has a first element
+ansiColours.ts:34-73 (30: BASIC_COLOURS names, BRIGHT_OF, SIXTEEN, XTERM_RGB entries, CUBE_LEVEL, GRAY_LEVEL) — gate-covered: module-level (#732), pinned by ansiColours.test; red was checked by hand
+jobLog.ts:36 TIMESTAMP regex (19) — gate-covered: module-level regex (#732); the timestamp tests and the mid-line case kill each one (the missing ^ was checked by hand)
+jobLog.ts:38 SECTION regex (16), :39 SECTION_END, :40 CONTROL_OR_SECTION, :41 ESCAPE — gate-covered: module-level (#732), killed by the section tests, the almost-marker tests and the escape tests
+jobLogSearch.ts:1 NO_RESULTS "" — gate-covered: module-level constant (#732), asserted in the_count_reads_one_based
+sgr.ts:20-26 PLAIN_PEN, :36-38 digitCodes, :42-63 every SGR_CODES entry, :66 INDEXED_COLOUR (33) — gate-covered: module-level table (#732); codes_follow_gitlabs_exact_table pins each code ("22" was checked by hand)

@@ -1,0 +1,983 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index 2a3f6ea..fe6a2fb 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -4,7 +4,7 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ 
+ `readiness` also has `mergesCleanly`, yamt's own merge of GitLab's two commits found no conflict: "No conflicts (checked locally). GitLab has not checked the rest yet", icon `circle-dashed-check`, never `ready`'s words or icon. `rechecked` puts a checked row's readiness on the row with its iid, every other row and field kept.
+ 
+-`internal/`: `filters` (the filter types, `passes`, `stateOf`, `clicked` and the other edits, `filterLabel` "Assignee: not Me, anna"), `choices`, `order`, `summary`, `relativeTime`, `ciBox`, `stored`, `size` (`sizeParts` `{ added "+120", removed "−40", files "6 files" }` with U+2212, the row colours them green, red, text colour; `sizeTitle`), `readiness` (`readinessText`, "Has conflicts. Also blocked: " and the reasons joined by "; ", GitLab's own word quoted for `other`; `readinessIcon`), `rowAction` (the row's Resolve or Continue, first match wins: Continue on the merging row whatever its readiness, disabled while its window is open; no button unless conflicts; a fork, then another unfinished merge, disable Resolve; then running), `dueDate`, `calendar`. Every file has its `*.test.ts` (node), each test named for the bug it catches.
++`internal/`: `filters` (the filter types, `passes`, `stateOf`, `clicked` and the other edits, `filterLabel` "Assignee: not Me, anna"), `choices`, `order`, `summary`, `relativeTime`, `ciBox`, `stored`, `size` (`sizeParts` `{ added "+120", removed "−40", files "6 files" }` with U+2212, the row colours them green, red, text colour; `sizeTitle`), `readiness` (`readinessText`, "Has conflicts. Also blocked: " and the reasons joined by "; ", GitLab's own word quoted for `other`; `readinessIcon`), `rowAction` (the row's Resolve or Continue, first match wins: Continue on the merging row whatever its readiness, disabled while its window is open; no button unless conflicts; a fork, then another unfinished merge, disable Resolve; then running), `dueDate`, `calendar`, `jobLog`, `sgr`, `ansiColours`, `jobLogSearch`. Every file but `sgr` (tested through `jobLogView`) has its `*.test.ts` (node), each test named for the bug it catches.
+ 
+ `dueDate`: `CalendarDay` (month 1–12) made by `calendarDayFrom` from `"YYYY-MM-DD"` naming a real day, written back by `calendarDayText` (the stored form); `typedDay` reads what the user types, day first only (`3.11.2026`, `03.11.2026`, `03/11/2026`, `03-11-2026` with one separator throughout, or eight digits `03112026`; a four-digit year; a day that does not exist is refused, `11/3/2026` is 11 March); `compareDays` gives the whole days from one day to another (negative when the first is earlier); `localDay` is the local calendar day of a time; `daysLeft` is `compareDays` from `localDay` of now (both days at UTC midnight, so midnight, month ends and daylight-saving days count once); `daysLeftText` "Due today", "1 day left", "n days left", "1 day overdue", "n days overdue"; `dueDateText` is every shown date, `DD.MM.YYYY` with leading zeros ("03.11.2026"), no locale; `dateTimeText` is every shown time, that local date and the 24-hour local time ("30.10.2026, 15:04", the row's created-at hover).
+ 
+@@ -15,3 +15,5 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ `labels`: `labelsShown` (the first label in GitLab's order and the rest), `moreText` "+N" (labels and the people stack).
+ 
+ `search` (request #2150): `searched(rows, text)` keeps a row whose title (as shown, "Draft: " included) contains the trimmed text in any case, or whose iid is a number the text names — a run of digits with no letter or digit beside it (`!1234`, `#1234`, a `…/merge_requests/1234` address, `0042` is 42; `v2`, `abc123`, `12ab`, `1e3` name nothing); blank text returns `rows` itself. Only loaded rows: it never asks GitLab.
++
++Job log (request `docs/slices/request-ci-job-log.md` rules 4–6, design `docs/slices/briefs/ci-job-log-design.md` §1.2, §1.7–1.9, plan §2 #159): `jobLogView(raw)` turns the raw `/trace` text into `LogLine`s of styled `LogRun`s as GitLab's job page shows it (`lib/gitlab/ci/ansi2json/converter.rb`, `parser.rb`, `style.rb`, `line.rb`; bold from `ansi2html.rb`), in one scan: a break is `\r*\n`; the 32-character timestamp prefix is stripped from every line when the first line has it, and a line whose prefix ends in `+` continues the one before (only the `\n` goes, a `\r` before it then clears); `section_start`/`section_end` markers vanish and end a line that has text; a lone `\r` clears the line; only `ESC[…m` (SGR) is applied, by GitLab's exact-text code table (`sgr.ts` `penAfter`: `01` is nothing, `38;5;n` an indexed colour, `38;2;…` no truecolor, its numbers read as codes); every other escape, and C0 controls but tab, vanish; an escape cut off at a line's end drops the rest; 30–37 show bright while bold; the style carries across lines; a line without text is not shown; neighbouring text in equal styles is one run. Run text is text, never markup (RK57). `text` is the shown lines joined by `"\n"`: what the page's `search/` matcher runs over; `hitPlaces` maps its `{ line, from, to }` hits onto runs (a `from` at a run's end starts the next run, a `to` there ends in that run; a hit outside the view is left out). `basicColour` turns a 256-colour index into one of the 16 `AnsiColour`s, 16–255 the nearest on xterm's default palette (the triples classify, never paint: the page maps `AnsiColour` to the `--color-ansi-*` tokens). `jobLogSearch`: `firstHit` the last match, `steppedHit` wraps both ways, `hitCountText` "3 of 17", `NO_RESULTS`.
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+index e2c569d..13d7430 100644
+--- a/frontend/src/mergeRequests/index.ts
++++ b/frontend/src/mergeRequests/index.ts
+@@ -84,3 +84,16 @@ export {
+   type ReadinessIcon,
+ } from "./internal/readiness";
+ export { rowAction, type ActionRow, type LocalMerge, type RowAction } from "./internal/rowAction";
++export { basicColour, type AnsiColour } from "./internal/ansiColours";
++export {
++  hitPlaces,
++  jobLogView,
++  type HitPlace,
++  type JobLogView,
++  type LogHit,
++  type LogLine,
++  type LogRun,
++  type LogStyle,
++  type RunPoint,
++} from "./internal/jobLog";
++export { NO_RESULTS, firstHit, hitCountText, steppedHit } from "./internal/jobLogSearch";
+diff --git a/frontend/src/mergeRequests/internal/ansiColours.test.ts b/frontend/src/mergeRequests/internal/ansiColours.test.ts
+new file mode 100644
+index 0000000..f0bc264
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/ansiColours.test.ts
+@@ -0,0 +1,57 @@
++import { expect, test } from "vitest";
++
++import { basicColour, type AnsiColour } from "../index";
++
++test("the_first_sixteen_are_themselves", () => {
++  expect(Array.from({ length: 16 }, (_, index) => basicColour(index))).toEqual([
++    "black",
++    "red",
++    "green",
++    "yellow",
++    "blue",
++    "magenta",
++    "cyan",
++    "white",
++    "brightBlack",
++    "brightRed",
++    "brightGreen",
++    "brightYellow",
++    "brightBlue",
++    "brightMagenta",
++    "brightCyan",
++    "brightWhite",
++  ]);
++});
++
++test.each<[number, AnsiColour]>([
++  [16, "black"],
++  [21, "blue"],
++  [28, "green"],
++  [46, "brightGreen"],
++  [124, "red"],
++  [196, "brightRed"],
++  [208, "yellow"],
++  [226, "brightYellow"],
++  [231, "brightWhite"],
++  [232, "black"],
++  [244, "brightBlack"],
++  [250, "white"],
++  [255, "white"],
++  [39, "cyan"],
++  [94, "red"],
++  [135, "brightBlue"],
++  [201, "brightMagenta"],
++  [51, "brightCyan"],
++  [37, "cyan"],
++  [90, "magenta"],
++])("a_256_colour_is_its_nearest_basic_one (%i is %s)", (index, colour) => {
++  expect(basicColour(index)).toBe(colour);
++});
++
++test("a_tie_goes_to_the_lower_index (249, gray 178, is as near white 229 as bright black 127)", () => {
++  expect(basicColour(249)).toBe("white");
++});
++
++test.each([-1, 256, 1.5, Number.NaN])("anything_else_is_no_colour (%s)", (index) => {
++  expect(basicColour(index)).toBeNull();
++});
+diff --git a/frontend/src/mergeRequests/internal/ansiColours.ts b/frontend/src/mergeRequests/internal/ansiColours.ts
+new file mode 100644
+index 0000000..7df48b4
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/ansiColours.ts
+@@ -0,0 +1,119 @@
++export type BasicColour =
++  | "black"
++  | "red"
++  | "green"
++  | "yellow"
++  | "blue"
++  | "magenta"
++  | "cyan"
++  | "white";
++type BrightColour =
++  | "brightBlack"
++  | "brightRed"
++  | "brightGreen"
++  | "brightYellow"
++  | "brightBlue"
++  | "brightMagenta"
++  | "brightCyan"
++  | "brightWhite";
++export type AnsiColour = BasicColour | BrightColour;
++
++type Rgb = { readonly red: number; readonly green: number; readonly blue: number };
++
++export const BASIC_COLOURS = [
++  "black",
++  "red",
++  "green",
++  "yellow",
++  "blue",
++  "magenta",
++  "cyan",
++  "white",
++] as const satisfies readonly BasicColour[];
++
++export const BRIGHT_OF: Readonly<Record<BasicColour, BrightColour>> = {
++  black: "brightBlack",
++  red: "brightRed",
++  green: "brightGreen",
++  yellow: "brightYellow",
++  blue: "brightBlue",
++  magenta: "brightMagenta",
++  cyan: "brightCyan",
++  white: "brightWhite",
++};
++
++const SIXTEEN: readonly AnsiColour[] = [
++  ...BASIC_COLOURS,
++  ...BASIC_COLOURS.map((colour) => BRIGHT_OF[colour]),
++];
++
++const XTERM_RGB: Readonly<Record<AnsiColour, Rgb>> = {
++  black: { red: 0, green: 0, blue: 0 },
++  red: { red: 205, green: 0, blue: 0 },
++  green: { red: 0, green: 205, blue: 0 },
++  yellow: { red: 205, green: 205, blue: 0 },
++  blue: { red: 0, green: 0, blue: 238 },
++  magenta: { red: 205, green: 0, blue: 205 },
++  cyan: { red: 0, green: 205, blue: 205 },
++  white: { red: 229, green: 229, blue: 229 },
++  brightBlack: { red: 127, green: 127, blue: 127 },
++  brightRed: { red: 255, green: 0, blue: 0 },
++  brightGreen: { red: 0, green: 255, blue: 0 },
++  brightYellow: { red: 255, green: 255, blue: 0 },
++  brightBlue: { red: 92, green: 92, blue: 255 },
++  brightMagenta: { red: 255, green: 0, blue: 255 },
++  brightCyan: { red: 0, green: 255, blue: 255 },
++  brightWhite: { red: 255, green: 255, blue: 255 },
++};
++
++const CUBE_FIRST = 16;
++const CUBE_SIDE = 6;
++const CUBE_LEVEL = { base: 55, step: 40 };
++const GRAYS_FIRST = 232;
++const GRAY_LEVEL = { base: 8, step: 10 };
++const LAST_INDEX = 255;
++
++function cubeLevel(step: number): number {
++  return step === 0 ? 0 : CUBE_LEVEL.base + CUBE_LEVEL.step * step;
++}
++
++function xtermRgb(index: number): Rgb {
++  if (index >= GRAYS_FIRST) {
++    const level = GRAY_LEVEL.base + GRAY_LEVEL.step * (index - GRAYS_FIRST);
++    return { red: level, green: level, blue: level };
++  }
++  const cube = index - CUBE_FIRST;
++  return {
++    red: cubeLevel(Math.floor(cube / (CUBE_SIDE * CUBE_SIDE))),
++    green: cubeLevel(Math.floor(cube / CUBE_SIDE) % CUBE_SIDE),
++    blue: cubeLevel(cube % CUBE_SIDE),
++  };
++}
++
++function distance(left: Rgb, right: Rgb): number {
++  const red = left.red - right.red;
++  const green = left.green - right.green;
++  const blue = left.blue - right.blue;
++  return red * red + green * green + blue * blue;
++}
++
++function nearest(rgb: Rgb): AnsiColour {
++  let best: AnsiColour = "black";
++  for (const colour of SIXTEEN) {
++    if (distance(rgb, XTERM_RGB[colour]) < distance(rgb, XTERM_RGB[best])) {
++      best = colour;
++    }
++  }
++  return best;
++}
++
++/** A 256-colour index as one of the 16: 0–7 the basic, 8–15 the bright ones; 16–231 (xterm's cube, levels 0, 95, 135,
++ *  175, 215, 255) and 232–255 (grays 8 + 10·k) the nearest of the 16 by squared RGB distance on xterm's default
++ *  palette, a tie to the lower index; anything else `null`. The triples are numbers that classify, never a colour
++ *  painted (palette fence, design §1.8). */
++export function basicColour(index: number): AnsiColour | null {
++  if (!Number.isInteger(index) || index < 0 || index > LAST_INDEX) {
++    return null;
++  }
++  return SIXTEEN[index] ?? nearest(xtermRgb(index));
++}
+diff --git a/frontend/src/mergeRequests/internal/jobLog.test.ts b/frontend/src/mergeRequests/internal/jobLog.test.ts
+new file mode 100644
+index 0000000..ead0dd9
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/jobLog.test.ts
+@@ -0,0 +1,355 @@
++import { expect, test } from "vitest";
++
++import {
++  hitPlaces,
++  jobLogView,
++  type HitPlace,
++  type JobLogView,
++  type LogHit,
++  type LogLine,
++  type LogRun,
++  type LogStyle,
++  type RunPoint,
++} from "../index";
++
++const E = "\x1b";
++const MARKER_END = `\r${E}[0K`;
++const PLAIN: LogStyle = {
++  foreground: null,
++  background: null,
++  bold: false,
++  italic: false,
++  underline: false,
++  struck: false,
++};
++
++const inputs: string[] = [];
++
++function viewOf(raw: string): JobLogView {
++  inputs.push(raw);
++  return jobLogView(raw);
++}
++
++function lineText(line: LogLine): string {
++  return line.runs.map((run) => run.text).join("");
++}
++
++function shown(raw: string): string[] {
++  return viewOf(raw).lines.map(lineText);
++}
++
++function runs(raw: string): [string, LogStyle][][] {
++  return viewOf(raw).lines.map((line) => line.runs.map((run: LogRun) => [run.text, run.style]));
++}
++
++function point(run: number, offset: number): RunPoint {
++  return { run, offset };
++}
++
++function styled(style: Partial<LogStyle>): LogStyle {
++  return { ...PLAIN, ...style };
++}
++
++function styleAfter(codes: string): LogStyle | undefined {
++  return viewOf(`${E}[${codes}mx`).lines[0]?.runs[0]?.style;
++}
++
++function stamped(text: string, stream: "O" | "E" = "O", join = " "): string {
++  return `2026-11-03T10:15:42.123456Z 0f${stream}${join}${text}`;
++}
++
++function joined(text: string): string {
++  return stamped(text, "O", "+");
++}
++
++test("timestamps_are_stripped_and_plus_lines_join", () => {
++  const raw = [
++    stamped("$ make"),
++    stamped("build", "E"),
++    joined("ing"),
++    joined(" all"),
++    "not stamped",
++    `note ${stamped("inside")}`,
++    stamped("done"),
++    "",
++  ].join("\n");
++  expect(shown(raw)).toEqual([
++    "$ make",
++    "building all",
++    "not stamped",
++    `note ${stamped("inside")}`,
++    "done",
++  ]);
++});
++
++test("a_log_whose_first_line_has_no_timestamp_keeps_text_that_looks_like_one", () => {
++  const raw = ["hello", stamped("world"), joined("again")].join("\n");
++  expect(shown(raw)).toEqual(["hello", stamped("world"), joined("again")]);
++});
++
++test.each([
++  "2026-11-03T10:15:42.123456Z 0fX hello",
++  "2026-11-03T10:15:42.12345Z 0fO hello!",
++  "2026-11-03 10:15:42.123456Z 0fO hello",
++  "2026-11-03T10:15:42.123456Z 0FO hello",
++  "2026-11-03T10:15:42.123456Z 0fO-hello",
++  `x${stamped("hello")}`,
++])("a_first_line_whose_prefix_breaks_the_pattern_keeps_it (%s)", (first) => {
++  expect(shown(`${first}\n${stamped("next")}`)).toEqual([first, stamped("next")]);
++});
++
++test("section_markers_vanish_and_their_header_is_a_plain_line", () => {
++  const raw = [
++    `${E}[0Ksection_start:1762164942:prepare_script[collapsed=true]${MARKER_END}${E}[36;1mPreparing${E}[0;m`,
++    "Running on runner-1",
++    `${E}[0Ksection_end:1762164943:prepare_script${MARKER_END}`,
++    `section_start:1762164944:step.build-2[collapsed=true, hide_duration=false]${MARKER_END}Building`,
++    `section_end:1762164945:step.build-2${MARKER_END}`,
++    `section_start:1762164946:other[a=b,c=d, e=f]${MARKER_END}Other`,
++  ].join("\n");
++  expect(runs(raw)).toEqual([
++    [["Preparing", styled({ foreground: "brightCyan", bold: true })]],
++    [["Running on runner-1", PLAIN]],
++    [["Building", PLAIN]],
++    [["Other", PLAIN]],
++  ]);
++});
++
++test("text_that_is_almost_a_section_marker_stays_text", () => {
++  expect(
++    shown(
++      [
++        "section_start:1:name and more",
++        "section_middle:1:name",
++        `see section_start:1:name[bad]`,
++        `section_start:x:name${MARKER_END}after`,
++        `abc section_start:x${MARKER_END} section_end:1:a`,
++      ].join("\n"),
++    ),
++  ).toEqual([
++    "section_start:1:name and more",
++    "section_middle:1:name",
++    "see section_start:1:name[bad]",
++    "after",
++    " section_end:1:a",
++  ]);
++});
++
++test("a_section_marker_ends_a_line_that_has_text", () => {
++  const raw = [
++    `before section_start:1:a${MARKER_END}after`,
++    `one section_start:1762164942:step.build-2${MARKER_END}two`,
++    `three section_end:1762164943:script[collapsed=true]${MARKER_END}four`,
++    `five section_start:12:b[a=b,c=d, hide_duration=false]${MARKER_END}six`,
++    `section_end:2:a${MARKER_END}next`,
++  ].join("\n");
++  expect(shown(raw)).toEqual([
++    "before ",
++    "after",
++    "one ",
++    "two",
++    "three ",
++    "four",
++    "five ",
++    "six",
++    "next",
++  ]);
++});
++
++test("a_lone_carriage_return_clears_the_line_and_crlf_is_a_break", () => {
++  expect(shown("10%\r50%\r100%\r\nnext\r\r\nlast\n")).toEqual(["100%", "next", "last"]);
++  expect(runs(`${E}[31mred\rnew`)).toEqual([[["new", styled({ foreground: "red" })]]]);
++  expect(shown("gone\r")).toEqual([]);
++});
++
++test("a_joined_line_keeps_the_carriage_return_before_its_join", () => {
++  expect(shown([stamped("10%\r"), joined("100%"), stamped("next")].join("\n"))).toEqual([
++    "100%",
++    "next",
++  ]);
++  expect(shown([stamped("10%\r"), stamped("next")].join("\n"))).toEqual(["10%", "next"]);
++});
++
++test("only_sgr_styles_and_every_other_escape_vanishes", () => {
++  expect(shown(`a${E}[0Kb${E}[2;5Hc${E}[?25ld${E}]0;e${E}[1~f${E}[5@g${E}@zh${E}_zi`)).toEqual([
++    "abcdfghi",
++  ]);
++  expect(shown(`${E}]0;title${E}(B${E}\`x`)).toEqual(["itle(B`x"]);
++  expect(runs(`${E}[32mok`)).toEqual([[["ok", styled({ foreground: "green" })]]]);
++  expect(runs(`${E}[31ma${E}[0Kb${E}]1mc`)).toEqual([[["abc", styled({ foreground: "red" })]]]);
++  expect(shown(`a${E}[1\u00e9mb${E}[\x7fmc`)).toEqual(["abc"]);
++});
++
++test("an_escape_cut_off_at_the_line_end_drops_the_rest", () => {
++  expect(runs(`abc${E}[31;1 12.5% 3/4\nnext`)).toEqual([[["abc", PLAIN]], [["next", PLAIN]]]);
++  expect(shown(`abc${E}\nnext`)).toEqual(["abc", "next"]);
++});
++
++test.each<[string, LogStyle]>([
++  ["01", PLAIN],
++  ["+1", PLAIN],
++  ["031", PLAIN],
++  ["5", PLAIN],
++  ["8", PLAIN],
++  ["28", PLAIN],
++  [`31m${E}[`, PLAIN],
++  [`31m${E}[;;`, PLAIN],
++  ["1", styled({ bold: true })],
++  ["3", styled({ italic: true })],
++  ["4", styled({ underline: true })],
++  ["9", styled({ struck: true })],
++  ["1;3;4;9;31;42;0", PLAIN],
++  ["1;22", PLAIN],
++  ["1;21", PLAIN],
++  ["3;23", PLAIN],
++  ["4;24", PLAIN],
++  ["9;29", PLAIN],
++  ["31;39", PLAIN],
++  ["31;99", PLAIN],
++  ["41;49", PLAIN],
++  ["41;109", PLAIN],
++  ["31;", styled({ foreground: "red" })],
++  [";31", styled({ foreground: "red" })],
++  ["30", styled({ foreground: "black" })],
++  ["37", styled({ foreground: "white" })],
++  ["40", styled({ background: "black" })],
++  ["47", styled({ background: "white" })],
++  ["90", styled({ foreground: "brightBlack" })],
++  ["97", styled({ foreground: "brightWhite" })],
++  ["100", styled({ background: "brightBlack" })],
++  ["107", styled({ background: "brightWhite" })],
++  ["38", PLAIN],
++  ["48", PLAIN],
++  ["39;31", styled({ foreground: "red" })],
++  ["1;5;3", styled({ bold: true, italic: true })],
++])("codes_follow_gitlabs_exact_table (%j)", (codes, style) => {
++  expect(styleAfter(codes)).toEqual(style);
++});
++
++test("bold_shows_basic_foregrounds_bright_but_not_indexed_or_bright_ones", () => {
++  expect(styleAfter("1;31")).toEqual(styled({ foreground: "brightRed", bold: true }));
++  expect(styleAfter("31;1")).toEqual(styled({ foreground: "brightRed", bold: true }));
++  expect(styleAfter("1;91")).toEqual(styled({ foreground: "brightRed", bold: true }));
++  expect(styleAfter("1;38;5;1")).toEqual(styled({ foreground: "red", bold: true }));
++  expect(styleAfter("1;41")).toEqual(styled({ background: "red", bold: true }));
++  expect(runs(`${E}[34ma${E}[1mb${E}[22mc`)).toEqual([
++    [
++      ["a", styled({ foreground: "blue" })],
++      ["b", styled({ foreground: "brightBlue", bold: true })],
++      ["c", styled({ foreground: "blue" })],
++    ],
++  ]);
++});
++
++test("a_256_colour_goes_through_basic_colour", () => {
++  expect(styleAfter("38;5;208")).toEqual(styled({ foreground: "yellow" }));
++  expect(styleAfter("48;5;196")).toEqual(styled({ background: "brightRed" }));
++  expect(styleAfter("31;38;5")).toEqual(styled({ foreground: "red" }));
++  expect(styleAfter("41;48;5")).toEqual(styled({ background: "red" }));
++  expect(styleAfter("31;38;5;300")).toEqual(styled({ foreground: "red" }));
++  expect(styleAfter("41;48;5;300;4")).toEqual(styled({ background: "red", underline: true }));
++  expect(styleAfter("38;5;1")).toEqual(styled({ foreground: "red" }));
++  expect(styleAfter("31;38;5;?")).toEqual(styled({ foreground: "black" }));
++  expect(styleAfter("38;5;208.9")).toEqual(styled({ foreground: "yellow" }));
++  expect(styleAfter("38;6;1")).toEqual(styled({ bold: true }));
++});
++
++test("truecolor_is_ignored_and_its_numbers_read_as_codes", () => {
++  expect(styleAfter("31;38;2;255;0;0")).toEqual(PLAIN);
++  expect(styleAfter("31;38;2;1;3;4")).toEqual(
++    styled({ foreground: "brightRed", bold: true, italic: true, underline: true }),
++  );
++});
++
++test("the_style_carries_across_lines", () => {
++  expect(runs(`${E}[32mone\ntwo\n${E}[0mthree`)).toEqual([
++    [["one", styled({ foreground: "green" })]],
++    [["two", styled({ foreground: "green" })]],
++    [["three", PLAIN]],
++  ]);
++});
++
++test("empty_lines_are_not_shown", () => {
++  expect(shown("a\n\n\nb\n")).toEqual(["a", "b"]);
++  expect(shown(`a\n${E}[31m\n${E}[0K\n\x07\nb`)).toEqual(["a", "b"]);
++  expect(shown("a\n   \n\t\nb")).toEqual(["a", "   ", "\t", "b"]);
++  expect(viewOf("")).toEqual({ lines: [], text: "" });
++  expect(viewOf("\n")).toEqual({ lines: [], text: "" });
++});
++
++test("control_characters_but_tab_vanish", () => {
++  expect(shown("a\x00b\x07c\td\x7fe\x08f\x1fg h~\u0080i")).toEqual(["abc\tdefg h~\u0080i"]);
++});
++
++test("markup_in_a_log_stays_text", () => {
++  const text = "<script>x</script> &amp; <b>bold</b>";
++  expect(runs(text)).toEqual([[[text, PLAIN]]]);
++});
++
++test("equal_styles_merge_into_one_run_and_no_run_is_empty", () => {
++  expect(runs(`${E}[31ma${E}[0K${E}[31mb${E}[1m${E}[22mc${E}[32m${E}[0md`)).toEqual([
++    [
++      ["abc", styled({ foreground: "red" })],
++      ["d", PLAIN],
++    ],
++  ]);
++  expect(runs(`${E}[31;1ma${E}[91mb`)).toEqual([
++    [["ab", styled({ foreground: "brightRed", bold: true })]],
++  ]);
++  expect(runs(`${E}[31m${E}[0mx${E}[1m`)).toEqual([[["x", PLAIN]]]);
++  expect(runs(`a${E}[3mb`)).toEqual([
++    [
++      ["a", PLAIN],
++      ["b", styled({ italic: true })],
++    ],
++  ]);
++});
++
++test("hit_places_at_run_boundaries", () => {
++  const view = viewOf(`ab${E}[31mcd${E}[0mef\nxyz`);
++  const hits: LogHit[] = [
++    { line: 0, from: 0, to: 2 },
++    { line: 0, from: 2, to: 4 },
++    { line: 0, from: 1, to: 5 },
++    { line: 0, from: 5, to: 6 },
++    { line: 0, from: 4, to: 7 },
++    { line: 0, from: -1, to: 1 },
++    { line: 2, from: 0, to: 1 },
++    { line: -1, from: 0, to: 1 },
++    { line: 1, from: 1, to: 3 },
++  ];
++  const places: HitPlace[] = [
++    { line: 0, start: point(0, 0), end: point(0, 2) },
++    { line: 0, start: point(1, 0), end: point(1, 2) },
++    { line: 0, start: point(0, 1), end: point(2, 1) },
++    { line: 0, start: point(2, 1), end: point(2, 2) },
++    { line: 1, start: point(0, 1), end: point(0, 3) },
++  ];
++  expect(hitPlaces(view, hits)).toEqual(places);
++});
++
++test("a_whole_log_of_500_kb_parses_in_linear_time", () => {
++  const LINES = 9000;
++  const raw = Array.from({ length: LINES }, (_, at) =>
++    stamped(`${E}[3${at % 8};1mStep ${at}${E}[0m: ok`),
++  ).join("\n");
++  expect(raw.length).toBeGreaterThanOrEqual(500_000);
++  expect(raw.length).toBeLessThanOrEqual(512_000);
++  const started = performance.now();
++  const view = jobLogView(raw);
++  const elapsed = performance.now() - started;
++  expect(view.lines).toHaveLength(LINES);
++  expect(elapsed).toBeLessThan(300);
++});
++
++test("the_text_is_the_lines_joined_by_line_breaks", () => {
++  expect(inputs.length).toBeGreaterThan(50);
++  for (const raw of inputs) {
++    const view = jobLogView(raw);
++    expect(view.text).toBe(view.lines.map(lineText).join("\n"));
++    for (const line of view.lines) {
++      expect(line.runs.length).toBeGreaterThan(0);
++      expect(line.runs.every((run) => run.text !== "")).toBe(true);
++    }
++  }
++});
+diff --git a/frontend/src/mergeRequests/internal/jobLog.ts b/frontend/src/mergeRequests/internal/jobLog.ts
+new file mode 100644
+index 0000000..21c0ea1
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/jobLog.ts
+@@ -0,0 +1,229 @@
++import type { AnsiColour } from "./ansiColours";
++import { PLAIN_PEN, penAfter, type Pen } from "./sgr";
++
++export type LogStyle = {
++  readonly foreground: AnsiColour | null; // null: the box's own text colour
++  readonly background: AnsiColour | null; // null: the box's own background
++  readonly bold: boolean;
++  readonly italic: boolean;
++  readonly underline: boolean;
++  readonly struck: boolean;
++};
++export type LogRun = { readonly text: string; readonly style: LogStyle }; // text never ""
++export type LogLine = { readonly runs: readonly LogRun[] }; // at least one run
++export type JobLogView = {
++  readonly lines: readonly LogLine[];
++  /** Every line's runs' texts joined, the lines joined by "\n": what the search runs over (rule 8: what is shown). */
++  readonly text: string;
++};
++export type LogHit = { readonly line: number; readonly from: number; readonly to: number }; // UTF-16, from < to
++export type RunPoint = { readonly run: number; readonly offset: number };
++export type HitPlace = { readonly line: number; readonly start: RunPoint; readonly end: RunPoint };
++
++type Token =
++  | { readonly kind: "section"; readonly end: number }
++  | { readonly kind: "sgr"; readonly parameters: string; readonly end: number }
++  | { readonly kind: "clear"; readonly end: number }
++  | { readonly kind: "dropped"; readonly end: number };
++
++type Scan = {
++  pen: Pen;
++  style: LogStyle;
++  runs: LogRun[];
++  readonly lines: LogLine[];
++};
++
++const TIMESTAMP = /^\d{4}-[01]\d-[0-3]\dT[0-2]\d:[0-5]\d:[0-5]\d\.\d{6}Z [0-9a-f]{2}[EO][+ ]/;
++const TIMESTAMP_LENGTH = 32;
++const SECTION = /^section_(?:start|end):\d+:[A-Za-z0-9_.-]+(?:\[\w+=\w+(?:, ?\w+=\w+)*\])?/;
++const SECTION_END = "\r\x1b[0K";
++const CONTROL_OR_SECTION = /[^\t -~\u0080-\uFFFF]|section_/;
++const ESCAPE = "\x1b";
++
++function continues(line: string | undefined): boolean {
++  return line !== undefined && TIMESTAMP.test(line) && line.charAt(TIMESTAMP_LENGTH - 1) === "+";
++}
++
++function withoutBreakReturns(line: string): string {
++  let end = line.length;
++  while (line.charAt(end - 1) === "\r") {
++    end -= 1;
++  }
++  return line.slice(0, end);
++}
++
++function logicalLines(raw: string): readonly string[] {
++  const physical = raw.split("\n");
++  const timestamped = TIMESTAMP.test(physical[0] ?? "");
++  const lines: string[] = [];
++  let joined = "";
++  for (const [at, line] of physical.entries()) {
++    joined += timestamped && TIMESTAMP.test(line) ? line.slice(TIMESTAMP_LENGTH) : line;
++    const next = physical[at + 1];
++    if (next === undefined) {
++      lines.push(joined);
++    } else if (!(timestamped && continues(next))) {
++      lines.push(withoutBreakReturns(joined));
++      joined = "";
++    }
++  }
++  return lines;
++}
++
++function escapeAt(line: string, at: number): Token {
++  const introducerAt = at + 1;
++  const introducer = line.charAt(introducerAt);
++  if (introducer < "@" || introducer > "_") {
++    return { kind: "dropped", end: introducerAt };
++  }
++  for (let end = introducerAt + 1; end < line.length; end += 1) {
++    const final = line.charAt(end);
++    if (final >= "@" && final <= "~") {
++      return introducer === "[" && final === "m"
++        ? { kind: "sgr", parameters: line.slice(introducerAt + 1, end), end: end + 1 }
++        : { kind: "dropped", end: end + 1 };
++    }
++  }
++  return { kind: "dropped", end: line.length };
++}
++
++function sectionAt(line: string, at: number): Token | null {
++  const marker = SECTION.exec(line.slice(at));
++  if (marker === null) {
++    return null;
++  }
++  const end = at + marker[0].length;
++  return line.startsWith(SECTION_END, end)
++    ? { kind: "section", end: end + SECTION_END.length }
++    : null;
++}
++
++function tokenAt(line: string, at: number): Token | null {
++  switch (line.charAt(at)) {
++    case ESCAPE:
++      return escapeAt(line, at);
++    case "\r":
++      return { kind: "clear", end: at + 1 };
++    case "s":
++      return sectionAt(line, at);
++    default:
++      return { kind: "dropped", end: at + 1 };
++  }
++}
++
++function nextSpecial(line: string, from: number): number {
++  const found = line.slice(from).search(CONTROL_OR_SECTION);
++  return found === -1 ? line.length : from + found;
++}
++
++function shownStyle({ foreground, background, bold, italic, underline, struck }: Pen): LogStyle {
++  const shown = bold ? foreground?.whenBold : foreground?.colour;
++  return { foreground: shown ?? null, background, bold, italic, underline, struck };
++}
++
++function sameStyle(left: LogStyle, right: LogStyle): boolean {
++  return (
++    left.foreground === right.foreground &&
++    left.background === right.background &&
++    left.bold === right.bold &&
++    left.italic === right.italic &&
++    left.underline === right.underline &&
++    left.struck === right.struck
++  );
++}
++
++function addText(scan: Scan, text: string): void {
++  if (text === "") {
++    return;
++  }
++  const last = scan.runs.at(-1);
++  if (last !== undefined && sameStyle(last.style, scan.style)) {
++    scan.runs[scan.runs.length - 1] = { text: last.text + text, style: last.style };
++  } else {
++    scan.runs.push({ text, style: scan.style });
++  }
++}
++
++function endLine(scan: Scan): void {
++  if (scan.runs.length > 0) {
++    scan.lines.push({ runs: scan.runs });
++    scan.runs = [];
++  }
++}
++
++function applied(scan: Scan, token: Token): void {
++  switch (token.kind) {
++    case "section":
++      endLine(scan);
++      return;
++    case "sgr":
++      scan.pen = penAfter(scan.pen, token.parameters);
++      scan.style = shownStyle(scan.pen);
++      return;
++    case "clear":
++      scan.runs = [];
++      return;
++    case "dropped":
++      return;
++  }
++}
++
++function scanLine(scan: Scan, line: string): void {
++  let textFrom = 0;
++  let at = nextSpecial(line, 0);
++  while (at < line.length) {
++    const token = tokenAt(line, at);
++    if (token === null) {
++      at = nextSpecial(line, at + 1);
++    } else {
++      addText(scan, line.slice(textFrom, at));
++      applied(scan, token);
++      textFrom = token.end;
++      at = nextSpecial(line, textFrom);
++    }
++  }
++  addText(scan, line.slice(textFrom));
++  endLine(scan);
++}
++
++function lineText(line: LogLine): string {
++  return line.runs.map((run) => run.text).join("");
++}
++
++/** The log as GitLab's job page shows it (the rules and their sources: `mergeRequests/AGENTS.md`). Total: any string
++ *  gives a view, "" none of its lines. */
++export function jobLogView(raw: string): JobLogView {
++  const scan: Scan = { pen: PLAIN_PEN, style: shownStyle(PLAIN_PEN), runs: [], lines: [] };
++  for (const line of logicalLines(raw)) {
++    scanLine(scan, line);
++  }
++  return { lines: scan.lines, text: scan.lines.map(lineText).join("\n") };
++}
++
++function pointAt(runs: readonly LogRun[], column: number, edge: "start" | "end"): RunPoint | null {
++  let runStart = 0;
++  for (const [run, { text }] of runs.entries()) {
++    const runEnd = runStart + text.length;
++    if (edge === "start" ? column < runEnd : column <= runEnd) {
++      return { run, offset: column - runStart };
++    }
++    runStart = runEnd;
++  }
++  return null;
++}
++
++/** Where each hit of `view.text` starts and ends among its line's runs, in order. A `from` at a run's end starts in
++ *  the next run (offset 0); a `to` at a run's end ends in that run (offset = its length); a hit outside the view is
++ *  left out. */
++export function hitPlaces(view: JobLogView, hits: readonly LogHit[]): readonly HitPlace[] {
++  const places: HitPlace[] = [];
++  for (const { line, from, to } of hits) {
++    const runs = view.lines[line]?.runs ?? [];
++    const start = from < 0 ? null : pointAt(runs, from, "start");
++    const end = pointAt(runs, to, "end");
++    if (start !== null && end !== null) {
++      places.push({ line, start, end });
++    }
++  }
++  return places;
++}
+diff --git a/frontend/src/mergeRequests/internal/jobLogSearch.test.ts b/frontend/src/mergeRequests/internal/jobLogSearch.test.ts
+new file mode 100644
+index 0000000..31ae55b
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/jobLogSearch.test.ts
+@@ -0,0 +1,26 @@
++import { expect, test } from "vitest";
++
++import { NO_RESULTS, firstHit, hitCountText, steppedHit } from "../index";
++
++test("the_first_current_match_is_the_last", () => {
++  expect(firstHit(17)).toBe(16);
++  expect(firstHit(1)).toBe(0);
++  expect(firstHit(0)).toBeNull();
++});
++
++test("steps_wrap_both_ways", () => {
++  expect(steppedHit(0, 3, false)).toBe(1);
++  expect(steppedHit(1, 3, false)).toBe(2);
++  expect(steppedHit(2, 3, false)).toBe(0);
++  expect(steppedHit(2, 3, true)).toBe(1);
++  expect(steppedHit(1, 3, true)).toBe(0);
++  expect(steppedHit(0, 3, true)).toBe(2);
++  expect(steppedHit(0, 1, false)).toBe(0);
++  expect(steppedHit(0, 1, true)).toBe(0);
++});
++
++test("the_count_reads_one_based", () => {
++  expect(hitCountText(2, 17)).toBe("3 of 17");
++  expect(hitCountText(0, 1)).toBe("1 of 1");
++  expect(NO_RESULTS).toBe("No results");
++});
+diff --git a/frontend/src/mergeRequests/internal/jobLogSearch.ts b/frontend/src/mergeRequests/internal/jobLogSearch.ts
+new file mode 100644
+index 0000000..e51c04d
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/jobLogSearch.ts
+@@ -0,0 +1,16 @@
++export const NO_RESULTS = "No results";
++
++/** The first current match: the last one in the log (rule 6); null when there is none. */
++export function firstHit(count: number): number | null {
++  return count > 0 ? count - 1 : null;
++}
++
++/** Enter (forward) / Shift+Enter (backwards), wrapping at both ends; `count` ≥ 1, `current` in [0, count). */
++export function steppedHit(current: number, count: number, backwards: boolean): number {
++  return (current + (backwards ? count - 1 : 1)) % count;
++}
++
++/** "3 of 17" for current 2 of 17 (`count` ≥ 1). */
++export function hitCountText(current: number, count: number): string {
++  return `${current + 1} of ${count}`;
++}
+diff --git a/frontend/src/mergeRequests/internal/sgr.ts b/frontend/src/mergeRequests/internal/sgr.ts
+new file mode 100644
+index 0000000..f363618
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/sgr.ts
+@@ -0,0 +1,99 @@
++import {
++  BASIC_COLOURS,
++  BRIGHT_OF,
++  basicColour,
++  type AnsiColour,
++  type BasicColour,
++} from "./ansiColours";
++
++type Foreground = { readonly colour: AnsiColour; readonly whenBold: AnsiColour };
++export type Pen = {
++  readonly foreground: Foreground | null;
++  readonly background: AnsiColour | null;
++  readonly bold: boolean;
++  readonly italic: boolean;
++  readonly underline: boolean;
++  readonly struck: boolean;
++};
++type PenChange = (pen: Pen) => Pen;
++
++export const PLAIN_PEN: Pen = {
++  foreground: null,
++  background: null,
++  bold: false,
++  italic: false,
++  underline: false,
++  struck: false,
++};
++
++function steady(colour: AnsiColour): Foreground {
++  return { colour, whenBold: colour };
++}
++
++function digitCodes(
++  prefix: string,
++  change: (pen: Pen, colour: BasicColour) => Pen,
++): Readonly<Record<string, PenChange>> {
++  return Object.fromEntries(
++    BASIC_COLOURS.map((colour, digit) => [`${prefix}${digit}`, (pen: Pen) => change(pen, colour)]),
++  );
++}
++
++const SGR_CODES: Readonly<Record<string, PenChange>> = {
++  "0": () => PLAIN_PEN,
++  "1": (pen) => ({ ...pen, bold: true }),
++  "3": (pen) => ({ ...pen, italic: true }),
++  "4": (pen) => ({ ...pen, underline: true }),
++  "9": (pen) => ({ ...pen, struck: true }),
++  "21": (pen) => ({ ...pen, bold: false }),
++  "22": (pen) => ({ ...pen, bold: false }),
++  "23": (pen) => ({ ...pen, italic: false }),
++  "24": (pen) => ({ ...pen, underline: false }),
++  "29": (pen) => ({ ...pen, struck: false }),
++  "39": (pen) => ({ ...pen, foreground: null }),
++  "99": (pen) => ({ ...pen, foreground: null }),
++  "49": (pen) => ({ ...pen, background: null }),
++  "109": (pen) => ({ ...pen, background: null }),
++  ...digitCodes("3", (pen, colour) => ({
++    ...pen,
++    foreground: { colour, whenBold: BRIGHT_OF[colour] },
++  })),
++  ...digitCodes("4", (pen, colour) => ({ ...pen, background: colour })),
++  ...digitCodes("9", (pen, colour) => ({ ...pen, foreground: steady(BRIGHT_OF[colour]) })),
++  ...digitCodes("10", (pen, colour) => ({ ...pen, background: BRIGHT_OF[colour] })),
++};
++
++const INDEXED_COLOUR = "5";
++const INDEXED_LENGTH = 3;
++
++function indexedColour(parameter: string): AnsiColour | null {
++  const index = Number.parseInt(parameter, 10);
++  return basicColour(Number.isNaN(index) ? 0 : index);
++}
++
++function withIndexed(pen: Pen, code: "38" | "48", colour: AnsiColour | null): Pen {
++  if (colour === null) {
++    return pen;
++  }
++  return code === "38" ? { ...pen, foreground: steady(colour) } : { ...pen, background: colour };
++}
++
++export function penAfter(pen: Pen, sgr: string): Pen {
++  const parameters = sgr.split(";");
++  while (parameters.at(-1) === "") {
++    parameters.pop();
++  }
++  let changed = parameters.length === 0 ? PLAIN_PEN : pen;
++  let at = 0;
++  while (at < parameters.length) {
++    const [code = "", selector, index] = parameters.slice(at, at + INDEXED_LENGTH);
++    if ((code === "38" || code === "48") && selector === INDEXED_COLOUR && index !== undefined) {
++      changed = withIndexed(changed, code, indexedColour(index));
++      at += INDEXED_LENGTH;
++    } else {
++      changed = SGR_CODES[code]?.(changed) ?? changed;
++      at += 1;
++    }
++  }
++  return changed;
++}

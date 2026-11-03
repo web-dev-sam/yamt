@@ -84,3 +84,16 @@ export {
   type ReadinessIcon,
 } from "./internal/readiness";
 export { rowAction, type ActionRow, type LocalMerge, type RowAction } from "./internal/rowAction";
+export { basicColour, type AnsiColour } from "./internal/ansiColours";
+export {
+  hitPlaces,
+  jobLogView,
+  type HitPlace,
+  type JobLogView,
+  type LogHit,
+  type LogLine,
+  type LogRun,
+  type LogStyle,
+  type RunPoint,
+} from "./internal/jobLog";
+export { NO_RESULTS, firstHit, hitCountText, steppedHit } from "./internal/jobLogSearch";
