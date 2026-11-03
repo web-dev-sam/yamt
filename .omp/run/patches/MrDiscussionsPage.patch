@@ -1,0 +1,579 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 4709ac4..c02f9bb 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -1,6 +1,6 @@
+ Owner skills: `skill://vue-conventions`, `skill://ts-conventions`. Vue chrome only: never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal`, `model` (oxlint). Store singleton via `useAppStore()` (merge window), `useCompareStore()` (compare window) or `useRangeStore()` (range window); the editor seams are `useMergeController`, `useCompareController` and `useRangeController`. Section order enforced by `scripts/check-sfc-order.ts`.
+ 
+-Compare window (plan §2 #93–#97, #101): a second root, `CompareApp.vue` over `compareStore.ts`, mounted by `main.ts` when `<html data-window="compare">` (app, `yamt --diff`) or `?diff` / `?diff=<case>` (fixture mode). Every compare-only file carries the prefix — `Compare*.vue`, `compare*.ts`, `useCompare*.ts` — and none imports `store.ts`, `App.vue` or `lsp/` (fence PM7, `scripts/fences.ts`). `CompareTabList.vue` is the panel in the file list's place (rename inline); the store's `visited` (written with `tabs`/`shown`) holds the tabs shown at least once, and `CompareApp` renders one `CompareView.vue` per entry; showing or adding a tab returns the screen to the tabs. Its controller lives in `useCompareController` (built once the hosts exist and `loadTab` answered; settled → `saveColumn` → `showComparison`; tracked for `flushAll` at close: one close flush at a time, which also waits for every write in flight); `CompareLanguagePicker.vue` is the language drop-down over `useDropdownMenu`, its label "Auto" until the tab's first detection. The gear's `SettingsView` has no slot here, so no language-server section. Both roots set `<html data-theme>` through `settingsStore.ts` `useThemeAttribute`.
++Compare window (plan §2 #93–#97, #101): a second root, `CompareApp.vue` over `compareStore.ts`, mounted by `main.ts` when `<html data-window="compare">` (app, `yamt --diff`) or `?diff` / `?diff=<case>` (fixture mode). Every compare-only file carries the prefix — `Compare*.vue`, `compare*.ts`, `useCompare*.ts` — and none imports `store.ts`, `App.vue` or `lsp/` (fence PM7, `scripts/fences.ts`). `CompareTabList.vue` is the panel in the file list's place (rename inline); the store's `visited` (written with `tabs`/`shown`) holds the tabs shown at least once, and `CompareApp` renders one `CompareView.vue` per entry; showing or adding a tab returns the screen to the tabs. Its controller lives in `useCompareController` (built once the hosts exist and `loadTab` answered; settled → `saveColumn` → `showComparison`; tracked for `flushAll` at close: one close flush at a time, which also waits for every write in flight); `CompareLanguagePicker.vue` is the language drop-down over `useDropdownMenu`, its label "Auto" until the tab's first detection. The gear's `SettingsView` slot holds only `MergeRequestDiscussionSetting.vue` here, so no language-server section. Both roots set `<html data-theme>` through `settingsStore.ts` `useThemeAttribute`.
+ 
+ Range window (plan §2 #103–#106): a third root, `RangeApp.vue` over `rangeStore.ts`, mounted by `main.ts` when `<html data-window="range">` (app, `yamt --diff=<range>`) or `?range` / `?range=<case>` (fixture mode). Every range-only file carries the prefix — `Range*.vue`, `range*.ts`, `useRange*.ts` — and none imports `store.ts`, `App.vue`, `compareStore.ts`, `CompareApp.vue` or `lsp/` (fence PM9; PM7 keeps the compare root from `rangeStore.ts`/`RangeApp.vue`). The panel is the shared `FileList.vue` with `RangeFileRow.vue` in its `#file` slot (coloured A/M/D/R with its word as title, the old path of a renamed file muted, `+n −m`). `start` mirrors `openRange`'s reply; `shown` is written only by `showFile` and `startUp` (the first file at start); `visited` keeps first-visit order, at most `MOUNTED_FILES` (16) views mounted, the least recently shown dropped when another file is shown. A failed `loadFile` reports `open` with the path and drops the file from `visited`, so selecting it again retries; that file's later success clears the problem. `RangeView.vue` (one per visited file, `PaneFrame`) shows the header (icon, path or "old → new", the mode note, ↑/↓, gear), the column headers (side and short id, the subject as title) and either the two read-only columns or one sentence. `useRangeController` (`followRange`) keeps a texts reply in a non-reactive slot until the hosts exist, builds `RangeController` once, follows preferences, and drops a reply that lands after unmount; a sentence kind builds nothing. Every range word is in `rangeText.ts`. No close guard: the window closes at once.
+ 
+@@ -52,6 +52,8 @@ Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of t
+ 
+ Job logs (request `docs/slices/request-ci-job-log.md`, plan §2 #158–#161): `mergeRequestJobLogs.ts` holds the window's one log box (`jobLog`): Shift over the job already loading or shown changes nothing; any other job writes a new `loading` entry, and a reply is written only into the entry it was asked for (parsed once by `mergeRequests/` `jobLogView`); `closeJobLog` sets null. The search texts are remembered per job name, no repository key (`jobSearch`/`setJobSearch`, key `yamt.mergeRequests.jobSearches`); "" forgets one. A Shift tap is `useShiftTaps()` (`useShiftHeld.ts`): Shift down then up with no other key and no pointer press between, so Shift+Tab, Shift+click and a typed capital never count. `CiStatusBox.vue` watches the count, never `open && held` (a Shift held as the box opens would count), and asks for the pointed job (its `<li>`, since a disabled button gets no pointer events), else the focused one, only while its box is open, the job has a page and focus is in no text field (`typingTarget.ts` `isTypingTarget`, window-neutral; the log's own field included, so Shift there types a capital and switches nothing). The pointed and focused jobs are forgotten when the CI box closes (Escape removes the `<li>` without its `pointerleave`). The job whose log is shown has no hover tip (its tip would cover the log's header; a Shift press does not hide a tip). `CiStatusJobLog.vue` is a DOM child of the CI box's hover area, after the box, so `useHoverBox`'s one inside rule holds both and a scroll inside the log closes nothing; it sits left of the CI box, tops level (`useMenuPlacement`, clamped), is keyed by the job's page and closes when the CI box does. Escape in the log is the log's: it prevents the default and closes, and `CiStatusBox` puts focus on that job's button (found by its `data-job-page`); `useHoverBox` ignores an Escape already `defaultPrevented`, so a second Escape closes the CI box. A refused or failed log moves focus from the field to the log body, so Shift over the job asks again as its words say. Lines are static: one `div` per line, one `span` per run with `mergeRequestLogLook.ts` `runClasses` and the run's text as text (never markup); a run with an ANSI background takes the panel colour as its text colour (every `--color-ansi-*` is ≥ 4.5:1 against `--color-panel`, so the pair is too); the log opens at its end (`useFollowEnd`). The search (`search/` `matcherOf`, case-insensitive, mapped onto runs by `hitPlaces`) paints CSS Custom Highlights `job-log-match` and `job-log-current` over those text nodes, with no DOM change; every hit counts and is stepped, but `job-log-match` holds only the hits on lines in view ± one screen (`mergeRequests/` `firstLineBelow` on the lines' `offsetTop`, `placesOnLines`), rebuilt at once on a search and once per animation frame on a scroll or a step (tens of thousands of live ranges freeze WebKitGTK for seconds); the current hit starts at the last one and is centred by `scrollTop` only; Enter / Shift+Enter step it. Each name is registered once per log with one `Highlight`, cleared and refilled on every rebuild: WebKitGTK 2.54 leaves the ranges of a `Highlight` that `CSS.highlights.set` replaces painted (#2191). Both are deleted when the log unmounts. Opening fills the field with the remembered text, selected and searched. Words in `mergeRequestLogText.ts`.
+ 
++Discussions (request `docs/slices/request-mr-discussions.md`, design `docs/slices/briefs/mr-discussions-design.md` option A, plan §2 #163, #164): `mergeRequestDiscussions.ts` owns `discussions` (its only writer), one entry per asked row while the list stands. One call at a time; a generation is raised by `replaced` and by "off", so an older answer is dropped. "Load fully": the rows with a count above 0 are queued from `received` (`listed`), all again at `ended`'s swap (`replaced`), and a watch on the setting asks them when it turns to full, with no reload. "Load lazily": `askDiscussions(iid)` puts that row first and asks it once. "Off": every entry and any call in flight dropped. Log `mergeRequests.discussions_read` (counts only). `MergeRequestDiscussions.vue` is the row's count: with "Off" or a count of 0 the plain count (`vTooltip` `discussionsText`, muted at 0), no box and no ask; else the people box's shape (`useHoverBox`, an opener button named by `discussionsText` with no tooltip, #154) whose `open` watch calls `askDiscussions`, so a hover and keyboard focus both ask. Its `role="status"` header is `DISCUSSIONS_LOADING` with no entry or while loading, `turnSummaryText(turnCounts(…, me))` once read, else `discussionsRefusedText` (the list's glab words) or `problemText` at step `discussions` in the error colour — never the problem bar. Its list is `discussionTurns(…, me)` (the viewer's turn first, newest first); each line is a button calling `openPage("discussion", page)` when the last note has a page, else a `div`: the author's picture and `noteAuthorName`, `agoText`, `turnText` (the viewer's turn in `text-primary`), `placeText`, and `noteExcerpt` clamped to 3 lines. All of its text is interpolated, never `v-html` (RK60). `MergeRequestDiscussionSetting.vue` is Settings → "Discussion details" (`DISCUSSION_DETAILS_OPTIONS` through `ChoiceButtons`, `setDiscussionDetails` on the settings seam, the hint under it); the compare and the range root put it into `SettingsView`'s slot, and the merge window, which has no merge-request page, has no such section.
++
+ Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid (`rechecked`, `mergeRequests/`) among its own load's rows only — `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap, `null` once a failed first load cleared them) is that load, else the load's own buffer (empty unless it is a refresh, read only by a refresh's swap) — so any other is dropped, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
+ 
+ Merge-request conflicts (plan §2 #138–#143): `MergeRequestRow.vue` shows the change size in its meta line (`sizeParts`, each part its own span, title `sizeTitle` on the whole size; none when GitLab gave none), `MergeRequestReadiness.vue` (a `w-7` column right of the CI box: the Lucide icon of `readinessIcon`, title and accessible name `readinessText`) and, left of the open-changes button, the row's one action from `mergeRequests/` `rowAction` (Resolve `git-merge`, Continue `step-forward`; a disabled one through the `<span :title>` hover of `OperationButtons.vue`; the spinner while it runs) with its reply line under the row (`rowReplyText`, `role="status"`, the error colour only when `refused`). `mergeRequestActions.ts` `createRowActions` (held by the slice) is the only writer of `actions` (one `RowActing` per row, replaced by the next click; a click while the row runs sends nothing) and `localMerge` (rules 8, 9): it is read at `show()`, on the window's `focus` while the page is shown (`MergeRequestsView.vue`) and after every resolve or continue reply; a failed read keeps what was known and reports the `localMerge` step. Its `setRow` (a new map with the row's value, or without the row for `null`) and `claimRow` (the row set busy unless it already is) are the one per-row write and busy guard of `actions` and of the slice's `openings`.
+diff --git a/frontend/src/ui/CompareApp.vue b/frontend/src/ui/CompareApp.vue
+index 6bec3a3..b62f9ea 100644
+--- a/frontend/src/ui/CompareApp.vue
++++ b/frontend/src/ui/CompareApp.vue
+@@ -6,6 +6,7 @@ import { log, onWindowClose } from "../ipc";
+ import { useCompareStore } from "./compareStore";
+ import CompareTabList from "./CompareTabList.vue";
+ import CompareView from "./CompareView.vue";
++import MergeRequestDiscussionSetting from "./MergeRequestDiscussionSetting.vue";
+ import MergeRequestsView from "./MergeRequestsView.vue";
+ import NoticeBar from "./NoticeBar.vue";
+ import { unexpected } from "./problem";
+@@ -89,7 +90,9 @@ async function watchWindowClose(): Promise<void> {
+           :tab="tab"
+           :shown="tab.id === shown && screen.kind === 'files'"
+         />
+-        <SettingsView v-if="screen.kind === 'settings'" />
++        <SettingsView v-if="screen.kind === 'settings'">
++          <MergeRequestDiscussionSetting />
++        </SettingsView>
+         <MergeRequestsView v-if="screen.kind === 'mergeRequests'" :asking="question !== null" />
+       </div>
+     </div>
+diff --git a/frontend/src/ui/MergeRequestDiscussionSetting.vue b/frontend/src/ui/MergeRequestDiscussionSetting.vue
+new file mode 100644
+index 0000000..a8f5eb9
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestDiscussionSetting.vue
+@@ -0,0 +1,23 @@
++<script setup lang="ts">
++import ChoiceButtons from "./ChoiceButtons.vue";
++import {
++  DISCUSSION_DETAILS,
++  DISCUSSION_DETAILS_HINT,
++  DISCUSSION_DETAILS_OPTIONS,
++} from "./mergeRequestsText";
++import { useSettingsStore } from "./settingsStore";
++
++const { settings, setDiscussionDetails } = useSettingsStore();
++</script>
++
++<template>
++  <section aria-labelledby="settings-discussion-details">
++    <h3 id="settings-discussion-details" class="mb-2 font-semibold">{{ DISCUSSION_DETAILS }}</h3>
++    <ChoiceButtons
++      :options="DISCUSSION_DETAILS_OPTIONS"
++      :pressed="settings.discussionDetails"
++      @pick="setDiscussionDetails"
++    />
++    <p class="mt-1 text-fg-muted">{{ DISCUSSION_DETAILS_HINT }}</p>
++  </section>
++</template>
+diff --git a/frontend/src/ui/MergeRequestDiscussions.vue b/frontend/src/ui/MergeRequestDiscussions.vue
+new file mode 100644
+index 0000000..a2e07c0
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestDiscussions.vue
+@@ -0,0 +1,172 @@
++<script setup lang="ts">
++import { computed, useTemplateRef, watch } from "vue";
++import MessageSquare from "~icons/lucide/message-square";
++
++import type { MergeRequestRow, WebPage } from "../ipc";
++import {
++  agoText,
++  discussionTurns,
++  DISCUSSIONS_LABEL,
++  noteAuthorName,
++  noteExcerpt,
++  placeText,
++  turnCounts,
++  turnSummaryText,
++  turnText,
++} from "../mergeRequests";
++import type { DiscussionLoad } from "./mergeRequestDiscussions";
++import MergeRequestPicture from "./MergeRequestPicture.vue";
++import { useMergeRequests } from "./mergeRequestsStore";
++import { discussionsRefusedText, discussionsText, DISCUSSIONS_LOADING } from "./mergeRequestsText";
++import { problemText } from "./problemText";
++import { vTooltip } from "./tooltip";
++import { useHoverBox } from "./useHoverBox";
++
++type Header = { readonly text: string; readonly failed: boolean };
++
++const props = defineProps<{ row: MergeRequestRow; now: number }>();
++
++const { discussions, discussionDetails, askDiscussions, me, openPage } = useMergeRequests();
++const area = useTemplateRef<HTMLSpanElement>("area");
++const opener = useTemplateRef<HTMLButtonElement>("opener");
++const box = useTemplateRef<HTMLDivElement>("box");
++const { open, placement, on } = useHoverBox({
++  area: () => area.value,
++  opener: () => opener.value,
++  box,
++});
++
++const count = computed(() => props.row.openDiscussions);
++const label = computed(() => discussionsText(count.value));
++const boxed = computed(() => discussionDetails.value !== "off" && count.value > 0);
++const load = computed(() => discussions.value.get(props.row.iid));
++const header = computed(() => headerOf(load.value));
++const lines = computed(() =>
++  load.value?.kind === "read"
++    ? discussionTurns(load.value.discussions, me.value).map(({ discussion, turn }, index) => ({
++        key: index,
++        page: discussion.last.page,
++        author: discussion.last.author,
++        name: noteAuthorName(discussion.last.author),
++        ago: agoText(discussion.last.createdAt, props.now),
++        turn: turnText(turn),
++        viewersTurn: turn === "viewer",
++        place: placeText(discussion.place),
++        excerpt: noteExcerpt(discussion.last.text),
++      }))
++    : [],
++);
++
++watch(open, (isOpen) => {
++  if (isOpen) {
++    askDiscussions(props.row.iid);
++  }
++});
++
++function headerOf(shown: DiscussionLoad | undefined): Header {
++  if (shown === undefined) {
++    return { text: DISCUSSIONS_LOADING, failed: false };
++  }
++  switch (shown.kind) {
++    case "loading":
++      return { text: DISCUSSIONS_LOADING, failed: false };
++    case "read":
++      return { text: turnSummaryText(turnCounts(shown.discussions, me.value)), failed: false };
++    case "refused":
++      return { text: discussionsRefusedText(shown.answer), failed: true };
++    case "failed":
++      return {
++        text: problemText(
++          { action: "mergeRequests", step: "discussions", cause: shown.cause },
++          navigator.platform,
++        ),
++        failed: true,
++      };
++    default: {
++      const _exhaustive: never = shown;
++      return _exhaustive;
++    }
++  }
++}
++
++async function openLine(page: WebPage | null): Promise<void> {
++  if (page !== null) {
++    await openPage("discussion", page);
++  }
++}
++</script>
++
++<template>
++  <span
++    v-if="!boxed"
++    v-tooltip="label"
++    class="flex items-center gap-1"
++    :class="{ 'text-fg-muted': count === 0 }"
++    :aria-label="label"
++  >
++    <MessageSquare class="size-4" aria-hidden="true" />
++    <span aria-hidden="true">{{ count }}</span>
++  </span>
++  <span
++    v-else
++    ref="area"
++    data-row-control
++    class="flex cursor-default"
++    @click.stop
++    @pointerenter="on.pointerenter"
++    @pointerleave="on.pointerleave"
++    @focusin="on.focusin"
++    @focusout="on.focusout"
++    @keydown="on.keydown"
++  >
++    <button
++      ref="opener"
++      type="button"
++      :aria-expanded="open"
++      :aria-label="label"
++      class="flex items-center gap-1 rounded p-0.5 hover:bg-hover"
++    >
++      <MessageSquare class="size-4" aria-hidden="true" />
++      <span aria-hidden="true">{{ count }}</span>
++    </button>
++    <div
++      v-if="open"
++      ref="box"
++      tabindex="-1"
++      class="fixed z-10 max-h-[60vh] w-max max-w-[30rem] overflow-y-auto rounded-md border border-control-border bg-panel-inline p-1 text-fg shadow-lg outline-none"
++      :style="placement"
++    >
++      <p
++        role="status"
++        class="px-2 pt-1 pb-0.5"
++        :class="header.failed ? 'text-problem-error' : 'text-fg-muted'"
++      >
++        {{ header.text }}
++      </p>
++      <ul :aria-label="DISCUSSIONS_LABEL">
++        <li v-for="line in lines" :key="line.key">
++          <component
++            :is="line.page === null ? 'div' : 'button'"
++            :type="line.page === null ? undefined : 'button'"
++            class="block w-full rounded px-2 py-1 text-left"
++            :class="{ 'cursor-pointer hover:bg-hover': line.page !== null }"
++            @click="openLine(line.page)"
++          >
++            <span class="flex items-center gap-2">
++              <MergeRequestPicture :person="line.author" size="box" aria-hidden="true" />
++              <span>{{ line.name }}</span>
++              <span class="text-fg-muted">{{ line.ago }}</span>
++              <span
++                class="ml-auto pl-4"
++                :class="line.viewersTurn ? 'font-semibold text-primary' : 'text-fg-muted'"
++                >{{ line.turn }}</span
++              >
++            </span>
++            <span class="block wrap-break-word text-fg-muted">{{ line.place }}</span>
++            <span class="line-clamp-3 wrap-break-word whitespace-pre-line">{{ line.excerpt }}</span>
++          </component>
++        </li>
++      </ul>
++    </div>
++  </span>
++</template>
+diff --git a/frontend/src/ui/MergeRequestRow.vue b/frontend/src/ui/MergeRequestRow.vue
+index 9533d83..db97682 100644
+--- a/frontend/src/ui/MergeRequestRow.vue
++++ b/frontend/src/ui/MergeRequestRow.vue
+@@ -3,7 +3,6 @@ import { computed } from "vue";
+ import FileDiff from "~icons/lucide/file-diff";
+ import GitMerge from "~icons/lucide/git-merge";
+ import LoaderCircle from "~icons/lucide/loader-circle";
+-import MessageSquare from "~icons/lucide/message-square";
+ import StepForward from "~icons/lucide/step-forward";
+ import ThumbsUp from "~icons/lucide/thumbs-up";
+ 
+@@ -20,6 +19,7 @@ import {
+ } from "../mergeRequests";
+ import CiStatusBox from "./CiStatusBox.vue";
+ import type { RowActing } from "./mergeRequestActions";
++import MergeRequestDiscussions from "./MergeRequestDiscussions.vue";
+ import MergeRequestDueDate from "./MergeRequestDueDate.vue";
+ import MergeRequestLabels from "./MergeRequestLabels.vue";
+ import MergeRequestPeople from "./MergeRequestPeople.vue";
+@@ -28,7 +28,6 @@ import MergeRequestReadiness from "./MergeRequestReadiness.vue";
+ import type { Opening, RerequestAsk } from "./mergeRequests";
+ import {
+   approvalsText,
+-  discussionsText,
+   mergeRequestReference,
+   openChangesTitle,
+   openPageTitle,
+@@ -61,7 +60,6 @@ const mr = computed(() => mergeRequestReference(props.row.iid));
+ const author = computed(() => authorText(props.row.author));
+ const created = computed(() => createdAgo(props.row.createdAt, props.now));
+ const createdTitle = computed(() => dateTimeText(props.row.createdAt));
+-const discussions = computed(() => discussionsText(props.row.openDiscussions));
+ const approvals = computed(() => ({
+   count: props.row.approvedBy.length,
+   label: approvalsText(props.row.approvedBy.length),
+@@ -160,14 +158,8 @@ function act(): void {
+       <span class="flex w-24 shrink-0">
+         <MergeRequestDueDate :due="due" :now="now" @set="emit('setDue', row.iid, $event)" />
+       </span>
+-      <span
+-        v-tooltip="discussions"
+-        class="flex w-12 shrink-0 items-center gap-1"
+-        :class="{ 'text-fg-muted': row.openDiscussions === 0 }"
+-        :aria-label="discussions"
+-      >
+-        <MessageSquare class="size-4" aria-hidden="true" />
+-        <span aria-hidden="true">{{ row.openDiscussions }}</span>
++      <span class="flex w-12 shrink-0">
++        <MergeRequestDiscussions :row :now />
+       </span>
+       <span
+         v-tooltip="approvals.names"
+diff --git a/frontend/src/ui/RangeApp.vue b/frontend/src/ui/RangeApp.vue
+index 2b2758d..a925690 100644
+--- a/frontend/src/ui/RangeApp.vue
++++ b/frontend/src/ui/RangeApp.vue
+@@ -5,6 +5,7 @@ import { computed, onMounted, watch } from "vue";
+ import { log, onWindowClose, type RangeLineCounts } from "../ipc";
+ import AgentSettings from "./AgentSettings.vue";
+ import FileList from "./FileList.vue";
++import MergeRequestDiscussionSetting from "./MergeRequestDiscussionSetting.vue";
+ import MergeRequestsButton from "./MergeRequestsButton.vue";
+ import MergeRequestsView from "./MergeRequestsView.vue";
+ import NoticeBar from "./NoticeBar.vue";
+@@ -146,6 +147,7 @@ function folderLines(path: string): RangeLineCounts {
+           <p class="island bg-panel px-4 py-3">{{ emptyText }}</p>
+         </div>
+         <SettingsView v-if="screen.kind === 'settings'">
++          <MergeRequestDiscussionSetting />
+           <AgentSettings v-if="ai !== null" />
+         </SettingsView>
+         <MergeRequestsView v-if="screen.kind === 'mergeRequests'" :asking="question !== null" />
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index c535250..8c91c50 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
+ 
+ import {
+   isMergeRequestIid,
++  type DiscussionsAnswer,
+   type ListEnd,
+   type MergeRequestIid,
+   type OpenReply,
+@@ -25,6 +26,11 @@ import {
+   PICK_TODAY,
+   PREVIOUS_MONTH,
+   clearFilterTitle,
++  DISCUSSION_DETAILS,
++  DISCUSSION_DETAILS_HINT,
++  DISCUSSION_DETAILS_OPTIONS,
++  DISCUSSIONS_LOADING,
++  discussionsRefusedText,
+   discussionsText,
+   dueDateLabel,
+   jobTitle,
+@@ -86,6 +92,37 @@ test.each<[ListEnd, string | null]>([
+   expect(listFailureText(end)).toBe(words);
+ });
+ 
++test.each<[Exclude<DiscussionsAnswer, { kind: "open" }>, string]>([
++  [
++    { kind: "glabMissing" },
++    "glab is not installed (not found on PATH) — install glab, then Refresh.",
++  ],
++  [
++    { kind: "notLoggedIn", detail: DETAIL },
++    `glab is not logged in: ${DETAIL} — run glab auth login in a terminal, then Refresh.`,
++  ],
++  [{ kind: "failed", message: "glab timed out" }, "glab failed: glab timed out"],
++])(
++  "a refused discussions answer %j reads %j, the list's words (catches the two drifting apart)",
++  (answer, words) => {
++    expect(discussionsRefusedText(answer)).toBe(words);
++  },
++);
++
++test("the discussion box's and setting's words are the request's (a renamed choice or hint)", () => {
++  expect(DISCUSSIONS_LOADING).toBe("Loading discussions…");
++  expect(DISCUSSION_DETAILS).toBe("Discussion details");
++  expect(DISCUSSION_DETAILS_OPTIONS).toEqual([
++    { value: "full", label: "Load fully" },
++    { value: "lazy", label: "Load lazily" },
++    { value: "off", label: "Off" },
++  ]);
++  expect(DISCUSSION_DETAILS_HINT).toBe(
++    "On the merge-request page: every listed merge request's open discussions, right after the list; one " +
++      "merge request's, when you first hover its count; or none.",
++  );
++});
++
+ test.each([
+   [0, "0 open discussions", "0 approvals"],
+   [1, "1 open discussion", "1 approval"],
+@@ -147,6 +184,11 @@ test.each<[PageOpened, PageKind, string | null]>([
+     "mergeRequest",
+     "This merge request's page was not listed by GitLab, so yamt did not open it.",
+   ],
++  [
++    { kind: "notOffered" },
++    "discussion",
++    "This comment's page was not listed by GitLab, so yamt did not open it.",
++  ],
+   [
+     { kind: "failed", message: "xdg-open: not found" },
+     "mergeRequest",
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index 1f44ec3..c6740d5 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -1,5 +1,7 @@
+ import type {
+   ContinueMergeReply,
++  DiscussionDetails,
++  DiscussionsAnswer,
+   ListEnd,
+   MergeRequestIid,
+   OpenReply,
+@@ -14,7 +16,7 @@ import { leftoverText } from "./leftoverText";
+ import type { RowReply } from "./mergeRequestActions";
+ import { counted } from "./serverText";
+ 
+-export type PageKind = "job" | "mergeRequest";
++export type PageKind = "job" | "mergeRequest" | "discussion";
+ 
+ export const PAGE_TITLE = "Merge requests";
+ export const LIST_LABEL = "Open merge requests";
+@@ -45,31 +47,35 @@ export const DUE_DATE_PLACEHOLDER = "DD.MM.YYYY";
+ export const PICK_TODAY = "Today";
+ export const PREVIOUS_MONTH = "Previous month";
+ export const NEXT_MONTH = "Next month";
++export const DISCUSSIONS_LOADING = "Loading discussions…";
++export const DISCUSSION_DETAILS = "Discussion details";
++export const DISCUSSION_DETAILS_OPTIONS: readonly {
++  readonly value: DiscussionDetails;
++  readonly label: string;
++}[] = [
++  { value: "full", label: "Load fully" },
++  { value: "lazy", label: "Load lazily" },
++  { value: "off", label: "Off" },
++];
++export const DISCUSSION_DETAILS_HINT =
++  "On the merge-request page: every listed merge request's open discussions, right after the list; one merge " +
++  "request's, when you first hover its count; or none.";
+ 
+-function glabMissingListText(): string {
+-  return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
+-}
+-
+-function notLoggedInListText(detail: string): string {
+-  return `${glabNotLoggedInText(detail)} — run glab auth login in a terminal, then Refresh.`;
++export function discussionsRefusedText(
++  answer: Exclude<DiscussionsAnswer, { readonly kind: "open" }>,
++): string {
++  switch (answer.kind) {
++    case "glabMissing":
++      return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
++    case "notLoggedIn":
++      return `${glabNotLoggedInText(answer.detail)} — run glab auth login in a terminal, then Refresh.`;
++    case "failed":
++      return glabFailedText(answer.message);
++  }
+ }
+ 
+ export function listFailureText(end: ListEnd): string | null {
+-  switch (end.kind) {
+-    case "loaded":
+-    case "cut":
+-      return null;
+-    case "glabMissing":
+-      return glabMissingListText();
+-    case "notLoggedIn":
+-      return notLoggedInListText(end.detail);
+-    case "failed":
+-      return glabFailedText(end.message);
+-    default: {
+-      const _exhaustive: never = end;
+-      return _exhaustive;
+-    }
+-  }
++  return end.kind === "loaded" || end.kind === "cut" ? null : discussionsRefusedText(end);
+ }
+ 
+ export function mergeRequestReference(iid: MergeRequestIid): string {
+@@ -124,9 +130,8 @@ export function rerequestReplyText(
+     case "notOpen":
+       return "This merge request is no longer open.";
+     case "glabMissing":
+-      return glabMissingListText();
+     case "notLoggedIn":
+-      return notLoggedInListText(reply.detail);
++      return discussionsRefusedText(reply);
+     case "refused":
+     case "failed":
+       return reply.message;
+@@ -181,6 +186,7 @@ export function openReplyText(
+ const NOT_OFFERED: Readonly<Record<PageKind, string>> = {
+   job: "This job's page was not listed by GitLab, so yamt did not open it.",
+   mergeRequest: "This merge request's page was not listed by GitLab, so yamt did not open it.",
++  discussion: "This comment's page was not listed by GitLab, so yamt did not open it.",
+ };
+ 
+ export function pageProblemText(opened: PageOpened, clicked: PageKind): string | null {
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index c70283c..2bd5703 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -46,7 +46,9 @@ export type MergeRequestStep =
+   | "resolve"
+   | "continue"
+   | "localMerge"
+-  | "rerequestReview";
++  | "rerequestReview"
++  | "discussions"
++  | "discussion";
+ 
+ export type Problem =
+   | { readonly action: "list"; readonly cause: ProblemCause }
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index 1516638..1c570ff 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -325,6 +325,8 @@ test.each([
+   ["localMerge", "Could not check for an unfinished merge: yamt's worker stopped; try again."],
+   ["jobLog", "Could not read the job's log: yamt's worker stopped; try again."],
+   ["rerequestReview", "Could not re-request the review: yamt's worker stopped; try again."],
++  ["discussions", "Could not read the discussions: yamt's worker stopped; try again."],
++  ["discussion", "Could not open the comment's page: yamt's worker stopped; try again."],
+ ] as const)("a failed merge-request call at %s says what failed", (step, words) => {
+   expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
+ });
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 96df664..232f79b 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -81,6 +81,8 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
+   continue: "Could not continue the merge request's merge",
+   localMerge: "Could not check for an unfinished merge",
+   rerequestReview: "Could not re-request the review",
++  discussions: "Could not read the discussions",
++  discussion: "Could not open the comment's page",
+ };
+ 
+ const FIXED_ATTEMPT_WORDS: Readonly<
+diff --git a/frontend/src/ui/settingsStore.test.ts b/frontend/src/ui/settingsStore.test.ts
+index a446bdf..2d44437 100644
+--- a/frontend/src/ui/settingsStore.test.ts
++++ b/frontend/src/ui/settingsStore.test.ts
+@@ -20,6 +20,7 @@ function settingsStore(settings = shallowRef(startSettings("dark"))): SettingsSt
+     closeSettings: nothingShown,
+     setTheme: nothing,
+     setAntialiasing: nothing,
++    setDiscussionDetails: nothing,
+     moveSettings: nothing,
+     addKey: nothing,
+     changeKey: nothing,
+@@ -40,6 +41,18 @@ test("the settings view gets the store its window root registered, and nothing b
+   expect(useSettingsStore()).toBe(store);
+ });
+ 
++test("the settings view's Discussion details choice reaches the window's action (a seam that drops it)", async () => {
++  const picked: string[] = [];
++  registerSettingsStore({
++    ...settingsStore(),
++    setDiscussionDetails: async (details) => {
++      picked.push(details);
++    },
++  });
++  await useSettingsStore().setDiscussionDetails("lazy");
++  expect(picked).toEqual(["lazy"]);
++});
++
+ test("the page's theme attribute and color-scheme follow the theme in use, a light editor theme light", async () => {
+   const settings = shallowRef(startSettings("dark"));
+   registerSettingsStore(settingsStore(settings));
+diff --git a/frontend/src/ui/settingsStore.ts b/frontend/src/ui/settingsStore.ts
+index c98204d..ef59059 100644
+--- a/frontend/src/ui/settingsStore.ts
++++ b/frontend/src/ui/settingsStore.ts
+@@ -12,6 +12,7 @@ export type SettingsStore = Pick<
+   SettingsActions,
+   | "setTheme"
+   | "setAntialiasing"
++  | "setDiscussionDetails"
+   | "moveSettings"
+   | "addKey"
+   | "changeKey"

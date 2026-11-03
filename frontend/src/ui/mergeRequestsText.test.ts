@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import {
   isMergeRequestIid,
+  type DiscussionsAnswer,
   type ListEnd,
   type MergeRequestIid,
   type OpenReply,
@@ -25,6 +26,11 @@ import {
   PICK_TODAY,
   PREVIOUS_MONTH,
   clearFilterTitle,
+  DISCUSSION_DETAILS,
+  DISCUSSION_DETAILS_HINT,
+  DISCUSSION_DETAILS_OPTIONS,
+  DISCUSSIONS_LOADING,
+  discussionsRefusedText,
   discussionsText,
   dueDateLabel,
   jobTitle,
@@ -84,6 +90,37 @@ test.each<[ListEnd, string | null]>([
   [{ kind: "failed", message: "glab timed out" }, "glab failed: glab timed out"],
 ])("the list end %j is a failure reading %j, or none when the list was listed", (end, words) => {
   expect(listFailureText(end)).toBe(words);
+});
+
+test.each<[Exclude<DiscussionsAnswer, { kind: "open" }>, string]>([
+  [
+    { kind: "glabMissing" },
+    "glab is not installed (not found on PATH) — install glab, then Refresh.",
+  ],
+  [
+    { kind: "notLoggedIn", detail: DETAIL },
+    `glab is not logged in: ${DETAIL} — run glab auth login in a terminal, then Refresh.`,
+  ],
+  [{ kind: "failed", message: "glab timed out" }, "glab failed: glab timed out"],
+])(
+  "a refused discussions answer %j reads %j, the list's words (catches the two drifting apart)",
+  (answer, words) => {
+    expect(discussionsRefusedText(answer)).toBe(words);
+  },
+);
+
+test("the discussion box's and setting's words are the request's (a renamed choice or hint)", () => {
+  expect(DISCUSSIONS_LOADING).toBe("Loading discussions…");
+  expect(DISCUSSION_DETAILS).toBe("Discussion details");
+  expect(DISCUSSION_DETAILS_OPTIONS).toEqual([
+    { value: "full", label: "Load fully" },
+    { value: "lazy", label: "Load lazily" },
+    { value: "off", label: "Off" },
+  ]);
+  expect(DISCUSSION_DETAILS_HINT).toBe(
+    "On the merge-request page: every listed merge request's open discussions, right after the list; one " +
+      "merge request's, when you first hover its count; or none.",
+  );
 });
 
 test.each([
@@ -146,6 +183,11 @@ test.each<[PageOpened, PageKind, string | null]>([
     { kind: "notOffered" },
     "mergeRequest",
     "This merge request's page was not listed by GitLab, so yamt did not open it.",
+  ],
+  [
+    { kind: "notOffered" },
+    "discussion",
+    "This comment's page was not listed by GitLab, so yamt did not open it.",
   ],
   [
     { kind: "failed", message: "xdg-open: not found" },

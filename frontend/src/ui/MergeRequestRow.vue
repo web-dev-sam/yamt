@@ -3,7 +3,6 @@ import { computed } from "vue";
 import FileDiff from "~icons/lucide/file-diff";
 import GitMerge from "~icons/lucide/git-merge";
 import LoaderCircle from "~icons/lucide/loader-circle";
-import MessageSquare from "~icons/lucide/message-square";
 import StepForward from "~icons/lucide/step-forward";
 import ThumbsUp from "~icons/lucide/thumbs-up";
 
@@ -20,6 +19,7 @@ import {
 } from "../mergeRequests";
 import CiStatusBox from "./CiStatusBox.vue";
 import type { RowActing } from "./mergeRequestActions";
+import MergeRequestDiscussions from "./MergeRequestDiscussions.vue";
 import MergeRequestDueDate from "./MergeRequestDueDate.vue";
 import MergeRequestLabels from "./MergeRequestLabels.vue";
 import MergeRequestPeople from "./MergeRequestPeople.vue";
@@ -28,7 +28,6 @@ import MergeRequestReadiness from "./MergeRequestReadiness.vue";
 import type { Opening, RerequestAsk } from "./mergeRequests";
 import {
   approvalsText,
-  discussionsText,
   mergeRequestReference,
   openChangesTitle,
   openPageTitle,
@@ -61,7 +60,6 @@ const mr = computed(() => mergeRequestReference(props.row.iid));
 const author = computed(() => authorText(props.row.author));
 const created = computed(() => createdAgo(props.row.createdAt, props.now));
 const createdTitle = computed(() => dateTimeText(props.row.createdAt));
-const discussions = computed(() => discussionsText(props.row.openDiscussions));
 const approvals = computed(() => ({
   count: props.row.approvedBy.length,
   label: approvalsText(props.row.approvedBy.length),
@@ -160,14 +158,8 @@ function act(): void {
       <span class="flex w-24 shrink-0">
         <MergeRequestDueDate :due="due" :now="now" @set="emit('setDue', row.iid, $event)" />
       </span>
-      <span
-        v-tooltip="discussions"
-        class="flex w-12 shrink-0 items-center gap-1"
-        :class="{ 'text-fg-muted': row.openDiscussions === 0 }"
-        :aria-label="discussions"
-      >
-        <MessageSquare class="size-4" aria-hidden="true" />
-        <span aria-hidden="true">{{ row.openDiscussions }}</span>
+      <span class="flex w-12 shrink-0">
+        <MergeRequestDiscussions :row :now />
       </span>
       <span
         v-tooltip="approvals.names"

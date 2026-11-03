@@ -81,6 +81,8 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
   continue: "Could not continue the merge request's merge",
   localMerge: "Could not check for an unfinished merge",
   rerequestReview: "Could not re-request the review",
+  discussions: "Could not read the discussions",
+  discussion: "Could not open the comment's page",
 };
 
 const FIXED_ATTEMPT_WORDS: Readonly<

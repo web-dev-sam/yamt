@@ -1,0 +1,2 @@
+just mutants HEAD: no Rust changes; Stryker 96.42% (458 killed, 1 survived, 16 no coverage). mergeRequestsText.ts 93.78%, problem.ts 100%, problemText.ts 97.02%, settingsStore.ts 100%
+problemText.ts:169 ArrayDeclaration `found ?? []` — line not changed by this slice (brokenText). The 16 no-coverage mutants are existing exhaustive `default:` blocks, also on lines this slice did not change.

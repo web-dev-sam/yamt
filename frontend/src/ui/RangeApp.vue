@@ -5,6 +5,7 @@ import { computed, onMounted, watch } from "vue";
 import { log, onWindowClose, type RangeLineCounts } from "../ipc";
 import AgentSettings from "./AgentSettings.vue";
 import FileList from "./FileList.vue";
+import MergeRequestDiscussionSetting from "./MergeRequestDiscussionSetting.vue";
 import MergeRequestsButton from "./MergeRequestsButton.vue";
 import MergeRequestsView from "./MergeRequestsView.vue";
 import NoticeBar from "./NoticeBar.vue";
@@ -146,6 +147,7 @@ function folderLines(path: string): RangeLineCounts {
           <p class="island bg-panel px-4 py-3">{{ emptyText }}</p>
         </div>
         <SettingsView v-if="screen.kind === 'settings'">
+          <MergeRequestDiscussionSetting />
           <AgentSettings v-if="ai !== null" />
         </SettingsView>
         <MergeRequestsView v-if="screen.kind === 'mergeRequests'" :asking="question !== null" />

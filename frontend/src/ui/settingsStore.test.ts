@@ -20,6 +20,7 @@ function settingsStore(settings = shallowRef(startSettings("dark"))): SettingsSt
     closeSettings: nothingShown,
     setTheme: nothing,
     setAntialiasing: nothing,
+    setDiscussionDetails: nothing,
     moveSettings: nothing,
     addKey: nothing,
     changeKey: nothing,
@@ -38,6 +39,18 @@ test("the settings view gets the store its window root registered, and nothing b
   const store = settingsStore();
   registerSettingsStore(store);
   expect(useSettingsStore()).toBe(store);
+});
+
+test("the settings view's Discussion details choice reaches the window's action (a seam that drops it)", async () => {
+  const picked: string[] = [];
+  registerSettingsStore({
+    ...settingsStore(),
+    setDiscussionDetails: async (details) => {
+      picked.push(details);
+    },
+  });
+  await useSettingsStore().setDiscussionDetails("lazy");
+  expect(picked).toEqual(["lazy"]);
 });
 
 test("the page's theme attribute and color-scheme follow the theme in use, a light editor theme light", async () => {

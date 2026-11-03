@@ -12,6 +12,7 @@ export type SettingsStore = Pick<
   SettingsActions,
   | "setTheme"
   | "setAntialiasing"
+  | "setDiscussionDetails"
   | "moveSettings"
   | "addKey"
   | "changeKey"

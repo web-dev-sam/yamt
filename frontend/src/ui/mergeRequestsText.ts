@@ -1,5 +1,7 @@
 import type {
   ContinueMergeReply,
+  DiscussionDetails,
+  DiscussionsAnswer,
   ListEnd,
   MergeRequestIid,
   OpenReply,
@@ -14,7 +16,7 @@ import { leftoverText } from "./leftoverText";
 import type { RowReply } from "./mergeRequestActions";
 import { counted } from "./serverText";
 
-export type PageKind = "job" | "mergeRequest";
+export type PageKind = "job" | "mergeRequest" | "discussion";
 
 export const PAGE_TITLE = "Merge requests";
 export const LIST_LABEL = "Open merge requests";
@@ -45,31 +47,35 @@ export const DUE_DATE_PLACEHOLDER = "DD.MM.YYYY";
 export const PICK_TODAY = "Today";
 export const PREVIOUS_MONTH = "Previous month";
 export const NEXT_MONTH = "Next month";
+export const DISCUSSIONS_LOADING = "Loading discussions…";
+export const DISCUSSION_DETAILS = "Discussion details";
+export const DISCUSSION_DETAILS_OPTIONS: readonly {
+  readonly value: DiscussionDetails;
+  readonly label: string;
+}[] = [
+  { value: "full", label: "Load fully" },
+  { value: "lazy", label: "Load lazily" },
+  { value: "off", label: "Off" },
+];
+export const DISCUSSION_DETAILS_HINT =
+  "On the merge-request page: every listed merge request's open discussions, right after the list; one merge " +
+  "request's, when you first hover its count; or none.";
 
-function glabMissingListText(): string {
-  return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
-}
-
-function notLoggedInListText(detail: string): string {
-  return `${glabNotLoggedInText(detail)} — run glab auth login in a terminal, then Refresh.`;
+export function discussionsRefusedText(
+  answer: Exclude<DiscussionsAnswer, { readonly kind: "open" }>,
+): string {
+  switch (answer.kind) {
+    case "glabMissing":
+      return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
+    case "notLoggedIn":
+      return `${glabNotLoggedInText(answer.detail)} — run glab auth login in a terminal, then Refresh.`;
+    case "failed":
+      return glabFailedText(answer.message);
+  }
 }
 
 export function listFailureText(end: ListEnd): string | null {
-  switch (end.kind) {
-    case "loaded":
-    case "cut":
-      return null;
-    case "glabMissing":
-      return glabMissingListText();
-    case "notLoggedIn":
-      return notLoggedInListText(end.detail);
-    case "failed":
-      return glabFailedText(end.message);
-    default: {
-      const _exhaustive: never = end;
-      return _exhaustive;
-    }
-  }
+  return end.kind === "loaded" || end.kind === "cut" ? null : discussionsRefusedText(end);
 }
 
 export function mergeRequestReference(iid: MergeRequestIid): string {
@@ -124,9 +130,8 @@ export function rerequestReplyText(
     case "notOpen":
       return "This merge request is no longer open.";
     case "glabMissing":
-      return glabMissingListText();
     case "notLoggedIn":
-      return notLoggedInListText(reply.detail);
+      return discussionsRefusedText(reply);
     case "refused":
     case "failed":
       return reply.message;
@@ -181,6 +186,7 @@ export function openReplyText(
 const NOT_OFFERED: Readonly<Record<PageKind, string>> = {
   job: "This job's page was not listed by GitLab, so yamt did not open it.",
   mergeRequest: "This merge request's page was not listed by GitLab, so yamt did not open it.",
+  discussion: "This comment's page was not listed by GitLab, so yamt did not open it.",
 };
 
 export function pageProblemText(opened: PageOpened, clicked: PageKind): string | null {
