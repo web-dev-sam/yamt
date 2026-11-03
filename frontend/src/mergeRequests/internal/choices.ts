@@ -1,11 +1,13 @@
 import {
   rowPeople,
+  sameValue,
   stateOf,
   type ChoiceState,
   type Held,
   type LabelValue,
   type ListedRequest,
   type PersonValue,
+  type ReviewFor,
 } from "./filters";
 
 export type Choice<V> = {
@@ -120,6 +122,21 @@ export function labelChoices(
       : [],
   );
   return [none, ...[...found, ...missing].toSorted(byCountThenLabel)];
+}
+
+/** Rule 1's picker: `reviewerChoices` (personChoices of "reviewers") without "None", in its order; the chosen
+ *  reviewer `included`, every other `off`. */
+export function reviewChoices(
+  reviewerChoices: readonly Choice<PersonValue>[],
+  review: ReviewFor | null,
+): readonly Choice<ReviewFor>[] {
+  return reviewerChoices.flatMap(({ value, label, count }): readonly Choice<ReviewFor>[] => {
+    if (value.kind === "none") {
+      return [];
+    }
+    const chosen = review !== null && sameValue(review, value);
+    return [{ value, label, count, state: chosen ? "included" : "off" }];
+  });
 }
 
 export function narrowed<V>(choices: readonly Choice<V>[], typed: string): readonly Choice<V>[] {

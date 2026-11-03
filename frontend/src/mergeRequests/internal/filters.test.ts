@@ -8,6 +8,7 @@ import {
   filtered,
   isFiltered,
   passes,
+  reviewing,
   stateOf,
   withDraft,
   type ChoiceState,
@@ -19,6 +20,7 @@ import {
   type ListedRequest,
   type Person,
   type PersonValue,
+  type ReviewFor,
 } from "../index";
 
 const SAM: Person = { username: "sam", name: "Sam Lee" };
@@ -90,6 +92,7 @@ test("every set filter must match across filters", () => {
     reviewer: [included(person("sam"))],
     label: [],
     draft: "all",
+    review: null,
   };
   expect(iids(filters, null)).toEqual([3]);
   expect(iids({ ...filters, reviewer: [] }, null)).toEqual([2, 3]);
@@ -262,6 +265,7 @@ test("cleared empties one filter and keeps the others", () => {
     reviewer: [excluded(NOBODY)],
     label: [included({ kind: "none" })],
     draft: "drafts",
+    review: null,
   };
   expect(cleared(filters, "reviewer")).toEqual({ ...filters, reviewer: [] });
   expect(cleared(filters, "label")).toEqual({ ...filters, label: [] });
@@ -283,6 +287,7 @@ const LABELLED: Filters = {
   reviewer: [included(ME), included(person("anna"))],
   label: [included({ kind: "none" }), excluded(label("needs review"))],
   draft: "all",
+  review: null,
 };
 
 test.each<[ListFilter, Filters, string]>([
@@ -298,3 +303,43 @@ test.each<[ListFilter, Filters, string]>([
     expect(filterLabel(filter, filters)).toBe(text);
   },
 );
+
+test("reviewing_replaces_every_filter_with_reviewer_and_ready", () => {
+  const anna: ReviewFor = { kind: "person", username: "anna" };
+  expect(reviewing(anna)).toEqual({
+    assignee: [],
+    reviewer: [included(anna)],
+    label: [],
+    draft: "ready",
+    review: anna,
+  });
+  expect(iids(reviewing(anna), null)).toEqual([1, 3]);
+  expect(reviewing({ kind: "me" })).toEqual({
+    ...NO_FILTERS,
+    reviewer: [included(ME)],
+    draft: "ready",
+    review: ME,
+  });
+});
+
+test("a_filter_edit_keeps_the_review_order", () => {
+  const anna = reviewing({ kind: "person", username: "anna" });
+  const edited = cleared(withDraft(clicked(anna, "label", label("bug"), false), "all"), "reviewer");
+  expect(edited).toEqual({
+    ...NO_FILTERS,
+    label: [included(label("bug"))],
+    review: { kind: "person", username: "anna" },
+  });
+  expect(clicked(anna, "assignee", ME, true).review).toEqual(anna.review);
+});
+
+test("no_filters_has_no_review_order", () => {
+  expect(NO_FILTERS).toEqual({ assignee: [], reviewer: [], label: [], draft: "all", review: null });
+  expect(isFiltered(NO_FILTERS)).toBe(false);
+});
+
+test("review_alone_counts_as_filtered", () => {
+  expect(isFiltered({ ...NO_FILTERS, review: ME })).toBe(true);
+  expect(isFiltered({ ...NO_FILTERS, review: { kind: "person", username: "anna" } })).toBe(true);
+  expect(iids({ ...NO_FILTERS, review: ME }, "sam")).toEqual([1, 2, 3, 4]);
+});

@@ -1,0 +1,6 @@
+just mutants HEAD (10 changed .ts): 1112 killed, 32 survived, 24 no-cov, score 95.21%; mergeRequestFilters 100%, reviewOrder 98.65%, mergeRequestsShown 95.92%
+src/mergeRequests/internal/filters.ts:37-41 NO_FILTERS literal — gate-covered: module-level, not re-run under vitest (#732); web-test no_filters_has_no_review_order asserts the exact literal
+src/mergeRequests/internal/discussions.ts:32 WAITING_TEXT — gate-covered: module-level (#732); web-test the_turn_words_name_another_reviewer asserts it
+src/mergeRequests/internal/reviewOrder.ts:17 NO_TURNS — gate-covered: module-level (#732); web-test rows_not_arrived_sort_as_none_and_are_counted_loading relies on it
+src/ui/mergeRequestsShown.ts:56 {kind:"none"}→{}/{kind:""} — equivalent: reviewOrdered reads only loading/read/failed, so anything else sorts as none
+src/ui/mergeRequestRowReplyText.ts:39,63,81 exhaustive default (no cov) — equivalent: unreachable by types; moved unchanged

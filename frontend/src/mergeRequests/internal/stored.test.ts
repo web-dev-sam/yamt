@@ -7,6 +7,7 @@ import {
   type Filters,
   type Held,
   type Mode,
+  type ReviewFor,
   type StoredFilters,
 } from "../index";
 
@@ -27,6 +28,7 @@ const FILTERS: Filters = {
     included({ kind: "label", title: "not:none" }),
   ],
   draft: "drafts",
+  review: null,
 };
 
 test("the remembered form spells values as words, excluded ones after not:", () => {
@@ -49,6 +51,7 @@ test("an_excluded_word_round_trips", () => {
     reviewer: [excluded({ kind: "person", username: "sam" })],
     label: [excluded({ kind: "label", title: "bug" })],
     draft: "all",
+    review: null,
   });
 });
 
@@ -60,6 +63,7 @@ test.each<Mode>(["included", "excluded"])(
       reviewer: [{ value: { kind: "none" }, mode }],
       label: [{ value: { kind: "label", title: "bug" }, mode }],
       draft: "all",
+      review: null,
     };
     expect(filtersFrom(storedFilters(filters))).toEqual(filters);
   },
@@ -71,6 +75,7 @@ test("old_words_read_as_included_and_unknown_words_are_dropped", () => {
     reviewer: [],
     label: [included({ kind: "none" })],
     draft: "ready",
+    review: null,
   });
   expect(
     filtersFrom({
@@ -84,6 +89,7 @@ test("old_words_read_as_included_and_unknown_words_are_dropped", () => {
     reviewer: [included({ kind: "none" })],
     label: [included({ kind: "label", title: "ui" }), included({ kind: "none" })],
     draft: "all",
+    review: null,
   });
 });
 
@@ -99,6 +105,7 @@ test("a_value_stored_twice_reads_once", () => {
     reviewer: [included({ kind: "none" })],
     label: [included({ kind: "label", title: "bug" })],
     draft: "all",
+    review: null,
   });
 });
 
@@ -117,3 +124,47 @@ test.each([
 test.each(["all", "drafts", "ready"] as const)("Draft %s reads back", (draft) => {
   expect(filtersFrom({ draft }).draft).toBe(draft);
 });
+
+test("review_is_stored_as_me_or_user_word_only_while_on", () => {
+  expect(storedFilters({ ...NO_FILTERS, review: { kind: "me" } }).review).toBe("me");
+  expect(
+    storedFilters({ ...NO_FILTERS, review: { kind: "person", username: "anna" } }).review,
+  ).toBe("user:anna");
+  expect(Object.keys(storedFilters(FILTERS))).not.toContain("review");
+});
+
+test("the_stored_form_keeps_the_four_fields_older_yamt_reads", () => {
+  const anna: ReviewFor = { kind: "person", username: "anna" };
+  const { review, ...others } = storedFilters({ ...FILTERS, review: anna });
+  expect(review).toBe("user:anna");
+  expect(others).toEqual(storedFilters(FILTERS));
+  expect(Object.keys(others)).toEqual(["assignee", "reviewer", "label", "draft"]);
+});
+
+test.each<[string, unknown]>([
+  ["none", "none"],
+  ["an empty user", "user:"],
+  ["a bare username", "anna"],
+  ["an excluded word", "not:me"],
+  ["a number", 3],
+  ["an array", ["me"]],
+  ["null", null],
+])("a_review_word_none_or_junk_reads_as_off (%s)", (_kind, review) => {
+  expect(filtersFrom({ reviewer: ["me"], review })).toEqual({
+    ...NO_FILTERS,
+    reviewer: [included({ kind: "me" })],
+  });
+});
+
+test.each<ReviewFor>([{ kind: "me" }, { kind: "person", username: "anna" }])(
+  "review mode for %j round trips through storage",
+  (review) => {
+    const filters: Filters = {
+      ...NO_FILTERS,
+      reviewer: [included(review)],
+      draft: "ready",
+      review,
+    };
+    expect(filtersFrom(JSON.parse(JSON.stringify(storedFilters(filters))))).toEqual(filters);
+  },
+);

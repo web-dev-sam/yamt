@@ -7,6 +7,7 @@ export {
   filtered,
   isFiltered,
   passes,
+  reviewing,
   stateOf,
   withDraft,
   type ChoiceState,
@@ -20,6 +21,7 @@ export {
   type Mode,
   type Person,
   type PersonValue,
+  type ReviewFor,
   type ReviewState,
   type Reviewer,
 } from "./internal/filters";
@@ -28,9 +30,17 @@ export {
   labelChoices,
   narrowed,
   personChoices,
+  reviewChoices,
   type Choice,
 } from "./internal/choices";
 export { byDueDate, merged } from "./internal/order";
+export {
+  reviewFailedText,
+  reviewOrdered,
+  reviewSortedText,
+  type ReviewDetails,
+  type ReviewOrder,
+} from "./internal/reviewOrder";
 export {
   calendarDayFrom,
   calendarDayText,
@@ -82,12 +92,14 @@ export {
   turnCounts,
   turnSummaryText,
   turnText,
+  viewerOf,
   type DiscussionNote,
   type DiscussionPlace,
   type OpenDiscussion,
   type Turn,
   type TurnCounts,
   type TurnLine,
+  type Viewer,
 } from "./internal/discussions";
 export { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "./internal/ciBox";
 export { filtersFrom, storedFilters, type StoredFilters } from "./internal/stored";

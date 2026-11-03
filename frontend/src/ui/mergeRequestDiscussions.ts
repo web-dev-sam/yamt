@@ -21,6 +21,7 @@ export type DiscussionLoad =
       readonly answer: Exclude<DiscussionsAnswer, { readonly kind: "open" }>;
     }
   | { readonly kind: "failed"; readonly cause: ProblemCause };
+export type DiscussionFailure = Extract<DiscussionLoad, { readonly kind: "refused" | "failed" }>;
 export type Discussions = {
   /** Each asked row's discussions while this list stands; no entry: not asked, or (count 0) none open. */
   readonly discussions: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>>;

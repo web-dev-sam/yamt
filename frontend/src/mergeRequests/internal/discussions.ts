@@ -1,4 +1,4 @@
-import type { Person } from "./filters";
+import type { ListedRequest, Person, ReviewFor } from "./filters";
 import { displayName } from "./people";
 
 export type DiscussionPlace =
@@ -16,6 +16,10 @@ export type OpenDiscussion = { readonly place: DiscussionPlace; readonly last: D
 export type Turn = "viewer" | "waiting";
 export type TurnLine<D extends OpenDiscussion> = { readonly discussion: D; readonly turn: Turn };
 export type TurnCounts = { readonly viewersTurn: number; readonly waiting: number };
+/** Whose turn the box and the review order speak for (request-mr-discussions rule 3, review-mode rule 5). */
+export type Viewer =
+  | { readonly kind: "me"; readonly username: string | null }
+  | { readonly kind: "person"; readonly username: string; readonly name: string };
 
 export const DISCUSSIONS_LABEL = "Open discussions";
 export const UNKNOWN_AUTHOR = "Someone";
@@ -25,10 +29,7 @@ const EXCERPT_CHARACTERS = 280;
 
 const TURN_RANK: Readonly<Record<Turn, number>> = { viewer: 0, waiting: 1 };
 
-const TURN_TEXTS: Readonly<Record<Turn, string>> = {
-  viewer: "Your turn",
-  waiting: "Waiting for an answer",
-};
+const WAITING_TEXT = "Waiting for an answer";
 
 function turnOf(last: DiscussionNote, viewer: string | null): Turn {
   return last.author !== null && last.author.username === viewer ? "waiting" : "viewer";
@@ -56,16 +57,41 @@ export function turnCounts(open: readonly OpenDiscussion[], viewer: string | nul
   return { viewersTurn, waiting: open.length - viewersTurn };
 }
 
-export function turnText(turn: Turn): string {
-  return TURN_TEXTS[turn];
+/** null or Me → me; a person whose username is `me` → me; else the person, named by displayName of the first row
+ *  reviewer with that username, else the username. */
+export function viewerOf(
+  review: ReviewFor | null,
+  me: string | null,
+  rows: readonly ListedRequest[],
+): Viewer {
+  if (review === null || review.kind === "me" || review.username === me) {
+    return { kind: "me", username: me };
+  }
+  const { username } = review;
+  const found = rows
+    .flatMap((row) => row.reviewers)
+    .find((reviewer) => reviewer.person.username === username);
+  return {
+    kind: "person",
+    username,
+    name: found === undefined ? username : displayName(found.person),
+  };
 }
 
-export function turnSummaryText({ viewersTurn, waiting }: TurnCounts): string {
+export function turnText(turn: Turn, viewer: Viewer): string {
+  if (turn === "waiting") {
+    return WAITING_TEXT;
+  }
+  return viewer.kind === "me" ? "Your turn" : `${viewer.name}'s turn`;
+}
+
+export function turnSummaryText({ viewersTurn, waiting }: TurnCounts, viewer: Viewer): string {
   const total = viewersTurn + waiting;
   if (total === 0) {
     return "No open discussions";
   }
-  return `${viewersTurn} of ${total} ${viewersTurn === 1 ? "waits" : "wait"} for you`;
+  const whom = viewer.kind === "me" ? "you" : viewer.name;
+  return `${viewersTurn} of ${total} ${viewersTurn === 1 ? "waits" : "wait"} for ${whom}`;
 }
 
 export function placeText(place: DiscussionPlace): string {

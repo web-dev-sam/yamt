@@ -5,6 +5,7 @@ import {
   labelChoices,
   narrowed,
   personChoices,
+  reviewChoices,
   type Choice,
   type ChoiceState,
   type Held,
@@ -261,5 +262,33 @@ test("a checklist long enough for the narrowing box narrows to one typed label",
   expect(choices.length).toBeGreaterThan(NARROW_FROM);
   expect(narrowed(choices, "AREA-3").map((listed) => listed.value)).toEqual([
     { kind: "label", title: "area-3" },
+  ]);
+});
+
+test("the_picker_lists_me_then_the_reviewer_filters_people_without_none", () => {
+  const ghost = { kind: "person", username: "ghost" } as const;
+  const reviewer = personChoices(ROWS, "reviewers", "sam", [excluded(ghost)]);
+  expect(rows(reviewer).map(([label]) => label)).toEqual(["Me", "None", "Anna Berg", "ghost"]);
+
+  expect(rows(reviewChoices(reviewer, null))).toEqual([
+    ["Me", 1, "off"],
+    ["Anna Berg", 1, "off"],
+    ["ghost", 0, "off"],
+  ]);
+  expect(rows(reviewChoices(reviewer, { kind: "me" }))).toEqual([
+    ["Me", 1, "included"],
+    ["Anna Berg", 1, "off"],
+    ["ghost", 0, "off"],
+  ]);
+  const held = reviewChoices(reviewer, ghost);
+  expect(rows(held)).toEqual([
+    ["Me", 1, "off"],
+    ["Anna Berg", 1, "off"],
+    ["ghost", 0, "included"],
+  ]);
+  expect(held.map((listed) => listed.value)).toEqual([
+    { kind: "me" },
+    { kind: "person", username: "anna" },
+    ghost,
   ]);
 });

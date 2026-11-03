@@ -17,8 +17,7 @@ import {
 import { useRowDiscussions, type DiscussionLoad } from "./mergeRequestDiscussions";
 import MergeRequestPicture from "./MergeRequestPicture.vue";
 import { useMergeRequests } from "./mergeRequestsStore";
-import { discussionsText, DISCUSSIONS_LOADING, glabRefusalText } from "./mergeRequestsText";
-import { problemText } from "./problemText";
+import { discussionsFailedText, discussionsText, DISCUSSIONS_LOADING } from "./mergeRequestsText";
 import { vTooltip } from "./tooltip";
 import { useHoverBox } from "./useHoverBox";
 
@@ -27,7 +26,7 @@ type Header = { readonly text: string; readonly failed: boolean };
 const props = defineProps<{ row: MergeRequestRow; now: number }>();
 
 const mergeRequests = useMergeRequests();
-const { discussionDetails, me, openPage } = mergeRequests;
+const { discussionDetails, viewer, openPage } = mergeRequests;
 const area = useTemplateRef<HTMLSpanElement>("area");
 const opener = useTemplateRef<HTMLButtonElement>("opener");
 const box = useTemplateRef<HTMLDivElement>("box");
@@ -48,17 +47,19 @@ const boxed = computed(() => discussionDetails.value !== "off" && count.value > 
 const header = computed(() => headerOf(load.value));
 const lines = computed(() =>
   load.value?.kind === "read"
-    ? discussionTurns(load.value.discussions, me.value).map(({ discussion, turn }, index) => ({
-        key: index,
-        page: discussion.last.page,
-        author: discussion.last.author,
-        name: noteAuthorName(discussion.last.author),
-        ago: agoText(discussion.last.createdAt, props.now),
-        turn: turnText(turn),
-        viewersTurn: turn === "viewer",
-        place: placeText(discussion.place),
-        excerpt: noteExcerpt(discussion.last.text),
-      }))
+    ? discussionTurns(load.value.discussions, viewer.value.username).map(
+        ({ discussion, turn }, index) => ({
+          key: index,
+          page: discussion.last.page,
+          author: discussion.last.author,
+          name: noteAuthorName(discussion.last.author),
+          ago: agoText(discussion.last.createdAt, props.now),
+          turn: turnText(turn, viewer.value),
+          viewersTurn: turn === "viewer",
+          place: placeText(discussion.place),
+          excerpt: noteExcerpt(discussion.last.text),
+        }),
+      )
     : [],
 );
 
@@ -70,17 +71,13 @@ function headerOf(shown: DiscussionLoad | undefined): Header {
     case "loading":
       return { text: DISCUSSIONS_LOADING, failed: false };
     case "read":
-      return { text: turnSummaryText(turnCounts(shown.discussions, me.value)), failed: false };
-    case "refused":
-      return { text: glabRefusalText(shown.answer), failed: true };
-    case "failed":
       return {
-        text: problemText(
-          { action: "mergeRequests", step: "discussions", cause: shown.cause },
-          navigator.platform,
-        ),
-        failed: true,
+        text: turnSummaryText(turnCounts(shown.discussions, viewer.value.username), viewer.value),
+        failed: false,
       };
+    case "refused":
+    case "failed":
+      return { text: discussionsFailedText(shown, navigator.platform), failed: true };
     default: {
       const _exhaustive: never = shown;
       return _exhaustive;

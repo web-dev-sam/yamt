@@ -6,6 +6,7 @@ import {
   type Held,
   type LabelValue,
   type PersonValue,
+  type ReviewFor,
 } from "./filters";
 
 export type StoredFilters = {
@@ -13,6 +14,8 @@ export type StoredFilters = {
   readonly reviewer: readonly string[];
   readonly label: readonly string[];
   readonly draft: DraftFilter;
+  /** "me" | "user:<username>"; the key is absent while review mode is off. */
+  readonly review?: string;
 };
 
 const USER_PREFIX = "user:";
@@ -43,7 +46,15 @@ function labelFrom(word: string): readonly LabelValue[] {
   return title === "" ? [] : [{ kind: "label", title }];
 }
 
-function wordsOf(entry: object, field: keyof StoredFilters): readonly string[] {
+function reviewFrom(word: unknown): ReviewFor | null {
+  if (typeof word !== "string") {
+    return null;
+  }
+  const [value] = personFrom(word);
+  return value === undefined || value.kind === "none" ? null : value;
+}
+
+function wordsOf(entry: object, field: Exclude<keyof StoredFilters, "review">): readonly string[] {
   const words: unknown = Reflect.get(entry, field);
   if (!Array.isArray(words)) {
     return [];
@@ -84,14 +95,16 @@ export function filtersFrom(stored: unknown): Filters {
     reviewer: heldFrom(wordsOf(stored, "reviewer"), personFrom),
     label: heldFrom(wordsOf(stored, "label"), labelFrom),
     draft: draft === "drafts" || draft === "ready" ? draft : "all",
+    review: reviewFrom(Reflect.get(stored, "review")),
   };
 }
 
 export function storedFilters(filters: Filters): StoredFilters {
-  return {
+  const stored = {
     assignee: storedWords(filters.assignee, storedPerson),
     reviewer: storedWords(filters.reviewer, storedPerson),
     label: storedWords(filters.label, storedLabel),
     draft: filters.draft,
   };
+  return filters.review === null ? stored : { ...stored, review: storedPerson(filters.review) };
 }

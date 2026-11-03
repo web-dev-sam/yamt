@@ -72,6 +72,7 @@ test("the_owners_example_keeps_six_rows: Assignee not Me and Label frontend over
     reviewer: [],
     label: [{ value: { kind: "label", title: "frontend" }, mode: "included" }],
     draft: "all",
+    review: null,
   };
   expect(filtered(rows, filters, "sam").map((row) => row.iid)).toEqual([
     639, 627, 623, 619, 607, 603,

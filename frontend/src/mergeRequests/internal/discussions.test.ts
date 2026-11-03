@@ -10,14 +10,30 @@ import {
   turnCounts,
   turnSummaryText,
   turnText,
+  viewerOf,
   type DiscussionPlace,
+  type ListedRequest,
   type OpenDiscussion,
   type Person,
+  type Viewer,
 } from "../index";
 
 const SAM: Person = { username: "sam", name: "Sam Lee" };
 const ANNA: Person = { username: "anna", name: "Anna Berg" };
 const OVERVIEW: DiscussionPlace = { kind: "overview" };
+const ME_SAM: Viewer = { kind: "me", username: "sam" };
+const AS_ANNA: Viewer = { kind: "person", username: "anna", name: "Anna Berg" };
+
+function reviewedBy(iid: number, reviewers: readonly Person[]): ListedRequest {
+  return {
+    iid,
+    createdAt: iid,
+    draft: false,
+    assignees: [],
+    reviewers: reviewers.map((person) => ({ person, state: "requested" })),
+    labels: [],
+  };
+}
 
 function discussion(
   id: string,
@@ -104,13 +120,62 @@ test.each([
   [{ viewersTurn: 0, waiting: 3 }, "0 of 3 wait for you"],
   [{ viewersTurn: 0, waiting: 0 }, "No open discussions"],
 ])("the_summary_counts_words_singular_and_plural: %o reads %s", (counts, text) => {
-  expect(turnSummaryText(counts)).toBe(text);
+  expect(turnSummaryText(counts, ME_SAM)).toBe(text);
+  expect(turnSummaryText(counts, { kind: "me", username: null })).toBe(text);
+});
+
+test.each([
+  [{ viewersTurn: 2, waiting: 3 }, "2 of 5 wait for Anna Berg"],
+  [{ viewersTurn: 1, waiting: 4 }, "1 of 5 waits for Anna Berg"],
+  [{ viewersTurn: 0, waiting: 0 }, "No open discussions"],
+])("the summary for another reviewer: %o reads %s", (counts, text) => {
+  expect(turnSummaryText(counts, AS_ANNA)).toBe(text);
 });
 
 test("the_turn_words_are_not_swapped", () => {
-  expect(turnText("viewer")).toBe("Your turn");
-  expect(turnText("waiting")).toBe("Waiting for an answer");
+  expect(turnText("viewer", ME_SAM)).toBe("Your turn");
+  expect(turnText("waiting", ME_SAM)).toBe("Waiting for an answer");
   expect(DISCUSSIONS_LABEL).toBe("Open discussions");
+});
+
+test("the_turn_words_name_another_reviewer", () => {
+  expect(turnText("viewer", AS_ANNA)).toBe("Anna Berg's turn");
+  expect(turnText("waiting", AS_ANNA)).toBe("Waiting for an answer");
+});
+
+test("viewer_of_a_person_who_is_me_is_me", () => {
+  const rows = [reviewedBy(1, [SAM, ANNA])];
+  expect(viewerOf(null, "sam", rows)).toEqual(ME_SAM);
+  expect(viewerOf({ kind: "me" }, "sam", rows)).toEqual(ME_SAM);
+  expect(viewerOf({ kind: "me" }, null, rows)).toEqual({ kind: "me", username: null });
+  expect(viewerOf({ kind: "person", username: "sam" }, "sam", rows)).toEqual(ME_SAM);
+  expect(viewerOf({ kind: "person", username: "sam" }, null, rows)).toEqual({
+    kind: "person",
+    username: "sam",
+    name: "Sam Lee",
+  });
+});
+
+test("viewer_name_is_the_display_name_else_the_username", () => {
+  const rows = [
+    reviewedBy(1, [SAM]),
+    reviewedBy(2, [{ username: "anna", name: "Anna Berg" }]),
+    reviewedBy(3, [
+      { username: "anna", name: "Anna B." },
+      { username: "ben", name: " " },
+    ]),
+  ];
+  expect(viewerOf({ kind: "person", username: "anna" }, "sam", rows)).toEqual(AS_ANNA);
+  expect(viewerOf({ kind: "person", username: "ben" }, "sam", rows)).toEqual({
+    kind: "person",
+    username: "ben",
+    name: "ben",
+  });
+  expect(viewerOf({ kind: "person", username: "zoe" }, "sam", rows)).toEqual({
+    kind: "person",
+    username: "zoe",
+    name: "zoe",
+  });
 });
 
 test("a_file_place_reads_path_and_line_or_path_alone", () => {

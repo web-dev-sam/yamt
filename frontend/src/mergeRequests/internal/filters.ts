@@ -9,11 +9,15 @@ export type LabelValue =
 export type Mode = "included" | "excluded";
 export type Held<V> = { readonly value: V; readonly mode: Mode };
 export type ChoiceState = "off" | Mode;
+/** Review mode's reviewer (request-mr-review-mode rule 1): the logged-in user or a person, never "None". */
+export type ReviewFor = Exclude<PersonValue, { readonly kind: "none" }>;
 export type Filters = {
   readonly assignee: readonly Held<PersonValue>[];
   readonly reviewer: readonly Held<PersonValue>[];
   readonly label: readonly Held<LabelValue>[];
   readonly draft: DraftFilter;
+  /** Rules 2–3: whose review order the shown rows follow; null: the normal order. */
+  readonly review: ReviewFor | null;
 };
 export type ListFilter = "assignee" | "reviewer" | "label";
 
@@ -30,7 +34,13 @@ export type ListedRequest = {
   readonly labels: readonly ListedLabel[];
 };
 
-export const NO_FILTERS: Filters = { assignee: [], reviewer: [], label: [], draft: "all" };
+export const NO_FILTERS: Filters = {
+  assignee: [],
+  reviewer: [],
+  label: [],
+  draft: "all",
+  review: null,
+};
 
 const FILTER_NAMES: Readonly<Record<ListFilter, string>> = {
   assignee: "Assignee",
@@ -168,12 +178,23 @@ export function cleared(filters: Filters, filter: ListFilter): Filters {
   return { ...filters, [filter]: [] };
 }
 
+/** Rule 2: Reviewer = who (included), Draft = ready, every other filter off, the order for who. */
+export function reviewing(who: ReviewFor): Filters {
+  return {
+    ...NO_FILTERS,
+    reviewer: [{ value: who, mode: "included" }],
+    draft: "ready",
+    review: who,
+  };
+}
+
 export function isFiltered(filters: Filters): boolean {
   return (
     filters.assignee.length > 0 ||
     filters.reviewer.length > 0 ||
     filters.label.length > 0 ||
-    filters.draft !== "all"
+    filters.draft !== "all" ||
+    filters.review !== null
   );
 }
 

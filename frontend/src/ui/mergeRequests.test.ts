@@ -19,8 +19,11 @@ import {
   type PageOpened,
   type RerequestReply,
   type ResolveReply,
+  type Person,
   type Reviewer,
   type RowDiscussions,
+  type DiscussionsAnswer,
+  type OpenDiscussion,
   type SourceFailure,
   type SourceResult,
   type WebPage,
@@ -33,6 +36,7 @@ import {
   type MergeRequests,
   type Opening,
 } from "./mergeRequests";
+import type { ReviewSort } from "./mergeRequestsShown";
 import { registerMergeRequests, useMergeRequests, windowMergeRequests } from "./mergeRequestsStore";
 import type { PageKind } from "./mergeRequestsText";
 import type { MergeRequestStep, Problem } from "./problem";
@@ -1248,4 +1252,178 @@ test("the slice shows a job's log through its source and remembers job searches 
   live.slice.setJobSearch("test:unit", "fail");
   expect(live.slice.jobSearch("test:unit")).toBe("fail");
   expect(live.storage.items.get("yamt.mergeRequests.jobSearches")).toBe('{"test:unit":"fail"}');
+});
+
+const FILTERS_KEY = "yamt.mergeRequests.filters";
+const ANNA = { kind: "person", username: "anna" } as const;
+
+function personOf(username: string): Person {
+  const found = ROWS.flatMap((row) => row.reviewers).find(
+    (reviewer) => reviewer.person.username === username,
+  );
+  if (found === undefined) {
+    throw new Error(`the fixture has no reviewer ${username}`);
+  }
+  return found.person;
+}
+
+function reviewedBy(username: string): readonly MergeRequestRow[] {
+  return ROWS.filter(
+    (row) => !row.draft && row.reviewers.some((reviewer) => reviewer.person.username === username),
+  );
+}
+
+function lastBy(author: Person): OpenDiscussion {
+  return {
+    place: { kind: "overview" },
+    last: { author, createdAt: T0, text: "a comment", page: null },
+  };
+}
+
+function answerFirstCall(live: Rig, answerOf: (asked: MergeRequestIid) => DiscussionsAnswer): void {
+  const [call] = live.discussionCalls;
+  if (call === undefined) {
+    throw new Error("no discussions call was sent");
+  }
+  call.answer({
+    ok: true,
+    value: call.iids.map((each) => ({ iid: each, answer: answerOf(each) })),
+  });
+}
+
+async function reviewing(storage = memoryStorage()): Promise<Rig> {
+  const live = rig({}, storage);
+  await live.slice.findProject();
+  await loaded(live);
+  return live;
+}
+
+test("review_mode_orders_the_shown_rows_and_a_late_answer_moves_them", async () => {
+  const live = await reviewing();
+  live.slice.review({ kind: "me" });
+  const mine = reviewedBy("sam");
+  const discussed = mine.filter((row) => row.openDiscussions > 0);
+  const quiet = mine.filter((row) => row.openDiscussions === 0);
+  const [soonest, later, ...others] = discussed;
+  if (soonest === undefined || later === undefined || quiet.length === 0) {
+    throw new Error("the fixture lists too few of sam's reviews");
+  }
+  live.slice.setDueDate(soonest.iid, NOV_5);
+  live.slice.setDueDate(later.iid, DEC_24);
+  const normal = [soonest, later, ...mine.filter((row) => row !== soonest && row !== later)];
+  expect(iids(live.slice.shownRows.value)).toEqual(iids(normal));
+  expect(live.slice.reviewSort.value).toEqual({ kind: "sorted", loading: discussed.length });
+
+  const other = personOf("anna");
+  answerFirstCall(live, (asked) => ({
+    kind: "open",
+    discussions: [lastBy(asked === later.iid ? other : personOf("sam"))],
+  }));
+  await settled();
+
+  expect(iids(live.slice.shownRows.value)).toEqual(iids([later, ...quiet, soonest, ...others]));
+  expect(live.slice.reviewSort.value).toEqual({ kind: "sorted", loading: 0 });
+});
+
+test("clear_filters_returns_the_normal_order_and_the_viewer_me", async () => {
+  const live = await reviewing();
+  live.slice.review(ANNA);
+  expect(iids(live.slice.shownRows.value)).toEqual(iids(reviewedBy("anna")));
+  expect(live.slice.viewer.value).toEqual({ kind: "person", username: "anna", name: "Anna Berg" });
+
+  live.slice.clearAll();
+
+  expect(live.slice.filters.value.review).toBeNull();
+  expect(live.slice.reviewSort.value).toBeNull();
+  expect(live.slice.viewer.value).toEqual({ kind: "me", username: "sam" });
+  expect(live.slice.shownRows.value).toEqual(ROWS);
+  expect(live.storage.items.get(FILTERS_KEY)).toBe("{}");
+});
+
+test("the_viewer_follows_review_mode", async () => {
+  const live = await reviewing();
+  expect(live.slice.viewer.value).toEqual({ kind: "me", username: "sam" });
+  expect(live.slice.reviewSort.value).toBeNull();
+
+  live.slice.review(ANNA);
+  expect(live.slice.viewer.value).toEqual({ kind: "person", username: "anna", name: "Anna Berg" });
+  expect(
+    live.slice.choices.value.review.find((choice) => choice.state === "included")?.value,
+  ).toEqual(ANNA);
+  live.slice.review({ kind: "person", username: "sam" });
+  expect(live.slice.viewer.value).toEqual({ kind: "me", username: "sam" });
+
+  live.slice.review(ANNA);
+  live.mode.value = "lazy";
+  await nextTick();
+  expect(live.slice.viewer.value).toEqual({ kind: "me", username: "sam" });
+  expect(live.slice.reviewSort.value).toBeNull();
+  expect(iids(live.slice.shownRows.value)).toEqual(iids(reviewedBy("anna")));
+});
+
+test("a_failed_row_leaves_the_normal_order_with_reviewSort_failed", async () => {
+  const live = await reviewing();
+  live.slice.review({ kind: "me" });
+  const discussed = reviewedBy("sam").filter((row) => row.openDiscussions > 0);
+  const [newer, , older] = discussed;
+  if (newer === undefined || older === undefined) {
+    throw new Error("the fixture lists too few of sam's discussed reviews");
+  }
+  live.slice.setDueDate(older.iid, NOV_5);
+  const normal = [older, ...reviewedBy("sam").filter((row) => row !== older)];
+
+  answerFirstCall(live, (asked) =>
+    asked === newer.iid || asked === older.iid
+      ? { kind: "glabMissing" }
+      : { kind: "open", discussions: [lastBy(personOf("anna"))] },
+  );
+  await settled();
+
+  expect(iids(live.slice.shownRows.value)).toEqual(iids(normal));
+  const unsorted: ReviewSort = {
+    kind: "failed",
+    iid: older.iid,
+    failure: { kind: "refused", answer: { kind: "glabMissing" } },
+  };
+  expect(live.slice.reviewSort.value).toEqual(unsorted);
+});
+
+test("an_ipc_failure_names_the_first_row_with_its_cause", async () => {
+  const live = await reviewing();
+  live.slice.review({ kind: "me" });
+  const [first] = reviewedBy("sam").filter((row) => row.openDiscussions > 0);
+  live.discussionCalls[0]?.answer({ ok: false, failure: STOPPED });
+  await settled();
+
+  expect(live.slice.reviewSort.value).toEqual({
+    kind: "failed",
+    iid: first?.iid,
+    failure: { kind: "failed", cause: STOPPED },
+  });
+  expect(iids(live.slice.shownRows.value)).toEqual(iids(reviewedBy("sam")));
+});
+
+test("review_mode_comes_back_on_a_new_slice_over_the_same_storage", async () => {
+  const storage = memoryStorage();
+  const live = await reviewing(storage);
+  live.slice.review(ANNA);
+  expect(JSON.parse(storage.items.get(FILTERS_KEY) ?? "null")).toEqual({
+    [REPOSITORY]: {
+      assignee: [],
+      reviewer: ["user:anna"],
+      label: [],
+      draft: "ready",
+      review: "user:anna",
+    },
+  });
+
+  const reopened = await reviewing(storage);
+
+  expect(reopened.slice.filters.value.review).toEqual(ANNA);
+  expect(reopened.slice.viewer.value).toEqual({
+    kind: "person",
+    username: "anna",
+    name: "Anna Berg",
+  });
+  expect(reopened.slice.reviewSort.value?.kind).toBe("sorted");
 });

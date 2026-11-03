@@ -25,6 +25,7 @@ import MergeRequestLabels from "./MergeRequestLabels.vue";
 import MergeRequestPeople from "./MergeRequestPeople.vue";
 import MergeRequestPicture from "./MergeRequestPicture.vue";
 import MergeRequestReadiness from "./MergeRequestReadiness.vue";
+import { rowReplyText } from "./mergeRequestRowReplyText";
 import type { Opening, RerequestAsk } from "./mergeRequests";
 import {
   approvalsText,
@@ -32,7 +33,6 @@ import {
   openChangesTitle,
   openPageTitle,
   openReplyText,
-  rowReplyText,
   type PageKind,
 } from "./mergeRequestsText";
 import { vTooltip } from "./tooltip";
