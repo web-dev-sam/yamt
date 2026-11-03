@@ -12,11 +12,11 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 details, due dates, exclude filters, list search, local conflict check, CI job log (sections below; their GitLab
 playground checks still open). The owner pushes `main`, waits for green ci, then tags.
 
-| row | slice                                                                                                        | owner        | status  | evidence   |
-| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ------- | ---------- |
-| 1   | release commit 0.6.6: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done    | `b99c9fb8` |
-| 2   | final run 0.6.6 before tagging (`briefs/release-0.6.6-verify.md`)                                            | verifier     | running |            |
-| 3   | push `main`, ci green on all four jobs, tag `v0.6.6`, publish                                                | human        | todo    |            |
+| row | slice                                                                                                        | owner        | status      | evidence                                                                                                                                                                                                                                   |
+| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | release commit 0.6.6: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done        | `b99c9fb8`                                                                                                                                                                                                                                 |
+| 2   | final run 0.6.6 before tagging (`briefs/release-0.6.6-verify.md`)                                            | verifier     | done        | `Release066Verify`: gate pass (72 s), readmer, licences; `yamt_0.6.6_amd64.deb` Version `0.6.6`, `yamt 0.6.6`; release binary: job log opens, "fail" 6 of 6, remembered after restart, one trace call per run. Notes `Release066Verify.md` |
+| 3   | push `main`, ci green on all four jobs, tag `v0.6.6`, publish                                                | human        | handed over |                                                                                                                                                                                                                                            |
 
 ## Line-range threads (session 42; owner #2051: "open discussions on a range of lines by dragging, like in gitlab")
 
