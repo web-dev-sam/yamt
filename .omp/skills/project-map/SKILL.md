@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `4e22f056` (MR review mode, plan §2 #165–#166: `filters.review` a field of the remembered filters, stored as a fifth key only while on and read as null unless discussion details are "full" — the one write on leaving "full" in `createRememberedFilters`; core `reviewOrder.ts` `reviewOrdered` over the shown rows and its tooltip words, `viewerOf` the one viewer of the order and the discussions box; `MergeRequestReviewMode.vue` a second opener of the bar's one `useHoverMenu`, `MergeRequestReviewSort.vue` the sort icon, `MergeRequestMenu.vue` the filters' and picker's one menu box; `rowReplyText` in `ui/mergeRequestRowReplyText.ts`; no IPC change; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `c57417bf` (MR starts, plan §2 #167–#168: `--mr` → `StartScreen` on `Invocation::Compare`/`Range` (alone it means `--diff`, refused with `--repo` alone), `YAMT_AI` read once in `lib.rs` (`AI_VAR`) into the pure `args::parse(args, ai_variable)`; `WindowKind = Merge | Compare { start } | Range { ai, start }`, the start script's `data-open="mergeRequests"`; `ui/startScreen.ts` `WindowStart`/`startScreenOf`/`openAtStart` — the page opens only after a `found` project; the slice's `listedAt` written only by `ended` on an end without failure text, core `timeTitle`; app-session `start-app --mr`, `start-fixture --open-mr`; no IPC change; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 

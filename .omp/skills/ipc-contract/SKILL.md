@@ -89,7 +89,7 @@ edit_note(message, text) / delete_message(message) -> ThreadList   an unsent Not
 set_thread_session(thread, session) / add_ai_answer(thread, session) -> ThreadList   the store numbers the AI's turns per session (#121)
 check_gitlab()                    -> GitLabCheck   LinedUp { merge_request } | NotLinedUp { why } (#119)
 send_queue(progress: Channel<SendProgress>) -> SendReply   async: Sent { sent, refused, list } | Stopped { reason, … } | NotLinedUp; a second send while one runs → SendRunning
-# the AI (`--ai` only, plan §2 #108–#115, crate yamt-agent; Mutex<AiState>, AiState::workspace() the one AiOff mapping)
+# the AI (`--ai` or `YAMT_AI` only, plan §2 #108–#115, #167, crate yamt-agent; Mutex<AiState>, AiState::workspace() the one AiOff mapping)
 prepare_checkout() -> CheckoutReply; start_agent(command, events: Channel<HostEvent>) -> AgentStartReply (async); send_to_agent(run, message); stop_agent(run)
 checkout_changes() -> CheckoutLook; discard_checkout() (async; RemoveFailed); diff_texts(old, next) -> Difference[] (merge_core::compare on a worker, #114)
 # the merge-request page (compare and range windows, plan §2 #128–#143, #149, #151–#153, crates yamt-merge-requests and yamt-local-merge; MergeRequestState: the GitLab project found at start, the pairs' folder, pages: Mutex<BTreeSet<WebPage>>, merged: Mutex<MergedPairs>, pictures: Pictures; registered for every window, managed only for those two)
