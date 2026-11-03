@@ -1,0 +1,2 @@
+just mutants HEAD — rangeStore.ts: 154 killed, 6 survived, 0 timeout, 0 no-cov, 0 errors (96.25%)
+

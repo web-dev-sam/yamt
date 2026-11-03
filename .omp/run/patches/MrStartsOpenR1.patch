@@ -1,0 +1,27 @@
+diff --git a/frontend/src/ui/rangeStore.ts b/frontend/src/ui/rangeStore.ts
+index 8c55c00..13ace8e 100644
+--- a/frontend/src/ui/rangeStore.ts
++++ b/frontend/src/ui/rangeStore.ts
+@@ -237,11 +237,11 @@ function showPath(state: State, path: string): void {
+   const entry = state.start.value?.files.find((file) => file.path === path);
+   if (entry !== undefined) {
+     state.screen.value = { kind: "files" };
+-    show(state, entry);
++    markShown(state, entry);
+   }
+ }
+ 
+-function show(state: State, entry: RangeEntry): void {
++function markShown(state: State, entry: RangeEntry): void {
+   const { id } = entry;
+   state.shown.value = id;
+   state.recent = [...state.recent.filter((each) => each !== id), id];
+@@ -272,7 +272,7 @@ async function startUp(state: State, besides: readonly Promise<void>[]): Promise
+   state.start.value = outcome.value;
+   const [first] = outcome.value.files;
+   if (first !== undefined) {
+-    show(state, first);
++    markShown(state, first);
+   }
+   await Promise.all([state.threads.load(), state.gitlab.checkNow()]);
+ }
