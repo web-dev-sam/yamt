@@ -5,11 +5,11 @@ here is one scenario; the fake reads it from `$YAMT_FAKE_GLAB`.
 
 ## Environment
 
-| variable | what |
-|---|---|
-| `YAMT_FAKE_GLAB` | the scenario folder (required; without it every call exits 2) |
+| variable               | what                                                                                                     |
+| ---------------------- | -------------------------------------------------------------------------------------------------------- |
+| `YAMT_FAKE_GLAB`       | the scenario folder (required; without it every call exits 2)                                            |
 | `YAMT_FAKE_GLAB_STATE` | a file holding how many posts were answered so far (missing = 0); each post adds one. Required for posts |
-| `YAMT_FAKE_GLAB_LOG` | a file every call is appended to (optional) |
+| `YAMT_FAKE_GLAB_LOG`   | a file every call is appended to (optional)                                                              |
 
 Each variable left unset is read from a `glab.env` file in the folder of `$0` (for a fake run through a symlink,
 the link's folder), one `NAME=value` line per variable, the value taken as written (no quotes); any other line
@@ -18,28 +18,28 @@ test ever runs a file it has just written (ETXTBSY).
 
 ## Scenario folder
 
-| file | answers |
-|---|---|
-| `auth-status.out` | `glab auth status`: printed on **stderr**, as glab prints all of it |
-| `auth-status.exit` | its exit status (missing = 0) |
-| `project.json` | `glab api` GET `projects/:fullpath` |
-| `merge-requests.json` | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests` |
-| `merge-request-<iid>.json` | `glab api` GET `…/merge_requests/<iid>` for that iid |
-| `merge-request.json` | `glab api` GET `…/merge_requests/<iid>` for any iid without its own file |
-| `draft-notes.json` | `glab api` GET `…/draft_notes` (`--paginate` accepted) |
-| `post-<n>.json` | the body of the n-th POST `…/draft_notes` or `glab api graphql --input -` (the re-request mutation; n from 1, counted in the state file) |
-| `post-<n>.status` | its HTTP status line (missing = `201 Created`) |
-| `post-<n>.err` | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body") |
-| `post-<n>.exit` | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout |
-| `post-<n>.sleep` | seconds to wait before answering (a post that hangs) |
-| `graphql-page-<n>.json` | `glab api graphql` without `--input -` and without a field `iids` or `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`) |
-| `graphql-discussions-<iids>.json` | `glab api graphql` without `--input -`, with a field `iids=<JSON array>` (the discussions query): `<iids>` is the array without its quotes, brackets and spaces, its commas as `-` (`iids=["82","81"]` → `graphql-discussions-82-81`); with a field `discussionsAfter=<cursor>`, `graphql-discussions-<iids>-after-<cursor>` |
-| `graphql-merge-request-<iid>.json` | `glab api graphql` without `--input -` and without a field `iids`, with a field `iid=<iid>` |
-| `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`) |
-| `pictures/<path>` | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found` |
-| `pictures/<path>.sleep` | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists |
-| `traces/<n>.log` | `glab api` GET `projects/<project>/jobs/<n>/trace` (a job's log, any project): printed with `cat` byte for byte, exit 0 (an empty file prints nothing); no such file answers `404 Not Found` |
-| `traces/<n>.log.sleep` | seconds to wait before that log's answer, whether or not the log exists |
+| file                                          | answers                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth-status.out`                             | `glab auth status`: printed on **stderr**, as glab prints all of it                                                                                                                                                                                                                                                          |
+| `auth-status.exit`                            | its exit status (missing = 0)                                                                                                                                                                                                                                                                                                |
+| `project.json`                                | `glab api` GET `projects/:fullpath`                                                                                                                                                                                                                                                                                          |
+| `merge-requests.json`                         | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests`                                                                                                                                                                                                                                            |
+| `merge-request-<iid>.json`                    | `glab api` GET `…/merge_requests/<iid>` for that iid                                                                                                                                                                                                                                                                         |
+| `merge-request.json`                          | `glab api` GET `…/merge_requests/<iid>` for any iid without its own file                                                                                                                                                                                                                                                     |
+| `draft-notes.json`                            | `glab api` GET `…/draft_notes` (`--paginate` accepted)                                                                                                                                                                                                                                                                       |
+| `post-<n>.json`                               | the body of the n-th POST `…/draft_notes` or `glab api graphql --input -` (the re-request mutation; n from 1, counted in the state file)                                                                                                                                                                                     |
+| `post-<n>.status`                             | its HTTP status line (missing = `201 Created`)                                                                                                                                                                                                                                                                               |
+| `post-<n>.err`                                | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body")                                                                                      |
+| `post-<n>.exit`                               | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout                                                                                                                                                                                                                   |
+| `post-<n>.sleep`                              | seconds to wait before answering (a post that hangs)                                                                                                                                                                                                                                                                         |
+| `graphql-page-<n>.json`                       | `glab api graphql` without `--input -` and without a field `iids` or `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`)                                                                                                                                         |
+| `graphql-discussions-<iids>.json`             | `glab api graphql` without `--input -`, with a field `iids=<JSON array>` (the discussions query): `<iids>` is the array without its quotes, brackets and spaces, its commas as `-` (`iids=["82","81"]` → `graphql-discussions-82-81`); with a field `discussionsAfter=<cursor>`, `graphql-discussions-<iids>-after-<cursor>` |
+| `graphql-merge-request-<iid>.json`            | `glab api graphql` without `--input -` and without a field `iids`, with a field `iid=<iid>`                                                                                                                                                                                                                                  |
+| `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`)                                                                                                                                                                                                                                                  |
+| `pictures/<path>`                             | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`                                                                                                         |
+| `pictures/<path>.sleep`                       | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists                                                                                                                                                                                                                             |
+| `traces/<n>.log`                              | `glab api` GET `projects/<project>/jobs/<n>/trace` (a job's log, any project): printed with `cat` byte for byte, exit 0 (an empty file prints nothing); no such file answers `404 Not Found`                                                                                                                                 |
+| `traces/<n>.log.sleep`                        | seconds to wait before that log's answer, whether or not the log exists                                                                                                                                                                                                                                                      |
 
 `glab api` keeps the value of every `-f`/`--raw-field`/`-F`/`--field` as `name=value` (the first wins when a name
 is given twice) and, as glab does, sends a POST when a field or `--input` is given without `-X`/`--method`. A GET
@@ -183,6 +183,16 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   `graphql-discussions-77.err` and `.exit` (1) fail before any answer with a deadline line. Avatars: anna's uploaded
   `/uploads/-/system/user/avatar/2/avatar.png` (`pictures/`, `mr-row-details/`'s PNG), ben's Gravatar as in
   `mr-row-details/`; every other `url` is `https://gitlab.example/taskboard/taskboard/-/merge_requests/<iid>#note_<n>`.
+- `mr-review-mode/` — review mode's order on the merge-request page (the real-app acceptance of
+  `docs/slices/briefs/mr-review-mode-page.md`): logged in; `mr-discussions/`'s project; user `sam` ("Sam Doe"); one
+  page, the last, with the list query's fields (`queryComplexity` 170 of 250); no `diffHeadSha`, no pipeline, no
+  label, assignee or avatar; every reviewer `UNREVIEWED`, not approved. !97 (by ben; reviewer anna; 1 open), !96 (ben;
+  sam and anna; 2), !95 (a draft, "Draft: …"; anna; sam; 1), !94 (anna; sam; 1), !93 (ben; sam; 2), !92 (sam; anna;
+  1), !91 (anna; sam and ben; none), !90 (anna; ben; 1). The batch `graphql-discussions-97-96-95-94-93-92-90.json`
+  (`queryComplexity` 58 of 250), one person's note per open discussion: !97 Overview, anna; !96 (a)
+  `src/board/filters.ts` line 4, ben, then (b) Overview, sam, newer; !95 Overview, anna; !94 `src/board/week.ts` line
+  12, anna; !93 (a) `src/export/csv.ts` line 8, sam, then (b) Overview, sam; !92 Overview, anna. !90 is absent from
+  the answer. Every `url` is `https://gitlab.example/taskboard/taskboard/-/merge_requests/<iid>#note_<n>`.
 
 ## Fake browser opener
 

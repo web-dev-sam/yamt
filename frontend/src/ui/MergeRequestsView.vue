@@ -5,11 +5,13 @@ import ArrowLeft from "~icons/lucide/arrow-left";
 import RefreshCw from "~icons/lucide/refresh-cw";
 import X from "~icons/lucide/x";
 
-import { filterLabel, isFiltered, type ListFilter } from "../mergeRequests";
+import { filterLabel, isFiltered, type ListFilter, type ReviewFor } from "../mergeRequests";
 import { RETRY } from "./aiText";
 import ChoiceButtons from "./ChoiceButtons.vue";
 import { returnFocus } from "./focusReturn";
 import MergeRequestFilter from "./MergeRequestFilter.vue";
+import MergeRequestReviewMode from "./MergeRequestReviewMode.vue";
+import MergeRequestReviewSort from "./MergeRequestReviewSort.vue";
 import MergeRequestRow from "./MergeRequestRow.vue";
 import type { RerequestAsk } from "./mergeRequests";
 import MergeRequestSearch from "./MergeRequestSearch.vue";
@@ -30,6 +32,8 @@ import { BACK } from "./serverText";
 import { useHoverMenu } from "./useHoverMenu";
 
 type FilterBar = InstanceType<typeof MergeRequestFilter>;
+type Picker = InstanceType<typeof MergeRequestReviewMode>;
+type MenuFor = ListFilter | "review";
 
 const props = defineProps<{ asking: boolean }>();
 
@@ -53,13 +57,17 @@ const {
   localMerge,
   dueDates,
   rerequests,
+  discussionDetails,
+  viewer,
+  reviewSort,
 } = requests;
 const back = useTemplateRef<HTMLButtonElement>("back");
 const bars = useTemplateRef<FilterBar[]>("bars");
-const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey, dismiss } =
-  useHoverMenu<ListFilter>({
-    menu: () => bars.value?.find((bar) => bar.menu !== null)?.menu ?? null,
-    opener: (which) => barOf(which)?.opener ?? null,
+const picker = useTemplateRef<Picker>("picker");
+const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey, dismiss, close } =
+  useHoverMenu<MenuFor>({
+    menu: () => bars.value?.find((bar) => bar.menu !== null)?.menu ?? picker.value?.menu ?? null,
+    opener: (which) => partOf(which)?.opener ?? null,
   });
 const focusedBefore = document.activeElement;
 const now = useNow({ scheduler: (tick) => useIntervalFn(tick, MINUTE_MS) });
@@ -103,9 +111,18 @@ function barOf(filter: ListFilter): FilterBar | undefined {
   return bars.value?.find((bar) => bar.$props.filter === filter);
 }
 
-async function openerClick(filter: ListFilter): Promise<void> {
-  await openerClicked(filter);
-  barOf(filter)?.narrowBox?.focus();
+function partOf(which: MenuFor): FilterBar | Picker | null | undefined {
+  return which === "review" ? picker.value : barOf(which);
+}
+
+async function openerClick(which: MenuFor): Promise<void> {
+  await openerClicked(which);
+  partOf(which)?.narrowBox?.focus();
+}
+
+async function pick(value: ReviewFor): Promise<void> {
+  requests.review(value);
+  await close();
 }
 </script>
 
@@ -158,6 +175,20 @@ async function openerClick(filter: ListFilter): Promise<void> {
         @pointer-leave="pointerLeft"
         @menu-key="menuKey"
       />
+      <MergeRequestReviewMode
+        v-if="discussionDetails === 'full'"
+        ref="picker"
+        :choices="choices.review"
+        :active="filters.review !== null"
+        :open="openFor === 'review'"
+        :above="above"
+        @pick="pick"
+        @opener-click="openerClick('review')"
+        @pointer-enter="pointerEntered('review')"
+        @pointer-leave="pointerLeft"
+        @menu-key="menuKey"
+      />
+      <MergeRequestReviewSort v-if="reviewSort !== null" :sort="reviewSort" :viewer="viewer" />
       <button
         v-if="filtered"
         type="button"

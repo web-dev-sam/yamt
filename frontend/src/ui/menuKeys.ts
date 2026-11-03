@@ -1,4 +1,4 @@
-export const MENU_ITEMS = "[role=menuitem], [role=menuitemcheckbox]";
+export const MENU_ITEMS = "[role=menuitem], [role=menuitemcheckbox], [role=menuitemradio]";
 
 export const ARROW_STEPS: Readonly<Record<string, number>> = { ArrowDown: 1, ArrowUp: -1 };
 

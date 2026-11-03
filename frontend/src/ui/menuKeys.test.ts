@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { stepMenuItem } from "./menuKeys";
+import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
 
 test("Escape and Tab close a menu", () => {
   expect(stepMenuItem({ count: 3, focused: 1 }, { key: "Escape" })).toEqual({ kind: "close" });
@@ -34,4 +34,12 @@ test("other keys, and arrows in an empty menu, are left alone", () => {
   expect(stepMenuItem({ count: 0, focused: -1 }, { key: "ArrowDown" })).toEqual({
     kind: "ignore",
   });
+});
+
+test("a radio item is stepped: menus step over plain, checkbox and radio items", () => {
+  expect(MENU_ITEMS.split(", ")).toEqual([
+    "[role=menuitem]",
+    "[role=menuitemcheckbox]",
+    "[role=menuitemradio]",
+  ]);
 });

@@ -1,0 +1,207 @@
+{
+  "data": {
+    "queryComplexity": { "score": 58, "limit": 250 },
+    "project": {
+      "mergeRequests": {
+        "nodes": [
+          {
+            "iid": "97",
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-97" },
+              "nodes": [
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
+                        "body": "Should a reminder repeat?",
+                        "createdAt": "2026-11-03T10:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/97#note_971",
+                        "position": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "iid": "96",
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-96" },
+              "nodes": [
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "ben", "name": "Ben Okafor", "avatarUrl": null },
+                        "body": "The empty filter keeps every card here.",
+                        "createdAt": "2026-11-02T10:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/96#note_961",
+                        "position": {
+                          "filePath": "src/board/filters.ts",
+                          "newLine": 4,
+                          "oldLine": null
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+                        "body": "Could the filters be remembered per board?",
+                        "createdAt": "2026-11-02T11:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/96#note_962",
+                        "position": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "iid": "95",
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-95" },
+              "nodes": [
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
+                        "body": "Archived cards still show in search.",
+                        "createdAt": "2026-11-01T10:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/95#note_951",
+                        "position": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "iid": "94",
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-94" },
+              "nodes": [
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
+                        "body": "Does the week start on Monday here?",
+                        "createdAt": "2026-10-31T10:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/94#note_941",
+                        "position": {
+                          "filePath": "src/board/week.ts",
+                          "newLine": 12,
+                          "oldLine": null
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "iid": "93",
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-93" },
+              "nodes": [
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+                        "body": "A comma inside a title breaks this column.",
+                        "createdAt": "2026-10-30T10:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/93#note_931",
+                        "position": {
+                          "filePath": "src/export/csv.ts",
+                          "newLine": 8,
+                          "oldLine": null
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+                        "body": "Please add a test with an empty board.",
+                        "createdAt": "2026-10-30T11:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/93#note_932",
+                        "position": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "iid": "92",
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-92" },
+              "nodes": [
+                {
+                  "resolvable": true,
+                  "resolved": false,
+                  "notes": {
+                    "pageInfo": { "hasPreviousPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
+                        "body": "Can a lane be collapsed?",
+                        "createdAt": "2026-10-29T10:00:00Z",
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/92#note_921",
+                        "position": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

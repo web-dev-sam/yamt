@@ -2,7 +2,6 @@ import type * as Generated from "./bindings";
 import { pause } from "./fixture";
 import { TIMED_OUT } from "./fixtureGitLab";
 import {
-  FIXTURE_ME,
   fixtureRows,
   fixtureUploadedPicture,
   LOGGED_OUT_DETAIL,
@@ -14,7 +13,7 @@ import type { MergeRequestSource } from "./MergeRequestSource";
 
 type Position = { readonly index: number; readonly at: 0 | 1 };
 
-export const DISCUSSIONS_FAILED_IID = 633;
+export const DISCUSSIONS_FAILED_IID = 615;
 export const DISCUSSIONS_LOGGED_OUT_IID = 629;
 
 const DISCUSSIONS_PAUSE_MS = 400;
@@ -37,10 +36,6 @@ const SHORT_TEXTS: Readonly<Record<Position["at"], string>> = {
   0: "Could you look at this again?",
   1: "Done, see the new commit.",
 };
-
-function sam(listed: readonly Generated.MergeRequestRow[]): Generated.Person | null {
-  return listed.find((row) => row.author?.username === FIXTURE_ME)?.author ?? null;
-}
 
 function text({ index, at }: Position): string {
   if (index === LONG_TEXT_INDEX && at === 0) {
@@ -67,11 +62,7 @@ function note(
   };
 }
 
-function discussions(
-  row: Generated.MergeRequestRow,
-  index: number,
-  listed: readonly Generated.MergeRequestRow[],
-): Generated.OpenDiscussion[] {
+function discussions(row: Generated.MergeRequestRow, index: number): Generated.OpenDiscussion[] {
   const nextAuthor = fixtureRows(index + 1, 1)[0]?.author ?? null;
   const first: Generated.OpenDiscussion = {
     place:
@@ -82,7 +73,7 @@ function discussions(
   };
   const reply: Generated.OpenDiscussion = {
     place: { kind: "file", path: "src/board/column.ts", line: null },
-    last: note(row, { index, at: 1 }, sam(listed), REPLY_HOURS),
+    last: note(row, { index, at: 1 }, row.reviewers[0]?.person ?? null, REPLY_HOURS),
   };
   return [first, reply].slice(0, row.openDiscussions);
 }
@@ -104,7 +95,7 @@ export function fixtureDiscussions(
   if (row === undefined) {
     return { kind: "failed", message: `GitLab sent no merge request !${iid}` };
   }
-  return { kind: "open", discussions: discussions(row, index, listed) };
+  return { kind: "open", discussions: discussions(row, index) };
 }
 
 /** Answers the first FIXTURE_ANSWERED distinct iids, as Rust answers a prefix of DISCUSSION_BATCH. */

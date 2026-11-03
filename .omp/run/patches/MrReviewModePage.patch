@@ -1,0 +1,1116 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index 5cacad9..60ec268 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -16,7 +16,7 @@ A row's people (plan §2 #151–#156): the author, assignees, reviewers (with th
+ 
+ A failed job's log (request `docs/slices/request-ci-job-log.md`, plan §2 row 158): `readJobLog(page)` → `JobLogReply` (`mergeRequestDomain.ts`, an alias of the generated type: `log { text, cut }` with the raw text, colour codes and all, or `notOffered`, `noLog`, `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), passed through unchanged by `tauriMergeRequests.ts`; Rust answers only a job page this window's list offered and keeps the logs for the run. Fixture mode answers every script after `LOG_PAUSE_MS` (400 ms), logging `mergeRequests.fixture_job_log { page }` first, from `fixtureMergeRequestLogs.ts` `fixtureJobLog(page, listed)` (the `LISTED_ROWS` = 500 rows), answered by row and job name: every `lint:docs` a short timestamped log (`cut: false`; sections with and without `\e[0K` before `section_start`, a `\r` progress line, `\r\n` ends, a `00O+` continuation, basic, bright, 256 and truecolor runs, an OSC title, a markup line); every `test:unit` about 9,000 lines under 512,000 bytes, built once, `cut: true`; the `lint:docs` and `test:unit` of `NO_LOG_IID` (!632) `noLog` and `failed` "glab timed out", of `LOGGED_OUT_LOG_IID` (!624) `notLoggedIn` and `glabMissing`; any other page, or a listed job of another name, `notOffered`. No string in the file names a `#`-hex colour (the palette fence).
+ 
+-Each row's open discussions (request `docs/slices/request-mr-discussions.md`, plan §2 rows 162–164): `readDiscussions(iids)` → `RowDiscussions[]` (a non-empty prefix of at most Rust's `DISCUSSION_BATCH` distinct iids, in order, for a non-empty ask; the caller asks again for the rest), converted by `mergeRequestDomain.ts` `toRowDiscussions(raw, index, uploadedPicture)`: the iid branded, an `open` answer's notes with `createdAt` in milliseconds, `author` the domain `Person` (its picture as `toMergeRequestPage` makes it) and `page` through `toWebPage`; the refusals `glabMissing`, `notLoggedIn { detail }`, `failed { message }` as sent; a bad iid, time or page throws. `DiscussionPlace` and `DiscussionNote` stay module-local; `OpenDiscussion`, `DiscussionsAnswer` and `RowDiscussions` are exported from `index.ts`. Fixture mode: `fixtureMergeRequestDiscussions.ts` `discussionsScript(log, listedRows)`, spread into `createFixtureMergeRequests`, logs `mergeRequests.fixture_discussions { iids }` (comma-joined) and answers after `DISCUSSIONS_PAUSE_MS` (400 ms) the first `FIXTURE_ANSWERED` (10) distinct iids by `fixtureDiscussions(iid, listed)`: each row's `openDiscussions` open ones with both turns for `sam`, a markup text, !638's 400-character line, pageless notes on every sixth row; !633 (`DISCUSSIONS_FAILED_IID`) `failed`, !629 (`DISCUSSIONS_LOGGED_OUT_IID`) `notLoggedIn`, an iid no row has `failed`. The setting: `setDiscussionDetails(current, details)` on `ChunkSource`/`SettingsSource` as `setAntialiasing`, in `tauri.ts` and `fixtureSettings.ts`; `DiscussionDetails` (`"full" | "lazy" | "off"`) aliases the generated type in `domain.ts`.
++Each row's open discussions (request `docs/slices/request-mr-discussions.md`, plan §2 rows 162–164): `readDiscussions(iids)` → `RowDiscussions[]` (a non-empty prefix of at most Rust's `DISCUSSION_BATCH` distinct iids, in order, for a non-empty ask; the caller asks again for the rest), converted by `mergeRequestDomain.ts` `toRowDiscussions(raw, index, uploadedPicture)`: the iid branded, an `open` answer's notes with `createdAt` in milliseconds, `author` the domain `Person` (its picture as `toMergeRequestPage` makes it) and `page` through `toWebPage`; the refusals `glabMissing`, `notLoggedIn { detail }`, `failed { message }` as sent; a bad iid, time or page throws. `DiscussionPlace` and `DiscussionNote` stay module-local; `OpenDiscussion`, `DiscussionsAnswer` and `RowDiscussions` are exported from `index.ts`. Fixture mode: `fixtureMergeRequestDiscussions.ts` `discussionsScript(log, listedRows)`, spread into `createFixtureMergeRequests`, logs `mergeRequests.fixture_discussions { iids }` (comma-joined) and answers after `DISCUSSIONS_PAUSE_MS` (400 ms) the first `FIXTURE_ANSWERED` (10) distinct iids by `fixtureDiscussions(iid, listed)`: each row's `openDiscussions` open ones — discussion 0's last comment by the next row's author, discussion 1's (newer) by the row's first reviewer, so both turns occur for `sam` and another reviewer waits (review mode's orders, pinned by `the_review_orders_the_smoke_expects`) —, a markup text, !638's 400-character line, pageless notes on every sixth row; !615 (`DISCUSSIONS_FAILED_IID`, reviewed by chiara, none of sam's) `failed`, !629 (`DISCUSSIONS_LOGGED_OUT_IID`) `notLoggedIn`, an iid no row has `failed`. The setting: `setDiscussionDetails(current, details)` on `ChunkSource`/`SettingsSource` as `setAntialiasing`, in `tauri.ts` and `fixtureSettings.ts`; `DiscussionDetails` (`"full" | "lazy" | "off"`) aliases the generated type in `domain.ts`.
+ 
+ `localMergeDomain.ts` holds the merge window's aliases (MergeView, ReturnTo, Leftover, AbortReply, PushReply) over bindings; domain.ts's Listing and ChunkSource import from it.
+ 
+diff --git a/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts b/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
+index f243b8f..ff48bf7 100644
+--- a/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
+@@ -1,13 +1,30 @@
+ import { expect, test } from "vitest";
+ 
++import {
++  byDueDate,
++  calendarDayFrom,
++  filtered,
++  reviewing,
++  reviewOrdered,
++  withDraft,
++  type CalendarDay,
++  type Filters,
++  type ReviewDetails,
++} from "../mergeRequests";
+ import type * as Generated from "./bindings";
+ import { TIMED_OUT } from "./fixtureGitLab";
+-import { FIXTURE_ME, fixtureRows, LOGGED_OUT_DETAIL } from "./fixtureMergeRequestData";
++import {
++  FIXTURE_ME,
++  fixtureRows,
++  fixtureUploadedPicture,
++  LOGGED_OUT_DETAIL,
++} from "./fixtureMergeRequestData";
+ import {
+   DISCUSSIONS_FAILED_IID,
+   DISCUSSIONS_LOGGED_OUT_IID,
+   fixtureDiscussions,
+ } from "./fixtureMergeRequestDiscussions";
++import { toMergeRequestPage, toRowDiscussions } from "./mergeRequestDomain";
+ 
+ const LISTED = fixtureRows(0, 500);
+ const SCRIPTED: ReadonlySet<number> = new Set([DISCUSSIONS_FAILED_IID, DISCUSSIONS_LOGGED_OUT_IID]);
+@@ -41,17 +58,21 @@ test("every_listed_row_with_open_discussions_has_that_many", () => {
+ });
+ 
+ test("both_turns_occur_for_sam_and_some_rows_wait_only", () => {
+-  const pairs = UNSCRIPTED.map((row) => openOf(row.iid)).filter((open) => open.length === 2);
+-  const mixed = pairs.filter(([first, second]) => !isSams(first) && isSams(second));
+-  const samsOnly = pairs.filter((open) => open.every(isSams));
++  const pairs = UNSCRIPTED.filter((row) => row.openDiscussions === 2);
++  const opens = UNSCRIPTED.map((row) => openOf(row.iid)).filter((open) => open.length > 0);
+ 
+-  expect(mixed.length).toBeGreaterThan(0);
+-  expect(samsOnly.length).toBeGreaterThan(0);
+-  for (const [first, second] of mixed) {
++  expect(pairs.length).toBeGreaterThan(0);
++  for (const row of pairs) {
++    const [first, second] = openOf(row.iid);
++    expect(row.reviewers[0]).toBeDefined();
++    expect(second?.last.author).toEqual(row.reviewers[0]?.person);
+     expect(Date.parse(second?.last.createdAt ?? "")).toBeGreaterThan(
+       Date.parse(first?.last.createdAt ?? ""),
+     );
+   }
++  expect(opens.some((open) => open.every(isSams))).toBe(true);
++  expect(opens.some((open) => !open.some(isSams))).toBe(true);
++  expect(opens.some((open) => open.some(isSams) && !open.every(isSams))).toBe(true);
+ });
+ 
+ test("the_markup_text_and_a_pageless_discussion_exist", () => {
+@@ -99,3 +120,67 @@ test("an_unlisted_iid_fails", () => {
+   });
+   expect(fixtureDiscussions(141, LISTED).kind).toBe("open");
+ });
++
++const SMOKE_ROWS = 40;
++const SMOKE_DUE_DATES: Readonly<Record<number, string>> = {
++  618: "2026-11-04",
++  633: "2026-11-05",
++  623: "2026-11-05",
++  622: "2026-11-01",
++  602: "2026-11-06",
++};
++
++function smokeDue(iid: number): CalendarDay | null {
++  const text = SMOKE_DUE_DATES[iid];
++  return text === undefined ? null : calendarDayFrom(text);
++}
++
++function smokeDetails(listed: readonly Generated.MergeRequestRow[]) {
++  return (iid: number): ReviewDetails<string> => {
++    const { answer } = toRowDiscussions(
++      { iid, answer: fixtureDiscussions(iid, listed) },
++      0,
++      fixtureUploadedPicture,
++    );
++    return answer.kind === "open"
++      ? { kind: "read", discussions: answer.discussions }
++      : { kind: "failed", failure: answer.kind };
++  };
++}
++
++test("the_review_orders_the_smoke_expects", () => {
++  const listed = fixtureRows(0, SMOKE_ROWS);
++  const { rows } = toMergeRequestPage({ me: FIXTURE_ME, rows: listed }, fixtureUploadedPicture);
++  const detailsOf = smokeDetails(listed);
++  function orders(filters: Filters, reviewer: string) {
++    const passing = filtered(rows, filters, FIXTURE_ME);
++    const order = reviewOrdered(passing, reviewer, smokeDue, detailsOf);
++    return {
++      normal: byDueDate(passing, smokeDue)
++        .map((row) => `!${row.iid}`)
++        .join(" "),
++      review: order.rows.map((row) => `!${row.iid}`).join(" "),
++      failed: order.kind === "failed" ? order.row.iid : null,
++    };
++  }
++  const anna = reviewing({ kind: "person", username: "anna" });
++
++  expect(orders(reviewing({ kind: "me" }), FIXTURE_ME)).toEqual({
++    normal: "!622 !618 !633 !623 !638 !608 !603",
++    review: "!618 !633 !623 !622 !638 !603 !608",
++    failed: null,
++  });
++  expect(orders(anna, "anna")).toEqual({
++    normal: "!622 !602 !632 !630 !617 !612",
++    review: "!602 !622 !630 !612 !632 !617",
++    failed: null,
++  });
++  expect(orders(withDraft(anna, "all"), "anna").review).toBe(
++    "!602 !622 !630 !627 !612 !632 !617 !606",
++  );
++  expect(orders(reviewing({ kind: "person", username: "chiara" }), "chiara")).toEqual({
++    normal: "!638 !635 !630 !615 !614 !605",
++    review: "!638 !635 !630 !615 !614 !605",
++    failed: 615,
++  });
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequestDiscussions.ts b/frontend/src/ipc/fixtureMergeRequestDiscussions.ts
+index 2b26b55..e7cf6cc 100644
+--- a/frontend/src/ipc/fixtureMergeRequestDiscussions.ts
++++ b/frontend/src/ipc/fixtureMergeRequestDiscussions.ts
+@@ -2,7 +2,6 @@ import type * as Generated from "./bindings";
+ import { pause } from "./fixture";
+ import { TIMED_OUT } from "./fixtureGitLab";
+ import {
+-  FIXTURE_ME,
+   fixtureRows,
+   fixtureUploadedPicture,
+   LOGGED_OUT_DETAIL,
+@@ -14,7 +13,7 @@ import type { MergeRequestSource } from "./MergeRequestSource";
+ 
+ type Position = { readonly index: number; readonly at: 0 | 1 };
+ 
+-export const DISCUSSIONS_FAILED_IID = 633;
++export const DISCUSSIONS_FAILED_IID = 615;
+ export const DISCUSSIONS_LOGGED_OUT_IID = 629;
+ 
+ const DISCUSSIONS_PAUSE_MS = 400;
+@@ -38,10 +37,6 @@ const SHORT_TEXTS: Readonly<Record<Position["at"], string>> = {
+   1: "Done, see the new commit.",
+ };
+ 
+-function sam(listed: readonly Generated.MergeRequestRow[]): Generated.Person | null {
+-  return listed.find((row) => row.author?.username === FIXTURE_ME)?.author ?? null;
+-}
+-
+ function text({ index, at }: Position): string {
+   if (index === LONG_TEXT_INDEX && at === 0) {
+     return LONG_TEXT;
+@@ -67,11 +62,7 @@ function note(
+   };
+ }
+ 
+-function discussions(
+-  row: Generated.MergeRequestRow,
+-  index: number,
+-  listed: readonly Generated.MergeRequestRow[],
+-): Generated.OpenDiscussion[] {
++function discussions(row: Generated.MergeRequestRow, index: number): Generated.OpenDiscussion[] {
+   const nextAuthor = fixtureRows(index + 1, 1)[0]?.author ?? null;
+   const first: Generated.OpenDiscussion = {
+     place:
+@@ -82,7 +73,7 @@ function discussions(
+   };
+   const reply: Generated.OpenDiscussion = {
+     place: { kind: "file", path: "src/board/column.ts", line: null },
+-    last: note(row, { index, at: 1 }, sam(listed), REPLY_HOURS),
++    last: note(row, { index, at: 1 }, row.reviewers[0]?.person ?? null, REPLY_HOURS),
+   };
+   return [first, reply].slice(0, row.openDiscussions);
+ }
+@@ -104,7 +95,7 @@ export function fixtureDiscussions(
+   if (row === undefined) {
+     return { kind: "failed", message: `GitLab sent no merge request !${iid}` };
+   }
+-  return { kind: "open", discussions: discussions(row, index, listed) };
++  return { kind: "open", discussions: discussions(row, index) };
+ }
+ 
+ /** Answers the first FIXTURE_ANSWERED distinct iids, as Rust answers a prefix of DISCUSSION_BATCH. */
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index c336fb7..11a5ee2 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -44,18 +44,20 @@ Themes (plan §2 #102): `useThemeAttribute` (`settingsStore.ts`, every root) is
+ 
+ Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`store.ts` `search` + `liveResults` from `mergeSearch.ts`, `rangeStore.ts` `search` from `rangeSearch.ts`), the only writer of the query, case, filters and closed groups; the runner in `searchRun.ts` writes only `results` and `running` (full runs by generation, each with its own `Working` matcher, ranks and results, 8 ms slices, one-file re-runs by `changed` after `SEARCH_PAUSE_MS`, stale replies dropped per path; `onFullRun` lets `searching.ts` open every group and count `fullRuns`, one per new search). The merge source's `loadFile` replies go through `landed` with the stop they were sent in (`currentStop`). Matching and rows are `search/`'s only. `SideColumn.vue` holds the left column's width and handle (`usePanelWidth`, "File list width"), its visibility and the islands' overlap between the shown panel and list, with `SearchPanel.vue` (box, Match Case, pane toggles from `searchIcons.ts`, summary words in `searchText.ts`, `SearchResults.vue`'s virtual list, `overflow-x-hidden`: WebKitGTK's overlay scrollbar would take the clicks on the last row, #1719; its keys in `searchListKeys.ts` `stepSearchList`) above `FileList.vue`; both roots call `search.toggleKey` after `fileListKey` (`windowKey`, the one guard). `SearchResults.vue` alone owns the list's scroll position and its active row: each new search (`fullRuns`) scrolls to the top and clears the active row, so Down from the box starts at the first row; rows that shrink below the scroll position clamp it to the end; `keepInView` follows the keys. Hiding the panel while the keyboard is in it or on `<body>`: with a file on screen (both roots pass `SearchPanel` the shown path only while `screen.kind === 'files'`), the pane focused at show — CodeMirror's content element, `role=textbox aria-multiline` — when still connected and the same path is shown, else `focusShownFile`; with no file on screen (Settings, a server log), the element focused at show when still connected, never a go-to. A row asks `goTo` and opens its file; the shown view takes it through `took`. `opening.ts` holds the merge store's file opening (`open`, `pick`, `thenMoveOn`).
+ 
+-Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. What the page shows from the loaded rows is `mergeRequestsShown.ts` `shownOf`: the remembered filters, `shownRows` (`datedFirst(searched(filtered(…)))`), the checklists' `choices` (over every loaded row, never searched) and the summary. Its filter row starts with `MergeRequestSearch.vue` (request #2150: the title or any `!number` named in the text, `mergeRequests/` `searched`; the slice's `search`, written by `setSearch` and emptied by `show`, kept through Refresh, never stored, not cleared by "Clear filters"; × and Escape with text empty it and keep the focus, Escape in the empty field closes the page as before because the field prevents only the Escape it used), then three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; presentational: the View holds their one menu; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears) and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the people stack, the "+N" labels chip, the due date, the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box through `useHoverBox` on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
++Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. What the page shows from the loaded rows is `mergeRequestsShown.ts` `shownOf`: the remembered filters, `shownRows` (`datedFirst(searched(filtered(…)))`, or the review order while `filters.review` is set; one computed gives it and `reviewSort`), the checklists' `choices` (over every loaded row, never searched; `choices.review` is the picker's, `reviewChoices`), the summary, `viewer` (`viewerOf`) and `reviewSort` (null without review mode). Its filter row starts with `MergeRequestSearch.vue` (request #2150: the title or any `!number` named in the text, `mergeRequests/` `searched`; the slice's `search`, written by `setSearch` and emptied by `show`, kept through Refresh, never stored, not cleared by "Clear filters"; × and Escape with text empty it and keep the focus, Escape in the empty field closes the page as before because the field prevents only the Escape it used), then three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; presentational: the View holds their one menu; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears), review mode's button and sort icon (below), and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the people stack, the "+N" labels chip, the due date, the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box through `useHoverBox` on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
+ 
+-Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). WebKit sends no pointer events to a disabled button, so a control that can be disabled (a CI job without a log, the row action, open changes while fetching) carries its tip on a wrapper and the button `disabled:pointer-events-none`. `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); it and the due-date box close on a scroll outside them (`useScrollOutside`, capture phase, the one copy of that rule). `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter>` for the three filters, finds each filter's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click; Escape with a filter list open closes the list, not the page.
++Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). WebKit sends no pointer events to a disabled button, so a control that can be disabled (a CI job without a log, the row action, open changes while fetching) carries its tip on a wrapper and the button `disabled:pointer-events-none`. `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); it and the due-date box close on a scroll outside them (`useScrollOutside`, capture phase, the one copy of that rule). `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter | "review">` for the three filters and review mode's picker (at most one list open), finds each part's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click; Escape with a list open closes the list, not the page.
+ 
+-Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (the "created … ago" hover is `dateTimeText`, "30.10.2026, 15:04", no locale; labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date `DD.MM.YYYY` over the days left in the error colour when overdue; its `role="dialog"` box "Choose a due date" holds a text field on its own draft (`v-model`, set to the shown date when the box opens, so a re-render never rewrites it) that `typedDay` reads on Enter — a refused text stays as typed, sets `aria-invalid` and the error border, saves nothing —, `MergeRequestCalendar.vue` and Today (`PICK_TODAY`) / Clear; only Enter, a click or a footer button saves, never blur), then discussions and approvals (`approversText`, one name per line). `MergeRequestCalendar.vue` (`selected`, `today`, emits `pick`) is shadcn's Calendar: it owns the focused day, and the shown month is the focused day's (`monthOf`); the caption between the Previous / Next month chevrons, `WEEKDAYS` and `monthGrid`'s six weeks as `role="grid"` labelled by the caption, each day a button named `dayName` (`aria-selected` on its gridcell, `aria-current="date"` today); one tab stop (roving `tabindex`), the WAI-ARIA date-picker keys by `movedDay` (arrows, Home/End, PageUp/PageDown, Shift for a year; Enter/Space are the button's click), and it focuses its day when it mounts. Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)` with the click's `shiftKey`; while Shift is held (`useShiftHeld.ts` `useShiftHeld()`, one state per window shared by every filter and every CI box through vueuse `createSharedComposable`: the rule `shiftAfter` over `ShiftState` — `up` or `held { alone }`, both with a `taps` count — on `keyHold.ts`'s one listener set, `useKeyHold(KeyHold<S>)`, generic over its state, which the shell Alt's boolean hold uses too; held from Shift's keydown to its keyup by key name, since WebKitGTK on X11 reports Shift still set on its own release; up on blur, a hidden page, or a pointer event without `shiftKey`, none of which counts a tap) every value shows a muted `circle-minus`, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
++Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (the "created … ago" hover is `dateTimeText`, "30.10.2026, 15:04", no locale; labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date `DD.MM.YYYY` over the days left in the error colour when overdue; its `role="dialog"` box "Choose a due date" holds a text field on its own draft (`v-model`, set to the shown date when the box opens, so a re-render never rewrites it) that `typedDay` reads on Enter — a refused text stays as typed, sets `aria-invalid` and the error border, saves nothing —, `MergeRequestCalendar.vue` and Today (`PICK_TODAY`) / Clear; only Enter, a click or a footer button saves, never blur), then discussions and approvals (`approversText`, one name per line). `MergeRequestCalendar.vue` (`selected`, `today`, emits `pick`) is shadcn's Calendar: it owns the focused day, and the shown month is the focused day's (`monthOf`); the caption between the Previous / Next month chevrons, `WEEKDAYS` and `monthGrid`'s six weeks as `role="grid"` labelled by the caption, each day a button named `dayName` (`aria-selected` on its gridcell, `aria-current="date"` today); one tab stop (roving `tabindex`), the WAI-ARIA date-picker keys by `movedDay` (arrows, Home/End, PageUp/PageDown, Shift for a year; Enter/Space are the button's click), and it focuses its day when it mounts. Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)` with the click's `shiftKey`; while Shift is held (`useShiftHeld.ts` `useShiftHeld()`, one state per window shared by every filter and every CI box through vueuse `createSharedComposable`: the rule `shiftAfter` over `ShiftState` — `up` or `held { alone }`, both with a `taps` count — on `keyHold.ts`'s one listener set, `useKeyHold(KeyHold<S>)`, generic over its state, which the shell Alt's boolean hold uses too; held from Shift's keydown to its keyup by key name, since WebKitGTK on X11 reports Shift still set on its own release; up on blur, a hidden page, or a pointer event without `shiftKey`, none of which counts a tap) every value shows a muted `circle-minus`, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`, by `dueOf`, the one day lookup the review order reads too); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
+ 
+ Job logs (request `docs/slices/request-ci-job-log.md`, plan §2 #158–#161): `mergeRequestJobLogs.ts` holds the window's one log box (`jobLog`): Shift over the job already loading or shown changes nothing; any other job writes a new `loading` entry, and a reply is written only into the entry it was asked for (parsed once by `mergeRequests/` `jobLogView`); `closeJobLog` sets null. The search texts are remembered per job name, no repository key (`jobSearch`/`setJobSearch`, key `yamt.mergeRequests.jobSearches`); "" forgets one. A Shift tap is `useShiftTaps()` (`useShiftHeld.ts`): Shift down then up with no other key and no pointer press between, so Shift+Tab, Shift+click and a typed capital never count. `CiStatusBox.vue` watches the count, never `open && held` (a Shift held as the box opens would count), and asks for the pointed job (its `<li>`, since a disabled button gets no pointer events), else the focused one, only while its box is open, the job has a page and focus is in no text field (`typingTarget.ts` `isTypingTarget`, window-neutral; the log's own field included, so Shift there types a capital and switches nothing). The pointed and focused jobs are forgotten when the CI box closes (Escape removes the `<li>` without its `pointerleave`). The job whose log is shown has no hover tip (its tip would cover the log's header; a Shift press does not hide a tip). `CiStatusJobLog.vue` is a DOM child of the CI box's hover area, after the box, so `useHoverBox`'s one inside rule holds both and a scroll inside the log closes nothing; it sits left of the CI box, tops level (`useMenuPlacement`, clamped), is keyed by the job's page and closes when the CI box does. Escape in the log is the log's: it prevents the default and closes, and `CiStatusBox` puts focus on that job's button (found by its `data-job-page`); `useHoverBox` ignores an Escape already `defaultPrevented`, so a second Escape closes the CI box. A refused or failed log moves focus from the field to the log body, so Shift over the job asks again as its words say. Lines are static: one `div` per line, one `span` per run with `mergeRequestLogLook.ts` `runClasses` and the run's text as text (never markup); a run with an ANSI background takes the panel colour as its text colour (every `--color-ansi-*` is ≥ 4.5:1 against `--color-panel`, so the pair is too); the log opens at its end (`useFollowEnd`). The search (`search/` `matcherOf`, case-insensitive, mapped onto runs by `hitPlaces`) paints CSS Custom Highlights `job-log-match` and `job-log-current` over those text nodes, with no DOM change; every hit counts and is stepped, but `job-log-match` holds only the hits on lines in view ± one screen (`mergeRequests/` `firstLineBelow` on the lines' `offsetTop`, `placesOnLines`), rebuilt at once on a search and once per animation frame on a scroll or a step (tens of thousands of live ranges freeze WebKitGTK for seconds); the current hit starts at the last one and is centred by `scrollTop` only; Enter / Shift+Enter step it. Each name is registered once per log with one `Highlight`, cleared and refilled on every rebuild: WebKitGTK 2.54 leaves the ranges of a `Highlight` that `CSS.highlights.set` replaces painted (#2191). Both are deleted when the log unmounts. Opening fills the field with the remembered text, selected and searched. Words in `mergeRequestLogText.ts`.
+ 
+-Discussions (request `docs/slices/request-mr-discussions.md`, design `docs/slices/briefs/mr-discussions-design.md` option A, plan §2 #163, #164): `mergeRequestDiscussions.ts` owns `discussions` (its only writer), one entry per asked row while the list stands. One call at a time; a generation is raised by `replaced` and by "off", so an older answer is dropped. "Load fully": the rows with a count above 0 are queued from `received` (`listed`), all again at `ended`'s swap (`replaced`: a Refresh, or a show 30 s or more after the last load, `RECHECK_PAUSE_MS`), and a watch on the setting asks them when it turns to full, with no reload. "Load lazily": `askDiscussions(iid)` puts that row first and asks it once. "Off": every entry and any call in flight dropped. Log `mergeRequests.discussions_read` (counts only). `MergeRequestDiscussions.vue` is the row's count: with "Off" or a count of 0 the plain count (`vTooltip` `discussionsText`, muted at 0), no box and no ask; else the people box's shape (`useHoverBox`, an opener button named by `discussionsText` with no tooltip, #154) whose entry comes from `useRowDiscussions`, which calls `askDiscussions` when the box opens and again when an open box loses its entry (a swap), so a hover and keyboard focus both ask. Its `role="status"` header is `DISCUSSIONS_LOADING` with no entry or while loading, `turnSummaryText(turnCounts(…, me))` once read, else `glabRefusalText` (the glab words of the list, the box and a re-request reply) or `problemText` at step `discussions` in the error colour — never the problem bar. Its list is `discussionTurns(…, me)` (the viewer's turn first, newest first); each line is a button calling `openPage("discussion", page)` when the last note has a page, else a `div`: the author's picture and `noteAuthorName`, `agoText`, `turnText` (the viewer's turn in `text-primary`), `placeText`, and `noteExcerpt` clamped to 3 lines. All of its text is interpolated, never `v-html` (RK60). `MergeRequestDiscussionSetting.vue` is Settings → "Discussion details" (`DISCUSSION_DETAILS_OPTIONS` through `ChoiceButtons`, `setDiscussionDetails` on the settings seam, the hint under it); the compare and the range root put it into `SettingsView`'s slot, and the merge window, which has no merge-request page, has no such section.
++Discussions (request `docs/slices/request-mr-discussions.md`, design `docs/slices/briefs/mr-discussions-design.md` option A, plan §2 #163, #164): `mergeRequestDiscussions.ts` owns `discussions` (its only writer), one entry per asked row while the list stands. One call at a time; a generation is raised by `replaced` and by "off", so an older answer is dropped. "Load fully": the rows with a count above 0 are queued from `received` (`listed`), all again at `ended`'s swap (`replaced`: a Refresh, or a show 30 s or more after the last load, `RECHECK_PAUSE_MS`), and a watch on the setting asks them when it turns to full, with no reload. "Load lazily": `askDiscussions(iid)` puts that row first and asks it once. "Off": every entry and any call in flight dropped. Log `mergeRequests.discussions_read` (counts only). A refused or failed entry is a `DiscussionFailure` (`mergeRequestDiscussions.ts`). `MergeRequestDiscussions.vue` is the row's count: with "Off" or a count of 0 the plain count (`vTooltip` `discussionsText`, muted at 0), no box and no ask; else the people box's shape (`useHoverBox`, an opener button named by `discussionsText` with no tooltip, #154) whose entry comes from `useRowDiscussions`, which calls `askDiscussions` when the box opens and again when an open box loses its entry (a swap), so a hover and keyboard focus both ask. The box speaks for the slice's `viewer` (me, or review mode's person). Its `role="status"` header is `DISCUSSIONS_LOADING` with no entry or while loading, `turnSummaryText(turnCounts(…, viewer))` once read, else `discussionsFailedText` (`mergeRequestsText.ts`: `glabRefusalText`, the glab words of the list, the box and a re-request reply, or `problemText` at step `discussions`) in the error colour — never the problem bar. Its list is `discussionTurns(…, viewer)` (the viewer's turn first, newest first); each line is a button calling `openPage("discussion", page)` when the last note has a page, else a `div`: the author's picture and `noteAuthorName`, `agoText`, `turnText` (the viewer's turn in `text-primary`), `placeText`, and `noteExcerpt` clamped to 3 lines. All of its text is interpolated, never `v-html` (RK60). `MergeRequestDiscussionSetting.vue` is Settings → "Discussion details" (`DISCUSSION_DETAILS_OPTIONS` through `ChoiceButtons`, `setDiscussionDetails` on the settings seam, the hint under it); the compare and the range root put it into `SettingsView`'s slot, and the merge window, which has no merge-request page, has no such section.
++
++Review mode (request `docs/slices/request-mr-review-mode.md`, design `docs/slices/briefs/mr-review-mode-design.md` option A, plan §2 #165, #166): it is `filters.review`, a field of the remembered filters. `mergeRequestFilters.ts` `createRememberedFilters(repository, reviewable, storage)` is the gate (RK62): `review` reads null while `!reviewable()` (details not "full"), and turning false with a stored review writes the entry once without it, keeping Reviewer and Draft. `review(who)` writes `reviewing(who)` (Reviewer = who, Ready, the other filters off); "Clear filters" (`clearAll`, `NO_FILTERS`) is the only way out. `MergeRequestReviewMode.vue` is the button (Lucide `user-round-search`, `vTooltip` and name `REVIEW_MODE`, a set filter's `border-primary` while on), shown only while `discussionDetails === "full"`, after the three filters; its picker is a `menuitemradio` list of `choices.review` (Me, then the Reviewer list's people, no None; `MENU_ITEMS` steps radio items too) with the filter's narrowing box above `NARROW_FROM`; a pick calls `review(value)` and closes the menu with the focus back on the button. `MergeRequestReviewSort.vue` is the sort icon (Lucide `arrow-down-wide-narrow`, a `role="img"` span with `vTooltip` and `aria-label`), shown while `reviewSort` is not null: `text-primary` with `reviewSortedText(viewer, loading)` when sorted, `text-problem-error` with `reviewFailedText(viewer, iid, discussionsFailedText(…))` when a shown row's details failed (RK63: the list keeps the normal order).
+ 
+ Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid (`rechecked`, `mergeRequests/`) among its own load's rows only — `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap, `null` once a failed first load cleared them) is that load, else the load's own buffer (empty unless it is a refresh, read only by a refresh's swap) — so any other is dropped, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
+ 
+-Merge-request conflicts (plan §2 #138–#143): `MergeRequestRow.vue` shows the change size in its meta line (`sizeParts`, each part its own span, title `sizeTitle` on the whole size; none when GitLab gave none), `MergeRequestReadiness.vue` (a `w-7` column right of the CI box: the Lucide icon of `readinessIcon`, title and accessible name `readinessText`) and, left of the open-changes button, the row's one action from `mergeRequests/` `rowAction` (Resolve `git-merge`, Continue `step-forward`; a disabled one through the `<span :title>` hover of `OperationButtons.vue`; the spinner while it runs) with its reply line under the row (`rowReplyText`, `role="status"`, the error colour only when `refused`). `mergeRequestActions.ts` `createRowActions` (held by the slice) is the only writer of `actions` (one `RowActing` per row, replaced by the next click; a click while the row runs sends nothing) and `localMerge` (rules 8, 9): it is read at `show()`, on the window's `focus` while the page is shown (`MergeRequestsView.vue`) and after every resolve or continue reply; a failed read keeps what was known and reports the `localMerge` step. Its `setRow` (a new map with the row's value, or without the row for `null`) and `claimRow` (the row set busy unless it already is) are the one per-row write and busy guard of `actions` and of the slice's `openings`.
++Merge-request conflicts (plan §2 #138–#143): `MergeRequestRow.vue` shows the change size in its meta line (`sizeParts`, each part its own span, title `sizeTitle` on the whole size; none when GitLab gave none), `MergeRequestReadiness.vue` (a `w-7` column right of the CI box: the Lucide icon of `readinessIcon`, title and accessible name `readinessText`) and, left of the open-changes button, the row's one action from `mergeRequests/` `rowAction` (Resolve `git-merge`, Continue `step-forward`; a disabled one through the `<span :title>` hover of `OperationButtons.vue`; the spinner while it runs) with its reply line under the row (`rowReplyText` in `mergeRequestRowReplyText.ts`, `role="status"`, the error colour only when `refused`). `mergeRequestActions.ts` `createRowActions` (held by the slice) is the only writer of `actions` (one `RowActing` per row, replaced by the next click; a click while the row runs sends nothing) and `localMerge` (rules 8, 9): it is read at `show()`, on the window's `focus` while the page is shown (`MergeRequestsView.vue`) and after every resolve or continue reply; a failed read keeps what was known and reports the `localMerge` step. Its `setRow` (a new map with the row's value, or without the row for `null`) and `claimRow` (the row set busy unless it already is) are the one per-row write and busy guard of `actions` and of the slice's `openings`.
+ 
+ The merge window of a merge request (plan §2 #138–#143): `question.ts` is what is asked; `questionText.ts` is its words (`cancel: null` draws one button; a bullet list is kind `lines`). Abort of a merge yamt started (`mergeRequest`, written only by `listing.ts`) asks by returnTo/branchBefore, then shows the one-button notice if git left anything (`leftoverText.ts`, the page's `gitRefused` line uses it too), then `closeEndedMerge`. `pushing.ts` offers the push after Continue answers ReadyToPush: only Push pushes (RK45), a failure asks pushFailed again, Keep Local or Escape closes once. A failed push is the `push` problem ("Could not push <branch>"); a failed `closeEndedMerge`, after the push offer or after Abort's leftovers, is the `closeMerge` problem of the merge read before the action began ("Could not close the merge of <target> into <branch>"), never Abort's. Once Continue answers ReadyToPush, or Abort answers leftovers, git stays running: the window is ended for every reader.
+diff --git a/frontend/src/ui/MergeRequestReviewMode.vue b/frontend/src/ui/MergeRequestReviewMode.vue
+new file mode 100644
+index 0000000..5faed9f
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestReviewMode.vue
+@@ -0,0 +1,105 @@
++<script setup lang="ts">
++import { computed, shallowRef, useTemplateRef, watch } from "vue";
++import Check from "~icons/lucide/check";
++import UserRoundSearch from "~icons/lucide/user-round-search";
++
++import { filterName, NARROW_FROM, narrowed, type Choice, type ReviewFor } from "../mergeRequests";
++import { narrowLabel, narrowPlaceholder, REVIEW_MODE } from "./mergeRequestsText";
++import { vTooltip } from "./tooltip";
++
++const props = defineProps<{
++  choices: readonly Choice<ReviewFor>[];
++  active: boolean;
++  open: boolean;
++  above: boolean;
++}>();
++const emit = defineEmits<{
++  pick: [value: ReviewFor];
++  openerClick: [];
++  pointerEnter: [];
++  pointerLeave: [];
++  menuKey: [event: KeyboardEvent];
++}>();
++
++const REVIEWER = filterName("reviewer");
++
++const opener = useTemplateRef<HTMLButtonElement>("opener");
++const menu = useTemplateRef<HTMLDivElement>("menu");
++const narrowBox = useTemplateRef<HTMLInputElement>("narrowBox");
++const typed = shallowRef("");
++defineExpose({ opener, menu, narrowBox });
++
++const narrows = computed(() => props.choices.length > NARROW_FROM);
++const shown = computed(() =>
++  narrows.value ? narrowed(props.choices, typed.value) : props.choices,
++);
++
++watch(
++  () => props.open,
++  (open) => {
++    if (open) {
++      typed.value = "";
++    }
++  },
++);
++
++function keyOf(value: ReviewFor): string {
++  return value.kind === "me" ? value.kind : `user:${value.username}`;
++}
++</script>
++
++<template>
++  <div
++    class="relative flex items-center"
++    @pointerenter="emit('pointerEnter')"
++    @pointerleave="emit('pointerLeave')"
++  >
++    <button
++      ref="opener"
++      v-tooltip="REVIEW_MODE"
++      type="button"
++      aria-haspopup="menu"
++      :aria-expanded="open"
++      :aria-label="REVIEW_MODE"
++      class="flex items-center gap-1.5 rounded border border-control-border py-1 pr-2 pl-2.5 hover:bg-hover aria-expanded:bg-row-selected"
++      :class="{ 'border-primary': active }"
++      @click="emit('openerClick')"
++    >
++      <UserRoundSearch class="size-4" aria-hidden="true" />
++    </button>
++    <div
++      v-if="open"
++      ref="menu"
++      class="absolute left-0 z-10 flex max-h-[60vh] min-w-56 flex-col rounded border border-control-border bg-panel-inline p-1 shadow-lg"
++      :class="above ? 'bottom-full' : 'top-full'"
++      @keydown="emit('menuKey', $event)"
++    >
++      <input
++        v-if="narrows"
++        ref="narrowBox"
++        v-model="typed"
++        type="search"
++        :aria-label="narrowLabel(REVIEWER)"
++        :placeholder="narrowPlaceholder(REVIEWER)"
++        spellcheck="false"
++        class="mb-1 rounded border border-control-border bg-panel px-2 py-1 outline-none focus:border-primary"
++      />
++      <ul role="menu" :aria-label="REVIEW_MODE" class="min-h-0 overflow-y-auto">
++        <li v-for="choice in shown" :key="keyOf(choice.value)" role="none">
++          <button
++            type="button"
++            role="menuitemradio"
++            :aria-checked="choice.state === 'included'"
++            class="flex w-full items-center gap-2 rounded py-1 pr-2 pl-1.5 text-left whitespace-nowrap outline-none hover:bg-hover focus:bg-row-selected"
++            @click="emit('pick', choice.value)"
++          >
++            <Check v-if="choice.state === 'included'" class="size-4 shrink-0" aria-hidden="true" />
++            <span v-else class="size-4 shrink-0" aria-hidden="true" />
++            <span class="truncate">{{ choice.label }}</span>
++            <span class="ml-auto pl-3 text-fg-muted">{{ choice.count }}</span>
++          </button>
++        </li>
++      </ul>
++    </div>
++  </div>
++</template>
+diff --git a/frontend/src/ui/MergeRequestReviewSort.vue b/frontend/src/ui/MergeRequestReviewSort.vue
+new file mode 100644
+index 0000000..f2b198d
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestReviewSort.vue
+@@ -0,0 +1,39 @@
++<script setup lang="ts">
++import { computed } from "vue";
++import ArrowDownWideNarrow from "~icons/lucide/arrow-down-wide-narrow";
++
++import { reviewFailedText, reviewSortedText, type Viewer } from "../mergeRequests";
++import type { ReviewSort } from "./mergeRequestsShown";
++import { discussionsFailedText } from "./mergeRequestsText";
++import { vTooltip } from "./tooltip";
++
++const props = defineProps<{ sort: ReviewSort; viewer: Viewer }>();
++
++const text = computed(() => {
++  const { sort, viewer } = props;
++  switch (sort.kind) {
++    case "sorted":
++      return reviewSortedText(viewer, sort.loading);
++    case "failed":
++      return reviewFailedText(
++        viewer,
++        sort.iid,
++        discussionsFailedText(sort.failure, navigator.platform),
++      );
++    default: {
++      const _exhaustive: never = sort;
++      return _exhaustive;
++    }
++  }
++});
++</script>
++
++<template>
++  <span v-tooltip="text" role="img" :aria-label="text" class="flex items-center px-1">
++    <ArrowDownWideNarrow
++      class="size-4"
++      :class="sort.kind === 'failed' ? 'text-problem-error' : 'text-primary'"
++      aria-hidden="true"
++    />
++  </span>
++</template>
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index 4b3b4c8..c132eb4 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -5,11 +5,13 @@ import ArrowLeft from "~icons/lucide/arrow-left";
+ import RefreshCw from "~icons/lucide/refresh-cw";
+ import X from "~icons/lucide/x";
+ 
+-import { filterLabel, isFiltered, type ListFilter } from "../mergeRequests";
++import { filterLabel, isFiltered, type ListFilter, type ReviewFor } from "../mergeRequests";
+ import { RETRY } from "./aiText";
+ import ChoiceButtons from "./ChoiceButtons.vue";
+ import { returnFocus } from "./focusReturn";
+ import MergeRequestFilter from "./MergeRequestFilter.vue";
++import MergeRequestReviewMode from "./MergeRequestReviewMode.vue";
++import MergeRequestReviewSort from "./MergeRequestReviewSort.vue";
+ import MergeRequestRow from "./MergeRequestRow.vue";
+ import type { RerequestAsk } from "./mergeRequests";
+ import MergeRequestSearch from "./MergeRequestSearch.vue";
+@@ -30,6 +32,8 @@ import { BACK } from "./serverText";
+ import { useHoverMenu } from "./useHoverMenu";
+ 
+ type FilterBar = InstanceType<typeof MergeRequestFilter>;
++type Picker = InstanceType<typeof MergeRequestReviewMode>;
++type MenuFor = ListFilter | "review";
+ 
+ const props = defineProps<{ asking: boolean }>();
+ 
+@@ -53,13 +57,17 @@ const {
+   localMerge,
+   dueDates,
+   rerequests,
++  discussionDetails,
++  viewer,
++  reviewSort,
+ } = requests;
+ const back = useTemplateRef<HTMLButtonElement>("back");
+ const bars = useTemplateRef<FilterBar[]>("bars");
+-const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey, dismiss } =
+-  useHoverMenu<ListFilter>({
+-    menu: () => bars.value?.find((bar) => bar.menu !== null)?.menu ?? null,
+-    opener: (which) => barOf(which)?.opener ?? null,
++const picker = useTemplateRef<Picker>("picker");
++const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey, dismiss, close } =
++  useHoverMenu<MenuFor>({
++    menu: () => bars.value?.find((bar) => bar.menu !== null)?.menu ?? picker.value?.menu ?? null,
++    opener: (which) => partOf(which)?.opener ?? null,
+   });
+ const focusedBefore = document.activeElement;
+ const now = useNow({ scheduler: (tick) => useIntervalFn(tick, MINUTE_MS) });
+@@ -103,9 +111,18 @@ function barOf(filter: ListFilter): FilterBar | undefined {
+   return bars.value?.find((bar) => bar.$props.filter === filter);
+ }
+ 
+-async function openerClick(filter: ListFilter): Promise<void> {
+-  await openerClicked(filter);
+-  barOf(filter)?.narrowBox?.focus();
++function partOf(which: MenuFor): FilterBar | Picker | null | undefined {
++  return which === "review" ? picker.value : barOf(which);
++}
++
++async function openerClick(which: MenuFor): Promise<void> {
++  await openerClicked(which);
++  partOf(which)?.narrowBox?.focus();
++}
++
++async function pick(value: ReviewFor): Promise<void> {
++  requests.review(value);
++  await close();
+ }
+ </script>
+ 
+@@ -158,6 +175,20 @@ async function openerClick(filter: ListFilter): Promise<void> {
+         @pointer-leave="pointerLeft"
+         @menu-key="menuKey"
+       />
++      <MergeRequestReviewMode
++        v-if="discussionDetails === 'full'"
++        ref="picker"
++        :choices="choices.review"
++        :active="filters.review !== null"
++        :open="openFor === 'review'"
++        :above="above"
++        @pick="pick"
++        @opener-click="openerClick('review')"
++        @pointer-enter="pointerEntered('review')"
++        @pointer-leave="pointerLeft"
++        @menu-key="menuKey"
++      />
++      <MergeRequestReviewSort v-if="reviewSort !== null" :sort="reviewSort" :viewer="viewer" />
+       <button
+         v-if="filtered"
+         type="button"
+diff --git a/frontend/src/ui/menuKeys.test.ts b/frontend/src/ui/menuKeys.test.ts
+index 6e4ca11..7e98d32 100644
+--- a/frontend/src/ui/menuKeys.test.ts
++++ b/frontend/src/ui/menuKeys.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { stepMenuItem } from "./menuKeys";
++import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
+ 
+ test("Escape and Tab close a menu", () => {
+   expect(stepMenuItem({ count: 3, focused: 1 }, { key: "Escape" })).toEqual({ kind: "close" });
+@@ -35,3 +35,11 @@ test("other keys, and arrows in an empty menu, are left alone", () => {
+     kind: "ignore",
+   });
+ });
++
++test("a radio item is stepped: menus step over plain, checkbox and radio items", () => {
++  expect(MENU_ITEMS.split(", ")).toEqual([
++    "[role=menuitem]",
++    "[role=menuitemcheckbox]",
++    "[role=menuitemradio]",
++  ]);
++});
+diff --git a/frontend/src/ui/menuKeys.ts b/frontend/src/ui/menuKeys.ts
+index ef0228e..a259830 100644
+--- a/frontend/src/ui/menuKeys.ts
++++ b/frontend/src/ui/menuKeys.ts
+@@ -1,4 +1,4 @@
+-export const MENU_ITEMS = "[role=menuitem], [role=menuitemcheckbox]";
++export const MENU_ITEMS = "[role=menuitem], [role=menuitemcheckbox], [role=menuitemradio]";
+ 
+ export const ARROW_STEPS: Readonly<Record<string, number>> = { ArrowDown: 1, ArrowUp: -1 };
+ 
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index 80188b4..00ff474 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -5,11 +5,11 @@ here is one scenario; the fake reads it from `$YAMT_FAKE_GLAB`.
+ 
+ ## Environment
+ 
+-| variable | what |
+-|---|---|
+-| `YAMT_FAKE_GLAB` | the scenario folder (required; without it every call exits 2) |
++| variable               | what                                                                                                     |
++| ---------------------- | -------------------------------------------------------------------------------------------------------- |
++| `YAMT_FAKE_GLAB`       | the scenario folder (required; without it every call exits 2)                                            |
+ | `YAMT_FAKE_GLAB_STATE` | a file holding how many posts were answered so far (missing = 0); each post adds one. Required for posts |
+-| `YAMT_FAKE_GLAB_LOG` | a file every call is appended to (optional) |
++| `YAMT_FAKE_GLAB_LOG`   | a file every call is appended to (optional)                                                              |
+ 
+ Each variable left unset is read from a `glab.env` file in the folder of `$0` (for a fake run through a symlink,
+ the link's folder), one `NAME=value` line per variable, the value taken as written (no quotes); any other line
+@@ -18,28 +18,28 @@ test ever runs a file it has just written (ETXTBSY).
+ 
+ ## Scenario folder
+ 
+-| file | answers |
+-|---|---|
+-| `auth-status.out` | `glab auth status`: printed on **stderr**, as glab prints all of it |
+-| `auth-status.exit` | its exit status (missing = 0) |
+-| `project.json` | `glab api` GET `projects/:fullpath` |
+-| `merge-requests.json` | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests` |
+-| `merge-request-<iid>.json` | `glab api` GET `…/merge_requests/<iid>` for that iid |
+-| `merge-request.json` | `glab api` GET `…/merge_requests/<iid>` for any iid without its own file |
+-| `draft-notes.json` | `glab api` GET `…/draft_notes` (`--paginate` accepted) |
+-| `post-<n>.json` | the body of the n-th POST `…/draft_notes` or `glab api graphql --input -` (the re-request mutation; n from 1, counted in the state file) |
+-| `post-<n>.status` | its HTTP status line (missing = `201 Created`) |
+-| `post-<n>.err` | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body") |
+-| `post-<n>.exit` | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout |
+-| `post-<n>.sleep` | seconds to wait before answering (a post that hangs) |
+-| `graphql-page-<n>.json` | `glab api graphql` without `--input -` and without a field `iids` or `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`) |
+-| `graphql-discussions-<iids>.json` | `glab api graphql` without `--input -`, with a field `iids=<JSON array>` (the discussions query): `<iids>` is the array without its quotes, brackets and spaces, its commas as `-` (`iids=["82","81"]` → `graphql-discussions-82-81`); with a field `discussionsAfter=<cursor>`, `graphql-discussions-<iids>-after-<cursor>` |
+-| `graphql-merge-request-<iid>.json` | `glab api graphql` without `--input -` and without a field `iids`, with a field `iid=<iid>` |
+-| `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`) |
+-| `pictures/<path>` | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found` |
+-| `pictures/<path>.sleep` | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists |
+-| `traces/<n>.log` | `glab api` GET `projects/<project>/jobs/<n>/trace` (a job's log, any project): printed with `cat` byte for byte, exit 0 (an empty file prints nothing); no such file answers `404 Not Found` |
+-| `traces/<n>.log.sleep` | seconds to wait before that log's answer, whether or not the log exists |
++| file                                          | answers                                                                                                                                                                                                                                                                                                                      |
++| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| `auth-status.out`                             | `glab auth status`: printed on **stderr**, as glab prints all of it                                                                                                                                                                                                                                                          |
++| `auth-status.exit`                            | its exit status (missing = 0)                                                                                                                                                                                                                                                                                                |
++| `project.json`                                | `glab api` GET `projects/:fullpath`                                                                                                                                                                                                                                                                                          |
++| `merge-requests.json`                         | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests`                                                                                                                                                                                                                                            |
++| `merge-request-<iid>.json`                    | `glab api` GET `…/merge_requests/<iid>` for that iid                                                                                                                                                                                                                                                                         |
++| `merge-request.json`                          | `glab api` GET `…/merge_requests/<iid>` for any iid without its own file                                                                                                                                                                                                                                                     |
++| `draft-notes.json`                            | `glab api` GET `…/draft_notes` (`--paginate` accepted)                                                                                                                                                                                                                                                                       |
++| `post-<n>.json`                               | the body of the n-th POST `…/draft_notes` or `glab api graphql --input -` (the re-request mutation; n from 1, counted in the state file)                                                                                                                                                                                     |
++| `post-<n>.status`                             | its HTTP status line (missing = `201 Created`)                                                                                                                                                                                                                                                                               |
++| `post-<n>.err`                                | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body")                                                                                      |
++| `post-<n>.exit`                               | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout                                                                                                                                                                                                                   |
++| `post-<n>.sleep`                              | seconds to wait before answering (a post that hangs)                                                                                                                                                                                                                                                                         |
++| `graphql-page-<n>.json`                       | `glab api graphql` without `--input -` and without a field `iids` or `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`)                                                                                                                                         |
++| `graphql-discussions-<iids>.json`             | `glab api graphql` without `--input -`, with a field `iids=<JSON array>` (the discussions query): `<iids>` is the array without its quotes, brackets and spaces, its commas as `-` (`iids=["82","81"]` → `graphql-discussions-82-81`); with a field `discussionsAfter=<cursor>`, `graphql-discussions-<iids>-after-<cursor>` |
++| `graphql-merge-request-<iid>.json`            | `glab api graphql` without `--input -` and without a field `iids`, with a field `iid=<iid>`                                                                                                                                                                                                                                  |
++| `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`)                                                                                                                                                                                                                                                  |
++| `pictures/<path>`                             | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`                                                                                                         |
++| `pictures/<path>.sleep`                       | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists                                                                                                                                                                                                                             |
++| `traces/<n>.log`                              | `glab api` GET `projects/<project>/jobs/<n>/trace` (a job's log, any project): printed with `cat` byte for byte, exit 0 (an empty file prints nothing); no such file answers `404 Not Found`                                                                                                                                 |
++| `traces/<n>.log.sleep`                        | seconds to wait before that log's answer, whether or not the log exists                                                                                                                                                                                                                                                      |
+ 
+ `glab api` keeps the value of every `-f`/`--raw-field`/`-F`/`--field` as `name=value` (the first wins when a name
+ is given twice) and, as glab does, sends a POST when a field or `--input` is given without `-X`/`--method`. A GET
+@@ -183,6 +183,16 @@ answered: <address or endpoint>            (a picture or a job's log, after its
+   `graphql-discussions-77.err` and `.exit` (1) fail before any answer with a deadline line. Avatars: anna's uploaded
+   `/uploads/-/system/user/avatar/2/avatar.png` (`pictures/`, `mr-row-details/`'s PNG), ben's Gravatar as in
+   `mr-row-details/`; every other `url` is `https://gitlab.example/taskboard/taskboard/-/merge_requests/<iid>#note_<n>`.
++- `mr-review-mode/` — review mode's order on the merge-request page (the real-app acceptance of
++  `docs/slices/briefs/mr-review-mode-page.md`): logged in; `mr-discussions/`'s project; user `sam` ("Sam Doe"); one
++  page, the last, with the list query's fields (`queryComplexity` 170 of 250); no `diffHeadSha`, no pipeline, no
++  label, assignee or avatar; every reviewer `UNREVIEWED`, not approved. !97 (by ben; reviewer anna; 1 open), !96 (ben;
++  sam and anna; 2), !95 (a draft, "Draft: …"; anna; sam; 1), !94 (anna; sam; 1), !93 (ben; sam; 2), !92 (sam; anna;
++  1), !91 (anna; sam and ben; none), !90 (anna; ben; 1). The batch `graphql-discussions-97-96-95-94-93-92-90.json`
++  (`queryComplexity` 58 of 250), one person's note per open discussion: !97 Overview, anna; !96 (a)
++  `src/board/filters.ts` line 4, ben, then (b) Overview, sam, newer; !95 Overview, anna; !94 `src/board/week.ts` line
++  12, anna; !93 (a) `src/export/csv.ts` line 8, sam, then (b) Overview, sam; !92 Overview, anna. !90 is absent from
++  the answer. Every `url` is `https://gitlab.example/taskboard/taskboard/-/merge_requests/<iid>#note_<n>`.
+ 
+ ## Fake browser opener
+ 
+diff --git a/tests/glab/mr-review-mode/graphql-discussions-97-96-95-94-93-92-90.json b/tests/glab/mr-review-mode/graphql-discussions-97-96-95-94-93-92-90.json
+new file mode 100644
+index 0000000..720e78e
+--- /dev/null
++++ b/tests/glab/mr-review-mode/graphql-discussions-97-96-95-94-93-92-90.json
+@@ -0,0 +1,207 @@
++{
++  "data": {
++    "queryComplexity": { "score": 58, "limit": 250 },
++    "project": {
++      "mergeRequests": {
++        "nodes": [
++          {
++            "iid": "97",
++            "discussions": {
++              "pageInfo": { "hasNextPage": false, "endCursor": "d-97" },
++              "nodes": [
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
++                        "body": "Should a reminder repeat?",
++                        "createdAt": "2026-11-03T10:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/97#note_971",
++                        "position": null
++                      }
++                    ]
++                  }
++                }
++              ]
++            }
++          },
++          {
++            "iid": "96",
++            "discussions": {
++              "pageInfo": { "hasNextPage": false, "endCursor": "d-96" },
++              "nodes": [
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "ben", "name": "Ben Okafor", "avatarUrl": null },
++                        "body": "The empty filter keeps every card here.",
++                        "createdAt": "2026-11-02T10:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/96#note_961",
++                        "position": {
++                          "filePath": "src/board/filters.ts",
++                          "newLine": 4,
++                          "oldLine": null
++                        }
++                      }
++                    ]
++                  }
++                },
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++                        "body": "Could the filters be remembered per board?",
++                        "createdAt": "2026-11-02T11:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/96#note_962",
++                        "position": null
++                      }
++                    ]
++                  }
++                }
++              ]
++            }
++          },
++          {
++            "iid": "95",
++            "discussions": {
++              "pageInfo": { "hasNextPage": false, "endCursor": "d-95" },
++              "nodes": [
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
++                        "body": "Archived cards still show in search.",
++                        "createdAt": "2026-11-01T10:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/95#note_951",
++                        "position": null
++                      }
++                    ]
++                  }
++                }
++              ]
++            }
++          },
++          {
++            "iid": "94",
++            "discussions": {
++              "pageInfo": { "hasNextPage": false, "endCursor": "d-94" },
++              "nodes": [
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
++                        "body": "Does the week start on Monday here?",
++                        "createdAt": "2026-10-31T10:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/94#note_941",
++                        "position": {
++                          "filePath": "src/board/week.ts",
++                          "newLine": 12,
++                          "oldLine": null
++                        }
++                      }
++                    ]
++                  }
++                }
++              ]
++            }
++          },
++          {
++            "iid": "93",
++            "discussions": {
++              "pageInfo": { "hasNextPage": false, "endCursor": "d-93" },
++              "nodes": [
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++                        "body": "A comma inside a title breaks this column.",
++                        "createdAt": "2026-10-30T10:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/93#note_931",
++                        "position": {
++                          "filePath": "src/export/csv.ts",
++                          "newLine": 8,
++                          "oldLine": null
++                        }
++                      }
++                    ]
++                  }
++                },
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++                        "body": "Please add a test with an empty board.",
++                        "createdAt": "2026-10-30T11:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/93#note_932",
++                        "position": null
++                      }
++                    ]
++                  }
++                }
++              ]
++            }
++          },
++          {
++            "iid": "92",
++            "discussions": {
++              "pageInfo": { "hasNextPage": false, "endCursor": "d-92" },
++              "nodes": [
++                {
++                  "resolvable": true,
++                  "resolved": false,
++                  "notes": {
++                    "pageInfo": { "hasPreviousPage": false },
++                    "nodes": [
++                      {
++                        "system": false,
++                        "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
++                        "body": "Can a lane be collapsed?",
++                        "createdAt": "2026-10-29T10:00:00Z",
++                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/92#note_921",
++                        "position": null
++                      }
++                    ]
++                  }
++                }
++              ]
++            }
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/tests/glab/mr-review-mode/graphql-page-1.json b/tests/glab/mr-review-mode/graphql-page-1.json
+new file mode 100644
+index 0000000..72c8776
+--- /dev/null
++++ b/tests/glab/mr-review-mode/graphql-page-1.json
+@@ -0,0 +1,281 @@
++{
++  "data": {
++    "queryComplexity": { "score": 170, "limit": 250 },
++    "currentUser": { "username": "sam" },
++    "project": {
++      "mergeRequests": {
++        "pageInfo": { "hasNextPage": false, "endCursor": null },
++        "nodes": [
++          {
++            "iid": "97",
++            "title": "Card reminders",
++            "createdAt": "2026-11-03T09:00:00Z",
++            "draft": false,
++            "author": { "username": "ben", "name": "Ben Okafor", "avatarUrl": null },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": {
++              "nodes": [
++                {
++                  "username": "anna",
++                  "name": "Anna Berg",
++                  "avatarUrl": null,
++                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
++                }
++              ]
++            },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 1,
++            "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          },
++          {
++            "iid": "96",
++            "title": "Board filters",
++            "createdAt": "2026-11-02T09:00:00Z",
++            "draft": false,
++            "author": { "username": "ben", "name": "Ben Okafor", "avatarUrl": null },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": {
++              "nodes": [
++                {
++                  "username": "sam",
++                  "name": "Sam Doe",
++                  "avatarUrl": null,
++                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
++                },
++                {
++                  "username": "anna",
++                  "name": "Anna Berg",
++                  "avatarUrl": null,
++                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
++                }
++              ]
++            },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 2,
++            "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          },
++          {
++            "iid": "95",
++            "title": "Draft: Card archive",
++            "createdAt": "2026-11-01T09:00:00Z",
++            "draft": true,
++            "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": {
++              "nodes": [
++                {
++                  "username": "sam",
++                  "name": "Sam Doe",
++                  "avatarUrl": null,
++                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
++                }
++              ]
++            },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 1,
++            "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "DRAFT_STATUS",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          },
++          {
++            "iid": "94",
++            "title": "Week view",
++            "createdAt": "2026-10-31T09:00:00Z",
++            "draft": false,
++            "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": {
++              "nodes": [
++                {
++                  "username": "sam",
++                  "name": "Sam Doe",
++                  "avatarUrl": null,
++                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
++                }
++              ]
++            },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 1,
++            "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          },
++          {
++            "iid": "93",
++            "title": "Export CSV",
++            "createdAt": "2026-10-30T09:00:00Z",
++            "draft": false,
++            "author": { "username": "ben", "name": "Ben Okafor", "avatarUrl": null },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": {
++              "nodes": [
++                {
++                  "username": "sam",
++                  "name": "Sam Doe",
++                  "avatarUrl": null,
++                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
++                }
++              ]
++            },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 2,
++            "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          },
++          {
++            "iid": "92",
++            "title": "Swimlanes",
++            "createdAt": "2026-10-29T09:00:00Z",
++            "draft": false,
++            "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": {
++              "nodes": [
++                {
++                  "username": "anna",
++                  "name": "Anna Berg",
++                  "avatarUrl": null,
++                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
++                }
++              ]
++            },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 1,
++            "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          },
++          {
++            "iid": "91",
++            "title": "Card colours v2",
++            "createdAt": "2026-10-28T09:00:00Z",
++            "draft": false,
++            "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": {
++              "nodes": [
++                {
++                  "username": "sam",
++                  "name": "Sam Doe",
++                  "avatarUrl": null,
++                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
++                },
++                {
++                  "username": "ben",
++                  "name": "Ben Okafor",
++                  "avatarUrl": null,
++                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
++                }
++              ]
++            },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          },
++          {
++            "iid": "90",
++            "title": "Import Trello",
++            "createdAt": "2026-10-27T09:00:00Z",
++            "draft": false,
++            "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": {
++              "nodes": [
++                {
++                  "username": "ben",
++                  "name": "Ben Okafor",
++                  "avatarUrl": null,
++                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
++                }
++              ]
++            },
++            "approvedBy": { "nodes": [] },
++            "userPermissions": { "updateMergeRequest": true },
++            "resolvableDiscussionsCount": 1,
++            "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/tests/glab/mr-review-mode/project.json b/tests/glab/mr-review-mode/project.json
+new file mode 100644
+index 0000000..d591a82
+--- /dev/null
++++ b/tests/glab/mr-review-mode/project.json
+@@ -0,0 +1 @@
++{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example/taskboard/taskboard"}

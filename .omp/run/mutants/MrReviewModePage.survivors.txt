@@ -1,0 +1,3 @@
+just mutants HEAD: fixtureMergeRequestDiscussions.ts 92.71% (89 killed, 7 survived), menuKeys.ts 100% (28 killed); total 94.35%
+fixtureMergeRequestDiscussions.ts:32-37 LONG_TEXT/MARKUP_TEXT/SHORT_TEXTS literals (6) — gate-covered: unchanged module-level constants not re-run under vitest (#732); fixture text tests assert them
+fixtureMergeRequestDiscussions.ts:66:22 `?.`→`.` on fixtureRows(index + 1, 1)[0] — equivalent: unchanged line; fixtureRows always yields the row
