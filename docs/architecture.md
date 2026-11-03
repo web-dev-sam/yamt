@@ -1777,7 +1777,9 @@ through `startScreenOf` (only the word `mergeRequests` means the page; anything 
 `openAtStart` awaits `findProject()` and opens the page through the slice's `show` only when started on it and the
 project is `found`: no project or a failed lookup keeps the window on its files (the lookup's problem as before).
 **The list's age** (plan §2 #167): left of Refresh, in one `ml-auto` group with it, the header shows
-`agoText(listedAt, now)` in `text-fg-muted` (nothing while `listedAt` is null), following the page's minute `now`, with
+`agoText(listedAt, now)` in `text-fg-muted` (nothing while `listedAt` is null) on its own clock, `ui/useListAge.ts`: `now`
+is read at each `listedAt` change and each whole minute after it, so "just now" lasts under a minute (the rows keep the
+page's minute `useNow`); with
 core `timeTitle(at, now)` as its `v-tooltip`: `HH:MM` on now's local day, else `dateTimeText`. `listedAt`'s writers are
 §5.1's row.
 `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before

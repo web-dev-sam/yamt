@@ -145,29 +145,13 @@ Order: 2 ∥ 3, `just bindings`, 4, 5, 6 ∥ 7 smoke, 7 final.
 | 7   | verify (`briefs/mr-discussions-verify.md`): smoke after 5; final `just check`, WebKit, real app                     | verifier     | done        | smoke `96103a1f` (B6 = stale reload, #2217); final `MrDiscussionsFinal` at `2fe58a24`: `just check` pass (74.9 s, 4076 tests), B1–B8 both windows, C1–C6 pass. Notes `MrDiscussions{Smoke,Final}.md`                                                             |
 | 8   | owner check on the GitLab playground: a discussion answered by the author shows "Your turn" to the reviewer         | human        | handed over | the verify brief's "Owner check" (!1, four discussions by `samubr`; a second user's reply needed)                                                                                                                                                                |
 
-## Starts: the list's age, `yamt --mr`, `YAMT_AI` (session 48; owner #2195–#2198)
-
-Request `docs/slices/request-mr-starts.md` (parts A–C, acceptance, non-goals); base `6c34a149`. Shape given, short
-briefs by the orchestrator (no designer). Decided as owner (OR13, may veto, request A1/B3): the age uses the rows'
-words ("3 minutes ago", not "3 min ago"); without a GitLab remote `--mr` opens the files as `--diff` does. Start
-marker `data-open="mergeRequests"` / fixture `?open=mergeRequests` (briefs). No product question open.
-Order: 1 ∥ 2, then 3 (after the first of them lands), 4, 5.
-
-| row | slice                                                                     | owner       | status  | evidence                                                                                                                                                                                                                                                                             |
-| --- | ------------------------------------------------------------------------- | ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | rust (`briefs/mr-starts-rust.md`): `--mr`, `YAMT_AI`, start marker, usage | rust-impl   | done    | `4d00a753` + R1 `98780c0c` (#2231: `WindowKind::{Merge, Compare { start }, Range { ai, start }}`, no loose start options); 196 tests, 0 survivors; reviews and re-review pass; #2232 dropped. Notes `MrStartsRust*.md`                                                               |
-| 2   | age (`briefs/mr-starts-age.md`): core hover words, shown-list time, view  | web-impl    | review  | `942c9f9e` + R1 `65c665e1` (#2239 #2241: `ui/useListAge.ts`, the age's own clock from `listedAt`; WebKit just now at ~53 s, 1 minute ago at ~63 s); reviews pass; #2233 → docs keeper; #2234 #2235 dropped. R1 re-review + re-pass running. Notes `MrStartsAge*.md`                  |
-| 3   | open (`briefs/mr-starts-open.md`): start screen, stores, app-session      | web-impl    | done    | `e27bcf8d` + R1 `c57417bf` (#2237: `markShown`): `openAtStart` (`ui/startScreen.ts`), `WindowStart`, `start-app --mr`, `start-fixture --open-mr`; 4158 tests; fixture both windows + real app page open at once; reviews and re-review pass; #2238 dropped. Notes `MrStartsOpen*.md` |
-| 4   | docs keeper: architecture, map, plan rows; README + CHANGELOG by me       | docs-keeper | done    | `MrStartsDocs`: architecture, plan #167–#168, tree/state/map, ipc-contract, ui/AGENTS.md (#2233 #2236); map-check ok. README + CHANGELOG `6dc59696`; verification recipes `--mr`/`--open-mr` by me. Notes `MrStartsDocs.md`                                                          |
-| 5   | verify (`briefs/mr-starts-verify.md`): final `just check`, WebKit, app    | verifier    | running | `MrStartsFinal` at `33fdd7a0`: `just check` pass (59 s); B1 B3 B4, C1–C3, D1 D2 D4 D5 pass; D3 rerun (range-repo + merge-requests) child `--ai` with Ask AI, no `--ai` with `YAMT_AI=0`; B2 fail (#2239). Re-pass after age R1. Notes `MrStartsFinal.md`                             |
-
 ## Next, in the owner's order (session 45; owner #2193–#2198)
 
 One request per session (OR14), each started with `/new`, then `Implement docs/slices/request-<x>.md`:
 
 1. `request-mr-discussions.md`: done (section above); owner check handed over.
 2. `request-mr-review-mode.md`: done (archived, session 47).
-3. `request-mr-starts.md`: running (section above).
+3. `request-mr-starts.md`: done (archived, session 48).
 
 ## Open product questions
 
