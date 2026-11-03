@@ -1,45 +1,24 @@
 {
-  "MrPeopleState": {
+  "MrPeoplePage": {
     "owned": [
-      "frontend/src/ipc/MergeRequestSource.ts",
-      "frontend/src/ipc/mergeRequestDomain.ts",
-      "frontend/src/ipc/mergeRequestDomain.test.ts",
-      "frontend/src/ipc/tauriMergeRequests.ts",
-      "frontend/src/ipc/tauriMergeRequests.test.ts",
-      "frontend/src/ipc/fixtureMergeRequests.ts",
-      "frontend/src/ipc/fixtureMergeRequests.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestPeople.ts",
-      "frontend/src/ipc/fixtureMergeRequestPeople.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestData.ts",
-      "frontend/src/ipc/fixtureMergeRequestData.test.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ui/mergeRequestPeople.ts",
-      "frontend/src/ui/mergeRequestPeople.test.ts",
-      "frontend/src/ui/mergeRequests.ts",
-      "frontend/src/ui/mergeRequests.test.ts",
-      "frontend/src/ui/problem.ts",
-      "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ui/mergeRequestsShown.ts",
-      "frontend/src/ui/mergeRequestsList.ts",
-      "frontend/src/ui/mergeRequestsList.test.ts"
+      "frontend/src/ui/MergeRequestPeople.vue",
+      "frontend/src/ui/MergeRequestPeopleSearch.vue",
+      "frontend/src/ui/MergeRequestPersonMenu.vue",
+      "frontend/src/ui/mergeRequestPeopleLines.ts",
+      "frontend/src/ui/mergeRequestPeopleLines.test.ts",
+      "frontend/src/ui/mergeRequestsText.ts",
+      "frontend/src/ui/mergeRequestsText.test.ts",
+      "frontend/src/ui/AGENTS.md"
     ]
   },
-  "MrPeopleRustR1": {
+  "MrDescriptionRust": {
     "owned": [
-      "crates/merge-requests/**",
-      "src-tauri/src/merge_requests.rs",
-      "src-tauri/src/merge_requests/**",
-      "src-tauri/src/commands.rs",
+      "crates/merge-requests/src/**",
+      "crates/merge-requests/tests/**",
+      "crates/merge-requests/AGENTS.md",
       "scripts/fake-glab/glab",
-      "tests/glab/mr-people/**",
+      "tests/glab/mr-description/**",
       "tests/glab/README.md"
-    ]
-  },
-  "MrDescriptionDesign": {
-    "owned": [
-      "docs/slices/briefs/mr-description-*.md"
     ]
   }
 }

@@ -4727,11 +4727,13 @@ dependencies = [
 name = "yamt-merge-requests"
 version = "0.6.7"
 dependencies = [
+ "dom_query",
  "serde",
  "serde_json",
  "specta",
  "tempfile",
  "tracing",
+ "url",
  "yamt-conflict-repo",
  "yamt-gitio",
  "yamt-range",

@@ -50,6 +50,10 @@ tempfile = "3.27.0"
 # SHA-1 of a file path for GitLab's `line_code` in a multi-line comment (plan §2 #147); same digest 0.10 as sha2.
 sha1 = "0.10.6"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# GitLab's rendered description reduced to a typed tree (plan §2 #171); already built into the app via tauri-utils/wry.
+dom_query = "0.28.0"
+# Resolving a description's links against the GitLab server (plan §2 #171); already built into the app via tauri.
+url = "2.5.8"
 # 2.12.1, not today's 2.12.3: same supply-chain cool-down pnpm applies to @tauri-apps/api; matches tauri-cli 2.12.1.
 tauri = "2.12.1"
 tauri-build = "2.7.1"
