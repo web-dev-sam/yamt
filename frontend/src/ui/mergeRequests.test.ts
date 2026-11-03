@@ -1012,3 +1012,71 @@ test("a refused re-request leaves the rows as they were", async () => {
     new Map([["dmitri", { kind: "refused", reply: { kind: "notOpen" } }]]),
   );
 });
+
+function titled(part: string): number[] {
+  return iids(ROWS.filter((row) => row.title.toLowerCase().includes(part)));
+}
+
+test("the search narrows the shown rows and the summary, never the checklist counts (catches the search ignored or counted in the choices)", async () => {
+  const live = rig();
+  await loaded(live);
+  const choices = live.slice.choices.value;
+
+  live.slice.setSearch("!630");
+  expect(live.slice.search.value).toBe("!630");
+  expect(iids(live.slice.shownRows.value)).toEqual([630]);
+  expect(live.slice.summary.value).toBe("1 of 40 merge requests");
+  expect(live.slice.choices.value).toEqual(choices);
+
+  live.slice.setSearch("SNOOZE");
+  expect(iids(live.slice.shownRows.value)).toEqual(titled("snooze"));
+  expect(live.slice.summary.value).toBe(`${titled("snooze").length} of 40 merge requests`);
+
+  live.slice.setSearch(" ");
+  expect(live.slice.shownRows.value).toHaveLength(40);
+});
+
+test("a row is shown only when it passes the filters and matches the search; Clear filters keeps the search (catches search OR filters)", async () => {
+  const live = rig();
+  await live.slice.findProject();
+  await loaded(live);
+  live.slice.click("label", { kind: "label", title: "frontend" }, false);
+  const frontend = iids(live.slice.shownRows.value);
+  const outside = ROWS.find((row) => !frontend.includes(row.iid));
+  const inside = frontend[0];
+  if (outside === undefined || inside === undefined) {
+    throw new Error("the fixture has rows with and without frontend");
+  }
+
+  live.slice.setSearch(`!${inside} !${outside.iid}`);
+  expect(iids(live.slice.shownRows.value)).toEqual([inside]);
+
+  live.slice.clearAll();
+  expect(live.slice.search.value).toBe(`!${inside} !${outside.iid}`);
+  const both = ROWS.filter((row) => row.iid === inside || row.iid === outside.iid);
+  expect(iids(live.slice.shownRows.value)).toEqual(iids(both));
+});
+
+test("searched rows keep dated rows first (catches the search dropping the due-date order)", async () => {
+  const live = await dated();
+  live.slice.setSearch("620 630 638 640");
+  expect(iids(live.slice.shownRows.value)).toEqual([640, 630, 638, 620]);
+});
+
+test("Refresh keeps the search; show empties it (catches the text surviving a page visit or lost on reload)", async () => {
+  const live = rig();
+  await loaded(live);
+  live.slice.setSearch("!630");
+
+  const reloading = live.slice.refresh();
+  loadAt(live, 1).send({ me: "sam", rows: ROWS });
+  loadAt(live, 1).end(LOADED);
+  await reloading;
+  expect(live.slice.search.value).toBe("!630");
+  expect(iids(live.slice.shownRows.value)).toEqual([630]);
+
+  live.slice.close();
+  live.slice.show();
+  expect(live.slice.search.value).toBe("");
+  expect(live.slice.shownRows.value).toHaveLength(40);
+});

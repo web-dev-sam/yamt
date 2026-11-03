@@ -13,3 +13,5 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan 
 `people`: `peopleStack` (assignees, then reviewers not assigned; `STACK_SHOWN` 3, the rest as `more`), `displayName` (the username when the name is blank), `initials` (first letters of two words), `pictureHue` (0–359 from the username), `reviewStateText`, `reviewDone` (reviewed, approved or changes requested: GitLab's "Re-request review" applies), `authorText`, `approversText` (one name per line; "No approvals"), `NO_PEOPLE_TEXT`.
 
 `labels`: `labelsShown` (the first label in GitLab's order and the rest), `moreText` "+N" (labels and the people stack).
+
+`search` (request #2150): `searched(rows, text)` keeps a row whose title (as shown, "Draft: " included) contains the trimmed text in any case, or whose iid is a number the text names — a run of digits with no letter or digit beside it (`!1234`, `#1234`, a `…/merge_requests/1234` address, `0042` is 42; `v2`, `abc123`, `12ab`, `1e3` name nothing); blank text returns `rows` itself. Only loaded rows: it never asks GitLab.

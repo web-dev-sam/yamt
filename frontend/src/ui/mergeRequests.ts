@@ -1,5 +1,5 @@
 import type { StorageLike } from "@vueuse/core";
-import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } from "vue";
+import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import type {
   CheckedRow,
@@ -13,25 +13,12 @@ import type {
   Reviewer,
   WebPage,
 } from "../ipc";
-import {
-  filtered,
-  merged,
-  rechecked,
-  summaryText,
-  type CalendarDay,
-  type Filters,
-} from "../mergeRequests";
+import { merged, rechecked, type CalendarDay } from "../mergeRequests";
 import { RECHECK_PAUSE_MS } from "./glab";
 import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
 import { createDueDates, type DueDates } from "./mergeRequestDueDates";
-import {
-  choicesOf,
-  createRememberedFilters,
-  filterActions,
-  type Choices,
-  type FilterActions,
-} from "./mergeRequestFilters";
 import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
+import { shownOf, type Shown } from "./mergeRequestsShown";
 import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
 import { attempt, type Problem } from "./problem";
 import type { Screen } from "./screen";
@@ -49,16 +36,13 @@ export type Opening =
 
 export type MergeRequests = RowActions &
   Rerequests &
-  FilterActions & {
+  Shown & {
     readonly project: Readonly<ShallowRef<GitLabProject>>;
     readonly me: Readonly<ShallowRef<string | null>>;
     readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
     readonly listing: Readonly<ShallowRef<ListLoad>>;
     readonly failure: ComputedRef<string | null>;
-    readonly filters: Readonly<Ref<Filters>>;
-    readonly shownRows: ComputedRef<readonly MergeRequestRow[]>;
-    readonly choices: ComputedRef<Choices>;
-    readonly summary: ComputedRef<string>;
+    readonly search: Readonly<ShallowRef<string>>;
     readonly dueDates: ComputedRef<ReadonlyMap<MergeRequestIid, CalendarDay>>;
     readonly openings: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>>;
     readonly pageProblem: Readonly<ShallowRef<string | null>>;
@@ -66,6 +50,7 @@ export type MergeRequests = RowActions &
     show(): void;
     close(): void;
     refresh(): Promise<void>;
+    setSearch(text: string): void;
     setDueDate(iid: MergeRequestIid, day: CalendarDay | null): void;
     openChanges(iid: MergeRequestIid): Promise<void>;
     openPage(clicked: PageKind, page: WebPage): Promise<void>;
@@ -89,6 +74,7 @@ type State = Deps & {
   readonly cut: ShallowRef<boolean>;
   readonly listing: ShallowRef<ListLoad>;
   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
+  readonly search: ShallowRef<string>;
   readonly pageProblem: ShallowRef<string | null>;
   readonly dueDates: DueDates;
   readonly rowActions: RowActions;
@@ -176,6 +162,7 @@ async function load(state: State): Promise<void> {
 
 function show(state: State): void {
   state.screen.value = { kind: "mergeRequests" };
+  state.search.value = "";
   void state.rowActions.checkLocalMerge();
   const listing = state.listing.value;
   const stale = listing.kind === "done" && Date.now() - listing.at >= RECHECK_PAUSE_MS;
@@ -228,6 +215,7 @@ function createState(deps: Deps): State {
     me: shallowRef<string | null>(null),
     rows: shallowRef<readonly MergeRequestRow[]>([]),
     cut: shallowRef(false),
+    search: shallowRef(""),
     listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
     pageProblem: shallowRef<string | null>(null),
@@ -259,23 +247,17 @@ function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setD
 
 export function createMergeRequests(deps: Deps): MergeRequests {
   const state = createState(deps);
-  const { me, rows } = state;
-  const remembered = createRememberedFilters(state.repository, deps.storage);
-  const { filters } = remembered;
-  const shownRows = computed(() =>
-    state.dueDates.datedFirst(filtered(rows.value, filters.value, me.value)),
-  );
+  const { me, rows, search } = state;
   return {
     project: state.project,
     me,
     rows,
     ...listingOf(state),
-    filters,
-    shownRows,
-    choices: computed(() => choicesOf(rows.value, filters.value, me.value)),
-    summary: computed(() =>
-      summaryText(shownRows.value.length, rows.value.length, state.cut.value),
-    ),
+    ...shownOf(state, deps.storage),
+    search,
+    setSearch: (text) => {
+      search.value = text;
+    },
     ...dueDatesOf(state),
     openings: state.openings,
     pageProblem: state.pageProblem,
@@ -287,7 +269,6 @@ export function createMergeRequests(deps: Deps): MergeRequests {
       state.screen.value = { kind: "files" };
     },
     refresh: () => load(state),
-    ...filterActions(remembered),
     openChanges: (iid) => openChanges(state, iid),
     openPage: (clicked, page) => openPage(state, clicked, page),
     dismissPageProblem: () => {

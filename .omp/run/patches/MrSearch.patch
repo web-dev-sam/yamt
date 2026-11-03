@@ -1,0 +1,498 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index e18d063..2a3f6ea 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -13,3 +13,5 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ `people`: `peopleStack` (assignees, then reviewers not assigned; `STACK_SHOWN` 3, the rest as `more`), `displayName` (the username when the name is blank), `initials` (first letters of two words), `pictureHue` (0–359 from the username), `reviewStateText`, `reviewDone` (reviewed, approved or changes requested: GitLab's "Re-request review" applies), `authorText`, `approversText` (one name per line; "No approvals"), `NO_PEOPLE_TEXT`.
+ 
+ `labels`: `labelsShown` (the first label in GitLab's order and the rest), `moreText` "+N" (labels and the people stack).
++
++`search` (request #2150): `searched(rows, text)` keeps a row whose title (as shown, "Draft: " included) contains the trimmed text in any case, or whose iid is a number the text names — a run of digits with no letter or digit beside it (`!1234`, `#1234`, a `…/merge_requests/1234` address, `0042` is 42; `v2`, `abc123`, `12ab`, `1e3` name nothing); blank text returns `rows` itself. Only loaded rows: it never asks GitLab.
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+index d1a0929..e2c569d 100644
+--- a/frontend/src/mergeRequests/index.ts
++++ b/frontend/src/mergeRequests/index.ts
+@@ -70,6 +70,7 @@ export {
+ } from "./internal/people";
+ export { labelsShown, moreText } from "./internal/labels";
+ export { summaryText } from "./internal/summary";
++export { searched } from "./internal/search";
+ export { createdAgo } from "./internal/relativeTime";
+ export { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "./internal/ciBox";
+ export { filtersFrom, storedFilters, type StoredFilters } from "./internal/stored";
+diff --git a/frontend/src/mergeRequests/internal/search.test.ts b/frontend/src/mergeRequests/internal/search.test.ts
+new file mode 100644
+index 0000000..f8fbfc9
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/search.test.ts
+@@ -0,0 +1,69 @@
++import { expect, test } from "vitest";
++
++import { searched } from "../index";
++
++const ROWS = [
++  { iid: 630, title: "Snooze a reminder" },
++  { iid: 12345, title: "Draft: Show overdue cards in red" },
++  { iid: 42, title: "Fix build 630 on CI" },
++  { iid: 12, title: "Speed up the board query" },
++  { iid: 34, title: "Document the import format" },
++  { iid: 123, title: "Move the card menu" },
++  { iid: 2, title: "Keep the scroll position" },
++  { iid: 1000, title: "Add keyboard shortcuts" },
++  { iid: 18, title: "Drop the old export endpoint" },
++];
++
++function iids(text: string): number[] {
++  return searched(ROWS, text).map((row) => row.iid);
++}
++
++test("the title matches in any case, also its Draft prefix (catches a case-sensitive match)", () => {
++  expect(iids("OVERDUE cards")).toEqual([12345]);
++  expect(iids("draft: show")).toEqual([12345]);
++  expect(iids("snooze")).toEqual([630]);
++});
++
++test("the text is trimmed before it is matched (catches surrounding spaces matching nothing)", () => {
++  expect(iids("  board query \t")).toEqual([12]);
++});
++
++test("empty or whitespace-only text matches every row and returns the rows themselves", () => {
++  expect(searched(ROWS, "")).toBe(ROWS);
++  expect(searched(ROWS, "   \t ")).toBe(ROWS);
++});
++
++test.each([
++  "!12345",
++  "#12345",
++  "12345",
++  "MR 12345 fix",
++  "see !12345,",
++  "https://gitlab.example.com/g/p/-/merge_requests/12345",
++])("%s names merge request 12345 (catches a number form missed)", (text) => {
++  expect(iids(text)).toEqual([12345]);
++});
++
++test.each(["v2", "abc123", "12ab", "x34", "34é", "1e3", "0x12"])(
++  "%s names no number (catches digits inside a word taken as an iid)",
++  (text) => {
++    expect(iids(text)).toEqual([]);
++  },
++);
++
++test("two numbers show both merge requests (catches only the first number read)", () => {
++  expect(iids("!12 !34")).toEqual([12, 34]);
++});
++
++test("a number shows its merge request and every title containing it", () => {
++  expect(iids("630")).toEqual([630, 42]);
++});
++
++test("a number matching no iid still lets a title match through", () => {
++  expect(iids("build 630")).toEqual([630, 42]);
++  expect(iids("fix build")).toEqual([42]);
++});
++
++test("leading zeros name the same number: 0042 is 42", () => {
++  expect(iids("0042")).toEqual([42]);
++});
+diff --git a/frontend/src/mergeRequests/internal/search.ts b/frontend/src/mergeRequests/internal/search.ts
+new file mode 100644
+index 0000000..1cfcd3f
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/search.ts
+@@ -0,0 +1,19 @@
++export type SearchedRequest = { readonly iid: number; readonly title: string };
++
++function namedNumbers(text: string): ReadonlySet<number> {
++  const words = text.match(/[\p{L}\d]+/gu) ?? [];
++  const numbers = words.filter((word) => /^\d+$/.test(word));
++  return new Set(numbers.map((digits) => Number(digits)));
++}
++
++export function searched<R extends SearchedRequest>(
++  rows: readonly R[],
++  text: string,
++): readonly R[] {
++  const wanted = text.trim().toLowerCase();
++  if (wanted === "") {
++    return rows;
++  }
++  const numbers = namedNumbers(wanted);
++  return rows.filter((row) => numbers.has(row.iid) || row.title.toLowerCase().includes(wanted));
++}
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index b5c5a73..42632df 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -44,7 +44,7 @@ Themes (plan §2 #102): `useThemeAttribute` (`settingsStore.ts`, every root) is
+ 
+ Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`store.ts` `search` + `liveResults` from `mergeSearch.ts`, `rangeStore.ts` `search` from `rangeSearch.ts`), the only writer of the query, case, filters and closed groups; the runner in `searchRun.ts` writes only `results` and `running` (full runs by generation, each with its own `Working` matcher, ranks and results, 8 ms slices, one-file re-runs by `changed` after `SEARCH_PAUSE_MS`, stale replies dropped per path; `onFullRun` lets `searching.ts` open every group and count `fullRuns`, one per new search). The merge source's `loadFile` replies go through `landed` with the stop they were sent in (`currentStop`). Matching and rows are `search/`'s only. `SideColumn.vue` holds the left column's width and handle (`usePanelWidth`, "File list width"), its visibility and the islands' overlap between the shown panel and list, with `SearchPanel.vue` (box, Match Case, pane toggles from `searchIcons.ts`, summary words in `searchText.ts`, `SearchResults.vue`'s virtual list, `overflow-x-hidden`: WebKitGTK's overlay scrollbar would take the clicks on the last row, #1719; its keys in `searchListKeys.ts` `stepSearchList`) above `FileList.vue`; both roots call `search.toggleKey` after `fileListKey` (`windowKey`, the one guard). `SearchResults.vue` alone owns the list's scroll position and its active row: each new search (`fullRuns`) scrolls to the top and clears the active row, so Down from the box starts at the first row; rows that shrink below the scroll position clamp it to the end; `keepInView` follows the keys. Hiding the panel while the keyboard is in it or on `<body>`: with a file on screen (both roots pass `SearchPanel` the shown path only while `screen.kind === 'files'`), the pane focused at show — CodeMirror's content element, `role=textbox aria-multiline` — when still connected and the same path is shown, else `focusShownFile`; with no file on screen (Settings, a server log), the element focused at show when still connected, never a go-to. A row asks `goTo` and opens its file; the shown view takes it through `took`. `opening.ts` holds the merge store's file opening (`open`, `pick`, `thenMoveOn`).
+ 
+-Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. Its filter row is three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; presentational: the View holds their one menu; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears) and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the people stack, the "+N" labels chip, the due date, the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box through `useHoverBox` on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
++Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. What the page shows from the loaded rows is `mergeRequestsShown.ts` `shownOf`: the remembered filters, `shownRows` (`datedFirst(searched(filtered(…)))`), the checklists' `choices` (over every loaded row, never searched) and the summary. Its filter row starts with `MergeRequestSearch.vue` (request #2150: the title or any `!number` named in the text, `mergeRequests/` `searched`; the slice's `search`, written by `setSearch` and emptied by `show`, kept through Refresh, never stored, not cleared by "Clear filters"; × and Escape with text empty it and keep the focus, Escape in the empty field closes the page as before because the field prevents only the Escape it used), then three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; presentational: the View holds their one menu; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears) and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the people stack, the "+N" labels chip, the due date, the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box through `useHoverBox` on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
+ 
+ Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). WebKit sends no pointer events to a disabled button, so a control that can be disabled (a CI job without a log, the row action, open changes while fetching) carries its tip on a wrapper and the button `disabled:pointer-events-none`. `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); it and the due-date box close on a scroll outside them (`useScrollOutside`, capture phase, the one copy of that rule). `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter>` for the three filters, finds each filter's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click; Escape with a filter list open closes the list, not the page.
+ 
+diff --git a/frontend/src/ui/MergeRequestSearch.vue b/frontend/src/ui/MergeRequestSearch.vue
+new file mode 100644
+index 0000000..1de38ce
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestSearch.vue
+@@ -0,0 +1,57 @@
++<script setup lang="ts">
++import { useTemplateRef } from "vue";
++import Search from "~icons/lucide/search";
++import X from "~icons/lucide/x";
++
++import { CLEAR_SEARCH, SEARCH_FIELD_LABEL, SEARCH_FIELD_PLACEHOLDER } from "./mergeRequestsText";
++
++const props = defineProps<{ text: string }>();
++const emit = defineEmits<{ change: [text: string] }>();
++
++const field = useTemplateRef<HTMLInputElement>("field");
++
++function typed(event: Event): void {
++  if (event.target instanceof HTMLInputElement) {
++    emit("change", event.target.value);
++  }
++}
++
++function fieldKey(event: KeyboardEvent): void {
++  if (event.key === "Escape" && props.text !== "") {
++    event.preventDefault();
++    emit("change", "");
++  }
++}
++
++function cleared(): void {
++  emit("change", "");
++  field.value?.focus();
++}
++</script>
++
++<template>
++  <div class="relative flex w-72 items-center">
++    <Search class="pointer-events-none absolute left-2 size-4 text-fg-muted" aria-hidden="true" />
++    <input
++      ref="field"
++      type="text"
++      spellcheck="false"
++      :value="text"
++      :aria-label="SEARCH_FIELD_LABEL"
++      :placeholder="SEARCH_FIELD_PLACEHOLDER"
++      class="w-full rounded border border-control-border bg-panel py-1 pr-8 pl-8 outline-none focus:border-primary"
++      @input="typed"
++      @keydown="fieldKey"
++    />
++    <button
++      v-if="text !== ''"
++      type="button"
++      :aria-label="CLEAR_SEARCH"
++      class="absolute right-1 rounded p-0.5 hover:bg-hover"
++      @mousedown.prevent
++      @click="cleared"
++    >
++      <X class="size-4" aria-hidden="true" />
++    </button>
++  </div>
++</template>
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index 15a1502..4b3b4c8 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -12,6 +12,7 @@ import { returnFocus } from "./focusReturn";
+ import MergeRequestFilter from "./MergeRequestFilter.vue";
+ import MergeRequestRow from "./MergeRequestRow.vue";
+ import type { RerequestAsk } from "./mergeRequests";
++import MergeRequestSearch from "./MergeRequestSearch.vue";
+ import { useMergeRequests } from "./mergeRequestsStore";
+ import {
+   CLEAR_FILTERS,
+@@ -39,6 +40,7 @@ const NO_ASKS: ReadonlyMap<string, RerequestAsk> = new Map();
+ const requests = useMergeRequests();
+ const {
+   rows,
++  search,
+   listing,
+   failure,
+   filters,
+@@ -138,6 +140,7 @@ async function openerClick(filter: ListFilter): Promise<void> {
+       :aria-label="FILTERS_LABEL"
+       class="flex shrink-0 flex-wrap items-center gap-2 border-b border-separator px-3 py-2"
+     >
++      <MergeRequestSearch :text="search" @change="requests.setSearch" />
+       <MergeRequestFilter
+         v-for="filter in LIST_FILTERS"
+         ref="bars"
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index c2e75ce..a2608ac 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -1012,3 +1012,71 @@ test("a refused re-request leaves the rows as they were", async () => {
+     new Map([["dmitri", { kind: "refused", reply: { kind: "notOpen" } }]]),
+   );
+ });
++
++function titled(part: string): number[] {
++  return iids(ROWS.filter((row) => row.title.toLowerCase().includes(part)));
++}
++
++test("the search narrows the shown rows and the summary, never the checklist counts (catches the search ignored or counted in the choices)", async () => {
++  const live = rig();
++  await loaded(live);
++  const choices = live.slice.choices.value;
++
++  live.slice.setSearch("!630");
++  expect(live.slice.search.value).toBe("!630");
++  expect(iids(live.slice.shownRows.value)).toEqual([630]);
++  expect(live.slice.summary.value).toBe("1 of 40 merge requests");
++  expect(live.slice.choices.value).toEqual(choices);
++
++  live.slice.setSearch("SNOOZE");
++  expect(iids(live.slice.shownRows.value)).toEqual(titled("snooze"));
++  expect(live.slice.summary.value).toBe(`${titled("snooze").length} of 40 merge requests`);
++
++  live.slice.setSearch(" ");
++  expect(live.slice.shownRows.value).toHaveLength(40);
++});
++
++test("a row is shown only when it passes the filters and matches the search; Clear filters keeps the search (catches search OR filters)", async () => {
++  const live = rig();
++  await live.slice.findProject();
++  await loaded(live);
++  live.slice.click("label", { kind: "label", title: "frontend" }, false);
++  const frontend = iids(live.slice.shownRows.value);
++  const outside = ROWS.find((row) => !frontend.includes(row.iid));
++  const inside = frontend[0];
++  if (outside === undefined || inside === undefined) {
++    throw new Error("the fixture has rows with and without frontend");
++  }
++
++  live.slice.setSearch(`!${inside} !${outside.iid}`);
++  expect(iids(live.slice.shownRows.value)).toEqual([inside]);
++
++  live.slice.clearAll();
++  expect(live.slice.search.value).toBe(`!${inside} !${outside.iid}`);
++  const both = ROWS.filter((row) => row.iid === inside || row.iid === outside.iid);
++  expect(iids(live.slice.shownRows.value)).toEqual(iids(both));
++});
++
++test("searched rows keep dated rows first (catches the search dropping the due-date order)", async () => {
++  const live = await dated();
++  live.slice.setSearch("620 630 638 640");
++  expect(iids(live.slice.shownRows.value)).toEqual([640, 630, 638, 620]);
++});
++
++test("Refresh keeps the search; show empties it (catches the text surviving a page visit or lost on reload)", async () => {
++  const live = rig();
++  await loaded(live);
++  live.slice.setSearch("!630");
++
++  const reloading = live.slice.refresh();
++  loadAt(live, 1).send({ me: "sam", rows: ROWS });
++  loadAt(live, 1).end(LOADED);
++  await reloading;
++  expect(live.slice.search.value).toBe("!630");
++  expect(iids(live.slice.shownRows.value)).toEqual([630]);
++
++  live.slice.close();
++  live.slice.show();
++  expect(live.slice.search.value).toBe("");
++  expect(live.slice.shownRows.value).toHaveLength(40);
++});
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 3f93b7d..4438f28 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -1,5 +1,5 @@
+ import type { StorageLike } from "@vueuse/core";
+-import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } from "vue";
++import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import type {
+   CheckedRow,
+@@ -13,25 +13,12 @@ import type {
+   Reviewer,
+   WebPage,
+ } from "../ipc";
+-import {
+-  filtered,
+-  merged,
+-  rechecked,
+-  summaryText,
+-  type CalendarDay,
+-  type Filters,
+-} from "../mergeRequests";
++import { merged, rechecked, type CalendarDay } from "../mergeRequests";
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
+ import { createDueDates, type DueDates } from "./mergeRequestDueDates";
+-import {
+-  choicesOf,
+-  createRememberedFilters,
+-  filterActions,
+-  type Choices,
+-  type FilterActions,
+-} from "./mergeRequestFilters";
+ import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
++import { shownOf, type Shown } from "./mergeRequestsShown";
+ import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
+ import { attempt, type Problem } from "./problem";
+ import type { Screen } from "./screen";
+@@ -49,16 +36,13 @@ export type Opening =
+ 
+ export type MergeRequests = RowActions &
+   Rerequests &
+-  FilterActions & {
++  Shown & {
+     readonly project: Readonly<ShallowRef<GitLabProject>>;
+     readonly me: Readonly<ShallowRef<string | null>>;
+     readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
+     readonly listing: Readonly<ShallowRef<ListLoad>>;
+     readonly failure: ComputedRef<string | null>;
+-    readonly filters: Readonly<Ref<Filters>>;
+-    readonly shownRows: ComputedRef<readonly MergeRequestRow[]>;
+-    readonly choices: ComputedRef<Choices>;
+-    readonly summary: ComputedRef<string>;
++    readonly search: Readonly<ShallowRef<string>>;
+     readonly dueDates: ComputedRef<ReadonlyMap<MergeRequestIid, CalendarDay>>;
+     readonly openings: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>>;
+     readonly pageProblem: Readonly<ShallowRef<string | null>>;
+@@ -66,6 +50,7 @@ export type MergeRequests = RowActions &
+     show(): void;
+     close(): void;
+     refresh(): Promise<void>;
++    setSearch(text: string): void;
+     setDueDate(iid: MergeRequestIid, day: CalendarDay | null): void;
+     openChanges(iid: MergeRequestIid): Promise<void>;
+     openPage(clicked: PageKind, page: WebPage): Promise<void>;
+@@ -89,6 +74,7 @@ type State = Deps & {
+   readonly cut: ShallowRef<boolean>;
+   readonly listing: ShallowRef<ListLoad>;
+   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
++  readonly search: ShallowRef<string>;
+   readonly pageProblem: ShallowRef<string | null>;
+   readonly dueDates: DueDates;
+   readonly rowActions: RowActions;
+@@ -176,6 +162,7 @@ async function load(state: State): Promise<void> {
+ 
+ function show(state: State): void {
+   state.screen.value = { kind: "mergeRequests" };
++  state.search.value = "";
+   void state.rowActions.checkLocalMerge();
+   const listing = state.listing.value;
+   const stale = listing.kind === "done" && Date.now() - listing.at >= RECHECK_PAUSE_MS;
+@@ -228,6 +215,7 @@ function createState(deps: Deps): State {
+     me: shallowRef<string | null>(null),
+     rows: shallowRef<readonly MergeRequestRow[]>([]),
+     cut: shallowRef(false),
++    search: shallowRef(""),
+     listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
+     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
+     pageProblem: shallowRef<string | null>(null),
+@@ -259,23 +247,17 @@ function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setD
+ 
+ export function createMergeRequests(deps: Deps): MergeRequests {
+   const state = createState(deps);
+-  const { me, rows } = state;
+-  const remembered = createRememberedFilters(state.repository, deps.storage);
+-  const { filters } = remembered;
+-  const shownRows = computed(() =>
+-    state.dueDates.datedFirst(filtered(rows.value, filters.value, me.value)),
+-  );
++  const { me, rows, search } = state;
+   return {
+     project: state.project,
+     me,
+     rows,
+     ...listingOf(state),
+-    filters,
+-    shownRows,
+-    choices: computed(() => choicesOf(rows.value, filters.value, me.value)),
+-    summary: computed(() =>
+-      summaryText(shownRows.value.length, rows.value.length, state.cut.value),
+-    ),
++    ...shownOf(state, deps.storage),
++    search,
++    setSearch: (text) => {
++      search.value = text;
++    },
+     ...dueDatesOf(state),
+     openings: state.openings,
+     pageProblem: state.pageProblem,
+@@ -287,7 +269,6 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+       state.screen.value = { kind: "files" };
+     },
+     refresh: () => load(state),
+-    ...filterActions(remembered),
+     openChanges: (iid) => openChanges(state, iid),
+     openPage: (clicked, page) => openPage(state, clicked, page),
+     dismissPageProblem: () => {
+diff --git a/frontend/src/ui/mergeRequestsShown.ts b/frontend/src/ui/mergeRequestsShown.ts
+new file mode 100644
+index 0000000..9e900a1
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestsShown.ts
+@@ -0,0 +1,48 @@
++import type { StorageLike } from "@vueuse/core";
++import { computed, type ComputedRef, type Ref } from "vue";
++
++import type { MergeRequestRow } from "../ipc";
++import { filtered, searched, summaryText, type Filters } from "../mergeRequests";
++import type { DueDates } from "./mergeRequestDueDates";
++import {
++  choicesOf,
++  createRememberedFilters,
++  filterActions,
++  type Choices,
++  type FilterActions,
++} from "./mergeRequestFilters";
++
++export type Shown = FilterActions & {
++  readonly filters: Readonly<Ref<Filters>>;
++  readonly shownRows: ComputedRef<readonly MergeRequestRow[]>;
++  readonly choices: ComputedRef<Choices>;
++  readonly summary: ComputedRef<string>;
++};
++
++type Listed = {
++  readonly repository: Readonly<Ref<string | null>>;
++  readonly me: Readonly<Ref<string | null>>;
++  readonly rows: Readonly<Ref<readonly MergeRequestRow[]>>;
++  readonly cut: Readonly<Ref<boolean>>;
++  readonly search: Readonly<Ref<string>>;
++  readonly dueDates: DueDates;
++};
++
++export function shownOf(listed: Listed, storage?: StorageLike): Shown {
++  const { me, rows, search } = listed;
++  const remembered = createRememberedFilters(listed.repository, storage);
++  const { filters } = remembered;
++  const shownRows = computed(() => {
++    const passing = filtered(rows.value, filters.value, me.value);
++    return listed.dueDates.datedFirst(searched(passing, search.value));
++  });
++  return {
++    filters,
++    shownRows,
++    choices: computed(() => choicesOf(rows.value, filters.value, me.value)),
++    summary: computed(() =>
++      summaryText(shownRows.value.length, rows.value.length, listed.cut.value),
++    ),
++    ...filterActions(remembered),
++  };
++}
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index de9165c..a304d1d 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -20,6 +20,9 @@ export const PAGE_TITLE = "Merge requests";
+ export const LIST_LABEL = "Open merge requests";
+ export const REFRESH = "Refresh";
+ export const FILTERS_LABEL = "Filters";
++export const SEARCH_FIELD_LABEL = "Search merge requests";
++export const SEARCH_FIELD_PLACEHOLDER = "Search title or !number";
++export const CLEAR_SEARCH = "Clear search";
+ export const CLEAR_FILTERS = "Clear filters";
+ export const DRAFT_LABEL = "Draft";
+ export const DRAFT_OPTIONS: readonly { readonly value: DraftFilter; readonly label: string }[] = [

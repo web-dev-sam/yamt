@@ -1,0 +1,3 @@
+just mutants HEAD → All files 95.76% (384 killed, 0 timeout, 2 survived, 15 no coverage); search.ts 27 killed/1 no-cov; mergeRequestsShown.ts 5/5; mergeRequests.ts 175 killed/2 survived
+frontend/src/mergeRequests/internal/search.ts:4 `?? []` → `?? ["Stryker was here"]` (NoCoverage) — equivalent: that word fails /^\d+$/, so it names no number either way
+frontend/src/ui/mergeRequests.ts:218 shallowRef("") → "Stryker was here!" — equivalent: the page is only reached through `show`, which empties the search first; a test would only pin a default (SP5)

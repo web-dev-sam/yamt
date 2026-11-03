@@ -70,6 +70,7 @@ export {
 } from "./internal/people";
 export { labelsShown, moreText } from "./internal/labels";
 export { summaryText } from "./internal/summary";
+export { searched } from "./internal/search";
 export { createdAgo } from "./internal/relativeTime";
 export { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "./internal/ciBox";
 export { filtersFrom, storedFilters, type StoredFilters } from "./internal/stored";

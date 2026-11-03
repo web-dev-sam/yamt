@@ -12,6 +12,7 @@ import { returnFocus } from "./focusReturn";
 import MergeRequestFilter from "./MergeRequestFilter.vue";
 import MergeRequestRow from "./MergeRequestRow.vue";
 import type { RerequestAsk } from "./mergeRequests";
+import MergeRequestSearch from "./MergeRequestSearch.vue";
 import { useMergeRequests } from "./mergeRequestsStore";
 import {
   CLEAR_FILTERS,
@@ -39,6 +40,7 @@ const NO_ASKS: ReadonlyMap<string, RerequestAsk> = new Map();
 const requests = useMergeRequests();
 const {
   rows,
+  search,
   listing,
   failure,
   filters,
@@ -138,6 +140,7 @@ async function openerClick(filter: ListFilter): Promise<void> {
       :aria-label="FILTERS_LABEL"
       class="flex shrink-0 flex-wrap items-center gap-2 border-b border-separator px-3 py-2"
     >
+      <MergeRequestSearch :text="search" @change="requests.setSearch" />
       <MergeRequestFilter
         v-for="filter in LIST_FILTERS"
         ref="bars"
