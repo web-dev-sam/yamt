@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef, useTemplateRef, watch, type Component } from "vue";
+import { computed, useTemplateRef, type Component } from "vue";
 import Check from "~icons/lucide/check";
 import ChevronDown from "~icons/lucide/chevron-down";
 import CircleMinus from "~icons/lucide/circle-minus";
@@ -9,19 +9,13 @@ import X from "~icons/lucide/x";
 
 import {
   filterName,
-  NARROW_FROM,
-  narrowed,
   type Choice,
   type LabelValue,
   type ListFilter,
   type PersonValue,
 } from "../mergeRequests";
-import {
-  clearFilterTitle,
-  narrowLabel,
-  narrowPlaceholder,
-  notValueLabel,
-} from "./mergeRequestsText";
+import MenuNarrowing from "./MenuNarrowing.vue";
+import { clearFilterTitle, notValueLabel } from "./mergeRequestsText";
 import { vTooltip } from "./tooltip";
 import { useShiftHeld } from "./useShiftHeld";
 
@@ -58,26 +52,13 @@ const ICONS: Readonly<Record<ListFilter, Component>> = {
 };
 
 const opener = useTemplateRef<HTMLButtonElement>("opener");
-const menu = useTemplateRef<HTMLDivElement>("menu");
-const narrowBox = useTemplateRef<HTMLInputElement>("narrowBox");
-const typed = shallowRef("");
+const box = useTemplateRef("box");
 const shift = useShiftHeld();
-defineExpose({ opener, menu, narrowBox });
 
 const name = computed(() => filterName(props.filter));
-const narrows = computed(() => props.choices.length > NARROW_FROM);
-const items = computed(() =>
-  (narrows.value ? narrowed(props.choices, typed.value) : props.choices).map(item),
-);
-
-watch(
-  () => props.open,
-  (open) => {
-    if (open) {
-      typed.value = "";
-    }
-  },
-);
+const menu = computed(() => box.value?.menu ?? null);
+const narrowBox = computed(() => box.value?.narrowBox ?? null);
+defineExpose({ opener, menu, narrowBox });
 
 function keyOf(value: Value): string {
   switch (value.kind) {
@@ -136,53 +117,48 @@ function item(choice: Choice<Value>): Item {
     >
       <X class="size-3.5" aria-hidden="true" />
     </button>
-    <div
-      v-if="open"
-      ref="menu"
-      class="absolute left-0 z-10 flex max-h-[60vh] min-w-56 flex-col rounded border border-control-border bg-panel-inline p-1 shadow-lg"
-      :class="above ? 'bottom-full' : 'top-full'"
-      @keydown="emit('menuKey', $event)"
+    <MenuNarrowing
+      ref="box"
+      :choices="choices"
+      :name="name"
+      :open="open"
+      :above="above"
+      @menu-key="emit('menuKey', $event)"
     >
-      <input
-        v-if="narrows"
-        ref="narrowBox"
-        v-model="typed"
-        type="search"
-        :aria-label="narrowLabel(name)"
-        :placeholder="narrowPlaceholder(name)"
-        spellcheck="false"
-        class="mb-1 rounded border border-control-border bg-panel px-2 py-1 outline-none focus:border-primary"
-      />
-      <ul role="menu" :aria-label="name" class="min-h-0 overflow-y-auto">
-        <li v-for="entry in items" :key="entry.key" role="none">
-          <button
-            type="button"
-            role="menuitemcheckbox"
-            :aria-checked="entry.choice.state !== 'off'"
-            :aria-label="entry.name"
-            class="flex w-full items-center gap-2 rounded py-1 pr-2 pl-1.5 text-left whitespace-nowrap outline-none hover:bg-hover focus:bg-row-selected"
-            @click="emit('click', entry.choice.value, $event.shiftKey)"
-          >
-            <CircleMinus
-              v-if="entry.minusTone !== null"
-              class="size-4 shrink-0"
-              :class="entry.minusTone"
-              aria-hidden="true"
-            />
-            <span v-else class="size-4 shrink-0" aria-hidden="true" />
-            <Check
-              v-if="entry.choice.state === 'included'"
-              class="size-4 shrink-0"
-              aria-hidden="true"
-            />
-            <span v-else class="size-4 shrink-0" aria-hidden="true" />
-            <span class="truncate" :class="{ 'text-problem-error line-through': entry.excluded }">{{
-              entry.choice.label
-            }}</span>
-            <span class="ml-auto pl-3 text-fg-muted">{{ entry.choice.count }}</span>
-          </button>
-        </li>
-      </ul>
-    </div>
+      <template #default="{ shown }">
+        <ul role="menu" :aria-label="name" class="min-h-0 overflow-y-auto">
+          <li v-for="entry in shown.map(item)" :key="entry.key" role="none">
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              :aria-checked="entry.choice.state !== 'off'"
+              :aria-label="entry.name"
+              class="flex w-full items-center gap-2 rounded py-1 pr-2 pl-1.5 text-left whitespace-nowrap outline-none hover:bg-hover focus:bg-row-selected"
+              @click="emit('click', entry.choice.value, $event.shiftKey)"
+            >
+              <CircleMinus
+                v-if="entry.minusTone !== null"
+                class="size-4 shrink-0"
+                :class="entry.minusTone"
+                aria-hidden="true"
+              />
+              <span v-else class="size-4 shrink-0" aria-hidden="true" />
+              <Check
+                v-if="entry.choice.state === 'included'"
+                class="size-4 shrink-0"
+                aria-hidden="true"
+              />
+              <span v-else class="size-4 shrink-0" aria-hidden="true" />
+              <span
+                class="truncate"
+                :class="{ 'text-problem-error line-through': entry.excluded }"
+                >{{ entry.choice.label }}</span
+              >
+              <span class="ml-auto pl-3 text-fg-muted">{{ entry.choice.count }}</span>
+            </button>
+          </li>
+        </ul>
+      </template>
+    </MenuNarrowing>
   </div>
 </template>
