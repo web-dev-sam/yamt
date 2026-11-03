@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useKeyModifier } from "@vueuse/core";
 import { computed, shallowRef, useTemplateRef, watch, type Component } from "vue";
 import Check from "~icons/lucide/check";
 import ChevronDown from "~icons/lucide/chevron-down";
@@ -24,6 +23,7 @@ import {
   notValueLabel,
 } from "./mergeRequestsText";
 import { vTooltip } from "./tooltip";
+import { useShiftHeld } from "./useShiftHeld";
 
 type Value = PersonValue | LabelValue;
 type Item = {
@@ -61,7 +61,7 @@ const opener = useTemplateRef<HTMLButtonElement>("opener");
 const menu = useTemplateRef<HTMLDivElement>("menu");
 const narrowBox = useTemplateRef<HTMLInputElement>("narrowBox");
 const typed = shallowRef("");
-const shift = useKeyModifier("Shift");
+const shift = useShiftHeld();
 defineExpose({ opener, menu, narrowBox });
 
 const name = computed(() => filterName(props.filter));
@@ -101,7 +101,7 @@ function item(choice: Choice<Value>): Item {
     key: keyOf(choice.value),
     choice,
     excluded,
-    minusTone: excluded ? "text-problem-error" : shift.value === true ? "text-fg-muted" : null,
+    minusTone: excluded ? "text-problem-error" : shift.value ? "text-fg-muted" : null,
     name: excluded ? notValueLabel(choice.label) : undefined,
   };
 }

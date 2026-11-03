@@ -1,0 +1,2 @@
+just mutants HEAD → useShiftHeld.ts 58 mutants: 58 killed, 0 survived, 100%. The first run's survivor (visibility `if (true)`) was killed by tightening the hidden/visible test.
+
