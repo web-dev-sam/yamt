@@ -1,36 +1,13 @@
 {
-  "CiJobLogPageR1": {
+  "CiJobLogDocs": {
     "owned": [
-      "frontend/src/ui/CiStatusBox.vue",
-      "frontend/src/ui/CiStatusJobLog.vue",
-      "frontend/src/ui/mergeRequestLogLook.ts",
-      "frontend/src/ui/mergeRequestLogLook.test.ts",
-      "frontend/src/ui/mergeRequestLogText.ts",
-      "frontend/src/ui/mergeRequestLogText.test.ts",
-      "frontend/src/ui/mergeRequestsText.ts",
-      "frontend/src/ui/mergeRequestsText.test.ts",
-      "frontend/src/ui/problem.ts",
-      "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ui/useHoverBox.ts",
-      "frontend/src/ui/useHoverBox.test.ts",
-      "frontend/src/ui/useShiftHeld.ts",
-      "frontend/src/ui/useShiftHeld.test.ts",
-      "frontend/src/ui/keyHold.ts",
-      "frontend/src/ui/keyHold.test.ts",
-      "frontend/src/ui/altHold.ts",
-      "frontend/src/ui/altHold.test.ts",
-      "frontend/src/ui/rangeKeys.ts",
-      "frontend/src/ui/rangeKeys.test.ts",
-      "frontend/src/ui/typingTarget.ts",
-      "frontend/src/ui/typingTarget.test.ts",
-      "frontend/src/mergeRequests/index.ts",
-      "frontend/src/mergeRequests/internal/jobLogSearch.ts",
-      "frontend/src/mergeRequests/internal/jobLogSearch.test.ts",
-      "frontend/src/mergeRequests/AGENTS.md",
-      "frontend/scripts/app-session/keys.ts",
-      "frontend/scripts/app-session/keys.test.ts",
-      "frontend/src/ui/AGENTS.md"
+      "docs/architecture.md",
+      "docs/plan.md",
+      ".omp/skills/project-map/**",
+      ".omp/skills/ipc-contract/SKILL.md",
+      ".omp/skills/risk-register/**",
+      "src-tauri/AGENTS.md",
+      "frontend/src/ipc/AGENTS.md"
     ]
   }
 }
