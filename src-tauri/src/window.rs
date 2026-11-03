@@ -45,20 +45,21 @@ const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const PAGE_PING: &str = "true";
 const PAGE_ANSWER: &str = "true";
 
-/// Which page the window shows: `<html data-window>` before the first frame (plan §2 #94).
+/// Which page the window shows: `<html data-window>` before the first frame (plan §2 #94), with the start options
+/// its start script carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WindowKind {
     Merge,
-    Compare,
-    Range,
+    Compare { start: StartScreen },
+    Range { ai: Ai, start: StartScreen },
 }
 
 impl WindowKind {
     pub(crate) fn name(self) -> &'static str {
         match self {
             WindowKind::Merge => "merge",
-            WindowKind::Compare => "compare",
-            WindowKind::Range => "range",
+            WindowKind::Compare { .. } => "compare",
+            WindowKind::Range { .. } => "range",
         }
     }
 }
@@ -84,7 +85,7 @@ fn context() -> tauri::Context<tauri::Wry> {
 
 fn open_merge(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending> {
     let app = with_session(tauri::Builder::default(), session).build(context())?;
-    let handle = open_and_wait(app, title, WindowKind::Merge, Ai::Off, StartScreen::Files)?;
+    let handle = open_and_wait(app, title, WindowKind::Merge)?;
     servers::lock(&handle.state::<HostState>()).stop_all();
     Ok(ending_when_git_is_done(&handle.state::<MergeState>()))
 }
@@ -97,14 +98,7 @@ fn open_compare(folder: &Path, ai: Ai, start: StartScreen) -> tauri::Result<Endi
         merge_requests::manage(app, folder, app_folder, ai);
         Ok(())
     };
-    open_with_data_folder(
-        COMPARE_TITLE,
-        WindowKind::Compare,
-        Ai::Off,
-        start,
-        manage,
-        |_| {},
-    )
+    open_with_data_folder(COMPARE_TITLE, WindowKind::Compare { start }, manage, |_| {})
 }
 
 /// Builds a window whose state `manage` sets up in `<data_dir>/yamt` before the window opens;
@@ -112,8 +106,6 @@ fn open_compare(folder: &Path, ai: Ai, start: StartScreen) -> tauri::Result<Endi
 pub(crate) fn open_with_data_folder(
     title: &str,
     kind: WindowKind,
-    ai: Ai,
-    start: StartScreen,
     manage: impl FnOnce(&App, &Path) -> Result<(), String>,
     at_exit: impl FnOnce(&AppHandle),
 ) -> tauri::Result<Ending> {
@@ -126,7 +118,7 @@ pub(crate) fn open_with_data_folder(
     if let Err(problem) = managed {
         return Ok(Ending::failure(problem));
     }
-    let handle = open_and_wait(app, title, kind, ai, start)?;
+    let handle = open_and_wait(app, title, kind)?;
     at_exit(&handle);
     Ok(Ending {
         exit: Exit::Success,
@@ -139,13 +131,7 @@ pub(crate) fn app_folder(data_dir: &Path) -> PathBuf {
     data_dir.join(APP_FOLDER)
 }
 
-fn open_and_wait(
-    app: App,
-    title: &str,
-    kind: WindowKind,
-    ai: Ai,
-    start: StartScreen,
-) -> tauri::Result<AppHandle> {
+fn open_and_wait(app: App, title: &str, kind: WindowKind) -> tauri::Result<AppHandle> {
     let stored = start_settings(app.path());
     // WebKitGTK fixes its surfaces' subpixel layout when the webview is built (plan §2 #60).
     #[cfg(target_os = "linux")]
@@ -156,7 +142,7 @@ fn open_and_wait(
         .inner_size(WIDTH, HEIGHT)
         .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
         .background_color(background(theme))
-        .initialization_script(start_script(theme, kind, ai, start))
+        .initialization_script(start_script(theme, kind))
         .build()?;
     let handle = app.handle().clone();
     let mut close_watch = CloseWatch::new();

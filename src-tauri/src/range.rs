@@ -35,7 +35,7 @@ pub(crate) fn run_range(repo: &Path, spec: &RangeSpec, ai: Ai, start: StartScree
     let title = range_title(spec, resolved.root());
     let manage = |app: &App, app_folder: &Path| manage_range_in(app, app_folder, resolved, ai);
     let at_exit = |app: &AppHandle| ai::end_at_exit(&app.state());
-    match open_with_data_folder(&title, WindowKind::Range, ai, start, manage, at_exit) {
+    match open_with_data_folder(&title, WindowKind::Range { ai, start }, manage, at_exit) {
         Ok(ending) => ending,
         Err(error) => Ending::failure(error.to_string()),
     }

@@ -5,18 +5,29 @@ use crate::window::WindowKind;
 
 // wry 0.57 injects it at document start (webkitgtk/mod.rs:822, wkwebview/mod.rs:787): "after the
 // document element is created, but before any other content is loaded" (WKUserScriptInjectionTime).
-pub(crate) fn start_script(theme: Theme, kind: WindowKind, ai: Ai, start: StartScreen) -> String {
-    let ai_line = match (kind, ai) {
-        (WindowKind::Range, Ai::On) => " document.documentElement.dataset.ai = \"on\";",
-        (WindowKind::Range, Ai::Off)
-        | (WindowKind::Merge | WindowKind::Compare, Ai::On | Ai::Off) => "",
-    };
-    let open_line = match (kind, start) {
-        (WindowKind::Compare | WindowKind::Range, StartScreen::MergeRequests) => {
-            " document.documentElement.dataset.open = \"mergeRequests\";"
+pub(crate) fn start_script(theme: Theme, kind: WindowKind) -> String {
+    let ai_line = match kind {
+        WindowKind::Range { ai: Ai::On, .. } => " document.documentElement.dataset.ai = \"on\";",
+        WindowKind::Range { ai: Ai::Off, .. } | WindowKind::Compare { .. } | WindowKind::Merge => {
+            ""
         }
-        (WindowKind::Compare | WindowKind::Range, StartScreen::Files)
-        | (WindowKind::Merge, StartScreen::Files | StartScreen::MergeRequests) => "",
+    };
+    let open_line = match kind {
+        WindowKind::Compare {
+            start: StartScreen::MergeRequests,
+        }
+        | WindowKind::Range {
+            start: StartScreen::MergeRequests,
+            ..
+        } => " document.documentElement.dataset.open = \"mergeRequests\";",
+        WindowKind::Compare {
+            start: StartScreen::Files,
+        }
+        | WindowKind::Range {
+            start: StartScreen::Files,
+            ..
+        }
+        | WindowKind::Merge => "",
     };
     format!(
         "document.documentElement.dataset.theme = \"{}\"; document.documentElement.dataset.window = \"{}\";{ai_line}{open_line}",
@@ -29,32 +40,30 @@ pub(crate) fn start_script(theme: Theme, kind: WindowKind, ai: Ai, start: StartS
 mod tests {
     use super::*;
 
+    const COMPARE: WindowKind = WindowKind::Compare {
+        start: StartScreen::Files,
+    };
+
+    fn range(ai: Ai, start: StartScreen) -> WindowKind {
+        WindowKind::Range { ai, start }
+    }
+
     #[test]
     fn the_start_script_names_the_theme_and_the_window() {
         assert_eq!(
-            start_script(Theme::Light, WindowKind::Merge, Ai::Off, StartScreen::Files),
+            start_script(Theme::Light, WindowKind::Merge),
             r#"document.documentElement.dataset.theme = "light"; document.documentElement.dataset.window = "merge";"#
         );
         assert_eq!(
-            start_script(
-                Theme::Dark,
-                WindowKind::Compare,
-                Ai::Off,
-                StartScreen::Files
-            ),
+            start_script(Theme::Dark, COMPARE),
             r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "compare";"#
         );
         assert_eq!(
-            start_script(
-                Theme::ZedLight,
-                WindowKind::Merge,
-                Ai::Off,
-                StartScreen::Files
-            ),
+            start_script(Theme::ZedLight, WindowKind::Merge),
             r#"document.documentElement.dataset.theme = "zed-light"; document.documentElement.dataset.window = "merge";"#
         );
         assert_eq!(
-            start_script(Theme::Dark, WindowKind::Range, Ai::Off, StartScreen::Files),
+            start_script(Theme::Dark, range(Ai::Off, StartScreen::Files)),
             r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "range";"#
         );
     }
@@ -63,17 +72,14 @@ mod tests {
     #[test]
     fn the_start_script_marks_ai_only_when_on() {
         assert_eq!(
-            start_script(Theme::Dark, WindowKind::Range, Ai::On, StartScreen::Files),
+            start_script(Theme::Dark, range(Ai::On, StartScreen::Files)),
             r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "range"; document.documentElement.dataset.ai = "on";"#
         );
-        for kind in [WindowKind::Merge, WindowKind::Compare] {
-            assert!(
-                !start_script(Theme::Dark, kind, Ai::On, StartScreen::Files).contains("dataset.ai")
-            );
+        for kind in [WindowKind::Merge, COMPARE] {
+            assert!(!start_script(Theme::Dark, kind).contains("dataset.ai"));
         }
         assert!(
-            !start_script(Theme::Dark, WindowKind::Range, Ai::Off, StartScreen::Files)
-                .contains("dataset.ai")
+            !start_script(Theme::Dark, range(Ai::Off, StartScreen::Files)).contains("dataset.ai")
         );
     }
 
@@ -82,35 +88,22 @@ mod tests {
         assert_eq!(
             start_script(
                 Theme::Dark,
-                WindowKind::Compare,
-                Ai::Off,
-                StartScreen::MergeRequests
+                WindowKind::Compare {
+                    start: StartScreen::MergeRequests
+                }
             ),
             r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "compare"; document.documentElement.dataset.open = "mergeRequests";"#
         );
         assert_eq!(
-            start_script(
-                Theme::Dark,
-                WindowKind::Range,
-                Ai::On,
-                StartScreen::MergeRequests
-            ),
+            start_script(Theme::Dark, range(Ai::On, StartScreen::MergeRequests)),
             r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "range"; document.documentElement.dataset.ai = "on"; document.documentElement.dataset.open = "mergeRequests";"#
         );
-        assert!(
-            !start_script(
-                Theme::Dark,
-                WindowKind::Merge,
-                Ai::Off,
-                StartScreen::MergeRequests
-            )
-            .contains("dataset.open")
-        );
-        for kind in [WindowKind::Merge, WindowKind::Compare, WindowKind::Range] {
-            assert!(
-                !start_script(Theme::Dark, kind, Ai::Off, StartScreen::Files)
-                    .contains("dataset.open")
-            );
+        for kind in [
+            WindowKind::Merge,
+            COMPARE,
+            range(Ai::Off, StartScreen::Files),
+        ] {
+            assert!(!start_script(Theme::Dark, kind).contains("dataset.open"));
         }
     }
 }
