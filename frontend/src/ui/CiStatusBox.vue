@@ -91,6 +91,10 @@ function openJob({ page }: FailedJob): void {
   }
 }
 
+function tipOf(job: FailedJob): string | null {
+  return ownLog.value?.job.page === job.page ? null : jobTitle(job.name, job.page);
+}
+
 function point(job: FailedJob): void {
   pointed.value = job;
 }
@@ -151,7 +155,7 @@ function logClosed(): void {
           <li
             v-for="(job, index) in view.jobs"
             :key="index"
-            v-tooltip="jobTitle(job.name, job.page)"
+            v-tooltip="tipOf(job)"
             @pointerenter="point(job)"
             @pointerleave="unpoint"
           >

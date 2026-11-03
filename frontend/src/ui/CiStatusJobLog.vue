@@ -47,6 +47,11 @@ const lines = useTemplateRef<HTMLDivElement>("lines");
 const query = shallowRef(jobSearch(props.shown.job.name));
 const places = shallowRef<readonly HitPlace[]>([]);
 const current = shallowRef<number | null>(null);
+// WebKitGTK 2.54 does not repaint the ranges of a Highlight that `CSS.highlights.set` replaces: they
+// stay painted (finding 2191). Clearing the registered Highlight repaints them, so each name keeps
+// one Highlight for the box's life.
+const matches = new Highlight();
+const currentMatch = new Highlight();
 let frame: number | null = null;
 const boxSize = useElementSize(box, undefined, { box: "border-box" });
 const placement = useMenuPlacement(box, () => ({
@@ -91,6 +96,8 @@ watch(loaded, search, { flush: "post" });
 watch(answered, leaveField, { flush: "post" });
 
 onMounted(() => {
+  CSS.highlights.set(MATCHES, matches);
+  CSS.highlights.set(CURRENT, currentMatch);
   field.value?.focus();
   field.value?.select();
   leaveField();
@@ -137,12 +144,11 @@ function centre(range: Range): void {
 function showCurrent(): void {
   const place = current.value === null ? undefined : places.value[current.value];
   const range = place === undefined ? null : rangeOf(place);
-  if (range === null) {
-    CSS.highlights.delete(CURRENT);
-    return;
+  currentMatch.clear();
+  if (range !== null) {
+    currentMatch.add(range);
+    centre(range);
   }
-  CSS.highlights.set(CURRENT, new Highlight(range));
-  centre(range);
 }
 
 function bottomOf(rows: HTMLCollection, line: number): number {
@@ -158,7 +164,7 @@ function topOf(rows: HTMLCollection, line: number): number {
 function paintMatches(): void {
   const element = scroller.value;
   const rows = lines.value?.children;
-  const matches = new Highlight();
+  matches.clear();
   if (element !== null && rows !== undefined) {
     const screen = element.clientHeight;
     const above = element.scrollTop - screen;
@@ -172,7 +178,6 @@ function paintMatches(): void {
       }
     }
   }
-  CSS.highlights.set(MATCHES, matches);
 }
 
 function paintSoon(): void {
