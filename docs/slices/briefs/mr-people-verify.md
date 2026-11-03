@@ -101,6 +101,9 @@ merge-requests page. Run every step in both windows (`--diff`, and `--range-case
    - !632: no `user-plus`, no ellipsis anywhere in its box.
    - !637: its dimmed icon opens a box with "Assignees None" and "Reviewers None" and both add buttons.
 9. **No one found.** "Add reviewer", type "zzz": "No one found".
+   9b. **The open row stays** (owner #2246, request rule 9). Set the filter "Reviewer: None"; open !637's box and add
+   Erik Lund as reviewer: !637 stays on the list and its box stays open with Erik under "Reviewers". Move the
+   pointer off the box: once it closes, !637 is gone from the list.
 10. `shot` with a field open and with a menu open, in yamt Dark and yamt Light (`--settings '{"theme":"light"}'`).
 
 **C. Real app.** Run `scripts/local-conflicts-repo.sh <scratch>/mpv`, then `cargo tauri build --debug --no-bundle`,

@@ -46,6 +46,9 @@ path end to end (`crates/merge-requests/src/rerequest.rs`, `src-tauri/src/merge_
 8. **Only these writes.** Adding and removing change exactly the one person in the one list, against GitLab's
    current list at that moment (never a whole-list write from the page's possibly old copy), so a change made
    meanwhile on GitLab by someone else is kept.
+9. **The open row stays** (owner #2246). A row whose people box is open stays on the list while the box is open,
+   even when a change takes it out of the active filters or the search (e.g. "Reviewer: None", then adding a
+   reviewer); it leaves when the box closes.
 
 ## To be measured by the design (unverified)
 

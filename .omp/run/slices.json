@@ -1,25 +1,27 @@
 {
-  "MrPeopleRust": {
+  "MrPeopleState": {
     "owned": [
-      "crates/merge-requests/**",
-      "src-tauri/src/merge_requests.rs",
-      "src-tauri/src/merge_requests/**",
-      "src-tauri/src/commands.rs",
-      "scripts/fake-glab/glab",
-      "tests/glab/mr-people/**",
-      "tests/glab/README.md"
-    ]
-  },
-  "MrPeopleCore": {
-    "owned": [
-      "frontend/src/mergeRequests/internal/suggestions.ts",
-      "frontend/src/mergeRequests/internal/suggestions.test.ts",
-      "frontend/src/mergeRequests/internal/filters.ts",
-      "frontend/src/mergeRequests/internal/choices.ts",
-      "frontend/src/mergeRequests/internal/choices.test.ts",
-      "frontend/src/mergeRequests/internal/filters.test.ts",
-      "frontend/src/mergeRequests/index.ts",
-      "frontend/src/mergeRequests/AGENTS.md"
+      "frontend/src/ipc/MergeRequestSource.ts",
+      "frontend/src/ipc/mergeRequestDomain.ts",
+      "frontend/src/ipc/mergeRequestDomain.test.ts",
+      "frontend/src/ipc/tauriMergeRequests.ts",
+      "frontend/src/ipc/tauriMergeRequests.test.ts",
+      "frontend/src/ipc/fixtureMergeRequests.ts",
+      "frontend/src/ipc/fixtureMergeRequests.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestPeople.ts",
+      "frontend/src/ipc/fixtureMergeRequestPeople.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestData.ts",
+      "frontend/src/ipc/fixtureMergeRequestData.test.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/AGENTS.md",
+      "frontend/src/ui/mergeRequestPeople.ts",
+      "frontend/src/ui/mergeRequestPeople.test.ts",
+      "frontend/src/ui/mergeRequests.ts",
+      "frontend/src/ui/mergeRequests.test.ts",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts",
+      "frontend/src/ui/mergeRequestsShown.ts"
     ]
   }
 }

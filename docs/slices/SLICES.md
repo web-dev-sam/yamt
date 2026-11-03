@@ -14,18 +14,19 @@ at once, behind a menu click so it cannot happen by accident (#2245). Reopens pl
 reviewer"). Design `briefs/mr-people-design.md` option A: `search_people` through `autocompleteUsers` 250 ms after the
 last key, `change_people` one `APPEND`/`REMOVE` per change, Free case from GitLab's answer, pictures offered before the
 reply, a queue per merge request. Designer's questions decided by the orchestrator (OR13, owner may veto): no
-search fallback for GitLab before 16.3; Free keeps the "did not add" sentence (rule 6). Open: a row leaving the
-filters after a change (asked). Order: 2 ∥ 2b, `just bindings`, 3, 4, 5.
+search fallback for GitLab before 16.3; Free keeps the "did not add" sentence (rule 6). Owner #2246: the row whose
+box is open stays shown until the box closes (rule 9; state, page, verify briefs amended). Order: 2 ∥ 2b, `just
+bindings`, 3, 4, 5.
 
-| row | slice                                                                                  | owner                 | status  | evidence                                                                                             |
-| --- | -------------------------------------------------------------------------------------- | --------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| 1   | design: search field, writes and answers, Free case, pictures, box hover rules, briefs | designer              | done    | `MrPeopleDesign`: option A, five briefs (rust, core, state, page, verify). Notes `MrPeopleDesign.md` |
-| 2   | rust (`briefs/mr-people-rust.md`): search, change, pictures, fake glab, RK54 test      | rust-impl             | running |                                                                                                      |
-| 2b  | core (`briefs/mr-people-core.md`): suggestions, shared count rule                      | web-impl              | running |                                                                                                      |
-| 3   | state: ipc source + fixtures, the window's add/remove asks, texts                      | web-impl              | todo    |                                                                                                      |
-| 4   | page: add button, search list, per-person menu, hover rules; wires the window          | web-impl              | todo    |                                                                                                      |
-| 5   | docs keeper; verify: smoke after 4, final `just check`, WebKit, real app               | docs-keeper, verifier | todo    |                                                                                                      |
-| 6   | owner check on the GitLab playground: add and remove a reviewer and an assignee        | human                 | todo    |                                                                                                      |
+| row | slice                                                                                  | owner                 | status  | evidence                                                                                                                                            |
+| --- | -------------------------------------------------------------------------------------- | --------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | design: search field, writes and answers, Free case, pictures, box hover rules, briefs | designer              | done    | `MrPeopleDesign`: option A, five briefs (rust, core, state, page, verify). Notes `MrPeopleDesign.md`                                                |
+| 2   | rust (`briefs/mr-people-rust.md`): search, change, pictures, fake glab, RK54 test      | rust-impl             | review  | `6830881f` (+ bindings): 189+27 tests, 13 mutants caught, 19 unviable; mutations never sent to a real GitLab (owner check). Notes `MrPeopleRust.md` |
+| 2b  | core (`briefs/mr-people-core.md`): suggestions, shared count rule                      | web-impl              | review  | `1937a28b`: 9 tests, 400 mutants killed, `ME_WORD` static survivor (#732). Notes `MrPeopleCore.md`                                                  |
+| 3   | state (`briefs/mr-people-state.md`): ipc source + fixtures, asks, the open row stays   | web-impl              | running |                                                                                                                                                     |
+| 4   | page: add button, search list, per-person menu, hover rules; wires the window          | web-impl              | todo    |                                                                                                                                                     |
+| 5   | docs keeper; verify: smoke after 4, final `just check`, WebKit, real app               | docs-keeper, verifier | todo    |                                                                                                                                                     |
+| 6   | owner check on the GitLab playground: add and remove a reviewer and an assignee        | human                 | todo    |                                                                                                                                                     |
 
 ## Release 0.6.7 (session 48, owner: "release the next patch")
 

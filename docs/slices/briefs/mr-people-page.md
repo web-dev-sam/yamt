@@ -42,7 +42,8 @@ Two new components; each needs its one-line reason in `deviations_from_brief` (V
 - The author; approvals; labels on GitLab; several merge requests at once; an undo (request non-goals).
 - Editing from the filter bar or review mode's own controls (request non-goals).
 - Swapping on GitLab Free (open question 2).
-- Keeping a filtered-out row on screen (open question 3).
+- Hiding or showing rows: the state slice keeps a row whose box is open shown (request rule 9, owner #2246); the box
+  only reports when it opens and closes.
 - Renaming `mayRerequest` (design §3).
 
 ## Contract
@@ -50,7 +51,7 @@ Two new components; each needs its one-line reason in `deviations_from_brief` (V
 Given (fixed):
 
 - State: `MergeRequests.me`, `rows`, `peopleSearch`, `peopleAsks`, `searchPeople`, `endPeopleSearch`, `changePeople`,
-  `dismissPeopleNotices`; the types `PeopleSearch`, `RowPeopleAsks`, `NotDone`, `PeopleChangeFailure`.
+  `peopleBoxOpened`, `peopleBoxClosed`; the types `PeopleSearch`, `RowPeopleAsks`, `NotDone`, `PeopleChangeFailure`.
 - Domain: `PeopleGroup`, `PeopleChange`, `MergeRequestRow.mayRerequest`.
 - Core: `peopleSuggestions`, `Suggestion`, `ME_WORD`, `displayName`, `initials`.
 - Problem: the steps `searchPeople` and `changePeople` (`problemText`).
@@ -138,8 +139,10 @@ Otherwise it is `@<username>`: the field cleared after the pick, so the result i
 - **Notices.** The row's `notDone` show as `peopleChangeText`, `text-problem-error`, `role="status"`:
   - a remove → under that person's line while they are listed;
   - else under its group.
-- **The box closes** (today's `closed` emit, kept). It calls `dismissPeopleNotices(row.iid)`, and `endPeopleSearch()`
-  when a field was open; `adding` returns to null.
+- **The box opens** (`useHoverBox`'s `open` turns true): it calls `peopleBoxOpened(row.iid)`, on every row, editable
+  or not.
+- **The box closes** (today's `closed` emit, kept), or the component unmounts while open: it calls
+  `peopleBoxClosed(row.iid)`, and `endPeopleSearch()` when a field was open; `adding` returns to null.
 - **Focus.** Today's `keepFocusInBox` (`MergeRequestPeople.vue:87-99`) widens to every control of a line (re-request,
   ellipsis): a reply that removes the focused control moves focus to the box.
 - **Pure logic.** Which lines show, their states, the highlight steps and where a notice goes live in

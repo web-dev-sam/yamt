@@ -5,7 +5,8 @@ Feature: people on a merge request. Sources:
 - Request `docs/slices/request-mr-people.md`: rules 2 (pause, latest answer only), 4 (one change at a time per merge
   request), 5 (the row follows GitLab's answer; filters count the new people), 6 (sentences until the box closes),
   8 (one person, one list), and the WebKit acceptance's fixture.
-- Design `docs/slices/briefs/mr-people-design.md` option A, §1.3, §1.6–1.8.
+- Design `docs/slices/briefs/mr-people-design.md` option A, §1.3, §1.6–1.8; §5 question 3 answered by the owner
+  (#2246, request rule 9): the row whose people box is open stays shown until the box closes.
 - Proposed plan §2 #169, #170; RK64, RK65.
 
 Runs after `mr-people-rust` (with the orchestrator's `just bindings`) and `mr-people-core` have landed.
@@ -24,6 +25,7 @@ Runs after `mr-people-rust` (with the orchestrator's `just bindings`) and `mr-pe
 - `frontend/src/ui/mergeRequestPeople.ts` (new), `frontend/src/ui/mergeRequestPeople.test.ts` (new)
 - `frontend/src/ui/mergeRequests.ts`, `frontend/src/ui/mergeRequests.test.ts`
 - `frontend/src/ui/problem.ts`, `frontend/src/ui/problemText.ts`, `frontend/src/ui/problemText.test.ts`
+- `frontend/src/ui/mergeRequestsShown.ts` (rule 9 only)
 
 **Read-only:** everything else.
 
@@ -99,8 +101,13 @@ export type PeopleChanges = {
   endPeopleSearch(): void;
   /** Queues `change` (an equal one already queued: nothing); settles when it is answered. */
   changePeople(iid: MergeRequestIid, change: PeopleChange): Promise<void>;
-  /** Drops the row's notDone (the box closed); its queue stays. */
-  dismissPeopleNotices(iid: MergeRequestIid): void;
+  /** Request rule 9 (owner #2246): the rows whose people box is open. */
+  readonly openPeopleBoxes: Readonly<ShallowRef<ReadonlySet<MergeRequestIid>>>;
+  /** The box of row `iid` opened: the row stays shown while it is open. */
+  peopleBoxOpened(iid: MergeRequestIid): void;
+  /** The box of row `iid` closed (or unmounted while open): the row is released and its notDone dropped; its
+   *  queue stays. */
+  peopleBoxClosed(iid: MergeRequestIid): void;
 };
 export function createPeopleChanges(deps: {
   readonly source: MergeRequestSource;
@@ -138,6 +145,11 @@ function withPeople(state: State, iid: MergeRequestIid, people: Partial<MergeReq
   - then the next change of that row is sent.
   - Rows run independently of each other.
 - The map holds an iid only while its queue or `notDone` is non-empty (`setRow`, `mergeRequestActions.ts:62`).
+- **The open row stays** (request rule 9). `mergeRequestsShown.ts` `shownOf` passes a row that is in the listed
+  `rows` and either passes today's filters and search or is in `openPeopleBoxes`; the order rules stay as today over
+  that set (the summary counts it). A row no longer in `rows` (a refresh dropped it) is not shown, open box or not.
+  `peopleBoxClosed` of an iid not in the set only drops its notDone. A set, not one iid: the box of the row left
+  may close after the next row's box opened.
 
 **Fixture** (`ipc/fixtureMergeRequestPeople.ts`, spread into `createFixtureMergeRequests` beside `discussionsScript`):
 
@@ -201,12 +213,17 @@ export function peopleScript(
     - `changed_hands_gitlabs_people_to_the_row`
     - `an_unchanged_reply_takes_gitlabs_lists_and_keeps_its_sentence` (RK64)
     - `a_refused_or_thrown_change_keeps_a_notice_and_the_queue_goes_on`
-    - `dismissing_keeps_the_running_and_waiting_changes`
+    - `closing_the_box_keeps_the_running_and_waiting_changes`
+    - `a_box_opened_on_two_rows_keeps_both_until_each_closes`
     - `a_new_change_for_the_person_drops_their_old_notice`
   - `mergeRequests.test.ts`:
     - `a_people_change_rewrites_both_lists_in_rows_and_in_a_buffering_refresh`
     - `a_rerequest_still_rewrites_only_the_reviewers`
     - `the_filters_count_a_person_added_by_a_change` (core `personChoices` over the slice's rows after a `changed`)
+    - `a_row_whose_people_box_is_open_stays_shown_after_a_change_drops_it_from_the_filters` (owner #2246; "Reviewer:
+      None", add a reviewer: shown while open, gone after `peopleBoxClosed`)
+    - `a_row_whose_people_box_is_open_stays_shown_when_the_search_no_longer_matches`
+    - `an_open_box_does_not_bring_back_a_row_a_refresh_dropped`
   - `mergeRequestDomain.test.ts`: `found_and_changed_replies_get_pictures_like_a_rows_and_others_pass_unchanged`.
   - `tauriMergeRequests.test.ts`:
     - `searchPeople_and_changePeople_call_their_commands_with_the_arguments` (`commands.changePeople(iid, change)`)
