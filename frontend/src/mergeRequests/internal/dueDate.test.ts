@@ -9,6 +9,7 @@ import {
   daysLeftText,
   dueDateText,
   localDay,
+  timeTitle,
   typedDay,
   type CalendarDay,
 } from "../index";
@@ -169,4 +170,22 @@ test("dateTimeText writes the local day first and a padded 24-hour time, never 3
   expect(dateTimeText(localTime("2026-12-31", 0, 0))).toBe("31.12.2026, 00:00");
   expect(dateTimeText(localTime("2026-11-08", 23, 59, 999))).toBe("08.11.2026, 23:59");
   expect(dateTimeText(Date.UTC(2026, 10, 8, 23, 30))).toBe("09.11.2026, 00:30");
+});
+
+test("timeTitle is the clock alone on now's local day and the full date otherwise, at both day edges", () => {
+  const late = localTime("2026-11-08", 23, 59);
+  const midnight = localTime("2026-11-09", 0);
+  expect(timeTitle(localTime("2026-11-08", 0), late)).toBe("00:00");
+  expect(timeTitle(late, late)).toBe("23:59");
+  expect(timeTitle(late, midnight)).toBe("08.11.2026, 23:59");
+  expect(timeTitle(midnight, localTime("2026-11-09", 23, 59, 999))).toBe("00:00");
+  expect(timeTitle(midnight, late)).toBe("09.11.2026, 00:00");
+  expect(timeTitle(localTime("2026-11-08", 9, 7), localTime("2026-11-08", 8))).toBe("09:07");
+});
+
+test("timeTitle compares local days, not UTC days (catches getUTCDate)", () => {
+  expect(timeTitle(Date.UTC(2026, 10, 8, 23, 30), Date.UTC(2026, 10, 9, 12))).toBe("00:30");
+  expect(timeTitle(Date.UTC(2026, 10, 8, 22, 30), Date.UTC(2026, 10, 8, 23, 30))).toBe(
+    "08.11.2026, 23:30",
+  );
 });

@@ -5,7 +5,14 @@ import ArrowLeft from "~icons/lucide/arrow-left";
 import RefreshCw from "~icons/lucide/refresh-cw";
 import X from "~icons/lucide/x";
 
-import { filterLabel, isFiltered, type ListFilter, type ReviewFor } from "../mergeRequests";
+import {
+  agoText,
+  filterLabel,
+  isFiltered,
+  timeTitle,
+  type ListFilter,
+  type ReviewFor,
+} from "../mergeRequests";
 import { RETRY } from "./aiText";
 import ChoiceButtons from "./ChoiceButtons.vue";
 import { returnFocus } from "./focusReturn";
@@ -29,6 +36,7 @@ import {
 } from "./mergeRequestsText";
 import { DISMISS_LABEL } from "./searchText";
 import { BACK } from "./serverText";
+import { vTooltip } from "./tooltip";
 import { useHoverMenu } from "./useHoverMenu";
 
 type FilterBar = InstanceType<typeof MergeRequestFilter>;
@@ -46,6 +54,7 @@ const {
   rows,
   search,
   listing,
+  listedAt,
   failure,
   filters,
   shownRows,
@@ -81,6 +90,11 @@ const empty = computed(
 );
 const filtered = computed(() => isFiltered(filters.value));
 const nowMs = computed(() => now.value.getTime());
+const age = computed(() =>
+  listedAt.value === null
+    ? null
+    : { text: agoText(listedAt.value, nowMs.value), title: timeTitle(listedAt.value, nowMs.value) },
+);
 
 onMounted(() => {
   back.value?.focus();
@@ -142,15 +156,18 @@ async function pick(value: ReviewFor): Promise<void> {
         {{ BACK }}
       </button>
       <h2 class="font-semibold">{{ PAGE_TITLE }}</h2>
-      <button
-        type="button"
-        :disabled="loading"
-        class="ml-auto flex items-center gap-1.5 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
-        @click="requests.refresh"
-      >
-        <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" aria-hidden="true" />
-        {{ REFRESH }}
-      </button>
+      <div class="ml-auto flex items-center gap-3">
+        <span v-if="age !== null" v-tooltip="age.title" class="text-fg-muted">{{ age.text }}</span>
+        <button
+          type="button"
+          :disabled="loading"
+          class="flex items-center gap-1.5 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+          @click="requests.refresh"
+        >
+          <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" aria-hidden="true" />
+          {{ REFRESH }}
+        </button>
+      </div>
     </header>
     <div
       role="group"

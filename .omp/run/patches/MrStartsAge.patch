@@ -1,0 +1,334 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index 06e806f..55a3204 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -6,7 +6,7 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ 
+ `internal/`: `filters` (the filter types, `passes`, `stateOf`, `clicked` and the other edits, `filterLabel` "Assignee: not Me, anna"), `choices`, `order`, `summary`, `relativeTime` (`agoText` "just now" under a minute, else the largest whole unit "3 hours ago"; `createdAgo` "created …" on it), `ciBox`, `stored`, `size` (`sizeParts` `{ added "+120", removed "−40", files "6 files" }` with U+2212, the row colours them green, red, text colour; `sizeTitle`), `readiness` (`readinessText`, "Has conflicts. Also blocked: " and the reasons joined by "; ", GitLab's own word quoted for `other`; `readinessIcon`), `rowAction` (the row's Resolve or Continue, first match wins: Continue on the merging row whatever its readiness, disabled while its window is open; no button unless conflicts; a fork, then another unfinished merge, disable Resolve; then running), `dueDate`, `calendar`, `jobLog`, `sgr`, `ansiColours`, `jobLogSearch`, `discussions`. Every file but `sgr` (tested through `jobLogView`) has its `*.test.ts` (node), each test named for the bug it catches.
+ 
+-`dueDate`: `CalendarDay` (month 1–12) made by `calendarDayFrom` from `"YYYY-MM-DD"` naming a real day, written back by `calendarDayText` (the stored form); `typedDay` reads what the user types, day first only (`3.11.2026`, `03.11.2026`, `03/11/2026`, `03-11-2026` with one separator throughout, or eight digits `03112026`; a four-digit year; a day that does not exist is refused, `11/3/2026` is 11 March); `compareDays` gives the whole days from one day to another (negative when the first is earlier); `localDay` is the local calendar day of a time; `daysLeft` is `compareDays` from `localDay` of now (both days at UTC midnight, so midnight, month ends and daylight-saving days count once); `daysLeftText` "Due today", "1 day left", "n days left", "1 day overdue", "n days overdue"; `dueDateText` is every shown date, `DD.MM.YYYY` with leading zeros ("03.11.2026"), no locale; `dateTimeText` is every shown time, that local date and the 24-hour local time ("30.10.2026, 15:04", the row's created-at hover).
++`dueDate`: `CalendarDay` (month 1–12) made by `calendarDayFrom` from `"YYYY-MM-DD"` naming a real day, written back by `calendarDayText` (the stored form); `typedDay` reads what the user types, day first only (`3.11.2026`, `03.11.2026`, `03/11/2026`, `03-11-2026` with one separator throughout, or eight digits `03112026`; a four-digit year; a day that does not exist is refused, `11/3/2026` is 11 March); `compareDays` gives the whole days from one day to another (negative when the first is earlier); `localDay` is the local calendar day of a time; `daysLeft` is `compareDays` from `localDay` of now (both days at UTC midnight, so midnight, month ends and daylight-saving days count once); `daysLeftText` "Due today", "1 day left", "n days left", "1 day overdue", "n days overdue"; `dueDateText` is every shown date, `DD.MM.YYYY` with leading zeros ("03.11.2026"), no locale; `dateTimeText` is every shown time, that local date and the 24-hour local time ("30.10.2026, 15:04", the row's created-at hover); `timeTitle(at, now)` is the hover of a time near now: the 24-hour local time alone ("15:04") when `at` and now share a local day, else `dateTimeText` (the list's age hover).
+ 
+ `calendar`: the picker's month (`CalendarMonth`, month 1–12): `monthGrid` the 42 `GridDay`s of six weeks from the Monday on or before the 1st (`inMonth` false for the neighbouring months' days), `WEEKDAYS` `Mo`…`Su` (weeks start on Monday), `addDays`, `addMonths` (clamped to the target month's last day: 31 January + 1 is 28/29 February), `movedDay` (the WAI-ARIA date-picker keys: arrows a day or a week, Home/End the week's Monday/Sunday, PageUp/PageDown a month, with Shift a year, clamped; any other key `null`), `sameDay`, `monthOf`, `monthCaption` "November 2026" and `dayName` "Tuesday, 3 November 2026" (English words read in UTC, so every zone names the stored day).
+ 
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+index 7ed5f8e..003d8b3 100644
+--- a/frontend/src/mergeRequests/index.ts
++++ b/frontend/src/mergeRequests/index.ts
+@@ -50,6 +50,7 @@ export {
+   daysLeftText,
+   dueDateText,
+   localDay,
++  timeTitle,
+   typedDay,
+   type CalendarDay,
+ } from "./internal/dueDate";
+diff --git a/frontend/src/mergeRequests/internal/dueDate.test.ts b/frontend/src/mergeRequests/internal/dueDate.test.ts
+index cbd229e..7fc062d 100644
+--- a/frontend/src/mergeRequests/internal/dueDate.test.ts
++++ b/frontend/src/mergeRequests/internal/dueDate.test.ts
+@@ -9,6 +9,7 @@ import {
+   daysLeftText,
+   dueDateText,
+   localDay,
++  timeTitle,
+   typedDay,
+   type CalendarDay,
+ } from "../index";
+@@ -170,3 +171,21 @@ test("dateTimeText writes the local day first and a padded 24-hour time, never 3
+   expect(dateTimeText(localTime("2026-11-08", 23, 59, 999))).toBe("08.11.2026, 23:59");
+   expect(dateTimeText(Date.UTC(2026, 10, 8, 23, 30))).toBe("09.11.2026, 00:30");
+ });
++
++test("timeTitle is the clock alone on now's local day and the full date otherwise, at both day edges", () => {
++  const late = localTime("2026-11-08", 23, 59);
++  const midnight = localTime("2026-11-09", 0);
++  expect(timeTitle(localTime("2026-11-08", 0), late)).toBe("00:00");
++  expect(timeTitle(late, late)).toBe("23:59");
++  expect(timeTitle(late, midnight)).toBe("08.11.2026, 23:59");
++  expect(timeTitle(midnight, localTime("2026-11-09", 23, 59, 999))).toBe("00:00");
++  expect(timeTitle(midnight, late)).toBe("09.11.2026, 00:00");
++  expect(timeTitle(localTime("2026-11-08", 9, 7), localTime("2026-11-08", 8))).toBe("09:07");
++});
++
++test("timeTitle compares local days, not UTC days (catches getUTCDate)", () => {
++  expect(timeTitle(Date.UTC(2026, 10, 8, 23, 30), Date.UTC(2026, 10, 9, 12))).toBe("00:30");
++  expect(timeTitle(Date.UTC(2026, 10, 8, 22, 30), Date.UTC(2026, 10, 8, 23, 30))).toBe(
++    "08.11.2026, 23:30",
++  );
++});
+diff --git a/frontend/src/mergeRequests/internal/dueDate.ts b/frontend/src/mergeRequests/internal/dueDate.ts
+index ad885b6..03052c5 100644
+--- a/frontend/src/mergeRequests/internal/dueDate.ts
++++ b/frontend/src/mergeRequests/internal/dueDate.ts
+@@ -66,10 +66,17 @@ export function localDay(now: number): CalendarDay {
+   return { year: local.getFullYear(), month: local.getMonth() + 1, day: local.getDate() };
+ }
+ 
+-export function dateTimeText(at: number): string {
++function clockText(at: number): string {
+   const local = new Date(at);
+-  const time = `${padded(local.getHours(), PART_DIGITS)}:${padded(local.getMinutes(), PART_DIGITS)}`;
+-  return `${dueDateText(localDay(at))}, ${time}`;
++  return `${padded(local.getHours(), PART_DIGITS)}:${padded(local.getMinutes(), PART_DIGITS)}`;
++}
++
++export function dateTimeText(at: number): string {
++  return `${dueDateText(localDay(at))}, ${clockText(at)}`;
++}
++
++export function timeTitle(at: number, now: number): string {
++  return compareDays(localDay(at), localDay(now)) === 0 ? clockText(at) : dateTimeText(at);
+ }
+ 
+ export function daysLeft(day: CalendarDay, now: number): number {
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 07f7429..c1770ce 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -46,6 +46,8 @@ Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`
+ 
+ Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. What the page shows from the loaded rows is `mergeRequestsShown.ts` `shownOf`: the remembered filters, `shownRows` (`datedFirst(searched(filtered(…)))`, or the review order while `filters.review` is set; one computed gives it and `reviewSort`), the checklists' `choices` (over every loaded row, never searched; `choices.review` is the picker's, `reviewChoices`), the summary, `viewer` (`viewerOf`) and `reviewSort` (null without review mode). Its filter row starts with `MergeRequestSearch.vue` (request #2150: the title or any `!number` named in the text, `mergeRequests/` `searched`; the slice's `search`, written by `setSearch` and emptied by `show`, kept through Refresh, never stored, not cleared by "Clear filters"; × and Escape with text empty it and keep the focus, Escape in the empty field closes the page as before because the field prevents only the Escape it used), then three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; presentational: the View holds their one menu; `menuitemcheckbox` items keep it open; the menu is a `MergeRequestMenu.vue`, below; × clears), review mode's button and sort icon (below), and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the people stack, the "+N" labels chip, the due date, the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box through `useHoverBox` on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
+ 
++The list's age (request `docs/slices/request-mr-starts.md` part A): the slice's `listedAt` is when the list now on screen finished loading, null until one has; `ended` writes it (its only writer) only on an end without a failure text, the end that swaps the rows in, so a Refresh in flight, a failed or thrown call and a failure end keep it (`listing`'s `at`, the stale reload's clock, is every end's). Left of Refresh, in one `ml-auto` group with it, the header shows `mergeRequests/` `agoText(listedAt, now)` in `text-fg-muted` with `timeTitle` as its `v-tooltip` (`HH:MM` on today's local day, else `dateTimeText`), nothing while null; it follows the page's minute `now`.
++
+ Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). WebKit sends no pointer events to a disabled button, so a control that can be disabled (a CI job without a log, the row action, open changes while fetching) carries its tip on a wrapper and the button `disabled:pointer-events-none`. `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); it and the due-date box close on a scroll outside them (`useScrollOutside`, capture phase, the one copy of that rule). `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter | "review">` for the three filters and review mode's picker (at most one list open), finds each part's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click; Escape with a list open closes the list, not the page. `MergeRequestMenu.vue` is the one menu box of the filters and the picker (generic over the choice's value): the container (placed `above` or below, `keydown` → `menuKey`), above `NARROW_FROM` choices the narrowing box (`narrowLabel`/`narrowPlaceholder` of the list's name, emptied on each opening), and its default slot gets the `shown` choices (`narrowed` by the typed text); each menu exposes the box's `menu`/`narrowBox` as its own (detector `MergeRequestFilter.test.ts`: both menus render the same box).
+ 
+ Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (the "created … ago" hover is `dateTimeText`, "30.10.2026, 15:04", no locale; labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date `DD.MM.YYYY` over the days left in the error colour when overdue; its `role="dialog"` box "Choose a due date" holds a text field on its own draft (`v-model`, set to the shown date when the box opens, so a re-render never rewrites it) that `typedDay` reads on Enter — a refused text stays as typed, sets `aria-invalid` and the error border, saves nothing —, `MergeRequestCalendar.vue` and Today (`PICK_TODAY`) / Clear; only Enter, a click or a footer button saves, never blur), then discussions and approvals (`approversText`, one name per line). `MergeRequestCalendar.vue` (`selected`, `today`, emits `pick`) is shadcn's Calendar: it owns the focused day, and the shown month is the focused day's (`monthOf`); the caption between the Previous / Next month chevrons, `WEEKDAYS` and `monthGrid`'s six weeks as `role="grid"` labelled by the caption, each day a button named `dayName` (`aria-selected` on its gridcell, `aria-current="date"` today); one tab stop (roving `tabindex`), the WAI-ARIA date-picker keys by `movedDay` (arrows, Home/End, PageUp/PageDown, Shift for a year; Enter/Space are the button's click), and it focuses its day when it mounts. Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)` with the click's `shiftKey`; while Shift is held (`useShiftHeld.ts` `useShiftHeld()`, one state per window shared by every filter and every CI box through vueuse `createSharedComposable`: the rule `shiftAfter` over `ShiftState` — `up` or `held { alone }`, both with a `taps` count — on `keyHold.ts`'s one listener set, `useKeyHold(KeyHold<S>)`, generic over its state, which the shell Alt's boolean hold uses too; held from Shift's keydown to its keyup by key name, since WebKitGTK on X11 reports Shift still set on its own release; up on blur, a hidden page, or a pointer event without `shiftKey`, none of which counts a tap) every value shows a muted `circle-minus`, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`, by `dueOf`, the one day lookup the review order reads too); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index c132eb4..ee0dbbf 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -5,7 +5,14 @@ import ArrowLeft from "~icons/lucide/arrow-left";
+ import RefreshCw from "~icons/lucide/refresh-cw";
+ import X from "~icons/lucide/x";
+ 
+-import { filterLabel, isFiltered, type ListFilter, type ReviewFor } from "../mergeRequests";
++import {
++  agoText,
++  filterLabel,
++  isFiltered,
++  timeTitle,
++  type ListFilter,
++  type ReviewFor,
++} from "../mergeRequests";
+ import { RETRY } from "./aiText";
+ import ChoiceButtons from "./ChoiceButtons.vue";
+ import { returnFocus } from "./focusReturn";
+@@ -29,6 +36,7 @@ import {
+ } from "./mergeRequestsText";
+ import { DISMISS_LABEL } from "./searchText";
+ import { BACK } from "./serverText";
++import { vTooltip } from "./tooltip";
+ import { useHoverMenu } from "./useHoverMenu";
+ 
+ type FilterBar = InstanceType<typeof MergeRequestFilter>;
+@@ -46,6 +54,7 @@ const {
+   rows,
+   search,
+   listing,
++  listedAt,
+   failure,
+   filters,
+   shownRows,
+@@ -81,6 +90,11 @@ const empty = computed(
+ );
+ const filtered = computed(() => isFiltered(filters.value));
+ const nowMs = computed(() => now.value.getTime());
++const age = computed(() =>
++  listedAt.value === null
++    ? null
++    : { text: agoText(listedAt.value, nowMs.value), title: timeTitle(listedAt.value, nowMs.value) },
++);
+ 
+ onMounted(() => {
+   back.value?.focus();
+@@ -142,15 +156,18 @@ async function pick(value: ReviewFor): Promise<void> {
+         {{ BACK }}
+       </button>
+       <h2 class="font-semibold">{{ PAGE_TITLE }}</h2>
+-      <button
+-        type="button"
+-        :disabled="loading"
+-        class="ml-auto flex items-center gap-1.5 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+-        @click="requests.refresh"
+-      >
+-        <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" aria-hidden="true" />
+-        {{ REFRESH }}
+-      </button>
++      <div class="ml-auto flex items-center gap-3">
++        <span v-if="age !== null" v-tooltip="age.title" class="text-fg-muted">{{ age.text }}</span>
++        <button
++          type="button"
++          :disabled="loading"
++          class="flex items-center gap-1.5 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++          @click="requests.refresh"
++        >
++          <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" aria-hidden="true" />
++          {{ REFRESH }}
++        </button>
++      </div>
+     </header>
+     <div
+       role="group"
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index 07fde60..af0d811 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -546,6 +546,77 @@ test("a failed reload call is reported and keeps the list and its last end", asy
+   expect(iids(live.slice.rows.value)).toEqual(iids(ROWS));
+ });
+ 
++test("listedAt is null through the first load and its end's time once listed (catches an age before the list)", async () => {
++  const live = rig();
++  live.slice.show();
++  loadAt(live, 0).send({ me: "sam", rows: ROWS });
++  expect(live.slice.listedAt.value).toBeNull();
++  vi.setSystemTime(T0 + 5);
++  loadAt(live, 0).end({ ok: true, value: { kind: "cut", limit: 100 } });
++  await settled();
++  expect(live.slice.listedAt.value).toBe(T0 + 5);
++});
++
++test.each<SourceResult<ListEnd>>([
++  { ok: true, value: { kind: "failed", message: "502" } },
++  { ok: true, value: { kind: "notLoggedIn", detail: "no token" } },
++  { ok: false, failure: STOPPED },
++])("a first load ending %j leaves listedAt null", async (end) => {
++  const live = rig();
++  live.slice.show();
++  loadAt(live, 0).send({ me: "sam", rows: ROWS.slice(0, 20) });
++  loadAt(live, 0).end(end);
++  await settled();
++  expect(live.slice.listedAt.value).toBeNull();
++});
++
++test("a refresh keeps listedAt while it runs and writes its end's time once listed (catches the age reset at the click)", async () => {
++  const live = rig();
++  await loaded(live);
++  vi.setSystemTime(T0 + 7);
++  const reloading = live.slice.refresh();
++  loadAt(live, 1).send({ me: "sam", rows: ROWS });
++  expect(live.slice.listedAt.value).toBe(T0);
++  vi.setSystemTime(T0 + 9);
++  loadAt(live, 1).end(LOADED);
++  await reloading;
++  expect(live.slice.listedAt.value).toBe(T0 + 9);
++});
++
++test.each<SourceResult<ListEnd>>([
++  { ok: true, value: { kind: "failed", message: "glab timed out" } },
++  { ok: false, failure: STOPPED },
++])(
++  "a refresh ending %j keeps the shown list's listedAt (catches the age of a list never shown)",
++  async (end) => {
++    const live = rig();
++    await loaded(live);
++    vi.setSystemTime(T0 + 9);
++    const reloading = live.slice.refresh();
++    loadAt(live, 1).end(end);
++    await reloading;
++    expect(live.slice.listedAt.value).toBe(T0);
++  },
++);
++
++test("a refresh whose call throws keeps listedAt", async () => {
++  let calls = 0;
++  const live = rig({
++    listMergeRequests: async () => {
++      calls += 1;
++      if (calls > 1) {
++        throw new Error("unreadable page");
++      }
++      return { ok: true, value: { kind: "loaded" } };
++    },
++  });
++  await live.slice.refresh();
++  vi.setSystemTime(T0 + 9);
++  await live.slice.refresh();
++  expect(live.problems).toHaveLength(1);
++  expect(live.slice.listedAt.value).toBe(T0);
++});
++
+ test("a thrown list call is reported as unexpected", async () => {
+   const live = rig({
+     listMergeRequests: () => Promise.reject(new Error("unreadable page")),
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index b964c58..8f21ba9 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -51,6 +51,7 @@ export type MergeRequests = RowActions &
+     readonly me: Readonly<ShallowRef<string | null>>;
+     readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
+     readonly listing: Readonly<ShallowRef<ListLoad>>;
++    readonly listedAt: Readonly<ShallowRef<number | null>>;
+     readonly failure: ComputedRef<string | null>;
+     readonly search: Readonly<ShallowRef<string>>;
+     readonly dueDates: ComputedRef<ReadonlyMap<MergeRequestIid, CalendarDay>>;
+@@ -84,6 +85,7 @@ type State = Deps & {
+   readonly rows: ShallowRef<readonly MergeRequestRow[]>;
+   readonly cut: ShallowRef<boolean>;
+   readonly listing: ShallowRef<ListLoad>;
++  readonly listedAt: ShallowRef<number | null>;
+   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
+   readonly search: ShallowRef<string>;
+   readonly pageProblem: ShallowRef<string | null>;
+@@ -106,9 +108,11 @@ function received(state: State, load: Load, { me, rows }: MergeRequestPage): voi
+ }
+ 
+ function ended(state: State, load: Load, end: ListEnd): void {
++  const at = Date.now();
+   const listed = listFailureText(end) === null;
+   if (listed) {
+     state.cut.value = end.kind === "cut";
++    state.listedAt.value = at;
+   }
+   if (load.buffered && listed) {
+     state.rows.value = load.buffer;
+@@ -119,7 +123,7 @@ function ended(state: State, load: Load, end: ListEnd): void {
+   if (end.kind === "loaded") {
+     state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
+   }
+-  state.listing.value = { kind: "done", end, at: Date.now() };
++  state.listing.value = { kind: "done", end, at };
+ }
+ 
+ function checked(state: State, load: Load, row: CheckedRow): void {
+@@ -234,6 +238,7 @@ function createState(deps: Deps): State {
+     cut: shallowRef(false),
+     search: shallowRef(""),
+     listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
++    listedAt: shallowRef<number | null>(null),
+     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
+     pageProblem: shallowRef<string | null>(null),
+     dueDates: createDueDates(repository, deps.storage),
+@@ -244,16 +249,6 @@ function createState(deps: Deps): State {
+   };
+ }
+ 
+-function listingOf(state: State): Pick<MergeRequests, "listing" | "failure"> {
+-  const { listing } = state;
+-  return {
+-    listing,
+-    failure: computed(() =>
+-      listing.value.kind === "done" ? listFailureText(listing.value.end) : null,
+-    ),
+-  };
+-}
+-
+ function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setDueDate"> {
+   return {
+     dueDates: dueDates.dates,
+@@ -270,7 +265,11 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     project: state.project,
+     me,
+     rows,
+-    ...listingOf(state),
++    listing: state.listing,
++    listedAt: state.listedAt,
++    failure: computed(() =>
++      state.listing.value.kind === "done" ? listFailureText(state.listing.value.end) : null,
++    ),
+     ...shownOf(state, deps.storage),
+     search,
+     setSearch: (text) => {

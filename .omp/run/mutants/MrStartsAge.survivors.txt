@@ -1,0 +1,2 @@
+just mutants HEAD → no Rust changes; Stryker on dueDate.ts and ui/mergeRequests.ts: 284 mutants, 258 killed, 26 survived, 90.85%
+

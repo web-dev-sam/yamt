@@ -51,6 +51,7 @@ export type MergeRequests = RowActions &
     readonly me: Readonly<ShallowRef<string | null>>;
     readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
     readonly listing: Readonly<ShallowRef<ListLoad>>;
+    readonly listedAt: Readonly<ShallowRef<number | null>>;
     readonly failure: ComputedRef<string | null>;
     readonly search: Readonly<ShallowRef<string>>;
     readonly dueDates: ComputedRef<ReadonlyMap<MergeRequestIid, CalendarDay>>;
@@ -84,6 +85,7 @@ type State = Deps & {
   readonly rows: ShallowRef<readonly MergeRequestRow[]>;
   readonly cut: ShallowRef<boolean>;
   readonly listing: ShallowRef<ListLoad>;
+  readonly listedAt: ShallowRef<number | null>;
   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
   readonly search: ShallowRef<string>;
   readonly pageProblem: ShallowRef<string | null>;
@@ -106,9 +108,11 @@ function received(state: State, load: Load, { me, rows }: MergeRequestPage): voi
 }
 
 function ended(state: State, load: Load, end: ListEnd): void {
+  const at = Date.now();
   const listed = listFailureText(end) === null;
   if (listed) {
     state.cut.value = end.kind === "cut";
+    state.listedAt.value = at;
   }
   if (load.buffered && listed) {
     state.rows.value = load.buffer;
@@ -119,7 +123,7 @@ function ended(state: State, load: Load, end: ListEnd): void {
   if (end.kind === "loaded") {
     state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
   }
-  state.listing.value = { kind: "done", end, at: Date.now() };
+  state.listing.value = { kind: "done", end, at };
 }
 
 function checked(state: State, load: Load, row: CheckedRow): void {
@@ -234,6 +238,7 @@ function createState(deps: Deps): State {
     cut: shallowRef(false),
     search: shallowRef(""),
     listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
+    listedAt: shallowRef<number | null>(null),
     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
     pageProblem: shallowRef<string | null>(null),
     dueDates: createDueDates(repository, deps.storage),
@@ -241,16 +246,6 @@ function createState(deps: Deps): State {
     discussionQueue: createDiscussions({ ...deps, mode, rows: () => rows.value }),
     shown: null,
     running: null,
-  };
-}
-
-function listingOf(state: State): Pick<MergeRequests, "listing" | "failure"> {
-  const { listing } = state;
-  return {
-    listing,
-    failure: computed(() =>
-      listing.value.kind === "done" ? listFailureText(listing.value.end) : null,
-    ),
   };
 }
 
@@ -270,7 +265,11 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     project: state.project,
     me,
     rows,
-    ...listingOf(state),
+    listing: state.listing,
+    listedAt: state.listedAt,
+    failure: computed(() =>
+      state.listing.value.kind === "done" ? listFailureText(state.listing.value.end) : null,
+    ),
     ...shownOf(state, deps.storage),
     search,
     setSearch: (text) => {

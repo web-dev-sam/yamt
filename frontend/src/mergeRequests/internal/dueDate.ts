@@ -66,10 +66,17 @@ export function localDay(now: number): CalendarDay {
   return { year: local.getFullYear(), month: local.getMonth() + 1, day: local.getDate() };
 }
 
-export function dateTimeText(at: number): string {
+function clockText(at: number): string {
   const local = new Date(at);
-  const time = `${padded(local.getHours(), PART_DIGITS)}:${padded(local.getMinutes(), PART_DIGITS)}`;
-  return `${dueDateText(localDay(at))}, ${time}`;
+  return `${padded(local.getHours(), PART_DIGITS)}:${padded(local.getMinutes(), PART_DIGITS)}`;
+}
+
+export function dateTimeText(at: number): string {
+  return `${dueDateText(localDay(at))}, ${clockText(at)}`;
+}
+
+export function timeTitle(at: number, now: number): string {
+  return compareDays(localDay(at), localDay(now)) === 0 ? clockText(at) : dateTimeText(at);
 }
 
 export function daysLeft(day: CalendarDay, now: number): number {

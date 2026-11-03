@@ -50,6 +50,7 @@ export {
   daysLeftText,
   dueDateText,
   localDay,
+  timeTitle,
   typedDay,
   type CalendarDay,
 } from "./internal/dueDate";

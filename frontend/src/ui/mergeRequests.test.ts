@@ -546,6 +546,77 @@ test("a failed reload call is reported and keeps the list and its last end", asy
   expect(iids(live.slice.rows.value)).toEqual(iids(ROWS));
 });
 
+test("listedAt is null through the first load and its end's time once listed (catches an age before the list)", async () => {
+  const live = rig();
+  live.slice.show();
+  loadAt(live, 0).send({ me: "sam", rows: ROWS });
+  expect(live.slice.listedAt.value).toBeNull();
+  vi.setSystemTime(T0 + 5);
+  loadAt(live, 0).end({ ok: true, value: { kind: "cut", limit: 100 } });
+  await settled();
+  expect(live.slice.listedAt.value).toBe(T0 + 5);
+});
+
+test.each<SourceResult<ListEnd>>([
+  { ok: true, value: { kind: "failed", message: "502" } },
+  { ok: true, value: { kind: "notLoggedIn", detail: "no token" } },
+  { ok: false, failure: STOPPED },
+])("a first load ending %j leaves listedAt null", async (end) => {
+  const live = rig();
+  live.slice.show();
+  loadAt(live, 0).send({ me: "sam", rows: ROWS.slice(0, 20) });
+  loadAt(live, 0).end(end);
+  await settled();
+  expect(live.slice.listedAt.value).toBeNull();
+});
+
+test("a refresh keeps listedAt while it runs and writes its end's time once listed (catches the age reset at the click)", async () => {
+  const live = rig();
+  await loaded(live);
+  vi.setSystemTime(T0 + 7);
+  const reloading = live.slice.refresh();
+  loadAt(live, 1).send({ me: "sam", rows: ROWS });
+  expect(live.slice.listedAt.value).toBe(T0);
+  vi.setSystemTime(T0 + 9);
+  loadAt(live, 1).end(LOADED);
+  await reloading;
+  expect(live.slice.listedAt.value).toBe(T0 + 9);
+});
+
+test.each<SourceResult<ListEnd>>([
+  { ok: true, value: { kind: "failed", message: "glab timed out" } },
+  { ok: false, failure: STOPPED },
+])(
+  "a refresh ending %j keeps the shown list's listedAt (catches the age of a list never shown)",
+  async (end) => {
+    const live = rig();
+    await loaded(live);
+    vi.setSystemTime(T0 + 9);
+    const reloading = live.slice.refresh();
+    loadAt(live, 1).end(end);
+    await reloading;
+    expect(live.slice.listedAt.value).toBe(T0);
+  },
+);
+
+test("a refresh whose call throws keeps listedAt", async () => {
+  let calls = 0;
+  const live = rig({
+    listMergeRequests: async () => {
+      calls += 1;
+      if (calls > 1) {
+        throw new Error("unreadable page");
+      }
+      return { ok: true, value: { kind: "loaded" } };
+    },
+  });
+  await live.slice.refresh();
+  vi.setSystemTime(T0 + 9);
+  await live.slice.refresh();
+  expect(live.problems).toHaveLength(1);
+  expect(live.slice.listedAt.value).toBe(T0);
+});
+
 test("a thrown list call is reported as unexpected", async () => {
   const live = rig({
     listMergeRequests: () => Promise.reject(new Error("unreadable page")),
