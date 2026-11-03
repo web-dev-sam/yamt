@@ -1,1 +1,39 @@
-{}
+{
+  "CiJobLogPage": {
+    "owned": [
+      "frontend/src/ui/CiStatusBox.vue",
+      "frontend/src/ui/CiStatusJobLog.vue",
+      "frontend/src/ui/mergeRequestLogLook.ts",
+      "frontend/src/ui/mergeRequestLogLook.test.ts",
+      "frontend/src/ui/mergeRequestLogText.ts",
+      "frontend/src/ui/mergeRequestLogText.test.ts",
+      "frontend/src/ui/mergeRequestsText.ts",
+      "frontend/src/ui/mergeRequestsText.test.ts",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts",
+      "frontend/src/ui/useHoverBox.ts",
+      "frontend/src/ui/useHoverBox.test.ts",
+      "frontend/src/ui/useShiftHeld.ts",
+      "frontend/src/ui/useShiftHeld.test.ts",
+      "frontend/src/ui/keyHold.ts",
+      "frontend/src/ui/keyHold.test.ts",
+      "frontend/src/ui/altHold.ts",
+      "frontend/src/ui/altHold.test.ts",
+      "frontend/scripts/app-session/keys.ts",
+      "frontend/scripts/app-session/keys.test.ts",
+      "frontend/src/ui/AGENTS.md"
+    ]
+  },
+  "CiJobLogStateR1": {
+    "owned": [
+      "frontend/src/ui/mergeRequestJobLogs.ts",
+      "frontend/src/ui/mergeRequestJobLogs.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestLogs.ts",
+      "frontend/src/ipc/fixtureMergeRequestLogs.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestData.ts",
+      "frontend/src/ipc/fixtureMergeRequests.ts",
+      "frontend/src/ipc/fixtureMergeRequests.test.ts"
+    ]
+  }
+}
