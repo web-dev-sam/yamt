@@ -1,1 +1,5 @@
-{}
+{
+  "MrPeopleDesign": {
+    "owned": ["docs/slices/briefs/mr-people-*.md"]
+  }
+}

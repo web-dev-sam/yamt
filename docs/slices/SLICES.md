@@ -6,6 +6,22 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## People on a merge request (session 49; owner #2243: "add or remove a reviewer/assignee to/from an MR")
+
+Request `docs/slices/request-mr-people.md` (rules 1–8, acceptance, non-goals, reopens); facts
+`.omp/run/notes/PlanScoutMrPeopleFacts.md`. Owner's answers: anyone in the project, found by typing (#2244); removing
+at once, behind a menu click so it cannot happen by accident (#2245). Reopens plan #153 and RK54 ("nothing adds a
+reviewer"). No product question open.
+
+| row | slice                                                                                  | owner                 | status  | evidence |
+| --- | -------------------------------------------------------------------------------------- | --------------------- | ------- | -------- |
+| 1   | design: search field, writes and answers, Free case, pictures, box hover rules, briefs | designer              | running |          |
+| 2   | rust: search and add/remove commands, pictures offered, fake glab, RK54 test           | rust-impl             | todo    |          |
+| 3   | state: ipc source + fixtures, the window's add/remove asks, texts                      | web-impl              | todo    |          |
+| 4   | page: add button, search list, per-person menu, hover rules; wires the window          | web-impl              | todo    |          |
+| 5   | docs keeper; verify: smoke after 4, final `just check`, WebKit, real app               | docs-keeper, verifier | todo    |          |
+| 6   | owner check on the GitLab playground: add and remove a reviewer and an assignee        | human                 | todo    |          |
+
 ## Release 0.6.7 (session 48, owner: "release the next patch")
 
 0.6.7 = 0.6.6 (published, tag `v0.6.6` on origin; section archived) plus the merge-request page work since: whose
