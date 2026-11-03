@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-11-03
+
 ### Added
 
 - Whose turn it is in a merge request's open discussions: hovering or focusing a row's discussion count opens a box
@@ -520,7 +522,8 @@ The 0.6 line as a release: everything in 0.6.0-beta.1 and 0.6.0-beta.2 below, wi
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.6.6...HEAD
+[Unreleased]: ../../compare/v0.6.7...HEAD
+[0.6.7]: ../../compare/v0.6.6...v0.6.7
 [0.6.6]: ../../compare/v0.6.5...v0.6.6
 [0.6.5]: ../../compare/v0.6.4...v0.6.5
 [0.6.4]: ../../compare/v0.6.3...v0.6.4
