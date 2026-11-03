@@ -21,7 +21,25 @@
       "frontend/src/ui/problem.ts",
       "frontend/src/ui/problemText.ts",
       "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ui/mergeRequestsShown.ts"
+      "frontend/src/ui/mergeRequestsShown.ts",
+      "frontend/src/ui/mergeRequestsList.ts",
+      "frontend/src/ui/mergeRequestsList.test.ts"
+    ]
+  },
+  "MrPeopleRustR1": {
+    "owned": [
+      "crates/merge-requests/**",
+      "src-tauri/src/merge_requests.rs",
+      "src-tauri/src/merge_requests/**",
+      "src-tauri/src/commands.rs",
+      "scripts/fake-glab/glab",
+      "tests/glab/mr-people/**",
+      "tests/glab/README.md"
+    ]
+  },
+  "MrDescriptionDesign": {
+    "owned": [
+      "docs/slices/briefs/mr-description-*.md"
     ]
   }
 }
