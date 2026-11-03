@@ -82,6 +82,7 @@ export const commands = {
 	/**  Whether a merge yamt started is unfinished in this window's repository; no GitLab project is `Free`. */
 	findLocalMerge: () => typedError<LocalMerge, IpcError>(__TAURI_INVOKE("find_local_merge")),
 	rerequestReview: (iid: MergeRequestIid, username: string) => typedError<RerequestReply, IpcError>(__TAURI_INVOKE("rerequest_review", { iid, username })),
+	readJobLog: (page: WebPage) => typedError<JobLogReply, IpcError>(__TAURI_INVOKE("read_job_log", { page })),
 };
 
 /* Types */
@@ -437,6 +438,35 @@ export type InlineRange<L> = {
 };
 
 export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" } | { kind: "UnknownTab"; tab: TabId } | { kind: "ColumnTooLarge"; limit: number } | { kind: "UnknownRangeFile"; file: RangeFileId } | { kind: "WorkerStopped" } | { kind: "UnknownThread"; thread: ThreadId } | { kind: "UnknownMessage"; message: MessageId } | { kind: "EmptyMessage" } | { kind: "MessagePending"; message: MessageId } | { kind: "NotANote"; message: MessageId } | { kind: "SendRunning" } | { kind: "AiOff" } | { kind: "RemoveFailed"; folder: string; message: string };
+
+/**  A failed job's log as the window shows it. */
+export type JobLog = {
+	/**  The log as GitLab stores it, colour codes and all; bytes that are not UTF-8 read as U+FFFD. */
+	text: string,
+	/**  Whether earlier lines were left out: the log was longer than `MAX_LOG_BYTES`. */
+	cut: boolean,
+};
+
+/**  How asking for a failed job's log ended. */
+export type JobLogReply = 
+/**  GitLab's log of the job. */
+{ kind: "log"; 
+/**  The log. */
+log: JobLog } | 
+/**  This window's list never offered that job page (or the page is no job's), so nothing was asked. */
+{ kind: "notOffered" } | 
+/**  GitLab has no log for the job: an empty answer or HTTP 404. */
+{ kind: "noLog" } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first line, which names the instance. */
+detail: string } | 
+/**  glab failed, timed out or answered something unexpected, in glab's or yamt's words. */
+{ kind: "failed"; 
+/**  What went wrong. */
+message: string };
 
 /**
  *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);

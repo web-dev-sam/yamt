@@ -8,9 +8,9 @@ use tauri::ipc::Channel;
 use tauri::{App, Manager, Runtime, State, WebviewWindow};
 use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
 use yamt_merge_requests::{
-    CheckedRow, GitLabProject, GitLabRepository, Glab, ListEnd, ListedPage, MergeRequestIid,
-    MergeRequestPage, MergedPairs, OpenReply, PageOpened, RerequestReply, ResolveRefusal, WebPage,
-    check_conflicts, gitlab_repository, prepare_open, prepare_resolve,
+    CheckedRow, GitLabProject, GitLabRepository, Glab, JobLogReply, ListEnd, ListedPage,
+    MergeRequestIid, MergeRequestPage, MergedPairs, OpenReply, PageOpened, RerequestReply,
+    ResolveRefusal, WebPage, check_conflicts, gitlab_repository, prepare_open, prepare_resolve,
 };
 
 use crate::args::Ai;
@@ -18,6 +18,7 @@ use crate::ipc_error::{IpcError, blocking_reply};
 use crate::range::range_folder;
 use crate::second_window;
 
+mod job_logs;
 mod pictures;
 
 pub(crate) use pictures::{PICTURE_SCHEME, answer_picture};
@@ -62,7 +63,7 @@ pub(crate) enum ContinueMergeReply {
 
 /// The window's GitLab project, found once at start, the folder pair locks live in, the window's `--ai` that "Show
 /// Diff" passes on, and every merge request's and failed job's page a list sent in this run: only those may be
-/// opened (plan §2 #128–#137); `pages` is never locked together with another `Mutex`.
+/// opened or have their log read (plan §2 #128–#137); `pages` is never locked together with another `Mutex`.
 pub(crate) struct MergeRequestState {
     gitlab: Option<GitLabRepository>,
     range_dir: PathBuf,
@@ -72,6 +73,7 @@ pub(crate) struct MergeRequestState {
     /// twice (rule 7); never locked together with `pages`.
     merged: Mutex<MergedPairs>,
     pictures: pictures::Pictures,
+    job_logs: job_logs::JobLogs,
 }
 
 /// Looks for a GitLab project in `folder`'s repository, offline, and hands it to the app with the window's `ai`.
@@ -83,6 +85,7 @@ pub(crate) fn manage<R: Runtime>(app: &App<R>, folder: &Path, app_folder: &Path,
         pages: Mutex::new(BTreeSet::new()),
         merged: Mutex::new(MergedPairs::default()),
         pictures: pictures::Pictures::default(),
+        job_logs: job_logs::JobLogs::default(),
     });
 }
 
@@ -292,6 +295,22 @@ pub(crate) async fn rerequest_review<R: Runtime>(
             Glab::find().as_ref(),
             iid,
             &username,
+        ))
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn read_job_log<R: Runtime>(
+    window: WebviewWindow<R>,
+    page: WebPage,
+) -> Result<JobLogReply, IpcError> {
+    blocking_reply(move || {
+        Ok(job_logs::job_log_reply(
+            &window.state(),
+            Glab::find().as_ref(),
+            &page,
         ))
     })
     .await

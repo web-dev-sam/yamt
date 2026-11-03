@@ -37,6 +37,8 @@ test ever runs a file it has just written (ETXTBSY).
 | `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`) |
 | `pictures/<path>` | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found` |
 | `pictures/<path>.sleep` | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists |
+| `traces/<n>.log` | `glab api` GET `projects/<project>/jobs/<n>/trace` (a job's log, any project): printed with `cat` byte for byte, exit 0 (an empty file prints nothing); no such file answers `404 Not Found` |
+| `traces/<n>.log.sleep` | seconds to wait before that log's answer, whether or not the log exists |
 
 `glab api` keeps the value of every `-f`/`--raw-field`/`-F`/`--field` as `name=value` (the first wins when a name
 is given twice) and, as glab does, sends a POST when a field or `--input` is given without `-X`/`--method`. A GET
@@ -71,7 +73,7 @@ argv: <the arguments, joined by spaces>
 cwd: <the working folder, symlinks resolved>
 env: NO_COLOR=<value or unset> GIT_TERMINAL_PROMPT=<value or unset>
 stdin: <stdin as read, then a newline>     (only with `--input -`)
-answered: <address>                        (a picture, after its .sleep and before its answer)
+answered: <address or endpoint>            (a picture or a job's log, after its .sleep and before its answer)
 ```
 
 ## Scenarios
@@ -146,6 +148,20 @@ answered: <address>                        (a picture, after its .sleep and befo
   user; one merge request, !60, by anna (`/2/avatar.png`, a PNG) with assignees erik (`/3/avatar.png`: an HTML page,
   so no picture), `plus+one` (`/2/avatar.png` under a name the picture scheme refuses) and user11 to user16 (`/11/`
   to `/16/`: no file, each answer after 1 s).
+- `ci-job-log/` — a failed job's log in the merge-request page (`crates/merge-requests/tests/job_log.rs`, the job-log
+  app tests in `src-tauri/src/merge_requests/tests/job_log.rs`): logged in; `merge-requests/`'s project; user `sam`;
+  one page, the last; no `diffHeadSha`, so the local check runs no git. !71 (failed pipeline): `phpunit` (job 302),
+  `lint` allowed to fail (303), `e2e` (304), `docs` (305) and the trigger job `deploy` (`webPath: null`, no page);
+  !70 (failed): `phpunit` (312), the same job name on another merge request; !69 from a fork (source project 2):
+  `phpunit` at `/sam/taskboard/-/jobs/310`. `traces/302.log` is a short runner log, every line with the timestamp
+  prefix (`2026-11-03T09:00:00.123456Z 00O `, two `00O+` continuation lines, two `00E` lines): collapsed sections
+  (`\e[0Ksection_start:…[collapsed=true]\r\e[0K` and their `section_end`), a progress line rewritten with lone `\r`s,
+  bold, italic, underlined, 256-colour, red-background, truecolor and `\e[0;m` codes, a line of markup
+  (`<b>not bold</b> & <script>x</script>`) and PHPUnit's `FAILURES!` / `Tests: 12, Assertions: 30, Failures: 2.`
+  before the runner's `ERROR: Job failed`; `303.log` holds 520,706 bytes of numbered lines (a yellow warning every
+  25th), its first line naming `FIRST LINE OF THE LONG LOG`, its last a red failure line; `305.log` is empty; there
+  is no `304.log` (404); `310.log` is a short fork log (`FORK LOG: …`), `312.log` a short coloured log with `fail`.
+  `.gitattributes` keeps every byte (`* -text`).
 
 ## Fake browser opener
 

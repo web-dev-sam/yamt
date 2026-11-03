@@ -155,6 +155,22 @@ picture() {
 	answer '404 Not Found' '{"message":"404 Not Found"}'
 }
 
+# A job's log, GET projects/<project>/jobs/<n>/trace: $scenario/traces/<n>.log printed with cat (bytes as they are),
+# after its .sleep seconds; "answered: <endpoint>" is logged before the answer. No such file answers 404.
+trace() {
+	job=${endpoint#*/jobs/}
+	file="$scenario/traces/${job%/trace}.log"
+	if [ -f "$file.sleep" ]; then
+		sleep "$(cat "$file.sleep")"
+	fi
+	log "answered: $endpoint"
+	if [ -f "$file" ]; then
+		cat "$file"
+		exit 0
+	fi
+	answer '404 Not Found' '{"message":"404 Not Found"}'
+}
+
 api() {
 	while [ $# -gt 0 ]; do
 		case $1 in
@@ -204,6 +220,7 @@ api() {
 		fi
 		answer_file merge-request.json
 		;;
+	"GET projects/"*"/jobs/"*"/trace") trace ;;
 	*) answer '404 Not Found' '{"message":"404 Not Found"}' ;;
 	esac
 }

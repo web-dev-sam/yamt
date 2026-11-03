@@ -1,0 +1,34 @@
+2026-11-03T09:00:00.123456Z 00O [0KRunning with gitlab-runner 18.9.0 (a1b2c3d4)[0;m
+2026-11-03T09:00:00.123901Z 00O [0K  on shared-runner-1 x7Yk2pQr, system ID: s_0123456789ab[0;m
+2026-11-03T09:00:00.124310Z 00O [0Ksection_start:1793696400:prepare_script[collapsed=true][0K[0K[36;1mPreparing environment[0;m[0;m
+2026-11-03T09:00:01.401222Z 00O Running on runner-x7yk2pqr-project-7-concurrent-0 via shared-runner-1...
+2026-11-03T09:00:01.402871Z 00O [0Ksection_end:1793696401:prepare_script[0K
+2026-11-03T09:00:01.403004Z 00O [32;1m$ composer install --no-progress[0;m
+2026-11-03T09:00:02.010557Z 00O Downloading 10%Downloading 55%Downloading 100%
+2026-11-03T09:00:02.920013Z 00O Installing dependencies from lock file
+2026-11-03T09:00:02.920310Z 00O [3mitalic note[0m and [4munderlined[0m words
+2026-11-03T09:00:02.920566Z 00E [38;5;208mDeprecated:[0m a dynamic property on Board
+2026-11-03T09:00:02.920802Z 00E [41m RED BACKGROUND [0m
+2026-11-03T09:00:02.921047Z 00O [38;2;255;0;0mtruecolor red[0m
+2026-11-03T09:00:02.921290Z 00O <b>not bold</b> & <script>x</script>
+2026-11-03T09:00:02.921533Z 00O [32;1m$ vendor/bin/phpunit[0;m
+2026-11-03T09:00:03.330118Z 00O PHPUnit 11.4.3 by Sebastian Bergmann and contributors.
+2026-11-03T09:00:03.330402Z 00O 
+2026-11-03T09:00:04.118765Z 00O ..F.....F...                                                      12 / 12 (100%)
+2026-11-03T09:00:04.119021Z 00O 
+2026-11-03T09:00:04.119266Z 00O There were 2 failures:
+2026-11-03T09:00:04.119501Z 00O 
+2026-11-03T09:00:04.119733Z 00O 1) Tests\BoardTest::testSortsByDueDate
+2026-11-03T09:00:04.119970Z 00O Failed asserting that two arrays are identical.
+2026-11-03T09:00:04.120204Z 00O+ --- Expected
+2026-11-03T09:00:04.120440Z 00O+ +++ Actual
+2026-11-03T09:00:04.120672Z 00O 
+2026-11-03T09:00:04.120905Z 00O 2) Tests\CardTest::testDueDateIsOptional
+2026-11-03T09:00:04.121139Z 00O Failed asserting that null is set.
+2026-11-03T09:00:04.121371Z 00O 
+2026-11-03T09:00:04.121604Z 00O [1;31mFAILURES![0m
+2026-11-03T09:00:04.121838Z 00O [1;31mTests: 12, Assertions: 30, Failures: 2.[0m
+2026-11-03T09:00:04.130077Z 00O [0Ksection_start:1793696404:cleanup_file_variables[0K[0K[36;1mCleaning up project directory and file based variables[0;m[0;m
+2026-11-03T09:00:04.302511Z 00O [0Ksection_end:1793696404:cleanup_file_variables[0K
+2026-11-03T09:00:04.302744Z 00O [31;1mERROR: Job failed: exit code 1
+2026-11-03T09:00:04.302980Z 00O [0;m

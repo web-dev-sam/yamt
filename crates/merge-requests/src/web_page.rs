@@ -21,11 +21,13 @@ impl WebPage {
     /// The job log page `web_path` (`<project's web path>/-/jobs/<id>`) names on the GitLab at `origin`; `None` for
     /// any other origin or path.
     pub(crate) fn job(origin: &str, web_path: &str) -> Option<WebPage> {
-        let (project, job) = web_path.rsplit_once(JOBS_SEGMENT)?;
-        if !is_number(job) {
-            return None;
-        }
+        let (project, job) = split_job_path(web_path)?;
         project_page(origin, project, &format!("{JOBS_SEGMENT}{job}"))
+    }
+
+    /// A job page's address before `/-/jobs/` and the job's number; `None` for any other page.
+    pub(crate) fn job_parts(&self) -> Option<(&str, &str)> {
+        split_job_path(&self.0)
     }
 
     /// Merge request `iid`'s page of the project at `web_path` (`/group/project`, after any sub-path GitLab is
@@ -52,6 +54,12 @@ fn project_page(origin: &str, web_path: &str, tail: &str) -> Option<WebPage> {
     let authority = origin.strip_prefix(HTTPS)?;
     let is_page = is_authority(authority) && is_web_path(web_path);
     is_page.then(|| WebPage(format!("{origin}{web_path}{tail}")))
+}
+
+/// `<before>/-/jobs/<digits>` as `<before>` and the digits.
+fn split_job_path(path: &str) -> Option<(&str, &str)> {
+    let (before, job) = path.rsplit_once(JOBS_SEGMENT)?;
+    is_number(job).then_some((before, job))
 }
 
 /// Asks the system's browser to show `page`; the opener runs on its own, in a process group of its own on Unix so

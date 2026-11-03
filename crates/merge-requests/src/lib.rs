@@ -1,11 +1,12 @@
 //! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab,
 //! each row's conflicts checked by yamt's own merge of GitLab's two commits, each one's changes prepared for a window
-//! of their own, its page or a failed job's opened in the browser.
+//! of their own, its page or a failed job's opened in the browser, a failed job's log read.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 mod check;
 mod detect;
+mod job_log;
 mod labels;
 mod list;
 mod open;
@@ -27,6 +28,7 @@ use specta::Type;
 
 pub use check::{CheckSummary, ConflictCheck, MergedPairs, check_conflicts};
 pub use detect::{GitLabRepository, gitlab_repository};
+pub use job_log::{JobLog, JobLogReply, MAX_LOG_BYTES, read_job_log};
 pub use labels::{Label, LabelColors};
 pub use list::{Listed, ListedPage, OfferedPicture, list_merge_requests};
 pub use open::prepare_open;

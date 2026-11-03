@@ -1,0 +1,145 @@
+{
+  "data": {
+    "queryComplexity": { "score": 170, "limit": 250 },
+    "currentUser": { "username": "sam" },
+    "project": {
+      "mergeRequests": {
+        "pageInfo": { "hasNextPage": false, "endCursor": null },
+        "nodes": [
+          {
+            "iid": "71",
+            "title": "Sort cards by due date",
+            "createdAt": "2026-11-03T08:00:00Z",
+            "draft": false,
+            "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+            "labels": { "nodes": [] },
+            "assignees": { "nodes": [] },
+            "reviewers": { "nodes": [] },
+            "approvedBy": { "nodes": [] },
+            "userPermissions": { "updateMergeRequest": true },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "detailedMergeStatus": "CI_MUST_PASS",
+            "conflicts": false,
+            "diffStats": [{ "additions": 12, "deletions": 3 }],
+            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main",
+            "diffHeadSha": null,
+            "headPipeline": {
+              "status": "FAILED",
+              "jobs": {
+                "pageInfo": { "hasNextPage": false },
+                "nodes": [
+                  {
+                    "name": "phpunit",
+                    "allowFailure": false,
+                    "webPath": "/taskboard/taskboard/-/jobs/302",
+                    "stage": { "name": "test" }
+                  },
+                  {
+                    "name": "lint",
+                    "allowFailure": true,
+                    "webPath": "/taskboard/taskboard/-/jobs/303",
+                    "stage": { "name": "test" }
+                  },
+                  {
+                    "name": "e2e",
+                    "allowFailure": false,
+                    "webPath": "/taskboard/taskboard/-/jobs/304",
+                    "stage": { "name": "test" }
+                  },
+                  {
+                    "name": "docs",
+                    "allowFailure": false,
+                    "webPath": "/taskboard/taskboard/-/jobs/305",
+                    "stage": { "name": "build" }
+                  },
+                  {
+                    "name": "deploy",
+                    "allowFailure": false,
+                    "webPath": null,
+                    "stage": { "name": "deploy" }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "iid": "70",
+            "title": "Archive finished boards",
+            "createdAt": "2026-11-02T16:00:00Z",
+            "draft": false,
+            "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
+            "labels": { "nodes": [] },
+            "assignees": { "nodes": [] },
+            "reviewers": { "nodes": [] },
+            "approvedBy": { "nodes": [] },
+            "userPermissions": { "updateMergeRequest": true },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "detailedMergeStatus": "CI_MUST_PASS",
+            "conflicts": false,
+            "diffStats": [{ "additions": 4, "deletions": 1 }],
+            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main",
+            "diffHeadSha": null,
+            "headPipeline": {
+              "status": "FAILED",
+              "jobs": {
+                "pageInfo": { "hasNextPage": false },
+                "nodes": [
+                  {
+                    "name": "phpunit",
+                    "allowFailure": false,
+                    "webPath": "/taskboard/taskboard/-/jobs/312",
+                    "stage": { "name": "test" }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "iid": "69",
+            "title": "Dark card colours",
+            "createdAt": "2026-11-02T09:30:00Z",
+            "draft": false,
+            "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+            "labels": { "nodes": [] },
+            "assignees": { "nodes": [] },
+            "reviewers": { "nodes": [] },
+            "approvedBy": { "nodes": [] },
+            "userPermissions": { "updateMergeRequest": true },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "detailedMergeStatus": "CI_MUST_PASS",
+            "conflicts": false,
+            "diffStats": [{ "additions": 20, "deletions": 8 }],
+            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
+            "sourceProjectId": 2,
+            "targetProjectId": 7,
+            "targetBranch": "main",
+            "diffHeadSha": null,
+            "headPipeline": {
+              "status": "FAILED",
+              "jobs": {
+                "pageInfo": { "hasNextPage": false },
+                "nodes": [
+                  {
+                    "name": "phpunit",
+                    "allowFailure": false,
+                    "webPath": "/sam/taskboard/-/jobs/310",
+                    "stage": { "name": "test" }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -122,6 +122,9 @@ mod picture_scheme;
 #[cfg(unix)]
 mod rerequest;
 
+#[cfg(unix)]
+mod job_log;
+
 mod csp;
 
 #[cfg(unix)]

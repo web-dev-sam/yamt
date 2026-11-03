@@ -2,14 +2,17 @@
 # Usage: scripts/gitlab-playground.sh [--reset] <dir>
 # Fills a real GitLab project for trying yamt's merge-request page by hand. <dir> is a clone of that project
 # (origin = the GitLab project, glab logged in). The project gets the Taskboard history of scripts/mr-conflict-repo.sh
-# (fixed names and dates, so the commit ids never change) and five open merge requests into main:
+# (fixed names and dates, so the commit ids never change) and six open merge requests into main:
 #   "Due dates on cards"   feature/due-dates  conflicts with main (Resolve conflicts, Abort, Push)
 #   "Card labels"          feature/clean      merges clean
 #   "Notes on priorities"  feature/merged     already contains main
 #   "Draft: Develop notes" develop            a draft
 #   "Empty change"         feature/empty      main's tip: changes nothing ("+0 −0")
+#   "Failing CI"           feature/failing-ci adds a .gitlab-ci.yml whose jobs phpunit (a collapsed section, a "\r"
+#                                             progress line, colours) and long-log (about 600 KB, past the 500 KB
+#                                             tail GitLab's job page shows) fail: their logs, opened with Shift
 # Branches GitLab already has are left alone and merge requests that are open are not made again, so a second run
-# only fills what is missing. --reset also force-pushes the five branches back to their first commits (main is never
+# only fills what is missing. --reset also force-pushes the six branches back to their first commits (main is never
 # forced) and puts <dir> back on a clean main: a merge in progress is aborted, yamt's record of it removed, local
 # changes, untracked files and every local branch but main deleted. Only for a playground.
 set -euo pipefail
@@ -36,6 +39,42 @@ seed=$(mktemp -d "${TMPDIR:-/tmp}/yamt-gitlab-seed.XXXXXX")
 trap 'rm -rf "$seed"' EXIT
 "$here/mr-conflict-repo.sh" "$seed/repo" > /dev/null
 bare="$seed/repo/.git/fake-gitlab.git"
+
+# feature/failing-ci: main and one commit with a fixed author and date, as mr-conflict-repo.sh's commits.
+seed_git() {
+    git -C "$seed/repo" -c commit.gpgsign=false -c core.autocrlf=false -c core.hooksPath=/dev/null "$@"
+}
+seed_git checkout -q -b feature/failing-ci main
+cat > "$seed/repo/.gitlab-ci.yml" << 'YAML'
+image: alpine:3.20
+
+phpunit:
+  stage: test
+  script:
+    - |
+      printf '\033[0Ksection_start:%d:%s[collapsed=true]\r\033[0K%s\n' "$(date +%s)" prepare_tests 'Preparing the tests'
+      printf 'composer install\n'
+      printf '\033[0Ksection_end:%d:%s\r\033[0K\n' "$(date +%s)" prepare_tests
+      printf 'Downloading 10%%\rDownloading 55%%\rDownloading 100%%\n'
+      printf '\033[1;31mbold red\033[0m \033[3mitalic\033[0m \033[4munderlined\033[0m \033[38;5;208morange\033[0m \033[41mred background\033[0m\n'
+      printf '<b>not bold</b> & <script>x</script>\n'
+      printf 'FAILURES!\nTests: 12, Assertions: 30, Failures: 2.\n'
+      exit 1
+
+long-log:
+  stage: test
+  script:
+    - |
+      for i in $(seq 1 8500); do
+        printf '\033[32mline %05d\033[0m of a long log, padded to about six hundred kilobytes\n' "$i"
+      done
+      exit 1
+YAML
+seed_git add .gitlab-ci.yml
+GIT_AUTHOR_NAME=yamt GIT_AUTHOR_EMAIL=yamt@example.invalid GIT_AUTHOR_DATE=2026-10-08T10:00:00+02:00 \
+    GIT_COMMITTER_NAME=yamt GIT_COMMITTER_EMAIL=yamt@example.invalid GIT_COMMITTER_DATE=2026-10-08T10:00:00+02:00 \
+    seed_git commit -q -m "CI: two failing jobs"
+seed_git push -q "$bare" refs/heads/feature/failing-ci
 
 # Runs "$@" and shows its output only when it fails (GitLab's "To create a merge request …" lines are noise here).
 quiet() {
@@ -75,6 +114,7 @@ for branch in develop feature/due-dates feature/clean feature/merged; do
     push_branch "$branch" "refs/heads/$branch"
 done
 push_branch feature/empty refs/heads/main
+push_branch feature/failing-ci refs/heads/feature/failing-ci
 
 git -C "$dir" fetch -q --prune origin
 if $reset; then
@@ -113,3 +153,4 @@ open_merge_request feature/clean "Card labels"
 open_merge_request feature/merged "Notes on priorities"
 open_merge_request develop "Develop notes" --draft
 open_merge_request feature/empty "Empty change"
+open_merge_request feature/failing-ci "Failing CI"

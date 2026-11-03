@@ -80,6 +80,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         merge_requests::continue_merge_request::<tauri::Wry>,
         merge_requests::find_local_merge::<tauri::Wry>,
         merge_requests::rerequest_review::<tauri::Wry>,
+        merge_requests::read_job_log::<tauri::Wry>,
     ])
 }
 

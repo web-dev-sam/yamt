@@ -1,0 +1,6 @@
+2026-11-03T08:40:00.100000Z 00O [0KRunning with gitlab-runner 18.9.0 (a1b2c3d4)[0;m
+2026-11-03T08:40:00.200000Z 00O [0K  on sam-fork-runner f0rK2pQr, system ID: s_fedcba987654[0;m
+2026-11-03T08:40:01.300000Z 00O [32;1m$ vendor/bin/phpunit[0;m
+2026-11-03T08:40:02.400000Z 00O FORK LOG: Tests\ThemeTest::testDarkCards failed
+2026-11-03T08:40:02.500000Z 00O [1;31mFAILURES![0m
+2026-11-03T08:40:02.600000Z 00O [31;1mERROR: Job failed: exit code 1[0;m

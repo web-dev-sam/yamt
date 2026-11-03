@@ -1,0 +1,6 @@
+2026-11-03T07:20:00.100000Z 00O [0KRunning with gitlab-runner 18.9.0 (a1b2c3d4)[0;m
+2026-11-03T07:20:01.200000Z 00O [32;1m$ vendor/bin/phpunit[0;m
+2026-11-03T07:20:02.300000Z 00O Tests\ArchiveTest::testFinishedBoardsMove [31mfail[0m
+2026-11-03T07:20:02.400000Z 00O [1;31mFAILURES![0m
+2026-11-03T07:20:02.500000Z 00O [1;31mTests: 4, Assertions: 9, Failures: 1.[0m
+2026-11-03T07:20:02.600000Z 00O [31;1mERROR: Job failed: exit code 1[0;m
