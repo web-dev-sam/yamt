@@ -39,6 +39,9 @@ Asked by the owner on 2026-11-03 (#2194, second in importance; answers #2198); d
    (`request-mr-discussions.md` rule 3); after Clear filters, for the logged-in user again.
 6. **Details not loaded yet.** Rows whose discussion details have not arrived sort as if they had none and move once
    they arrive; a failure to read them leaves the normal order with the tooltip saying why.
+7. **Only with details loaded fully** (owner #2199). The review-mode button and its order exist only while
+   Settings' "Discussion details" is "Load fully" (the default, #2200; `request-mr-discussions.md` rule 8). With
+   "Load lazily" or "Off" the button is hidden; switching there turns an active review order off, its filters stay.
 
 ## To be measured by the design (unverified)
 

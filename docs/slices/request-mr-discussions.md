@@ -31,9 +31,19 @@ Next in line: `request-mr-review-mode.md` sorts by this feature's data, so the d
 5. **Plain text.** Comment text is shown as text, never as markup (risk register, the log-text rule of RK57).
 6. **To GitLab.** A click on a discussion opens that comment on GitLab in the browser, as a row click opens the merge
    request (plan §2 #137), only for a link GitLab's own answer gave for that comment.
-7. **Freshness and failure.** The details come with the list or right after it, for every listed row (review mode
-   sorts by them), and are as fresh as the list (`request-mr-starts.md` rule A shows its age). While they load the
-   box says so; if they cannot be read, the count still shows and the box says why — never a problem box.
+7. **Freshness and failure.** Loaded details are as fresh as the list (`request-mr-starts.md` rule A shows its age);
+   a refresh drops them and loads them again as rule 8's mode says. While they load the box says so; if they cannot
+   be read, the count still shows and the box says why — never a problem box.
+8. **A setting decides how much is loaded** (owner #2199–#2200). In Settings, "Discussion details", three choices:
+   - **Load fully** (the default, #2200): with the list or right after it, for every listed row. Everything is
+     shown: the hover box, and review mode with its order by waiting discussions (`request-mr-review-mode.md`).
+   - **Load lazily**: only a row's own details, on the first hover of its count, kept until the next refresh. The
+     hover box is shown; review mode is hidden (its order needs every row's details).
+   - **Off**: nothing is loaded. The count shows with today's plain tooltip; the hover box and review mode are
+     hidden.
+
+   A change applies to the open list at once (switching to "Load fully" loads what is missing; switching away
+   turns an active review order off, its filters stay). Kept in the settings file like the other settings.
 
 ## To be measured by the design (unverified)
 
@@ -45,15 +55,21 @@ Next in line: `request-mr-review-mode.md` sorts by this feature's data, so the d
 - Which `glab` user is "the viewer" (the list already knows "Me": the filters' "Me" value).
 - Where the turn rule lives (Rust or the framework-free `mergeRequests/` core) and the shape crossing the IPC.
 - The box: the people box's component reused or shared, without a second hover rule (`useHoverBox`, one tooltip).
+- The setting (rule 8): its key and three values in the settings file (`crates/settings`, the Settings window
+  `ui/SettingsView.vue`), and one load path that serves both "fully" (all rows) and "lazily" (one row on hover)
+  without two query shapes.
 
 ## Acceptance
 
 Rust: against the fake glab (`tests/glab/<case>/`), a listed row's open discussions arrive with each one's last
-person's note, its place and link; system notes are skipped; a failure keeps the list. WebKit fixture (`?mr=list`):
-hover a row's count → the box lists its open discussions, turn first, words as rule 3; capitals and markup in a
-comment show as text; review-mode viewer switch changes the turn marks (once review mode exists, else the "Me"
-case only); dark and light. Real app on the fake glab: the same hover. `just check` passes. Owner check on the
-GitLab playground: a discussion answered by the author shows "Your turn" to the reviewer.
+person's note, its place and link; one row's details alone (lazy); system notes are skipped; a failure keeps the
+list; the setting's three values read and written. WebKit fixture (`?mr=list`), per setting: **fully** — hover a
+row's count → the box lists its open discussions, turn first, words as rule 3, no wait; **lazily** — the first hover
+shows loading then the box, a second hover asks nothing, review mode hidden; **off** — plain tooltip, no box, no
+review mode, nothing asked; switching the setting applies at once. Capitals and markup in a comment show as text;
+dark and light. Real app on the fake glab: the same three, and the calls log shows no discussion query with "off"
+and one per hovered row with "lazily". `just check` passes. Owner check on the GitLab playground: a discussion
+answered by the author shows "Your turn" to the reviewer.
 
 ## Non-goals
 
@@ -63,14 +79,17 @@ showing whole threads; notifications.
 ## Owner's answers
 
 - (#2198) Review mode's perspective and order are in `request-mr-review-mode.md`.
+- (#2199) A setting chooses: load fully, load lazily (on hover per row), or off (related features hidden); "fully"
+  is what makes review mode's order by waiting discussions available.
+- (#2200) Default: load fully.
 
 ## Slice graph (proposal; the session's orchestrator refines it)
 
-| row | slice                                                                           | owner       | needs |
-| --- | ------------------------------------------------------------------------------- | ----------- | ----- |
-| 1   | design: query shape and cost, system notes, viewer, turn rule's home, box reuse | designer    | —     |
-| 2   | rust: discussion details for listed rows, fake glab scenario                    | rust-impl   | 1     |
-| 3   | core: the turn rule and the box's order and words                               | web-impl    | 1     |
-| 4   | page: hover box on the count, ipc + fixtures; wires the window                  | web-impl    | 2, 3  |
-| 5   | docs keeper                                                                     | docs-keeper | 4     |
-| 6   | verify: smoke after 4; final `just check`, WebKit, real app                     | verifier    | 4     |
+| row | slice                                                                                                                        | owner       | needs |
+| --- | ---------------------------------------------------------------------------------------------------------------------------- | ----------- | ----- |
+| 1   | design: query shape and cost, one load path for both modes, system notes, viewer, turn rule's home, box reuse, setting shape | designer    | —     |
+| 2   | rust: discussion details for listed rows or one row, the setting, fake glab scenario                                         | rust-impl   | 1     |
+| 3   | core: the turn rule and the box's order and words                                                                            | web-impl    | 1     |
+| 4   | page: hover box on the count per setting, Settings choice, ipc + fixtures; wires the window                                  | web-impl    | 2, 3  |
+| 5   | docs keeper                                                                                                                  | docs-keeper | 4     |
+| 6   | verify: smoke after 4; final `just check`, WebKit, real app                                                                  | verifier    | 4     |
