@@ -89,6 +89,16 @@ Brief `briefs/mr-due-picker.md` (rules 1–5): yamt's own calendar box replaces 
 | 2   | docs keeper: tree/state rows, architecture due-date text                                     | docs-keeper | done   | `MrDuePickerDocs` + `MrDuePickerDocsR1`: tree/state/map, architecture; map-check ok. Plan #156, CHANGELOG by orchestrator (`e476c454`)                                                                                                                        |
 | 3   | verify: `just check`, the brief's WebKit steps                                               | verifier    | done   | `MrDuePickerFinal` at `e476c454`: `just check` pass; every WebKit step dark+light pass (click, keys, typed `05.12.2026`, refused `31.02.2026` kept and invalid, Today, reload, scroll, Clear, created hover `05.10.2026, 11:00`). Notes `MrDuePickerFinal.md` |
 
+## Shift icons (session 44; owner #2145, corrected #2146: "the icon that appears stays after a shift press")
+
+Brief `briefs/mr-shift-held.md`: the muted "not" icons show only while Shift is held; Shift+click unchanged. Earlier
+passes never sent a real Shift release (synthetic keydown only), so they missed it.
+
+| row | slice                                                     | owner    | status  | evidence |
+| --- | --------------------------------------------------------- | -------- | ------- | -------- |
+| 1   | fix (`briefs/mr-shift-held.md`), reproduce with real keys | web-impl | running |          |
+| 2   | verify: `just check`, real-key WebKit and real-app steps  | verifier | todo    |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.

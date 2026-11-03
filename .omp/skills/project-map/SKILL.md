@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `f8220f13` (the merge-request due-date picker, owner #2138, and its fix round: `mergeRequests/` `calendar` with `movedDay` and `dueDate`'s `typedDay`, `localDay`, DD.MM.YYYY `dueDateText`, `dateTimeText` for the created-at hover; `ui/MergeRequestCalendar.vue` and the reworked `MergeRequestDueDate.vue` with its `draft`; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `2a5cf8b2` (the merge-request filters' Shift icons, owner #2145/#2146: `ui/useShiftHeld.ts` with the pure `shiftHeldAfter`, Shift held by key name because WebKitGTK/X11 reports Shift set on its own release, used by `MergeRequestFilter.vue` instead of `useKeyModifier`; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 

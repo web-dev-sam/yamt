@@ -1,1 +1,5 @@
-{}
+{
+  "MrShiftHeldDocs": {
+    "owned": ["docs/architecture.md", ".omp/skills/project-map/**"]
+  }
+}
