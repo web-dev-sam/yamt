@@ -16,6 +16,7 @@ test("start-app takes the brief's defaults: debug binary, 1600x1000, no recordin
     home: null,
     glab: null,
     ai: false,
+    mr: false,
   });
 });
 
@@ -50,6 +51,7 @@ test("start-app reads every option of the acceptance run", () => {
     home: "/tmp/h-home",
     glab: null,
     ai: false,
+    mr: false,
   });
 });
 
@@ -92,28 +94,56 @@ test("start-app --range needs --repo and takes neither --fresh-repo nor --diff",
 });
 
 test("the app opens the range window with --diff=<range> and --repo, the compare window with --diff alone, a folder with --repo", () => {
-  expect(appArgs({ kind: "range", range: "main...feature", dir: "rr" }, "/tmp/rr", false)).toEqual([
+  const off = { ai: false, mr: false };
+  expect(appArgs({ kind: "range", range: "main...feature", dir: "rr" }, "/tmp/rr", off)).toEqual([
     "--diff=main...feature",
     "--repo",
     "/tmp/rr",
   ]);
-  expect(appArgs({ kind: "diff", startDir: "rr" }, null, false)).toEqual(["--diff"]);
-  expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r", false)).toEqual(["--repo", "/tmp/r"]);
-  expect(appArgs({ kind: "fresh" }, "/tmp/s/repo", false)).toEqual(["--repo", "/tmp/s/repo"]);
+  expect(appArgs({ kind: "diff", startDir: "rr" }, null, off)).toEqual(["--diff"]);
+  expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r", off)).toEqual(["--repo", "/tmp/r"]);
+  expect(appArgs({ kind: "fresh" }, "/tmp/s/repo", off)).toEqual(["--repo", "/tmp/s/repo"]);
 });
 
 test("start-app --ai reaches the app as its own --ai after the repository", () => {
   const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
   expect(parseCommand([...range, "--ai"])).toMatchObject({ ai: true });
   expect(parseCommand(range)).toMatchObject({ ai: false });
-  expect(appArgs({ kind: "range", range: "a...b", dir: "rr" }, "/tmp/rr", true)).toEqual([
+  const on = { ai: true, mr: false };
+  expect(appArgs({ kind: "range", range: "a...b", dir: "rr" }, "/tmp/rr", on)).toEqual([
     "--diff=a...b",
     "--repo",
     "/tmp/rr",
     "--ai",
   ]);
-  expect(appArgs({ kind: "diff", startDir: null }, null, true)).toEqual(["--diff", "--ai"]);
+  expect(appArgs({ kind: "diff", startDir: null }, null, on)).toEqual(["--diff", "--ai"]);
   expect(() => parseCommand([...range, "--ai-case", "crash"])).toThrow(/unknown option --ai-case/);
+});
+
+test("start-app --mr reaches the app as its own --mr, only for the compare and range windows", () => {
+  const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
+  expect(parseCommand([...range, "--mr"])).toMatchObject({ mr: true });
+  expect(parseCommand(["start-app", "--name", "c", "--diff", "--mr"])).toMatchObject({ mr: true });
+  expect(parseCommand(range)).toMatchObject({ mr: false });
+  const needsWindow = /--mr needs --range or --diff/;
+  expect(() => parseCommand(["start-app", "--name", "r", "--repo", "/r", "--mr"])).toThrow(
+    needsWindow,
+  );
+  expect(() => parseCommand(["start-app", "--name", "r", "--fresh-repo", "--mr"])).toThrow(
+    needsWindow,
+  );
+  const both = { ai: true, mr: true };
+  expect(appArgs({ kind: "range", range: "a...b", dir: "rr" }, "/tmp/rr", both)).toEqual([
+    "--diff=a...b",
+    "--repo",
+    "/tmp/rr",
+    "--ai",
+    "--mr",
+  ]);
+  expect(appArgs({ kind: "diff", startDir: null }, null, { ai: false, mr: true })).toEqual([
+    "--diff",
+    "--mr",
+  ]);
 });
 
 test("start-app --glab names a tests/glab scenario by its form, only with --range or --diff", () => {

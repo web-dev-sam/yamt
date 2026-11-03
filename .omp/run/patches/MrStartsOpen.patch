@@ -1,0 +1,710 @@
+diff --git a/frontend/scripts/app-session/args.test.ts b/frontend/scripts/app-session/args.test.ts
+index 78dc5f9..d407875 100644
+--- a/frontend/scripts/app-session/args.test.ts
++++ b/frontend/scripts/app-session/args.test.ts
+@@ -16,6 +16,7 @@ test("start-app takes the brief's defaults: debug binary, 1600x1000, no recordin
+     home: null,
+     glab: null,
+     ai: false,
++    mr: false,
+   });
+ });
+ 
+@@ -50,6 +51,7 @@ test("start-app reads every option of the acceptance run", () => {
+     home: "/tmp/h-home",
+     glab: null,
+     ai: false,
++    mr: false,
+   });
+ });
+ 
+@@ -92,30 +94,58 @@ test("start-app --range needs --repo and takes neither --fresh-repo nor --diff",
+ });
+ 
+ test("the app opens the range window with --diff=<range> and --repo, the compare window with --diff alone, a folder with --repo", () => {
+-  expect(appArgs({ kind: "range", range: "main...feature", dir: "rr" }, "/tmp/rr", false)).toEqual([
++  const off = { ai: false, mr: false };
++  expect(appArgs({ kind: "range", range: "main...feature", dir: "rr" }, "/tmp/rr", off)).toEqual([
+     "--diff=main...feature",
+     "--repo",
+     "/tmp/rr",
+   ]);
+-  expect(appArgs({ kind: "diff", startDir: "rr" }, null, false)).toEqual(["--diff"]);
+-  expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r", false)).toEqual(["--repo", "/tmp/r"]);
+-  expect(appArgs({ kind: "fresh" }, "/tmp/s/repo", false)).toEqual(["--repo", "/tmp/s/repo"]);
++  expect(appArgs({ kind: "diff", startDir: "rr" }, null, off)).toEqual(["--diff"]);
++  expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r", off)).toEqual(["--repo", "/tmp/r"]);
++  expect(appArgs({ kind: "fresh" }, "/tmp/s/repo", off)).toEqual(["--repo", "/tmp/s/repo"]);
+ });
+ 
+ test("start-app --ai reaches the app as its own --ai after the repository", () => {
+   const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
+   expect(parseCommand([...range, "--ai"])).toMatchObject({ ai: true });
+   expect(parseCommand(range)).toMatchObject({ ai: false });
+-  expect(appArgs({ kind: "range", range: "a...b", dir: "rr" }, "/tmp/rr", true)).toEqual([
++  const on = { ai: true, mr: false };
++  expect(appArgs({ kind: "range", range: "a...b", dir: "rr" }, "/tmp/rr", on)).toEqual([
+     "--diff=a...b",
+     "--repo",
+     "/tmp/rr",
+     "--ai",
+   ]);
+-  expect(appArgs({ kind: "diff", startDir: null }, null, true)).toEqual(["--diff", "--ai"]);
++  expect(appArgs({ kind: "diff", startDir: null }, null, on)).toEqual(["--diff", "--ai"]);
+   expect(() => parseCommand([...range, "--ai-case", "crash"])).toThrow(/unknown option --ai-case/);
+ });
+ 
++test("start-app --mr reaches the app as its own --mr, only for the compare and range windows", () => {
++  const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
++  expect(parseCommand([...range, "--mr"])).toMatchObject({ mr: true });
++  expect(parseCommand(["start-app", "--name", "c", "--diff", "--mr"])).toMatchObject({ mr: true });
++  expect(parseCommand(range)).toMatchObject({ mr: false });
++  const needsWindow = /--mr needs --range or --diff/;
++  expect(() => parseCommand(["start-app", "--name", "r", "--repo", "/r", "--mr"])).toThrow(
++    needsWindow,
++  );
++  expect(() => parseCommand(["start-app", "--name", "r", "--fresh-repo", "--mr"])).toThrow(
++    needsWindow,
++  );
++  const both = { ai: true, mr: true };
++  expect(appArgs({ kind: "range", range: "a...b", dir: "rr" }, "/tmp/rr", both)).toEqual([
++    "--diff=a...b",
++    "--repo",
++    "/tmp/rr",
++    "--ai",
++    "--mr",
++  ]);
++  expect(appArgs({ kind: "diff", startDir: null }, null, { ai: false, mr: true })).toEqual([
++    "--diff",
++    "--mr",
++  ]);
++});
++
+ test("start-app --glab names a tests/glab scenario by its form, only with --range or --diff", () => {
+   const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
+   expect(parseCommand([...range, "--glab", "lined-up"])).toMatchObject({ glab: "lined-up" });
+diff --git a/frontend/scripts/app-session/args.ts b/frontend/scripts/app-session/args.ts
+index c373d97..8e93a4b 100644
+--- a/frontend/scripts/app-session/args.ts
++++ b/frontend/scripts/app-session/args.ts
+@@ -18,6 +18,7 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
+   start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo
+                 | --diff [--dir <start folder>] [--glab <tests/glab scenario>]
+                 | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]] [--ai]
++                [--mr]   (with --diff or --range: the window opens on its merge-request page)
+                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
+                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
+                 --dir: tauri-driver and so the compare window start in that folder
+@@ -26,7 +27,8 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
+   start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>
+                 | --range-case <range fixture> [--threads seeded] [--gitlab <script>]
+                   [--ai [--ai-case <agent fixture: crash, checkout-fails, cancelled, …>] [--ai-changes]]]
+-                [--mr <merge-request script: list, slow, many, …>]   (with --diff, --diff-case or --range-case)
++                [--mr <merge-request script: list, slow, many, …> [--open-mr]]
++                  (with --diff, --diff-case or --range-case; --open-mr: on the merge-request page)
+   click         --name <n> <accessible name or css> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
+   drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
+   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
+@@ -97,11 +99,11 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
+       "home",
+       "glab",
+     ],
+-    flags: ["fresh-repo", "diff", "ai"],
++    flags: ["fresh-repo", "diff", "ai", "mr"],
+   },
+   "start-fixture": {
+     values: ["name", "size", "diff-case", "range-case", "threads", "gitlab", "ai-case", "mr"],
+-    flags: ["diff", "ai", "ai-changes"],
++    flags: ["diff", "ai", "ai-changes", "open-mr"],
+   },
+   click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },
+   drag: { values: ["name", "dx", "dy", "role", "nth"], flags: [] },
+diff --git a/frontend/scripts/app-session/start.ts b/frontend/scripts/app-session/start.ts
+index b388397..289d0f2 100644
+--- a/frontend/scripts/app-session/start.ts
++++ b/frontend/scripts/app-session/start.ts
+@@ -82,7 +82,7 @@ function prepareApp(command: StartApp, folder: string): Prepared {
+   const repoDir = repoFolder(command.opens, folder);
+   const driverDir = startFolder(command.opens, folder, existsSync);
+   const glab = fakeGlab(scenarioFolder, folder);
+-  const args = appArgs(command.opens, repoDir, command.ai);
++  const args = appArgs(command.opens, repoDir, command);
+   return { home, configDir, repoDir, driverDir, binary, args, glab };
+ }
+ 
+diff --git a/frontend/scripts/app-session/startArgs.test.ts b/frontend/scripts/app-session/startArgs.test.ts
+index 6ac0ec3..7690d82 100644
+--- a/frontend/scripts/app-session/startArgs.test.ts
++++ b/frontend/scripts/app-session/startArgs.test.ts
+@@ -32,7 +32,9 @@ test("start-app --diff --dir starts the compare window in that folder and passes
+   expect(parseCommand(["start-app", "--name", "c", "--diff"])).toMatchObject({
+     opens: { kind: "diff", startDir: null },
+   });
+-  expect(appArgs({ kind: "diff", startDir: "/var/tmp/rr" }, null, false)).toEqual(["--diff"]);
++  expect(
++    appArgs({ kind: "diff", startDir: "/var/tmp/rr" }, null, { ai: false, mr: false }),
++  ).toEqual(["--diff"]);
+ });
+ 
+ test("a compare session starts in its --dir folder, asked about once; without --dir or --diff in the session folder", () => {
+@@ -101,3 +103,19 @@ test("start-fixture --mr refuses the merge window, which has no merge-request pa
+     /--mr needs a value/,
+   );
+ });
++
++test("start-fixture --open-mr opens the merge-request page at start, only with an --mr script", () => {
++  const fixture = ["start-fixture", "--name", "fx"];
++  expect(parseCommand([...fixture, "--diff", "--mr", "list", "--open-mr"])).toMatchObject({
++    search: "?diff&mr=list&open=mergeRequests",
++  });
++  expect(
++    parseCommand([...fixture, "--range-case", "review", "--mr", "list", "--open-mr"]),
++  ).toMatchObject({ search: "?range=review&mr=list&open=mergeRequests" });
++  expect(() => parseCommand([...fixture, "--diff", "--open-mr"])).toThrow(
++    "start-fixture takes --open-mr only with --mr <script>",
++  );
++  expect(() => parseCommand([...fixture, "--mr", "list", "--open-mr"])).toThrow(
++    /--mr only with --diff, --diff-case or --range-case/,
++  );
++});
+diff --git a/frontend/scripts/app-session/startArgs.ts b/frontend/scripts/app-session/startArgs.ts
+index 44dd3d9..51acdd3 100644
+--- a/frontend/scripts/app-session/startArgs.ts
++++ b/frontend/scripts/app-session/startArgs.ts
+@@ -24,6 +24,7 @@ export type StartCommand =
+       readonly home: string | null;
+       readonly glab: string | null;
+       readonly ai: boolean;
++      readonly mr: boolean;
+     }
+   | {
+       readonly kind: "start-fixture";
+@@ -32,6 +33,8 @@ export type StartCommand =
+       readonly search: string;
+     };
+ 
++type AppFlags = { readonly ai: boolean; readonly mr: boolean };
++
+ const DEFAULT_SIZE: Size = { width: 1600, height: 1000 };
+ const DEFAULT_BINARY = "target/debug/yamt";
+ const SIZE = /^([1-9][0-9]*)x([1-9][0-9]*)$/;
+@@ -117,18 +120,27 @@ function windowSearch(parsed: Parsed): string {
+   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
+ }
+ 
++function mergeRequestSearch(parsed: Parsed): string {
++  const script = parsed.values.get("mr");
++  const open = parsed.flags.has("open-mr");
++  if (script === undefined) {
++    if (open) {
++      throw new Error("start-fixture takes --open-mr only with --mr <script>");
++    }
++    return "";
++  }
++  return `&mr=${encodeURIComponent(script)}${open ? "&open=mergeRequests" : ""}`;
++}
++
+ function fixtureSearch(parsed: Parsed): string {
+   const search = windowSearch(parsed);
+-  const script = parsed.values.get("mr");
+-  if (script === undefined) {
+-    return search;
+-  }
+-  if (search === "") {
++  const mergeRequests = mergeRequestSearch(parsed);
++  if (mergeRequests !== "" && search === "") {
+     throw new Error(
+       "start-fixture takes --mr only with --diff, --diff-case or --range-case: the merge window has no merge-request page",
+     );
+   }
+-  return `${search}&mr=${encodeURIComponent(script)}`;
++  return `${search}${mergeRequests}`;
+ }
+ 
+ export function glabFolder(scenario: string, isFolder: (path: string) => boolean): string {
+@@ -170,6 +182,16 @@ function glabScenario(parsed: Parsed, opens: Opening): string | null {
+   return scenario;
+ }
+ 
++function startsOnMergeRequests(parsed: Parsed, opens: Opening): boolean {
++  const mr = parsed.flags.has("mr");
++  if (mr && opens.kind !== "range" && opens.kind !== "diff") {
++    throw new Error(
++      "start-app --mr needs --range or --diff: only the range and compare windows have a merge-request page",
++    );
++  }
++  return mr;
++}
++
+ function recording(parsed: Parsed): Recording | null {
+   const file = parsed.values.get("record");
+   const seconds = parsed.values.get("record-seconds");
+@@ -200,8 +222,16 @@ function settingsText(parsed: Parsed): string | null {
+   return text;
+ }
+ 
+-export function appArgs(opens: Opening, repoDir: string | null, ai: boolean): readonly string[] {
+-  const options = [...(repoDir === null ? [] : ["--repo", repoDir]), ...(ai ? ["--ai"] : [])];
++export function appArgs(
++  opens: Opening,
++  repoDir: string | null,
++  { ai, mr }: AppFlags,
++): readonly string[] {
++  const options = [
++    ...(repoDir === null ? [] : ["--repo", repoDir]),
++    ...(ai ? ["--ai"] : []),
++    ...(mr ? ["--mr"] : []),
++  ];
+   switch (opens.kind) {
+     case "diff":
+       return ["--diff", ...options];
+@@ -231,5 +261,6 @@ export function startCommand(kind: StartCommand["kind"], parsed: Parsed): StartC
+     home: parsed.values.get("home") ?? null,
+     glab: glabScenario(parsed, opens),
+     ai: parsed.flags.has("ai"),
++    mr: startsOnMergeRequests(parsed, opens),
+   };
+ }
+diff --git a/frontend/src/main.ts b/frontend/src/main.ts
+index 5d497ec..ec6acb0 100644
+--- a/frontend/src/main.ts
++++ b/frontend/src/main.ts
+@@ -28,6 +28,7 @@ import { takeLinuxPastes } from "./ui/linuxPaste";
+ import RangeApp from "./ui/RangeApp.vue";
+ import { createRangeStore, type RangeAgent } from "./ui/rangeStore";
+ import { useSettingsStore } from "./ui/settingsStore";
++import { startScreenOf, type WindowStart } from "./ui/startScreen";
+ import { createAppStore } from "./ui/store";
+ 
+ import "./style.css";
+@@ -56,9 +57,14 @@ function serverHost(): ServerHost | null {
+   return new URLSearchParams(SEARCH).has("servers") ? createFixtureServerHost() : null;
+ }
+ 
+-function startCompare(startTheme: Theme): void {
++function windowStart(dataset: DOMStringMap, theme: Theme): WindowStart {
++  const open = IN_APP ? dataset["open"] : new URLSearchParams(SEARCH).get("open");
++  return { theme, screen: startScreenOf(open) };
++}
++
++function startCompare(start: WindowStart): void {
+   const source = IN_APP ? createTauriCompareSource() : createFixtureCompareSource(log, SEARCH);
+-  const store = createCompareStore(source, startTheme);
++  const store = createCompareStore(source, start);
+   void store.startUp();
+   createApp(CompareApp).mount("#app");
+ }
+@@ -76,9 +82,9 @@ function rangeAgent(dataset: DOMStringMap): RangeAgent | null {
+   return { source, client: new AgentClient({ source, command: agentCommand }) };
+ }
+ 
+-function startRange(startTheme: Theme, dataset: DOMStringMap): void {
++function startRange(start: WindowStart, dataset: DOMStringMap): void {
+   const source = IN_APP ? createTauriRangeSource() : createFixtureRangeSource(log, SEARCH);
+-  const store = createRangeStore(source, startTheme, rangeAgent(dataset));
++  const store = createRangeStore(source, start, rangeAgent(dataset));
+   void store.startUp();
+   createApp(RangeApp).mount("#app");
+ }
+@@ -103,10 +109,10 @@ switch (kind) {
+     startMerge(startTheme);
+     break;
+   case "compare":
+-    startCompare(startTheme);
++    startCompare(windowStart(dataset, startTheme));
+     break;
+   case "range":
+-    startRange(startTheme, dataset);
++    startRange(windowStart(dataset, startTheme), dataset);
+     break;
+   default: {
+     const _exhaustive: never = kind;
+diff --git a/frontend/src/ui/compareStore.test.ts b/frontend/src/ui/compareStore.test.ts
+index 076e265..42ed73d 100644
+--- a/frontend/src/ui/compareStore.test.ts
++++ b/frontend/src/ui/compareStore.test.ts
+@@ -22,6 +22,7 @@ import type { KeyPress } from "./fileListKey";
+ import { useMergeRequests } from "./mergeRequestsStore";
+ import { problemText } from "./problemText";
+ import { useSettingsStore } from "./settingsStore";
++import type { WindowStart } from "./startScreen";
+ 
+ type Gate = { readonly opened: Promise<null>; readonly open: () => void };
+ 
+@@ -36,6 +37,7 @@ const LIMIT = 8 * 1024 * 1024;
+ const GONE: SourceFailure = { kind: "ReadFailed", path: "/data/tabs.json", message: "denied" };
+ const UNKNOWN: SourceFailure = { kind: "UnknownTab", tab: 4 };
+ const MICROTASKS = 10;
++const ON_FILES: WindowStart = { theme: "dark", screen: "files" };
+ 
+ afterEach(() => {
+   vi.restoreAllMocks();
+@@ -77,7 +79,7 @@ function compareSource(): CompareSource {
+ 
+ async function started(edit: Edit = () => ({})): Promise<CompareStore> {
+   const fixture = compareSource();
+-  const store = createCompareStore({ ...fixture, ...edit(fixture) }, "dark");
++  const store = createCompareStore({ ...fixture, ...edit(fixture) }, ON_FILES);
+   await store.startUp();
+   return store;
+ }
+@@ -125,7 +127,7 @@ test("the window's components get no store before the root creates one (catches
+ 
+ test("start-up lists the stored tabs, sets the column limit and loads the settings (catches a limit or list left unset)", async () => {
+   const fixture = compareSource();
+-  const store = createCompareStore(fixture, "dark");
++  const store = createCompareStore(fixture, ON_FILES);
+ 
+   expect([store.tabs.value, store.shown.value, store.columnLimit.value]).toEqual([[], null, 0]);
+   expect([store.fileListShown.value, store.screen.value]).toEqual([true, { kind: "files" }]);
+@@ -147,7 +149,7 @@ test("start-up lists the stored tabs, sets the column limit and loads the settin
+ });
+ 
+ test("start-up finds the GitLab project for the one slice the window registers (catches a button that never shows)", async () => {
+-  const store = createCompareStore(createFixtureCompareSource(log, "?mr=list", {}), "dark");
++  const store = createCompareStore(createFixtureCompareSource(log, "?mr=list", {}), ON_FILES);
+   expect(useMergeRequests()).toBe(store.mergeRequests);
+   expect(store.mergeRequests.project.value).toEqual({ kind: "none" });
+ 
+@@ -174,6 +176,43 @@ test("a failed project lookup at start-up reaches the problem bar and leaves the
+   expect(store.tabs.value).toHaveLength(1);
+ });
+ 
++test.each([
++  ["mergeRequests", "?mr=list", "mergeRequests"],
++  ["files", "?mr=list", "files"],
++  ["mergeRequests", "", "files"],
++] as const)(
++  "a window started on %s with the fixture search %j opens on %s, its tabs listed (catches --mr ignored, a page without a project, or a page closed by the tab list)",
++  async (screen, search, opened) => {
++    spyConsole();
++    const fixture = createFixtureCompareSource(log, search, {});
++    const store = createCompareStore(fixture, { theme: "dark", screen });
++
++    await store.startUp();
++
++    expect(store.screen.value).toEqual({ kind: opened });
++    expect(store.tabs.value).toHaveLength(1);
++    expect(store.mergeRequests.listing.value.kind === "notLoaded").toBe(opened === "files");
++  },
++);
++
++test("a window started on its merge-request page stays on its tabs when the project lookup fails (catches a page opened on a failed lookup)", async () => {
++  spyConsole();
++  const fixture = createFixtureCompareSource(log, "?mr=list", {});
++  const store = createCompareStore(
++    { ...fixture, findGitLabProject: () => failed({ kind: "WorkerStopped" }) },
++    { theme: "dark", screen: "mergeRequests" },
++  );
++
++  await store.startUp();
++
++  expect(store.screen.value).toEqual({ kind: "files" });
++  expect(store.problem.value).toEqual({
++    action: "mergeRequests",
++    step: "find",
++    cause: { kind: "WorkerStopped" },
++  });
++});
++
+ test("a failed start shows the problem and lists nothing (catches a failure read as an empty list)", async () => {
+   const lines = spyConsole();
+   const store = await started(() => ({ openCompare: () => failed(GONE) }));
+diff --git a/frontend/src/ui/compareStore.ts b/frontend/src/ui/compareStore.ts
+index 234c380..20a7373 100644
+--- a/frontend/src/ui/compareStore.ts
++++ b/frontend/src/ui/compareStore.ts
+@@ -26,6 +26,7 @@ import { settingsScreen, type Screen } from "./screen";
+ import { preferencesOf, settingsActions, startSettings } from "./settings";
+ import type { SettingsInUse } from "./settings";
+ import { registerSettingsStore, type SettingsStore } from "./settingsStore";
++import { openAtStart, type WindowStart } from "./startScreen";
+ import type { Preferences } from "./useMergeController";
+ 
+ export type ColumnSend = {
+@@ -112,8 +113,8 @@ function createRefs(startTheme: Theme): Refs {
+   };
+ }
+ 
+-export function createCompareStore(source: CompareSource, startTheme: Theme): CompareStore {
+-  const refs = createRefs(startTheme);
++export function createCompareStore(source: CompareSource, start: WindowStart): CompareStore {
++  const refs = createRefs(start.theme);
+   const state: State = {
+     ...refs,
+     source,
+@@ -131,7 +132,8 @@ export function createCompareStore(source: CompareSource, startTheme: Theme): Co
+     preferences: computed(() => preferencesOf(refs.settings.value)),
+     mergeRequests,
+     ...settings,
+-    startUp: () => startUp(state, [settings.loadSettings(), mergeRequests.findProject()]),
++    startUp: () =>
++      startUp(state, [settings.loadSettings(), openAtStart(mergeRequests, start.screen)]),
+     ...tabActions(state),
+     ...columnActions(state),
+     ...createCompareNotices(state),
+diff --git a/frontend/src/ui/rangeSearch.test.ts b/frontend/src/ui/rangeSearch.test.ts
+index e77b58b..3435e70 100644
+--- a/frontend/src/ui/rangeSearch.test.ts
++++ b/frontend/src/ui/rangeSearch.test.ts
+@@ -91,7 +91,7 @@ function pagedSource(options: PageOptions = {}): Paged {
+ }
+ 
+ async function started(paged: Paged): Promise<RangeStore> {
+-  const store = createRangeStore(paged.source, "dark", null);
++  const store = createRangeStore(paged.source, { theme: "dark", screen: "files" }, null);
+   await store.startUp();
+   return store;
+ }
+@@ -218,7 +218,7 @@ test("an empty range asks Rust nothing and finds nothing", async () => {
+ 
+ test("a search before the range opened reads nothing and remembers no page", async () => {
+   const paged = pagedSource();
+-  const store = createRangeStore(paged.source, "dark", null);
++  const store = createRangeStore(paged.source, { theme: "dark", screen: "files" }, null);
+ 
+   store.search.type("src/");
+   store.search.enter();
+diff --git a/frontend/src/ui/rangeStore.test.ts b/frontend/src/ui/rangeStore.test.ts
+index 91d9985..da79e2f 100644
+--- a/frontend/src/ui/rangeStore.test.ts
++++ b/frontend/src/ui/rangeStore.test.ts
+@@ -28,6 +28,7 @@ import {
+   type RangeStore,
+ } from "./rangeStore";
+ import { useSettingsStore } from "./settingsStore";
++import type { WindowStart } from "./startScreen";
+ import { listedButtons } from "./toolbarButtons";
+ 
+ type Edit = (fixture: RangeSource) => Partial<RangeSource>;
+@@ -36,6 +37,7 @@ const LINUX = "Linux x86_64";
+ const SIDE = { label: { kind: "named", name: "main" }, short_id: "1b2cfed", subject: "Start" };
+ const UNKNOWN: SourceFailure = { kind: "UnknownRangeFile", file: 3 };
+ const MICROTASKS = 10;
++const ON_FILES: WindowStart = { theme: "dark", screen: "files" };
+ 
+ afterEach(() => {
+   vi.restoreAllMocks();
+@@ -85,7 +87,7 @@ function source(count: number): RangeSource {
+ 
+ async function started(count: number, edit: Edit = () => ({})): Promise<RangeStore> {
+   const fixture = source(count);
+-  const store = createRangeStore({ ...fixture, ...edit(fixture) }, "dark", null);
++  const store = createRangeStore({ ...fixture, ...edit(fixture) }, ON_FILES, null);
+   await store.startUp();
+   return store;
+ }
+@@ -140,7 +142,7 @@ test("start-up finds the GitLab project for the one slice the window registers (
+     createFixtureRangeSource(log, "?range=review&mr=list", {
+       "../../fixtures/range/review.json": rangeCase(2),
+     }),
+-    "dark",
++    ON_FILES,
+     null,
+   );
+   expect(useMergeRequests()).toBe(store.mergeRequests);
+@@ -170,10 +172,52 @@ test("a failed project lookup at start-up reaches the problem bar and the range
+   expect(store.shownPath.value).toBe("src/f00.ts");
+ });
+ 
++test.each([
++  ["mergeRequests", "?range=review&mr=list", "mergeRequests"],
++  ["files", "?range=review&mr=list", "files"],
++  ["mergeRequests", "?range=review", "files"],
++] as const)(
++  "a window started on %s with the fixture search %j opens on %s, its first file shown (catches --mr ignored, a page without a project, or a page closed by the first file)",
++  async (screen, search, opened) => {
++    quiet();
++    const fixture = createFixtureRangeSource(log, search, {
++      "../../fixtures/range/review.json": rangeCase(2),
++    });
++    const store = createRangeStore(fixture, { theme: "dark", screen }, null);
++
++    await store.startUp();
++
++    expect(store.screen.value).toEqual({ kind: opened });
++    expect(store.shownPath.value).toBe("src/f00.ts");
++    expect(store.mergeRequests.listing.value.kind === "notLoaded").toBe(opened === "files");
++  },
++);
++
++test("a window started on its merge-request page stays on its files when the project lookup fails (catches a page opened on a failed lookup)", async () => {
++  quiet();
++  const fixture = createFixtureRangeSource(log, "?range=review&mr=list", {
++    "../../fixtures/range/review.json": rangeCase(2),
++  });
++  const store = createRangeStore(
++    { ...fixture, findGitLabProject: () => failed({ kind: "WorkerStopped" }) },
++    { theme: "dark", screen: "mergeRequests" },
++    null,
++  );
++
++  await store.startUp();
++
++  expect(store.screen.value).toEqual({ kind: "files" });
++  expect(store.problem.value).toEqual({
++    action: "mergeRequests",
++    step: "find",
++    cause: { kind: "WorkerStopped" },
++  });
++});
++
+ test("before openRange answers: the files screen, the start theme's preferences, no file to show", async () => {
+   quiet();
+   const other = await started(4);
+-  const store = createRangeStore(source(4), "light", null);
++  const store = createRangeStore(source(4), { theme: "light", screen: "files" }, null);
+ 
+   expect(store.screen.value).toEqual({ kind: "files" });
+   expect(store.preferences.value.theme).toBe("light");
+@@ -477,7 +521,7 @@ test("First message's values: the thread's place, the range as typed, both short
+   quiet();
+   const store = createRangeStore(
+     createFixtureRangeSource(log, "?range=review&threads=seeded"),
+-    "dark",
++    ON_FILES,
+     null,
+   );
+   await store.startUp();
+@@ -519,7 +563,7 @@ async function aiStore(discards: string[]): Promise<RangeStore> {
+     },
+   };
+   const client = new AgentClient({ source, command: () => DEFAULT_AGENT_COMMAND });
+-  const store = createRangeStore(createFixtureRangeSource(log, "?range=review"), "dark", {
++  const store = createRangeStore(createFixtureRangeSource(log, "?range=review"), ON_FILES, {
+     source,
+     client,
+   });
+@@ -557,7 +601,7 @@ test("deleteNote asks first: Cancel and Escape keep the note, Delete removes it
+   quiet();
+   const store = createRangeStore(
+     createFixtureRangeSource(log, "?range=review&threads=seeded"),
+-    "dark",
++    ON_FILES,
+     null,
+   );
+   await store.startUp();
+@@ -621,14 +665,14 @@ test.each([
+   "the collapse choice %s in the window's storage starts the range store as the merge window reads it",
+   (_name, initial, on) => {
+     withWindowStorage(initial, () => {
+-      expect(createRangeStore(source(1), "dark", null).collapsing.value).toBe(on);
++      expect(createRangeStore(source(1), ON_FILES, null).collapsing.value).toBe(on);
+     });
+   },
+ );
+ 
+ test("toggling in the range store writes the merge window's stored choice (catches a second key)", () => {
+   withWindowStorage({}, (items) => {
+-    const store = createRangeStore(source(1), "dark", null);
++    const store = createRangeStore(source(1), ON_FILES, null);
+ 
+     store.toggleCollapsing();
+ 
+diff --git a/frontend/src/ui/rangeStore.ts b/frontend/src/ui/rangeStore.ts
+index 48cc431..8c55c00 100644
+--- a/frontend/src/ui/rangeStore.ts
++++ b/frontend/src/ui/rangeStore.ts
+@@ -34,6 +34,7 @@ import type { Searching } from "./searching";
+ import { preferencesOf, settingsActions, startSettings } from "./settings";
+ import type { SettingsInUse } from "./settings";
+ import { registerSettingsStore, type SettingsStore } from "./settingsStore";
++import { openAtStart, type WindowStart } from "./startScreen";
+ import type { Preferences } from "./useMergeController";
+ 
+ /** What `main.ts` builds only under `data-ai` / `?ai` (plan row 108). */
+@@ -170,10 +171,10 @@ function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null):
+ 
+ export function createRangeStore(
+   source: RangeSource,
+-  startTheme: Theme,
++  { theme, screen }: WindowStart,
+   agent: RangeAgent | null,
+ ): RangeStore {
+-  const refs = createRefs(startTheme);
++  const refs = createRefs(theme);
+   const state = createState(refs, source, agent);
+   const settings = settingsActions(state);
+   const shownPath = computed(() => entryOf(state, refs.shown.value)?.path ?? null);
+@@ -195,7 +196,7 @@ export function createRangeStore(
+     }),
+     mergeRequests,
+     ...settings,
+-    startUp: () => startUp(state, [settings.loadSettings(), mergeRequests.findProject()]),
++    startUp: () => startUp(state, [settings.loadSettings(), openAtStart(mergeRequests, screen)]),
+     showFile: (path) => {
+       showPath(state, path);
+     },
+@@ -235,13 +236,13 @@ function entryOf(state: State, file: RangeFileId | null): RangeEntry | undefined
+ function showPath(state: State, path: string): void {
+   const entry = state.start.value?.files.find((file) => file.path === path);
+   if (entry !== undefined) {
++    state.screen.value = { kind: "files" };
+     show(state, entry);
+   }
+ }
+ 
+ function show(state: State, entry: RangeEntry): void {
+   const { id } = entry;
+-  state.screen.value = { kind: "files" };
+   state.shown.value = id;
+   state.recent = [...state.recent.filter((each) => each !== id), id];
+   if (state.visited.value.some((each) => each.id === id)) {
+diff --git a/frontend/src/ui/rangeThreads.test.ts b/frontend/src/ui/rangeThreads.test.ts
+index ed08ddf..23c615c 100644
+--- a/frontend/src/ui/rangeThreads.test.ts
++++ b/frontend/src/ui/rangeThreads.test.ts
+@@ -483,7 +483,7 @@ test("a Post text outlives its file's view: 16 other files evict file 0 and the
+   const fixture = createFixtureRangeSource(log, "?range=review", {
+     "../../fixtures/range/review.json": manyFiles(MOUNTED_FILES + 1),
+   });
+-  const store = createRangeStore(fixture, "dark", null);
++  const store = createRangeStore(fixture, { theme: "dark", screen: "files" }, null);
+   await store.startUp();
+   const [first, ...others] = store.start.value?.files ?? [];
+   if (first === undefined) {
+diff --git a/frontend/src/ui/startScreen.test.ts b/frontend/src/ui/startScreen.test.ts
+new file mode 100644
+index 0000000..34ff67f
+--- /dev/null
++++ b/frontend/src/ui/startScreen.test.ts
+@@ -0,0 +1,11 @@
++import { expect, test } from "vitest";
++
++import { startScreenOf } from "./startScreen";
++
++test("only the marker mergeRequests starts a window on its merge-request page (catches any other value read as --mr)", () => {
++  expect(startScreenOf("mergeRequests")).toBe("mergeRequests");
++  expect(startScreenOf(undefined)).toBe("files");
++  expect(startScreenOf(null)).toBe("files");
++  expect(startScreenOf("")).toBe("files");
++  expect(startScreenOf("mergerequests")).toBe("files");
++});
+diff --git a/frontend/src/ui/startScreen.ts b/frontend/src/ui/startScreen.ts
+new file mode 100644
+index 0000000..fe0af2d
+--- /dev/null
++++ b/frontend/src/ui/startScreen.ts
+@@ -0,0 +1,22 @@
++import type { Theme } from "../ipc";
++import type { MergeRequests } from "./mergeRequests";
++import type { Screen } from "./screen";
++
++/** The screen a compare or range window opens on: `--mr` asks for its merge-request page. */
++export type StartScreen = Extract<Screen["kind"], "files" | "mergeRequests">;
++
++export type WindowStart = { readonly theme: Theme; readonly screen: StartScreen };
++
++export function startScreenOf(open: string | null | undefined): StartScreen {
++  return open === "mergeRequests" ? "mergeRequests" : "files";
++}
++
++export async function openAtStart(
++  mergeRequests: MergeRequests,
++  screen: StartScreen,
++): Promise<void> {
++  await mergeRequests.findProject();
++  if (screen === "mergeRequests" && mergeRequests.project.value.kind === "found") {
++    mergeRequests.show();
++  }
++}

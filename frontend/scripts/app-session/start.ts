@@ -82,7 +82,7 @@ function prepareApp(command: StartApp, folder: string): Prepared {
   const repoDir = repoFolder(command.opens, folder);
   const driverDir = startFolder(command.opens, folder, existsSync);
   const glab = fakeGlab(scenarioFolder, folder);
-  const args = appArgs(command.opens, repoDir, command.ai);
+  const args = appArgs(command.opens, repoDir, command);
   return { home, configDir, repoDir, driverDir, binary, args, glab };
 }
 

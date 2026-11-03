@@ -26,6 +26,7 @@ import { settingsScreen, type Screen } from "./screen";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsInUse } from "./settings";
 import { registerSettingsStore, type SettingsStore } from "./settingsStore";
+import { openAtStart, type WindowStart } from "./startScreen";
 import type { Preferences } from "./useMergeController";
 
 export type ColumnSend = {
@@ -112,8 +113,8 @@ function createRefs(startTheme: Theme): Refs {
   };
 }
 
-export function createCompareStore(source: CompareSource, startTheme: Theme): CompareStore {
-  const refs = createRefs(startTheme);
+export function createCompareStore(source: CompareSource, start: WindowStart): CompareStore {
+  const refs = createRefs(start.theme);
   const state: State = {
     ...refs,
     source,
@@ -131,7 +132,8 @@ export function createCompareStore(source: CompareSource, startTheme: Theme): Co
     preferences: computed(() => preferencesOf(refs.settings.value)),
     mergeRequests,
     ...settings,
-    startUp: () => startUp(state, [settings.loadSettings(), mergeRequests.findProject()]),
+    startUp: () =>
+      startUp(state, [settings.loadSettings(), openAtStart(mergeRequests, start.screen)]),
     ...tabActions(state),
     ...columnActions(state),
     ...createCompareNotices(state),

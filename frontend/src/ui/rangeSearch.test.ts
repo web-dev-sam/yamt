@@ -91,7 +91,7 @@ function pagedSource(options: PageOptions = {}): Paged {
 }
 
 async function started(paged: Paged): Promise<RangeStore> {
-  const store = createRangeStore(paged.source, "dark", null);
+  const store = createRangeStore(paged.source, { theme: "dark", screen: "files" }, null);
   await store.startUp();
   return store;
 }
@@ -218,7 +218,7 @@ test("an empty range asks Rust nothing and finds nothing", async () => {
 
 test("a search before the range opened reads nothing and remembers no page", async () => {
   const paged = pagedSource();
-  const store = createRangeStore(paged.source, "dark", null);
+  const store = createRangeStore(paged.source, { theme: "dark", screen: "files" }, null);
 
   store.search.type("src/");
   store.search.enter();

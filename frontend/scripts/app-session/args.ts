@@ -18,6 +18,7 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
   start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo
                 | --diff [--dir <start folder>] [--glab <tests/glab scenario>]
                 | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]] [--ai]
+                [--mr]   (with --diff or --range: the window opens on its merge-request page)
                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
                 --dir: tauri-driver and so the compare window start in that folder
@@ -26,7 +27,8 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
   start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>
                 | --range-case <range fixture> [--threads seeded] [--gitlab <script>]
                   [--ai [--ai-case <agent fixture: crash, checkout-fails, cancelled, …>] [--ai-changes]]]
-                [--mr <merge-request script: list, slow, many, …>]   (with --diff, --diff-case or --range-case)
+                [--mr <merge-request script: list, slow, many, …> [--open-mr]]
+                  (with --diff, --diff-case or --range-case; --open-mr: on the merge-request page)
   click         --name <n> <accessible name or css> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
   drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
@@ -97,11 +99,11 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
       "home",
       "glab",
     ],
-    flags: ["fresh-repo", "diff", "ai"],
+    flags: ["fresh-repo", "diff", "ai", "mr"],
   },
   "start-fixture": {
     values: ["name", "size", "diff-case", "range-case", "threads", "gitlab", "ai-case", "mr"],
-    flags: ["diff", "ai", "ai-changes"],
+    flags: ["diff", "ai", "ai-changes", "open-mr"],
   },
   click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },
   drag: { values: ["name", "dx", "dy", "role", "nth"], flags: [] },

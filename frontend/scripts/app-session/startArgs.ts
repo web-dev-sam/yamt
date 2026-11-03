@@ -24,6 +24,7 @@ export type StartCommand =
       readonly home: string | null;
       readonly glab: string | null;
       readonly ai: boolean;
+      readonly mr: boolean;
     }
   | {
       readonly kind: "start-fixture";
@@ -31,6 +32,8 @@ export type StartCommand =
       readonly size: Size;
       readonly search: string;
     };
+
+type AppFlags = { readonly ai: boolean; readonly mr: boolean };
 
 const DEFAULT_SIZE: Size = { width: 1600, height: 1000 };
 const DEFAULT_BINARY = "target/debug/yamt";
@@ -117,18 +120,27 @@ function windowSearch(parsed: Parsed): string {
   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
 }
 
+function mergeRequestSearch(parsed: Parsed): string {
+  const script = parsed.values.get("mr");
+  const open = parsed.flags.has("open-mr");
+  if (script === undefined) {
+    if (open) {
+      throw new Error("start-fixture takes --open-mr only with --mr <script>");
+    }
+    return "";
+  }
+  return `&mr=${encodeURIComponent(script)}${open ? "&open=mergeRequests" : ""}`;
+}
+
 function fixtureSearch(parsed: Parsed): string {
   const search = windowSearch(parsed);
-  const script = parsed.values.get("mr");
-  if (script === undefined) {
-    return search;
-  }
-  if (search === "") {
+  const mergeRequests = mergeRequestSearch(parsed);
+  if (mergeRequests !== "" && search === "") {
     throw new Error(
       "start-fixture takes --mr only with --diff, --diff-case or --range-case: the merge window has no merge-request page",
     );
   }
-  return `${search}&mr=${encodeURIComponent(script)}`;
+  return `${search}${mergeRequests}`;
 }
 
 export function glabFolder(scenario: string, isFolder: (path: string) => boolean): string {
@@ -170,6 +182,16 @@ function glabScenario(parsed: Parsed, opens: Opening): string | null {
   return scenario;
 }
 
+function startsOnMergeRequests(parsed: Parsed, opens: Opening): boolean {
+  const mr = parsed.flags.has("mr");
+  if (mr && opens.kind !== "range" && opens.kind !== "diff") {
+    throw new Error(
+      "start-app --mr needs --range or --diff: only the range and compare windows have a merge-request page",
+    );
+  }
+  return mr;
+}
+
 function recording(parsed: Parsed): Recording | null {
   const file = parsed.values.get("record");
   const seconds = parsed.values.get("record-seconds");
@@ -200,8 +222,16 @@ function settingsText(parsed: Parsed): string | null {
   return text;
 }
 
-export function appArgs(opens: Opening, repoDir: string | null, ai: boolean): readonly string[] {
-  const options = [...(repoDir === null ? [] : ["--repo", repoDir]), ...(ai ? ["--ai"] : [])];
+export function appArgs(
+  opens: Opening,
+  repoDir: string | null,
+  { ai, mr }: AppFlags,
+): readonly string[] {
+  const options = [
+    ...(repoDir === null ? [] : ["--repo", repoDir]),
+    ...(ai ? ["--ai"] : []),
+    ...(mr ? ["--mr"] : []),
+  ];
   switch (opens.kind) {
     case "diff":
       return ["--diff", ...options];
@@ -231,5 +261,6 @@ export function startCommand(kind: StartCommand["kind"], parsed: Parsed): StartC
     home: parsed.values.get("home") ?? null,
     glab: glabScenario(parsed, opens),
     ai: parsed.flags.has("ai"),
+    mr: startsOnMergeRequests(parsed, opens),
   };
 }

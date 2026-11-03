@@ -34,6 +34,7 @@ import type { Searching } from "./searching";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsInUse } from "./settings";
 import { registerSettingsStore, type SettingsStore } from "./settingsStore";
+import { openAtStart, type WindowStart } from "./startScreen";
 import type { Preferences } from "./useMergeController";
 
 /** What `main.ts` builds only under `data-ai` / `?ai` (plan row 108). */
@@ -170,10 +171,10 @@ function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null):
 
 export function createRangeStore(
   source: RangeSource,
-  startTheme: Theme,
+  { theme, screen }: WindowStart,
   agent: RangeAgent | null,
 ): RangeStore {
-  const refs = createRefs(startTheme);
+  const refs = createRefs(theme);
   const state = createState(refs, source, agent);
   const settings = settingsActions(state);
   const shownPath = computed(() => entryOf(state, refs.shown.value)?.path ?? null);
@@ -195,7 +196,7 @@ export function createRangeStore(
     }),
     mergeRequests,
     ...settings,
-    startUp: () => startUp(state, [settings.loadSettings(), mergeRequests.findProject()]),
+    startUp: () => startUp(state, [settings.loadSettings(), openAtStart(mergeRequests, screen)]),
     showFile: (path) => {
       showPath(state, path);
     },
@@ -235,13 +236,13 @@ function entryOf(state: State, file: RangeFileId | null): RangeEntry | undefined
 function showPath(state: State, path: string): void {
   const entry = state.start.value?.files.find((file) => file.path === path);
   if (entry !== undefined) {
+    state.screen.value = { kind: "files" };
     show(state, entry);
   }
 }
 
 function show(state: State, entry: RangeEntry): void {
   const { id } = entry;
-  state.screen.value = { kind: "files" };
   state.shown.value = id;
   state.recent = [...state.recent.filter((each) => each !== id), id];
   if (state.visited.value.some((each) => each.id === id)) {

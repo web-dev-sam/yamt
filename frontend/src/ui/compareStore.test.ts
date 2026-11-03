@@ -22,6 +22,7 @@ import type { KeyPress } from "./fileListKey";
 import { useMergeRequests } from "./mergeRequestsStore";
 import { problemText } from "./problemText";
 import { useSettingsStore } from "./settingsStore";
+import type { WindowStart } from "./startScreen";
 
 type Gate = { readonly opened: Promise<null>; readonly open: () => void };
 
@@ -36,6 +37,7 @@ const LIMIT = 8 * 1024 * 1024;
 const GONE: SourceFailure = { kind: "ReadFailed", path: "/data/tabs.json", message: "denied" };
 const UNKNOWN: SourceFailure = { kind: "UnknownTab", tab: 4 };
 const MICROTASKS = 10;
+const ON_FILES: WindowStart = { theme: "dark", screen: "files" };
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -77,7 +79,7 @@ function compareSource(): CompareSource {
 
 async function started(edit: Edit = () => ({})): Promise<CompareStore> {
   const fixture = compareSource();
-  const store = createCompareStore({ ...fixture, ...edit(fixture) }, "dark");
+  const store = createCompareStore({ ...fixture, ...edit(fixture) }, ON_FILES);
   await store.startUp();
   return store;
 }
@@ -125,7 +127,7 @@ test("the window's components get no store before the root creates one (catches 
 
 test("start-up lists the stored tabs, sets the column limit and loads the settings (catches a limit or list left unset)", async () => {
   const fixture = compareSource();
-  const store = createCompareStore(fixture, "dark");
+  const store = createCompareStore(fixture, ON_FILES);
 
   expect([store.tabs.value, store.shown.value, store.columnLimit.value]).toEqual([[], null, 0]);
   expect([store.fileListShown.value, store.screen.value]).toEqual([true, { kind: "files" }]);
@@ -147,7 +149,7 @@ test("start-up lists the stored tabs, sets the column limit and loads the settin
 });
 
 test("start-up finds the GitLab project for the one slice the window registers (catches a button that never shows)", async () => {
-  const store = createCompareStore(createFixtureCompareSource(log, "?mr=list", {}), "dark");
+  const store = createCompareStore(createFixtureCompareSource(log, "?mr=list", {}), ON_FILES);
   expect(useMergeRequests()).toBe(store.mergeRequests);
   expect(store.mergeRequests.project.value).toEqual({ kind: "none" });
 
@@ -172,6 +174,43 @@ test("a failed project lookup at start-up reaches the problem bar and leaves the
     cause: { kind: "WorkerStopped" },
   });
   expect(store.tabs.value).toHaveLength(1);
+});
+
+test.each([
+  ["mergeRequests", "?mr=list", "mergeRequests"],
+  ["files", "?mr=list", "files"],
+  ["mergeRequests", "", "files"],
+] as const)(
+  "a window started on %s with the fixture search %j opens on %s, its tabs listed (catches --mr ignored, a page without a project, or a page closed by the tab list)",
+  async (screen, search, opened) => {
+    spyConsole();
+    const fixture = createFixtureCompareSource(log, search, {});
+    const store = createCompareStore(fixture, { theme: "dark", screen });
+
+    await store.startUp();
+
+    expect(store.screen.value).toEqual({ kind: opened });
+    expect(store.tabs.value).toHaveLength(1);
+    expect(store.mergeRequests.listing.value.kind === "notLoaded").toBe(opened === "files");
+  },
+);
+
+test("a window started on its merge-request page stays on its tabs when the project lookup fails (catches a page opened on a failed lookup)", async () => {
+  spyConsole();
+  const fixture = createFixtureCompareSource(log, "?mr=list", {});
+  const store = createCompareStore(
+    { ...fixture, findGitLabProject: () => failed({ kind: "WorkerStopped" }) },
+    { theme: "dark", screen: "mergeRequests" },
+  );
+
+  await store.startUp();
+
+  expect(store.screen.value).toEqual({ kind: "files" });
+  expect(store.problem.value).toEqual({
+    action: "mergeRequests",
+    step: "find",
+    cause: { kind: "WorkerStopped" },
+  });
 });
 
 test("a failed start shows the problem and lists nothing (catches a failure read as an empty list)", async () => {

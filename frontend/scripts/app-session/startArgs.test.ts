@@ -32,7 +32,9 @@ test("start-app --diff --dir starts the compare window in that folder and passes
   expect(parseCommand(["start-app", "--name", "c", "--diff"])).toMatchObject({
     opens: { kind: "diff", startDir: null },
   });
-  expect(appArgs({ kind: "diff", startDir: "/var/tmp/rr" }, null, false)).toEqual(["--diff"]);
+  expect(
+    appArgs({ kind: "diff", startDir: "/var/tmp/rr" }, null, { ai: false, mr: false }),
+  ).toEqual(["--diff"]);
 });
 
 test("a compare session starts in its --dir folder, asked about once; without --dir or --diff in the session folder", () => {
@@ -99,5 +101,21 @@ test("start-fixture --mr refuses the merge window, which has no merge-request pa
   );
   expect(() => parseCommand(["start-fixture", "--name", "fx", "--diff", "--mr"])).toThrow(
     /--mr needs a value/,
+  );
+});
+
+test("start-fixture --open-mr opens the merge-request page at start, only with an --mr script", () => {
+  const fixture = ["start-fixture", "--name", "fx"];
+  expect(parseCommand([...fixture, "--diff", "--mr", "list", "--open-mr"])).toMatchObject({
+    search: "?diff&mr=list&open=mergeRequests",
+  });
+  expect(
+    parseCommand([...fixture, "--range-case", "review", "--mr", "list", "--open-mr"]),
+  ).toMatchObject({ search: "?range=review&mr=list&open=mergeRequests" });
+  expect(() => parseCommand([...fixture, "--diff", "--open-mr"])).toThrow(
+    "start-fixture takes --open-mr only with --mr <script>",
+  );
+  expect(() => parseCommand([...fixture, "--mr", "list", "--open-mr"])).toThrow(
+    /--mr only with --diff, --diff-case or --range-case/,
   );
 });

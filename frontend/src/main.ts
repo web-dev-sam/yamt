@@ -28,6 +28,7 @@ import { takeLinuxPastes } from "./ui/linuxPaste";
 import RangeApp from "./ui/RangeApp.vue";
 import { createRangeStore, type RangeAgent } from "./ui/rangeStore";
 import { useSettingsStore } from "./ui/settingsStore";
+import { startScreenOf, type WindowStart } from "./ui/startScreen";
 import { createAppStore } from "./ui/store";
 
 import "./style.css";
@@ -56,9 +57,14 @@ function serverHost(): ServerHost | null {
   return new URLSearchParams(SEARCH).has("servers") ? createFixtureServerHost() : null;
 }
 
-function startCompare(startTheme: Theme): void {
+function windowStart(dataset: DOMStringMap, theme: Theme): WindowStart {
+  const open = IN_APP ? dataset["open"] : new URLSearchParams(SEARCH).get("open");
+  return { theme, screen: startScreenOf(open) };
+}
+
+function startCompare(start: WindowStart): void {
   const source = IN_APP ? createTauriCompareSource() : createFixtureCompareSource(log, SEARCH);
-  const store = createCompareStore(source, startTheme);
+  const store = createCompareStore(source, start);
   void store.startUp();
   createApp(CompareApp).mount("#app");
 }
@@ -76,9 +82,9 @@ function rangeAgent(dataset: DOMStringMap): RangeAgent | null {
   return { source, client: new AgentClient({ source, command: agentCommand }) };
 }
 
-function startRange(startTheme: Theme, dataset: DOMStringMap): void {
+function startRange(start: WindowStart, dataset: DOMStringMap): void {
   const source = IN_APP ? createTauriRangeSource() : createFixtureRangeSource(log, SEARCH);
-  const store = createRangeStore(source, startTheme, rangeAgent(dataset));
+  const store = createRangeStore(source, start, rangeAgent(dataset));
   void store.startUp();
   createApp(RangeApp).mount("#app");
 }
@@ -103,10 +109,10 @@ switch (kind) {
     startMerge(startTheme);
     break;
   case "compare":
-    startCompare(startTheme);
+    startCompare(windowStart(dataset, startTheme));
     break;
   case "range":
-    startRange(startTheme, dataset);
+    startRange(windowStart(dataset, startTheme), dataset);
     break;
   default: {
     const _exhaustive: never = kind;

@@ -1,0 +1,2 @@
+just mutants HEAD — 747 killed, 25 survived, 150 no coverage (start.ts, untested as before); startScreen.ts 100%
+

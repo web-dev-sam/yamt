@@ -28,6 +28,7 @@ import {
   type RangeStore,
 } from "./rangeStore";
 import { useSettingsStore } from "./settingsStore";
+import type { WindowStart } from "./startScreen";
 import { listedButtons } from "./toolbarButtons";
 
 type Edit = (fixture: RangeSource) => Partial<RangeSource>;
@@ -36,6 +37,7 @@ const LINUX = "Linux x86_64";
 const SIDE = { label: { kind: "named", name: "main" }, short_id: "1b2cfed", subject: "Start" };
 const UNKNOWN: SourceFailure = { kind: "UnknownRangeFile", file: 3 };
 const MICROTASKS = 10;
+const ON_FILES: WindowStart = { theme: "dark", screen: "files" };
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -85,7 +87,7 @@ function source(count: number): RangeSource {
 
 async function started(count: number, edit: Edit = () => ({})): Promise<RangeStore> {
   const fixture = source(count);
-  const store = createRangeStore({ ...fixture, ...edit(fixture) }, "dark", null);
+  const store = createRangeStore({ ...fixture, ...edit(fixture) }, ON_FILES, null);
   await store.startUp();
   return store;
 }
@@ -140,7 +142,7 @@ test("start-up finds the GitLab project for the one slice the window registers (
     createFixtureRangeSource(log, "?range=review&mr=list", {
       "../../fixtures/range/review.json": rangeCase(2),
     }),
-    "dark",
+    ON_FILES,
     null,
   );
   expect(useMergeRequests()).toBe(store.mergeRequests);
@@ -170,10 +172,52 @@ test("a failed project lookup at start-up reaches the problem bar and the range 
   expect(store.shownPath.value).toBe("src/f00.ts");
 });
 
+test.each([
+  ["mergeRequests", "?range=review&mr=list", "mergeRequests"],
+  ["files", "?range=review&mr=list", "files"],
+  ["mergeRequests", "?range=review", "files"],
+] as const)(
+  "a window started on %s with the fixture search %j opens on %s, its first file shown (catches --mr ignored, a page without a project, or a page closed by the first file)",
+  async (screen, search, opened) => {
+    quiet();
+    const fixture = createFixtureRangeSource(log, search, {
+      "../../fixtures/range/review.json": rangeCase(2),
+    });
+    const store = createRangeStore(fixture, { theme: "dark", screen }, null);
+
+    await store.startUp();
+
+    expect(store.screen.value).toEqual({ kind: opened });
+    expect(store.shownPath.value).toBe("src/f00.ts");
+    expect(store.mergeRequests.listing.value.kind === "notLoaded").toBe(opened === "files");
+  },
+);
+
+test("a window started on its merge-request page stays on its files when the project lookup fails (catches a page opened on a failed lookup)", async () => {
+  quiet();
+  const fixture = createFixtureRangeSource(log, "?range=review&mr=list", {
+    "../../fixtures/range/review.json": rangeCase(2),
+  });
+  const store = createRangeStore(
+    { ...fixture, findGitLabProject: () => failed({ kind: "WorkerStopped" }) },
+    { theme: "dark", screen: "mergeRequests" },
+    null,
+  );
+
+  await store.startUp();
+
+  expect(store.screen.value).toEqual({ kind: "files" });
+  expect(store.problem.value).toEqual({
+    action: "mergeRequests",
+    step: "find",
+    cause: { kind: "WorkerStopped" },
+  });
+});
+
 test("before openRange answers: the files screen, the start theme's preferences, no file to show", async () => {
   quiet();
   const other = await started(4);
-  const store = createRangeStore(source(4), "light", null);
+  const store = createRangeStore(source(4), { theme: "light", screen: "files" }, null);
 
   expect(store.screen.value).toEqual({ kind: "files" });
   expect(store.preferences.value.theme).toBe("light");
@@ -477,7 +521,7 @@ test("First message's values: the thread's place, the range as typed, both short
   quiet();
   const store = createRangeStore(
     createFixtureRangeSource(log, "?range=review&threads=seeded"),
-    "dark",
+    ON_FILES,
     null,
   );
   await store.startUp();
@@ -519,7 +563,7 @@ async function aiStore(discards: string[]): Promise<RangeStore> {
     },
   };
   const client = new AgentClient({ source, command: () => DEFAULT_AGENT_COMMAND });
-  const store = createRangeStore(createFixtureRangeSource(log, "?range=review"), "dark", {
+  const store = createRangeStore(createFixtureRangeSource(log, "?range=review"), ON_FILES, {
     source,
     client,
   });
@@ -557,7 +601,7 @@ test("deleteNote asks first: Cancel and Escape keep the note, Delete removes it 
   quiet();
   const store = createRangeStore(
     createFixtureRangeSource(log, "?range=review&threads=seeded"),
-    "dark",
+    ON_FILES,
     null,
   );
   await store.startUp();
@@ -621,14 +665,14 @@ test.each([
   "the collapse choice %s in the window's storage starts the range store as the merge window reads it",
   (_name, initial, on) => {
     withWindowStorage(initial, () => {
-      expect(createRangeStore(source(1), "dark", null).collapsing.value).toBe(on);
+      expect(createRangeStore(source(1), ON_FILES, null).collapsing.value).toBe(on);
     });
   },
 );
 
 test("toggling in the range store writes the merge window's stored choice (catches a second key)", () => {
   withWindowStorage({}, (items) => {
-    const store = createRangeStore(source(1), "dark", null);
+    const store = createRangeStore(source(1), ON_FILES, null);
 
     store.toggleCollapsing();
 
