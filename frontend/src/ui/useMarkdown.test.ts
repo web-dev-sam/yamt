@@ -90,6 +90,27 @@ test("a host swap destroys the old view and shows the text in a new one; a null 
   ]);
 });
 
+test("a host swap waits for the post flush: a text change in the same tick reaches the old view first", async () => {
+  const host = shallowRef<HTMLElement | null>(element());
+  const text = shallowRef("a");
+  const scope = mount(host, text);
+  await nextTick();
+  host.value = element();
+  text.value = "b";
+  await nextTick();
+  scope.stop();
+
+  expect(editor.state.calls).toEqual([
+    "build 1",
+    "show 1 a",
+    "show 1 b",
+    "destroy 1",
+    "build 2",
+    "show 2 b",
+    "destroy 2",
+  ]);
+});
+
 type Code = { readonly language: string | null; readonly text: string };
 
 function mountCode(host: ShallowRef<HTMLElement | null>, code: ShallowRef<Code>): EffectScope {

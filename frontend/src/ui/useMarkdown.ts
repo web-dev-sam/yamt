@@ -2,34 +2,27 @@ import { onScopeDispose, watch, type ShallowRef } from "vue";
 
 import { MarkdownView } from "../editor";
 
-export function useMarkdown(
-  host: Readonly<ShallowRef<HTMLElement | null>>,
-  text: () => string,
-): void {
-  let view: MarkdownView | null = null;
+type Host = Readonly<ShallowRef<HTMLElement | null>>;
 
-  watch(
-    host,
-    (element) => {
-      view?.destroy();
-      view = element === null ? null : new MarkdownView(element);
-      view?.show(text());
-    },
-    { immediate: true, flush: "post" },
-  );
-  watch(text, (next) => {
-    view?.show(next);
-  });
-
-  onScopeDispose(() => {
-    view?.destroy();
-    view = null;
+export function useMarkdown(host: Host, text: () => string): void {
+  useView(host, text, (view, value) => {
+    view.show(value);
   });
 }
 
 export function useMarkdownCode(
-  host: Readonly<ShallowRef<HTMLElement | null>>,
+  host: Host,
   code: () => { readonly language: string | null; readonly text: string },
+): void {
+  useView(host, code, (view, { language, text }) => {
+    view.showCode(language, text);
+  });
+}
+
+function useView<T>(
+  host: Host,
+  source: () => T,
+  render: (view: MarkdownView, value: T) => void,
 ): void {
   let view: MarkdownView | null = null;
 
@@ -38,13 +31,12 @@ export function useMarkdownCode(
     (element) => {
       view?.destroy();
       view = element === null ? null : new MarkdownView(element);
-      const { language, text } = code();
-      view?.showCode(language, text);
+      if (view !== null) render(view, source());
     },
     { immediate: true, flush: "post" },
   );
-  watch(code, ({ language, text }) => {
-    view?.showCode(language, text);
+  watch(source, (next) => {
+    if (view !== null) render(view, next);
   });
 
   onScopeDispose(() => {
