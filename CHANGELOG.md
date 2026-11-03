@@ -23,6 +23,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   merge request's discussions could not be read (the list then keeps its usual order). The discussions box then speaks
   for that reviewer ("Anna Berg's turn"). The choice is remembered with the filters; Clear filters ends it. Review mode
   needs Settings → "Discussion details" set to "Load fully"; switching away turns it off and keeps the filters.
+- The merge-request page says how old its list is, left of Refresh: "just now", "3 minutes ago", in the rows' words,
+  updated every minute; hovering it gives the time it loaded (`14:32`, or `03.11.2026, 14:32` on another day). A
+  refresh keeps the old age until the new list has arrived, and a failed refresh keeps it.
+- `yamt --mr` opens the compare window with the merge-request page already open (`--diff` is implied);
+  `yamt --diff=<range> --mr` opens the range window on its page. Without a GitLab remote the window opens on its
+  files as before.
+- `YAMT_AI=1` in the environment makes every start behave as with `--ai`; unset, empty or `0` leaves it off.
 
 ## [0.6.6] - 2026-11-03
 
