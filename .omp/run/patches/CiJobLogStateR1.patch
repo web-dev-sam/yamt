@@ -1,0 +1,364 @@
+diff --git a/frontend/src/ipc/fixtureMergeRequestLogs.test.ts b/frontend/src/ipc/fixtureMergeRequestLogs.test.ts
+index 0e341a0..8d7d2de 100644
+--- a/frontend/src/ipc/fixtureMergeRequestLogs.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequestLogs.test.ts
+@@ -9,7 +9,10 @@ import type { JobLogReply } from "./mergeRequestDomain";
+ const MANY_ROWS = 500;
+ const MAX_LOG_BYTES = 512_000;
+ const TIMESTAMP = /\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z/u;
++const STAMPED = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z 00O[ +]/u;
++const SECTIONS = 6;
+ const SCRIPTED: ReadonlySet<number> = new Set([NO_LOG_IID, LOGGED_OUT_LOG_IID]);
++const LISTED = fixtureRows(0, MANY_ROWS);
+ 
+ function webPage(text: string): WebPage {
+   if (!isWebPage(text)) {
+@@ -19,15 +22,14 @@ function webPage(text: string): WebPage {
+ }
+ 
+ function listedPages(name: string): readonly WebPage[] {
+-  return fixtureRows(0, MANY_ROWS)
+-    .filter((row) => !SCRIPTED.has(row.iid))
++  return LISTED.filter((row) => !SCRIPTED.has(row.iid))
+     .flatMap((row) => row.pipeline?.failedJobs ?? [])
+     .filter((job) => job.name === name)
+     .map((job) => webPage(job.page ?? ""));
+ }
+ 
+ function pageOf(iid: number, name: string): WebPage {
+-  const row = fixtureRows(0, MANY_ROWS).find((listed) => listed.iid === iid);
++  const row = LISTED.find((listed) => listed.iid === iid);
+   const job = row?.pipeline?.failedJobs.find((failed) => failed.name === name);
+   return webPage(job?.page ?? "");
+ }
+@@ -43,52 +45,97 @@ function runStyle(view: JobLogView, text: string): LogStyle | undefined {
+   return view.lines.flatMap((line) => line.runs).find((run) => run.text === text)?.style;
+ }
+ 
++function runsOf(view: JobLogView, shown: string): readonly (readonly [string, unknown, unknown])[] {
++  const line = view.lines.find((each) => each.runs.map((run) => run.text).join("") === shown);
++  return (line?.runs ?? []).map((run) => [run.text, run.style.foreground, run.style.background]);
++}
++
+ test("every_listed_lint_job_has_its_short_coloured_log", () => {
+   const pages = listedPages("lint:docs");
+   expect(pages.length).toBeGreaterThan(SCRIPTED.size);
+-  const raw = logOf(fixtureJobLog(pages[0] ?? webPage(ORIGIN)));
++  const raw = logOf(fixtureJobLog(pages[0] ?? webPage(ORIGIN), LISTED));
+   for (const page of pages) {
+-    expect(fixtureJobLog(page)).toEqual({ kind: "log", log: { text: raw.text, cut: false } });
++    expect(fixtureJobLog(page, LISTED)).toEqual({
++      kind: "log",
++      log: { text: raw.text, cut: false },
++    });
+   }
+   const physical = raw.text.split("\n").filter((line) => line !== "");
+   expect(physical.length).toBeGreaterThanOrEqual(40);
+   expect(physical.length).toBeLessThanOrEqual(80);
+-  expect(physical.every((line) => TIMESTAMP.test(line))).toBe(true);
++  expect(physical.every((line) => STAMPED.test(line))).toBe(true);
+   const times = physical.map((line) => Date.parse(line.slice(0, "2026-10-30T09:00:01.123".length)));
+   expect(times.every((time, at) => at === 0 || time > (times[at - 1] ?? time))).toBe(true);
+   expect(raw.text).toContain("\r\n");
+   expect(raw.text).toContain(" 00O+");
+   expect(raw.text).toContain("\u001b[0Ksection_start:");
++  expect(raw.text.match(/section_start:/gu)).toHaveLength(SECTIONS);
++  expect(raw.text.match(/section_end:\d+:\w+\r/gu)).toHaveLength(SECTIONS);
+   expect(raw.text).toMatch(/00O section_start:\d+:prepare_script\[collapsed=true\]\r/u);
+   expect(raw.text).toContain(":prepare_script[collapsed=true]\r\u001b[0K");
+ 
+   const view = jobLogView(raw.text);
+-  const lines = view.text.split("\n");
+-  expect(view.text).not.toMatch(TIMESTAMP);
+-  expect(view.text).not.toContain("section_");
+-  expect(lines).toContain("<b>not bold</b> &amp; <script>x</script>");
+-  expect(lines).toContain("Preparing environment");
+-  expect(lines).toContain("Receiving objects: 100% (120/120), done.");
+-  expect(lines).toContain(
++  expect(view.text.split("\n")).toEqual([
++    "itleRunning with gitlab-runner 17.5.0 (8ec04662)",
++    "  on docker-auto-scale-1 ZxAiwUvB, system ID: s_4c1a2b3d5e6f",
++    'Preparing the "docker+machine" executor',
++    "Using Docker executor with image node:22-bookworm ...",
++    "Pulling docker image node:22-bookworm ...",
++    "Preparing environment",
++    "Running on runner-zxaiwuvb-project-42-concurrent-0 via runner-manager-1...",
++    "Getting source from Git repository",
++    "Fetching changes with git depth set to 20...",
++    "Receiving objects: 100% (120/120), done.",
++    "Checking out 3f9c2a1b as detached HEAD (ref is refs/merge-requests/632/head)...",
++    'Executing "step_script" stage of the job script',
++    "$ pnpm install --frozen-lockfile",
++    "Lockfile is up to date, resolution step is skipped",
++    "Progress: resolved 812, reused 812, downloaded 0, added 812, done",
++    "$ pnpm lint:docs",
++    "> taskboard@1.4.0 lint:docs /builds/taskboard/taskboard",
++    '> markdownlint "docs/**/*.md"',
++    "docs/setup.md:12 MD013/line-length Line length [Expected: 120; Actual: 143]",
++    "docs/setup.md:40 MD040/fenced-code-language Fenced code blocks should have a language specified",
++    "docs/api.md:7 MD025/single-h1 Multiple top-level headings in the same document",
++    "docs/api.md:88 MD034/no-bare-urls Bare URL used",
++    "Summary: 4 errors in 2 files",
++    "warning: docs/changelog.md is older than the last release",
++    " BLOCKER  the docs build has been broken since 1.3.9",
++    "Error: markdownlint found 4 problems",
++    "<b>not bold</b> &amp; <script>x</script>",
++    "hint: run pnpm lint:docs --fix to fix 2 of them",
++    "note: the rules live in .markdownlint.jsonc",
+     "The command stopped at the first error in each file; see the list above for every error.",
+-  );
+-  expect(lines.filter((line) => line.includes("Error")).length).toBeGreaterThanOrEqual(1);
+-  expect(lines.filter((line) => line.includes("error")).length).toBeGreaterThanOrEqual(2);
+-  expect(lines.at(-1)).toBe("ERROR: Job failed: exit code 1");
++    " ELIFECYCLE  Command failed with exit code 1.",
++    "Uploading artifacts for failed job",
++    "Uploading artifacts...",
++    "WARNING: report.xml: no matching files. Ensure that the artifact path is relative to the working directory",
++    "ERROR: No files to upload",
++    "Cleaning up project directory and file based variables",
++    "ERROR: Job failed: exit code 1",
++  ]);
+   expect(runStyle(view, "MD013/line-length")?.foreground).toBe("red");
+   expect(runStyle(view, "MD040/fenced-code-language")?.foreground).toBe("brightRed");
+   expect(runStyle(view, "Summary:")?.bold).toBe(true);
+-  expect(runStyle(view, "warning")?.foreground).not.toBeNull();
+-  expect(runStyle(view, " BLOCKER ")?.background).not.toBeNull();
+-  expect(runStyle(view, "Error")?.foreground).not.toBeNull();
++  expect(runsOf(view, "warning: docs/changelog.md is older than the last release")).toEqual([
++    ["warning", "yellow", null],
++    [": docs/changelog.md is older than the last release", null, null],
++  ]);
++  expect(runsOf(view, " BLOCKER  the docs build has been broken since 1.3.9")).toEqual([
++    [" BLOCKER ", "brightWhite", "brightRed"],
++    [" the docs build has been broken since 1.3.9", null, null],
++  ]);
++  expect(runsOf(view, "Error: markdownlint found 4 problems")).toEqual([
++    ["Error: markdownlint found 4 problems", null, null],
++  ]);
+ });
+ 
+ test("every_listed_unit_job_has_the_long_cut_log", () => {
+   const pages = listedPages("test:unit");
+   expect(pages.length).toBeGreaterThan(SCRIPTED.size);
+-  const raw = logOf(fixtureJobLog(pages[0] ?? webPage(ORIGIN)));
++  const raw = logOf(fixtureJobLog(pages[0] ?? webPage(ORIGIN), LISTED));
+   for (const page of pages) {
+-    const log = logOf(fixtureJobLog(page));
++    const log = logOf(fixtureJobLog(page, LISTED));
+     expect(log.cut).toBe(true);
+     expect(log.text).toBe(raw.text);
+   }
+@@ -120,29 +167,49 @@ test("every_listed_unit_job_has_the_long_cut_log", () => {
+ 
+ test("the_scripted_rows_refuse_as_named", () => {
+   expect(NO_LOG_IID).not.toBe(LOGGED_OUT_LOG_IID);
+-  expect(fixtureJobLog(pageOf(NO_LOG_IID, "lint:docs"))).toEqual({ kind: "noLog" });
+-  expect(fixtureJobLog(pageOf(NO_LOG_IID, "test:unit"))).toEqual({
++  expect(fixtureJobLog(pageOf(NO_LOG_IID, "lint:docs"), LISTED)).toEqual({ kind: "noLog" });
++  expect(fixtureJobLog(pageOf(NO_LOG_IID, "test:unit"), LISTED)).toEqual({
+     kind: "failed",
+     message: "glab timed out",
+   });
+-  expect(fixtureJobLog(pageOf(LOGGED_OUT_LOG_IID, "lint:docs"))).toEqual({
++  expect(fixtureJobLog(pageOf(LOGGED_OUT_LOG_IID, "lint:docs"), LISTED)).toEqual({
+     kind: "notLoggedIn",
+     detail: LOGGED_OUT_DETAIL,
+   });
+-  expect(fixtureJobLog(pageOf(LOGGED_OUT_LOG_IID, "test:unit"))).toEqual({ kind: "glabMissing" });
+-  const firstFailed = fixtureRows(0, MANY_ROWS).find(
+-    (row) => (row.pipeline?.failedJobs.length ?? 0) > 0,
+-  );
++  expect(fixtureJobLog(pageOf(LOGGED_OUT_LOG_IID, "test:unit"), LISTED)).toEqual({
++    kind: "glabMissing",
++  });
++  const firstFailed = LISTED.find((row) => (row.pipeline?.failedJobs.length ?? 0) > 0);
+   expect([NO_LOG_IID, LOGGED_OUT_LOG_IID]).not.toContain(firstFailed?.iid);
+ });
+ 
+ test.each([
+   `${ORIGIN}/-/merge_requests/640`,
+   `${ORIGIN}/-/jobs/9002`,
++  `${ORIGIN}/-/jobs/9010`,
+   `${ORIGIN}/-/jobs/8990`,
++  `${ORIGIN}/-/jobs/99990`,
+   `${ORIGIN}/-/jobs/9000/raw`,
+   "https://gitlab.another/taskboard/taskboard/-/jobs/9000",
+   "https://gitlab.example/taskboard/otherbord/-/jobs/9001",
+ ])("a_page_that_is_no_listed_job_is_not_offered: %s", (page) => {
+-  expect(fixtureJobLog(webPage(page))).toEqual({ kind: "notOffered" });
++  expect(fixtureJobLog(webPage(page), LISTED)).toEqual({ kind: "notOffered" });
++});
++
++test("a_job_page_answers_only_while_its_row_is_listed", () => {
++  const page = listedPages("lint:docs")[0] ?? webPage(ORIGIN);
++  expect(fixtureJobLog(page, LISTED).kind).toBe("log");
++  expect(fixtureJobLog(page, [])).toEqual({ kind: "notOffered" });
++});
++
++test("a_listed_job_of_another_name_has_no_log", () => {
++  const row = LISTED.find((listed) => !SCRIPTED.has(listed.iid) && listed.pipeline !== null);
++  const pipeline = row?.pipeline;
++  if (row === undefined || pipeline === null || pipeline === undefined) {
++    throw new Error("the fixture lists no row with a pipeline");
++  }
++  const page = webPage(`${ORIGIN}/-/jobs/1`);
++  const build = { name: "build", stage: "build", allowFailure: false, page };
++  const listed = [{ ...row, pipeline: { ...pipeline, failedJobs: [build] } }];
++  expect(fixtureJobLog(page, listed)).toEqual({ kind: "notOffered" });
+ });
+diff --git a/frontend/src/ipc/fixtureMergeRequestLogs.ts b/frontend/src/ipc/fixtureMergeRequestLogs.ts
+index d07aefe..494349d 100644
+--- a/frontend/src/ipc/fixtureMergeRequestLogs.ts
++++ b/frontend/src/ipc/fixtureMergeRequestLogs.ts
+@@ -1,6 +1,7 @@
++import type * as Generated from "./bindings";
+ import type { WebPage } from "./domain";
+ import { TIMED_OUT } from "./fixtureGitLab";
+-import { fixtureRows, LOGGED_OUT_DETAIL, ORIGIN } from "./fixtureMergeRequestData";
++import { LOGGED_OUT_DETAIL } from "./fixtureMergeRequestData";
+ import type { JobLogReply } from "./mergeRequestDomain";
+ 
+ type RawLine = string | { readonly continues: string };
+@@ -8,13 +9,6 @@ type RawLine = string | { readonly continues: string };
+ export const NO_LOG_IID = 632;
+ export const LOGGED_OUT_LOG_IID = 624;
+ 
+-const JOB_PREFIX = `${ORIGIN}/-/jobs/`;
+-const JOB_NUMBER = /^\d+$/u;
+-const FIRST_JOB = 9000;
+-const JOBS_PER_ROW = 10;
+-const LINT_JOB = 0;
+-const UNIT_JOB = 1;
+-const SCRIPTED_ROWS_SCANNED = 20;
+ const LOG_START_MS = Date.parse("2026-10-30T09:00:01.123Z");
+ const LINE_STEP_MS = 7;
+ const MICROSECONDS = "456";
+@@ -119,38 +113,28 @@ function longUnitLog(): string {
+   return unitLog;
+ }
+ 
+-function scriptedRefusal(page: WebPage): JobLogReply | undefined {
+-  for (const row of fixtureRows(0, SCRIPTED_ROWS_SCANNED)) {
+-    const job = row.pipeline?.failedJobs.find((failed) => failed.page === page);
+-    if (job !== undefined) {
+-      return REFUSALS[row.iid]?.[job.name];
+-    }
+-  }
+-  return undefined;
+-}
+-
+-function jobNumber(page: WebPage): number | null {
+-  const number = page.slice(JOB_PREFIX.length);
+-  return page.startsWith(JOB_PREFIX) && JOB_NUMBER.test(number) ? Number(number) : null;
+-}
+-
+-/** The fixture's answer for a job page: a job page of the fixture's list gets a log or a scripted refusal; any other
+- *  page `notOffered` (as Rust, plan §2 row 158). */
+-export function fixtureJobLog(page: WebPage): JobLogReply {
+-  const refusal = scriptedRefusal(page);
+-  if (refusal !== undefined) {
+-    return refusal;
+-  }
+-  const job = jobNumber(page);
+-  if (job === null || job < FIRST_JOB) {
+-    return NOT_OFFERED;
+-  }
+-  switch (job % JOBS_PER_ROW) {
+-    case LINT_JOB:
++function namedLog(name: string): JobLogReply {
++  switch (name) {
++    case "lint:docs":
+       return { kind: "log", log: { text: stamped(LINT_LINES), cut: false } };
+-    case UNIT_JOB:
++    case "test:unit":
+       return { kind: "log", log: { text: longUnitLog(), cut: true } };
+     default:
+       return NOT_OFFERED;
+   }
+ }
++
++/** The fixture's answer for a job page: a failed job of a `listed` row gets its row's scripted refusal or its name's
++ *  log; any other page `notOffered` (as Rust, plan §2 row 158). */
++export function fixtureJobLog(
++  page: WebPage,
++  listed: readonly Generated.MergeRequestRow[],
++): JobLogReply {
++  for (const row of listed) {
++    const job = row.pipeline?.failedJobs.find((failed) => failed.page === page);
++    if (job !== undefined) {
++      return REFUSALS[row.iid]?.[job.name] ?? namedLog(job.name);
++    }
++  }
++  return NOT_OFFERED;
++}
+diff --git a/frontend/src/ipc/fixtureMergeRequests.ts b/frontend/src/ipc/fixtureMergeRequests.ts
+index b0b9097..063c2ea 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.ts
+@@ -62,6 +62,7 @@ const LIST_PAGE = 20;
+ const LIST_PAGES = 2;
+ const MANY_PAGE = 100;
+ const MANY_PAGES = 5;
++const LISTED_ROWS = MANY_PAGE * MANY_PAGES;
+ const SLOW_PAGE_MS = 1000;
+ const LOCAL_CHECK_MS = 1000;
+ const OPEN_PAUSE_MS = 1000;
+@@ -116,7 +117,7 @@ function scripted(script: MergeRequestScript, load: number): Scripted {
+     case "many":
+       return {
+         pages: pages(MANY_PAGE, MANY_PAGES),
+-        end: { kind: "cut", limit: MANY_PAGE * MANY_PAGES },
++        end: { kind: "cut", limit: LISTED_ROWS },
+       };
+     case "empty":
+       return { pages: [[]], end: LOADED };
+@@ -173,7 +174,7 @@ function rerequestReply(iid: number, username: string): Generated.RerequestReply
+   if (username === REFUSING_REVIEWER) {
+     return { kind: "refused", message: REFUSED_REREQUEST };
+   }
+-  const listed = fixtureRows(0, MANY_PAGE * MANY_PAGES).find((row) => row.iid === iid);
++  const listed = fixtureRows(0, LISTED_ROWS).find((row) => row.iid === iid);
+   const reviewers = listed?.reviewers ?? [];
+   if (!reviewers.some((reviewer) => reviewer.person.username === username)) {
+     return { kind: "notReviewer" };
+@@ -236,7 +237,7 @@ function pageScript(log: Log): Pick<MergeRequestSource, "openPage" | "readJobLog
+     async readJobLog(page) {
+       log.info("mergeRequests.fixture_job_log", { page });
+       await pause(LOG_PAUSE_MS);
+-      return { ok: true, value: fixtureJobLog(page) };
++      return { ok: true, value: fixtureJobLog(page, fixtureRows(0, LISTED_ROWS)) };
+     },
+   };
+ }
+diff --git a/frontend/src/ui/mergeRequestJobLogs.test.ts b/frontend/src/ui/mergeRequestJobLogs.test.ts
+index 7d97877..d10ede8 100644
+--- a/frontend/src/ui/mergeRequestJobLogs.test.ts
++++ b/frontend/src/ui/mergeRequestJobLogs.test.ts
+@@ -157,6 +157,27 @@ test("a_reply_after_close_is_dropped", async () => {
+   expect(info).not.toHaveBeenCalled();
+ });
+ 
++test("a_reply_for_a_closed_box_is_dropped_after_the_same_job_reopens", async () => {
++  const live = rig();
++  const info = vi.spyOn(log, "info");
++  const first = live.logs.showJobLog(LINT);
++  live.logs.closeJobLog();
++  const second = live.logs.showJobLog(LINT);
++  expect(live.asks.map((ask) => ask.page)).toEqual([LINT.page, LINT.page]);
++
++  askAt(live, 0).answer(logReply(RAW, false));
++  await first;
++  expect(shownOf(live)).toEqual({ job: LINT, load: LOADING });
++  expect(info).not.toHaveBeenCalled();
++
++  askAt(live, 1).answer(logReply(RAW, true));
++  await second;
++  expect(shownOf(live)).toEqual({
++    job: LINT,
++    load: { kind: "shown", view: jobLogView(RAW), cut: true },
++  });
++});
++
+ test("the_same_job_while_loading_or_shown_asks_nothing", async () => {
+   const live = rig();
+   const showing = live.logs.showJobLog(LINT);

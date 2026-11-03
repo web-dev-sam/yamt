@@ -1,6 +1,7 @@
+import type * as Generated from "./bindings";
 import type { WebPage } from "./domain";
 import { TIMED_OUT } from "./fixtureGitLab";
-import { fixtureRows, LOGGED_OUT_DETAIL, ORIGIN } from "./fixtureMergeRequestData";
+import { LOGGED_OUT_DETAIL } from "./fixtureMergeRequestData";
 import type { JobLogReply } from "./mergeRequestDomain";
 
 type RawLine = string | { readonly continues: string };
@@ -8,13 +9,6 @@ type RawLine = string | { readonly continues: string };
 export const NO_LOG_IID = 632;
 export const LOGGED_OUT_LOG_IID = 624;
 
-const JOB_PREFIX = `${ORIGIN}/-/jobs/`;
-const JOB_NUMBER = /^\d+$/u;
-const FIRST_JOB = 9000;
-const JOBS_PER_ROW = 10;
-const LINT_JOB = 0;
-const UNIT_JOB = 1;
-const SCRIPTED_ROWS_SCANNED = 20;
 const LOG_START_MS = Date.parse("2026-10-30T09:00:01.123Z");
 const LINE_STEP_MS = 7;
 const MICROSECONDS = "456";
@@ -119,38 +113,28 @@ function longUnitLog(): string {
   return unitLog;
 }
 
-function scriptedRefusal(page: WebPage): JobLogReply | undefined {
-  for (const row of fixtureRows(0, SCRIPTED_ROWS_SCANNED)) {
-    const job = row.pipeline?.failedJobs.find((failed) => failed.page === page);
-    if (job !== undefined) {
-      return REFUSALS[row.iid]?.[job.name];
-    }
-  }
-  return undefined;
-}
-
-function jobNumber(page: WebPage): number | null {
-  const number = page.slice(JOB_PREFIX.length);
-  return page.startsWith(JOB_PREFIX) && JOB_NUMBER.test(number) ? Number(number) : null;
-}
-
-/** The fixture's answer for a job page: a job page of the fixture's list gets a log or a scripted refusal; any other
- *  page `notOffered` (as Rust, plan §2 row 158). */
-export function fixtureJobLog(page: WebPage): JobLogReply {
-  const refusal = scriptedRefusal(page);
-  if (refusal !== undefined) {
-    return refusal;
-  }
-  const job = jobNumber(page);
-  if (job === null || job < FIRST_JOB) {
-    return NOT_OFFERED;
-  }
-  switch (job % JOBS_PER_ROW) {
-    case LINT_JOB:
+function namedLog(name: string): JobLogReply {
+  switch (name) {
+    case "lint:docs":
       return { kind: "log", log: { text: stamped(LINT_LINES), cut: false } };
-    case UNIT_JOB:
+    case "test:unit":
       return { kind: "log", log: { text: longUnitLog(), cut: true } };
     default:
       return NOT_OFFERED;
   }
+}
+
+/** The fixture's answer for a job page: a failed job of a `listed` row gets its row's scripted refusal or its name's
+ *  log; any other page `notOffered` (as Rust, plan §2 row 158). */
+export function fixtureJobLog(
+  page: WebPage,
+  listed: readonly Generated.MergeRequestRow[],
+): JobLogReply {
+  for (const row of listed) {
+    const job = row.pipeline?.failedJobs.find((failed) => failed.page === page);
+    if (job !== undefined) {
+      return REFUSALS[row.iid]?.[job.name] ?? namedLog(job.name);
+    }
+  }
+  return NOT_OFFERED;
 }

@@ -62,6 +62,7 @@ const LIST_PAGE = 20;
 const LIST_PAGES = 2;
 const MANY_PAGE = 100;
 const MANY_PAGES = 5;
+const LISTED_ROWS = MANY_PAGE * MANY_PAGES;
 const SLOW_PAGE_MS = 1000;
 const LOCAL_CHECK_MS = 1000;
 const OPEN_PAUSE_MS = 1000;
@@ -116,7 +117,7 @@ function scripted(script: MergeRequestScript, load: number): Scripted {
     case "many":
       return {
         pages: pages(MANY_PAGE, MANY_PAGES),
-        end: { kind: "cut", limit: MANY_PAGE * MANY_PAGES },
+        end: { kind: "cut", limit: LISTED_ROWS },
       };
     case "empty":
       return { pages: [[]], end: LOADED };
@@ -173,7 +174,7 @@ function rerequestReply(iid: number, username: string): Generated.RerequestReply
   if (username === REFUSING_REVIEWER) {
     return { kind: "refused", message: REFUSED_REREQUEST };
   }
-  const listed = fixtureRows(0, MANY_PAGE * MANY_PAGES).find((row) => row.iid === iid);
+  const listed = fixtureRows(0, LISTED_ROWS).find((row) => row.iid === iid);
   const reviewers = listed?.reviewers ?? [];
   if (!reviewers.some((reviewer) => reviewer.person.username === username)) {
     return { kind: "notReviewer" };
@@ -236,7 +237,7 @@ function pageScript(log: Log): Pick<MergeRequestSource, "openPage" | "readJobLog
     async readJobLog(page) {
       log.info("mergeRequests.fixture_job_log", { page });
       await pause(LOG_PAUSE_MS);
-      return { ok: true, value: fixtureJobLog(page) };
+      return { ok: true, value: fixtureJobLog(page, fixtureRows(0, LISTED_ROWS)) };
     },
   };
 }

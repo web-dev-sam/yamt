@@ -157,6 +157,27 @@ test("a_reply_after_close_is_dropped", async () => {
   expect(info).not.toHaveBeenCalled();
 });
 
+test("a_reply_for_a_closed_box_is_dropped_after_the_same_job_reopens", async () => {
+  const live = rig();
+  const info = vi.spyOn(log, "info");
+  const first = live.logs.showJobLog(LINT);
+  live.logs.closeJobLog();
+  const second = live.logs.showJobLog(LINT);
+  expect(live.asks.map((ask) => ask.page)).toEqual([LINT.page, LINT.page]);
+
+  askAt(live, 0).answer(logReply(RAW, false));
+  await first;
+  expect(shownOf(live)).toEqual({ job: LINT, load: LOADING });
+  expect(info).not.toHaveBeenCalled();
+
+  askAt(live, 1).answer(logReply(RAW, true));
+  await second;
+  expect(shownOf(live)).toEqual({
+    job: LINT,
+    load: { kind: "shown", view: jobLogView(RAW), cut: true },
+  });
+});
+
 test("the_same_job_while_loading_or_shown_asks_nothing", async () => {
   const live = rig();
   const showing = live.logs.showJobLog(LINT);

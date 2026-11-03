@@ -1,0 +1,5 @@
+just mutants HEAD → no Rust changes; web 306 killed, 86 survived, 2 no coverage (77.66%): fixtureMergeRequestLogs.ts 65/68, fixtureMergeRequests.ts 241/18
+fixtureMergeRequestLogs.ts:12-30 consts (LOG_START_MS, MICROSECONDS, STREAM, CONTINUED, NOT_OFFERED, E, REFUSALS) — gate-covered: module-level, Stryker can't re-run it (#732); STAMPED, notOffered and refusal tests assert each
+fixtureMergeRequestLogs.ts:34-82 LINT_LINES literals — gate-covered: module-level (#732); exact 37-line list, runs and 6 section start/end counts catch each; emptying :65/:63/:43 by hand fails the test
+fixtureMergeRequests.ts:65 LISTED_ROWS `*`→`/` — gate-covered: module-level (#732); fixtureMergeRequests.test.ts:86 asserts the many script's cut limit 500
+fixtureMergeRequests.ts:48-77 SCRIPTS/LOADED/FIXTURE_TARGET/messages, :134 default arm, :167 — not lines changed in this round (earlier slices)
