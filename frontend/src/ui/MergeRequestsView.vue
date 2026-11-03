@@ -5,14 +5,7 @@ import ArrowLeft from "~icons/lucide/arrow-left";
 import RefreshCw from "~icons/lucide/refresh-cw";
 import X from "~icons/lucide/x";
 
-import {
-  agoText,
-  filterLabel,
-  isFiltered,
-  timeTitle,
-  type ListFilter,
-  type ReviewFor,
-} from "../mergeRequests";
+import { filterLabel, isFiltered, type ListFilter, type ReviewFor } from "../mergeRequests";
 import { RETRY } from "./aiText";
 import ChoiceButtons from "./ChoiceButtons.vue";
 import { returnFocus } from "./focusReturn";
@@ -38,6 +31,7 @@ import { DISMISS_LABEL } from "./searchText";
 import { BACK } from "./serverText";
 import { vTooltip } from "./tooltip";
 import { useHoverMenu } from "./useHoverMenu";
+import { useListAge } from "./useListAge";
 
 type FilterBar = InstanceType<typeof MergeRequestFilter>;
 type Picker = InstanceType<typeof MergeRequestReviewMode>;
@@ -80,6 +74,7 @@ const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey, dis
   });
 const focusedBefore = document.activeElement;
 const now = useNow({ scheduler: (tick) => useIntervalFn(tick, MINUTE_MS) });
+const age = useListAge(listedAt);
 useEventListener(window, "keydown", escapePressed);
 useEventListener(window, "focus", windowFocused);
 
@@ -90,11 +85,6 @@ const empty = computed(
 );
 const filtered = computed(() => isFiltered(filters.value));
 const nowMs = computed(() => now.value.getTime());
-const age = computed(() =>
-  listedAt.value === null
-    ? null
-    : { text: agoText(listedAt.value, nowMs.value), title: timeTitle(listedAt.value, nowMs.value) },
-);
 
 onMounted(() => {
   back.value?.focus();

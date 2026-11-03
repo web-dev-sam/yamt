@@ -1,0 +1,219 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 2a908ea..2bf7b82 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -46,7 +46,7 @@ Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`
+ 
+ Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. What the page shows from the loaded rows is `mergeRequestsShown.ts` `shownOf`: the remembered filters, `shownRows` (`datedFirst(searched(filtered(…)))`, or the review order while `filters.review` is set; one computed gives it and `reviewSort`), the checklists' `choices` (over every loaded row, never searched; `choices.review` is the picker's, `reviewChoices`), the summary, `viewer` (`viewerOf`) and `reviewSort` (null without review mode). Its filter row starts with `MergeRequestSearch.vue` (request #2150: the title or any `!number` named in the text, `mergeRequests/` `searched`; the slice's `search`, written by `setSearch` and emptied by `show`, kept through Refresh, never stored, not cleared by "Clear filters"; × and Escape with text empty it and keep the focus, Escape in the empty field closes the page as before because the field prevents only the Escape it used), then three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; presentational: the View holds their one menu; `menuitemcheckbox` items keep it open; the menu is a `MergeRequestMenu.vue`, below; × clears), review mode's button and sort icon (below), and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the people stack, the "+N" labels chip, the due date, the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box through `useHoverBox` on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
+ 
+-The list's age (request `docs/slices/request-mr-starts.md` part A): the slice's `listedAt` is when the list now on screen finished loading, null until one has; `ended` writes it (its only writer) only on an end without a failure text, the end that swaps the rows in, so a Refresh in flight, a failed or thrown call and a failure end keep it (`listing`'s `at`, the stale reload's clock, is every end's). Left of Refresh, in one `ml-auto` group with it, the header shows `mergeRequests/` `agoText(listedAt, now)` in `text-fg-muted` with `timeTitle` as its `v-tooltip` (`HH:MM` on today's local day, else `dateTimeText`), nothing while null; it follows the page's minute `now`.
++The list's age (request `docs/slices/request-mr-starts.md` part A): the slice's `listedAt` is when the list now on screen finished loading, null until one has; `ended` writes it (its only writer) only on an end without a failure text, the end that swaps the rows in, so a Refresh in flight, a failed or thrown call and a failure end keep it (`listing`'s `at`, the stale reload's clock, is every end's). Left of Refresh, in one `ml-auto` group with it, the header shows `useListAge(listedAt)`: `mergeRequests/` `agoText(listedAt, now)` in `text-fg-muted` with `timeTitle` as its `v-tooltip` (`HH:MM` on today's local day, else `dateTimeText`), nothing while null. Its `now` is its own: read when `listedAt` changes and by a timeout set for the next whole minute after `listedAt` (rule A1: "just now" only under a minute), so the rows keep the page's minute `now` and never re-render for the header.
+ 
+ The start screen (request `docs/slices/request-mr-starts.md` part B, plan §2 #167): `yamt --mr` reaches the window as `<html data-open="mergeRequests">` (the fixture page: `?open=mergeRequests`); `main.ts` reads it once through `startScreen.ts` `startScreenOf` (only that word means the page) into the one `WindowStart { theme, screen }` both `createCompareStore` and `createRangeStore` take. `openAtStart` (the stores' start-up step beside `loadSettings`) awaits `findProject` and calls the slice's `show` only when started on the page and the project is `found`, so no project or a failed lookup leaves the window on its files with the lookup's problem as before. No other code opens the page at start.
+ 
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index ee0dbbf..1f94026 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -5,14 +5,7 @@ import ArrowLeft from "~icons/lucide/arrow-left";
+ import RefreshCw from "~icons/lucide/refresh-cw";
+ import X from "~icons/lucide/x";
+ 
+-import {
+-  agoText,
+-  filterLabel,
+-  isFiltered,
+-  timeTitle,
+-  type ListFilter,
+-  type ReviewFor,
+-} from "../mergeRequests";
++import { filterLabel, isFiltered, type ListFilter, type ReviewFor } from "../mergeRequests";
+ import { RETRY } from "./aiText";
+ import ChoiceButtons from "./ChoiceButtons.vue";
+ import { returnFocus } from "./focusReturn";
+@@ -38,6 +31,7 @@ import { DISMISS_LABEL } from "./searchText";
+ import { BACK } from "./serverText";
+ import { vTooltip } from "./tooltip";
+ import { useHoverMenu } from "./useHoverMenu";
++import { useListAge } from "./useListAge";
+ 
+ type FilterBar = InstanceType<typeof MergeRequestFilter>;
+ type Picker = InstanceType<typeof MergeRequestReviewMode>;
+@@ -80,6 +74,7 @@ const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey, dis
+   });
+ const focusedBefore = document.activeElement;
+ const now = useNow({ scheduler: (tick) => useIntervalFn(tick, MINUTE_MS) });
++const age = useListAge(listedAt);
+ useEventListener(window, "keydown", escapePressed);
+ useEventListener(window, "focus", windowFocused);
+ 
+@@ -90,11 +85,6 @@ const empty = computed(
+ );
+ const filtered = computed(() => isFiltered(filters.value));
+ const nowMs = computed(() => now.value.getTime());
+-const age = computed(() =>
+-  listedAt.value === null
+-    ? null
+-    : { text: agoText(listedAt.value, nowMs.value), title: timeTitle(listedAt.value, nowMs.value) },
+-);
+ 
+ onMounted(() => {
+   back.value?.focus();
+diff --git a/frontend/src/ui/useListAge.test.ts b/frontend/src/ui/useListAge.test.ts
+new file mode 100644
+index 0000000..b824e2a
+--- /dev/null
++++ b/frontend/src/ui/useListAge.test.ts
+@@ -0,0 +1,107 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { effectScope, nextTick, shallowRef, type EffectScope, type ShallowRef } from "vue";
++
++import { timeTitle } from "../mergeRequests";
++import { useListAge } from "./useListAge";
++
++const T0 = new Date(2026, 10, 3, 12, 0, 17, 250).getTime();
++const SECOND_MS = 1_000;
++
++let scope: EffectScope;
++
++beforeEach(() => {
++  vi.useFakeTimers();
++  vi.setSystemTime(T0);
++  scope = effectScope();
++});
++
++afterEach(() => {
++  scope.stop();
++  vi.useRealTimers();
++});
++
++function listAge(listedAt: ShallowRef<number | null>): ReturnType<typeof useListAge> {
++  const made = scope.run(() => useListAge(listedAt));
++  if (made === undefined) {
++    throw new Error("scope stopped");
++  }
++  return made;
++}
++
++function seconds(count: number): void {
++  vi.advanceTimersByTime(count * SECOND_MS);
++}
++
++test("the age reads just now for 59 s and 1 minute ago at 60 s, 2 minutes ago at 120 s (catches a page clock lagging the load)", () => {
++  const age = listAge(shallowRef<number | null>(T0));
++  seconds(59);
++  expect(age.value?.text).toBe("just now");
++  seconds(1);
++  expect(age.value?.text).toBe("1 minute ago");
++  seconds(59);
++  expect(age.value?.text).toBe("1 minute ago");
++  seconds(1);
++  expect(age.value?.text).toBe("2 minutes ago");
++});
++
++test("a list loaded 30 s before the page opened turns 1 minute ago 30 s after it (catches a clock counted from mount)", () => {
++  const age = listAge(shallowRef<number | null>(T0 - 30 * SECOND_MS));
++  seconds(29);
++  expect(age.value?.text).toBe("just now");
++  seconds(1);
++  expect(age.value?.text).toBe("1 minute ago");
++});
++
++test("a new listedAt reads just now at once and counts its minute from itself", async () => {
++  const listedAt = shallowRef<number | null>(T0);
++  const age = listAge(listedAt);
++  seconds(90);
++  expect(age.value?.text).toBe("1 minute ago");
++  listedAt.value = Date.now();
++  await nextTick();
++  expect(age.value?.text).toBe("just now");
++  seconds(59);
++  expect(age.value?.text).toBe("just now");
++  seconds(1);
++  expect(age.value?.text).toBe("1 minute ago");
++});
++
++test("no listedAt is no age and no timer; a first one starts both", async () => {
++  const listedAt = shallowRef<number | null>(null);
++  const age = listAge(listedAt);
++  expect(age.value).toBeNull();
++  expect(vi.getTimerCount()).toBe(0);
++  seconds(30);
++  listedAt.value = Date.now();
++  await nextTick();
++  expect(age.value?.text).toBe("just now");
++  seconds(60);
++  expect(age.value?.text).toBe("1 minute ago");
++});
++
++test("listedAt turning null stops the timer", async () => {
++  const listedAt = shallowRef<number | null>(T0);
++  const age = listAge(listedAt);
++  listedAt.value = null;
++  await nextTick();
++  expect(age.value).toBeNull();
++  expect(vi.getTimerCount()).toBe(0);
++});
++
++test("the hover follows the clock across midnight", () => {
++  const beforeMidnight = new Date(2026, 10, 3, 23, 59, 30).getTime();
++  vi.setSystemTime(beforeMidnight);
++  const age = listAge(shallowRef<number | null>(beforeMidnight));
++  const today = age.value?.title;
++  expect(today).toBe(timeTitle(beforeMidnight, beforeMidnight));
++  seconds(60);
++  expect(age.value?.title).toBe(timeTitle(beforeMidnight, Date.now()));
++  expect(age.value?.title).not.toBe(today);
++});
++
++test("unmount stops the timer", () => {
++  listAge(shallowRef<number | null>(T0));
++  expect(vi.getTimerCount()).toBe(1);
++  scope.stop();
++  expect(vi.getTimerCount()).toBe(0);
++});
+diff --git a/frontend/src/ui/useListAge.ts b/frontend/src/ui/useListAge.ts
+new file mode 100644
+index 0000000..408dfbd
+--- /dev/null
++++ b/frontend/src/ui/useListAge.ts
+@@ -0,0 +1,39 @@
++import { useTimeoutFn } from "@vueuse/core";
++import { computed, shallowRef, toRef, watch, type ComputedRef, type MaybeRefOrGetter } from "vue";
++
++import { agoText, timeTitle } from "../mergeRequests";
++
++const MINUTE_MS = 60_000;
++
++interface ListAge {
++  readonly text: string;
++  readonly title: string;
++}
++
++export function useListAge(listedAt: MaybeRefOrGetter<number | null>): ComputedRef<ListAge | null> {
++  const at = toRef(listedAt);
++  const now = shallowRef(Date.now());
++  const delay = shallowRef(MINUTE_MS);
++  const tick = useTimeoutFn(read, delay, { immediate: false });
++  watch(at, read, { immediate: true });
++
++  function read(): void {
++    now.value = Date.now();
++    if (at.value === null) {
++      tick.stop();
++      return;
++    }
++    delay.value = untilNextMinute(at.value, now.value);
++    tick.start();
++  }
++
++  return computed(() =>
++    at.value === null
++      ? null
++      : { text: agoText(at.value, now.value), title: timeTitle(at.value, now.value) },
++  );
++}
++
++function untilNextMinute(at: number, now: number): number {
++  return MINUTE_MS - ((now - at) % MINUTE_MS);
++}
