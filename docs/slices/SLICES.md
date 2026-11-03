@@ -99,6 +99,18 @@ passes never sent a real Shift release (synthetic keydown only), so they missed 
 | 1   | fix (`briefs/mr-shift-held.md`), reproduce with real keys | web-impl | done   | `2a5cf8b2` + R1 `8b9b2b6b` (#2147 #2148: one `keyHold` shell for Alt and Shift, one shared Shift state); reproduced with real X11 keys (WebDriver keys don't); 86/86 mutants; reviews pass; #2149 dropped. Docs `e4caf12d`, `ce73ad38`. Notes `MrShiftHeld*.md` |
 | 2   | verify: `just check`, real-key WebKit and real-app steps  | verifier | done   | `MrShiftHeldFinal` at `ce73ad38`: `just check` pass; fixture + real app Shift down 6/6 (3/3), up 6/0 (3/0) at once and after 2 s; Shift+click leaves only the red icon; plain click includes; Alt minimap unchanged. Notes `MrShiftHeldFinal.md`                |
 
+## Merge-request search (session 45; owner #2150: "Text search in MR list (also matches XXXX gitlab id anywhere in search text, searches title)")
+
+Brief `briefs/mr-search.md` (rules 1–6): a field first in the filter bar; title contains the text (any case) or a
+number anywhere in the text equals the iid; AND with the filters; not stored, empty on each visit (orchestrator details,
+owner may veto). No product question open.
+
+| row | slice                                                | owner       | status  | evidence |
+| --- | ---------------------------------------------------- | ----------- | ------- | -------- |
+| 1   | search (`briefs/mr-search.md`): core, state, field   | web-impl    | running |          |
+| 2   | docs keeper: tree/state rows, architecture page text | docs-keeper | pending |          |
+| 3   | verify: `just check`, the brief's WebKit steps       | verifier    | pending |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
