@@ -93,8 +93,12 @@ test("punctuation becomes its X keysym name; characters without one are refused"
 });
 
 test("unknown keys and modifiers, a repeated modifier and a missing key are refused", () => {
-  expect(() => parseChord("Hyper+a")).toThrow(/unknown modifier "Hyper"/);
-  expect(() => parseChord("Ctrl+Enterr")).toThrow(/unknown key "Enterr"/);
+  expect(() => parseChord("Hyper+a")).toThrow(
+    /unknown modifier "Hyper" in "Hyper\+a" \(Ctrl, Shift, Alt, Meta\)/,
+  );
+  expect(() => parseChord("Ctrl+Enterr")).toThrow(
+    /unknown key "Enterr" \(named keys: Enter, Escape, Tab, /,
+  );
   expect(() => parseChord("Ctrl+Control+a")).toThrow(/repeated modifier/);
   expect(() => parseChord("Ctrl+")).toThrow(/no key in "Ctrl\+"/);
   expect(() => parseChord("")).toThrow(/no key/);

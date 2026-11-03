@@ -37,11 +37,20 @@ test("the_plain_style_has_no_class", () => {
 
 test.each(COLOURS)("every_colour_has_its_class_both_ways: $colour", ({ colour, token }) => {
   expect(runClasses({ ...PLAIN, foreground: colour })).toBe(`text-ansi-${token}`);
-  expect(runClasses({ ...PLAIN, background: colour })).toBe(`bg-ansi-${token}`);
-  expect(runClasses({ ...PLAIN, foreground: colour, background: colour })).toBe(
-    `text-ansi-${token} bg-ansi-${token}`,
-  );
+  expect(runClasses({ ...PLAIN, background: colour })).toBe(`text-panel bg-ansi-${token}`);
 });
+
+test.each(COLOURS)(
+  "a_coloured_background_takes_the_panel_colour_as_text: $colour",
+  ({ colour }) => {
+    expect(runClasses({ ...PLAIN, foreground: colour, background: "red" })).toBe(
+      "text-panel bg-ansi-red",
+    );
+    expect(runClasses({ ...PLAIN, foreground: "white", background: colour })).toMatch(
+      /^text-panel /,
+    );
+  },
+);
 
 test("every colour is tested once", () => {
   expect(new Set(COLOURS.map(({ colour }) => colour)).size).toBe(16);
@@ -70,5 +79,5 @@ test("every part together, in one order", () => {
       underline: true,
       struck: false,
     }),
-  ).toBe("text-ansi-bright-red bg-ansi-blue font-bold italic underline");
+  ).toBe("text-panel bg-ansi-blue font-bold italic underline");
 });

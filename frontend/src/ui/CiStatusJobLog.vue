@@ -5,9 +5,11 @@ import { computed, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch
 import type { WebPage } from "../ipc";
 import {
   firstHit,
+  firstLineBelow,
   hitCountText,
   hitPlaces,
   NO_RESULTS,
+  placesOnLines,
   steppedHit,
   type HitPlace,
 } from "../mergeRequests";
@@ -45,6 +47,7 @@ const lines = useTemplateRef<HTMLDivElement>("lines");
 const query = shallowRef(jobSearch(props.shown.job.name));
 const places = shallowRef<readonly HitPlace[]>([]);
 const current = shallowRef<number | null>(null);
+let frame: number | null = null;
 const boxSize = useElementSize(box, undefined, { box: "border-box" });
 const placement = useMenuPlacement(box, () => ({
   x: props.anchor.left - boxSize.width.value,
@@ -54,6 +57,9 @@ const follow = useFollowEnd(scroller, () => props.shown.load);
 
 const title = computed(() => jobLogTitle(props.shown.job.name));
 const loaded = computed(() => (props.shown.load.kind === "shown" ? props.shown.load : null));
+const answered = computed(
+  () => props.shown.load.kind === "refused" || props.shown.load.kind === "failed",
+);
 const note = computed((): string | null => {
   const load = props.shown.load;
   switch (load.kind) {
@@ -82,17 +88,28 @@ const countText = computed(() => {
 });
 
 watch(loaded, search, { flush: "post" });
+watch(answered, leaveField, { flush: "post" });
 
 onMounted(() => {
   field.value?.focus();
   field.value?.select();
+  leaveField();
   search();
 });
 
 onBeforeUnmount(() => {
+  if (frame !== null) {
+    cancelAnimationFrame(frame);
+  }
   CSS.highlights.delete(MATCHES);
   CSS.highlights.delete(CURRENT);
 });
+
+function leaveField(): void {
+  if (answered.value && document.activeElement === field.value) {
+    scroller.value?.focus();
+  }
+}
 
 function rangeOf(place: HitPlace): Range | null {
   const line = lines.value?.children[place.line];
@@ -128,6 +145,43 @@ function showCurrent(): void {
   centre(range);
 }
 
+function bottomOf(rows: HTMLCollection, line: number): number {
+  const row = rows[line];
+  return row instanceof HTMLElement ? row.offsetTop + row.offsetHeight : Infinity;
+}
+
+function topOf(rows: HTMLCollection, line: number): number {
+  const row = rows[line];
+  return row instanceof HTMLElement ? row.offsetTop : Infinity;
+}
+
+function paintMatches(): void {
+  const element = scroller.value;
+  const rows = lines.value?.children;
+  const matches = new Highlight();
+  if (element !== null && rows !== undefined) {
+    const screen = element.clientHeight;
+    const above = element.scrollTop - screen;
+    const below = element.scrollTop + screen + screen;
+    const first = firstLineBelow(rows.length, (line) => bottomOf(rows, line), above);
+    const end = firstLineBelow(rows.length, (line) => topOf(rows, line), below);
+    for (const place of placesOnLines(places.value, first, end)) {
+      const range = rangeOf(place);
+      if (range !== null) {
+        matches.add(range);
+      }
+    }
+  }
+  CSS.highlights.set(MATCHES, matches);
+}
+
+function paintSoon(): void {
+  frame ??= requestAnimationFrame(() => {
+    frame = null;
+    paintMatches();
+  });
+}
+
 function search(): void {
   const view = loaded.value?.view;
   const hits =
@@ -136,15 +190,13 @@ function search(): void {
       : (matcherOf({ text: query.value, matchCase: false })?.hits(view.text, Infinity).hits ?? []);
   places.value = view === undefined ? [] : hitPlaces(view, hits);
   current.value = firstHit(places.value.length);
-  const matches = new Highlight();
-  for (const place of places.value) {
-    const range = rangeOf(place);
-    if (range !== null) {
-      matches.add(range);
-    }
-  }
-  CSS.highlights.set(MATCHES, matches);
   showCurrent();
+  paintMatches();
+}
+
+function scrolled(): void {
+  follow.scrolled();
+  paintSoon();
 }
 
 function typed(event: Event): void {
@@ -160,6 +212,7 @@ function fieldKey(event: KeyboardEvent): void {
     event.preventDefault();
     current.value = steppedHit(current.value, places.value.length, event.shiftKey);
     showCurrent();
+    paintSoon();
   }
 }
 
@@ -198,8 +251,8 @@ function keydown(event: KeyboardEvent): void {
     <div
       ref="scroller"
       tabindex="0"
-      class="min-h-0 flex-1 overflow-y-auto bg-panel px-2 py-1 font-mono [overflow-wrap:anywhere] whitespace-pre-wrap"
-      @scroll="follow.scrolled"
+      class="relative min-h-0 flex-1 overflow-y-auto bg-panel px-2 py-1 font-mono [overflow-wrap:anywhere] whitespace-pre-wrap"
+      @scroll="scrolled"
     >
       <p v-if="note !== null">{{ note }}</p>
       <template v-else-if="loaded !== null">

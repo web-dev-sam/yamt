@@ -38,6 +38,13 @@ const BACKGROUNDS: Readonly<Record<AnsiColour, string>> = {
   brightWhite: "bg-ansi-bright-white",
 };
 
+function textClass(style: LogStyle): string {
+  if (style.background !== null) {
+    return "text-panel";
+  }
+  return style.foreground === null ? "" : FOREGROUNDS[style.foreground];
+}
+
 function linesClass(underline: boolean, struck: boolean): string {
   if (underline && struck) {
     return "[text-decoration-line:underline_line-through]";
@@ -51,7 +58,7 @@ function linesClass(underline: boolean, struck: boolean): string {
 /** The classes of a run: full class names from static tables (Tailwind sees them), "" for the plain style. */
 export function runClasses(style: LogStyle): string {
   return [
-    style.foreground === null ? "" : FOREGROUNDS[style.foreground],
+    textClass(style),
     style.background === null ? "" : BACKGROUNDS[style.background],
     style.bold ? "font-bold" : "",
     style.italic ? "italic" : "",

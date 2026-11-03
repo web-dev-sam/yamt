@@ -220,11 +220,11 @@ test("every filter shares one state and one set of listeners until the last one 
 test("held_and_taps_share_one_listener_set", () => {
   const other = effectScope();
   const held = heldIn();
-  const taps = other.run(() => useShiftTaps());
   expect([...page.window.listening.keys()]).toEqual(["keydown", "keyup", "blur"]);
-
   send(page.window, "keydown", { key: "Shift" });
   expect(held.value).toBe(true);
+
+  const taps = other.run(() => useShiftTaps());
   send(page.window, "keyup", { key: "Shift" });
   expect(held.value).toBe(false);
   expect(taps?.value).toBe(1);

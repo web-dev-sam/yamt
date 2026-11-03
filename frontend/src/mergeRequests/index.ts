@@ -96,4 +96,11 @@ export {
   type LogStyle,
   type RunPoint,
 } from "./internal/jobLog";
-export { NO_RESULTS, firstHit, hitCountText, steppedHit } from "./internal/jobLogSearch";
+export {
+  NO_RESULTS,
+  firstHit,
+  firstLineBelow,
+  hitCountText,
+  placesOnLines,
+  steppedHit,
+} from "./internal/jobLogSearch";

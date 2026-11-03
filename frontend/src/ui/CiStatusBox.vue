@@ -19,8 +19,8 @@ import {
   jobTitle,
   MORE_FAILED_JOBS,
 } from "./mergeRequestsText";
-import { isTypingTarget } from "./rangeKeys";
 import { vTooltip } from "./tooltip";
+import { isTypingTarget } from "./typingTarget";
 import { useHoverBox } from "./useHoverBox";
 import { useShiftTaps } from "./useShiftHeld";
 
@@ -75,7 +75,12 @@ watch(useShiftTaps(), () => {
   void showJobLog({ name: job.name, page: job.page });
 });
 watch(open, (now) => {
-  if (!now && ownLog.value !== null) {
+  if (now) {
+    return;
+  }
+  pointed.value = null;
+  focused.value = null;
+  if (ownLog.value !== null) {
     closeJobLog();
   }
 });
@@ -90,28 +95,24 @@ function point(job: FailedJob): void {
   pointed.value = job;
 }
 
-function unpoint(job: FailedJob): void {
-  if (pointed.value === job) {
-    pointed.value = null;
-  }
+function unpoint(): void {
+  pointed.value = null;
 }
 
 function focus(job: FailedJob): void {
   focused.value = job;
 }
 
-function unfocus(job: FailedJob): void {
-  if (focused.value === job) {
-    focused.value = null;
-  }
+function unfocus(): void {
+  focused.value = null;
 }
 
 function logClosed(): void {
   const page = ownLog.value?.job.page;
   closeJobLog();
-  const index =
-    view.value.kind === "jobs" ? view.value.jobs.findIndex((job) => job.page === page) : -1;
-  box.value?.querySelectorAll<HTMLButtonElement>("li > button")[index]?.focus();
+  if (page !== undefined) {
+    box.value?.querySelector<HTMLButtonElement>(`[data-job-page="${CSS.escape(page)}"]`)?.focus();
+  }
 }
 </script>
 
@@ -152,16 +153,17 @@ function logClosed(): void {
             :key="index"
             v-tooltip="jobTitle(job.name, job.page)"
             @pointerenter="point(job)"
-            @pointerleave="unpoint(job)"
+            @pointerleave="unpoint"
           >
             <button
               type="button"
+              :data-job-page="job.page"
               :disabled="job.page === null"
               aria-keyshortcuts="Shift"
               class="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected disabled:pointer-events-none"
               @click="openJob(job)"
               @focus="focus(job)"
-              @blur="unfocus(job)"
+              @blur="unfocus"
             >
               <span>{{ job.name }}</span>
               <span class="text-fg-muted">{{ job.stage }}</span>

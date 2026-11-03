@@ -99,6 +99,16 @@ test("a failed save says the file could not be saved, with the write's own cause
   );
 });
 
+test("a failed write's message loses its closing line break", () => {
+  const said = text({
+    action: "save",
+    path: PATH,
+    cause: { kind: "WriteFailed", path: PATH, message: "disk full\n" },
+  });
+
+  expect(said).toBe(`Could not save ${PATH}: writing ${PATH} failed: disk full`);
+});
+
 test("ReadFailed names the path and the system's message", () => {
   const said = text({
     action: "take",
@@ -143,6 +153,28 @@ test("a broken settings entry without a position names the error only", () => {
   expect(
     text({ action: "settings", cause: { kind: "SettingsBroken", path: SETTINGS, message } }),
   ).toBe(`The settings file ${SETTINGS} has an error: ${message}. Fix it or choose another file.`);
+});
+
+test("a settings error ending in a line break still names its place, or the error alone", () => {
+  const placed = "expected `,` or `}` at line 3 column 7\n";
+  const unplaced = "`theme`: unknown variant `blue`\n";
+
+  expect(
+    text({
+      action: "settings",
+      cause: { kind: "SettingsBroken", path: SETTINGS, message: placed },
+    }),
+  ).toBe(
+    `The settings file ${SETTINGS} has an error at line 3, column 7: expected \`,\` or \`}\`. Fix it or choose another file.`,
+  );
+  expect(
+    text({
+      action: "settings",
+      cause: { kind: "SettingsBroken", path: SETTINGS, message: unplaced },
+    }),
+  ).toBe(
+    `The settings file ${SETTINGS} has an error: \`theme\`: unknown variant \`blue\`. Fix it or choose another file.`,
+  );
 });
 
 test("the other settings failures say the settings file could not be used and why", () => {

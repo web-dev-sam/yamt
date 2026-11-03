@@ -1,15 +1,11 @@
 import { expect, test } from "vitest";
 
-import { boxKeydown, isTypingTarget } from "./rangeKeys";
+import { boxKeydown } from "./rangeKeys";
 
 const LINUX = "Linux x86_64";
 const MAC = "MacIntel";
 
 type Held = Partial<Record<"ctrl" | "meta" | "alt" | "shift" | "composing", true>>;
-
-function element(fields: Readonly<Record<string, string>>): EventTarget {
-  return Object.assign(new EventTarget(), fields);
-}
 
 function boxPress(key: string, platform: string, held: Held = {}): string {
   const seen: string[] = [];
@@ -41,29 +37,6 @@ function boxPress(key: string, platform: string, held: Held = {}): string {
   );
   return seen.join(" ");
 }
-
-test("a text area and the text-like inputs are typing targets", () => {
-  expect(isTypingTarget(element({ tagName: "TEXTAREA" }))).toBe(true);
-  for (const type of ["text", "search", "url", "email", "password", "tel", "number"]) {
-    expect(isTypingTarget(element({ tagName: "INPUT", type }))).toBe(true);
-  }
-});
-
-test("buttons, checkboxes, other elements, the window and nothing are not typing targets", () => {
-  expect(isTypingTarget(element({ tagName: "INPUT", type: "checkbox" }))).toBe(false);
-  expect(isTypingTarget(element({ tagName: "INPUT", type: "button" }))).toBe(false);
-  expect(isTypingTarget(element({ tagName: "INPUT" }))).toBe(false);
-  expect(isTypingTarget(element({ tagName: "BUTTON", type: "text" }))).toBe(false);
-  expect(isTypingTarget(element({ tagName: "DIV" }))).toBe(false);
-  expect(isTypingTarget(element({ type: "text" }))).toBe(false);
-  expect(isTypingTarget(new EventTarget())).toBe(false);
-  expect(isTypingTarget(null)).toBe(false);
-});
-
-test("an input whose type is not a string is not a typing target, even one that reads as text", () => {
-  const typed = Object.assign(new EventTarget(), { tagName: "INPUT", type: ["text"] });
-  expect(isTypingTarget(typed)).toBe(false);
-});
 
 test("Ctrl+Enter submits on Linux, Cmd+Enter on macOS, each kept from the column and the window", () => {
   expect(boxPress("Enter", LINUX, { ctrl: true })).toBe("prevented stopped submit");

@@ -1,0 +1,7 @@
+just mutants HEAD → 116 killed / 6 timeout / 2 survived / 0 no-cov (98.39%); just mutants e205cad2~1 → 915 / 6 / 4 / 21 no-cov (97.36%)
+src/mergeRequests/internal/jobLogSearch.ts:48 places[index]?.line → places[index].line — equivalent: firstWhere only passes index < places.length; the ?. is there for noUncheckedIndexedAccess
+src/mergeRequests/internal/jobLogSearch.ts:3 NO_RESULTS "" — gate-covered: module-level constant (#732, --ignoreStatic), asserted in the_count_reads_one_based
+src/ui/problemText.ts:167 found ?? [] → ["Stryker was here"] — equivalent: destructuring skips index 0, so `what` still takes its default
+src/ui/useHoverBox.ts:117 at {x:0,y:0} → {} — equivalent: placement shows only while open, and only show() opens, writing `at` first. Scroll capture is pinned by 'it listens for scrolls anywhere, captured and passive'
+scripts/app-session/keys.ts:204 parts.at(-1) ?? "" (NoCoverage) — equivalent: split always returns at least one element
+src/ui/mergeRequestLogText.ts:27, mergeRequestsText.ts:68,133,174,194,234,258,276, problemText.ts:157,182 default arm ×2 each (NoCoverage) — equivalent: the never arm cannot be reached once the switch is exhaustive
