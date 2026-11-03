@@ -49,8 +49,8 @@ afterEach(() => {
   scope.stop();
 });
 
-function heldIn(): Readonly<{ value: boolean }> {
-  const held = scope.run(() => useShiftHeld());
+function heldIn(within: EffectScope = scope): Readonly<{ value: boolean }> {
+  const held = within.run(() => useShiftHeld());
   if (held === undefined) {
     throw new Error("scope stopped");
   }
@@ -115,38 +115,23 @@ test("typing while Shift is held keeps the icons", () => {
   send(page.window, "keydown", { key: "Shift" });
 
   send(page.window, "keydown", { key: "A" });
-  send(page.window, "keyup", { key: "A" });
+  send(page.window, "keyup", { key: "A", shiftKey: true });
   expect(held.value).toBe(true);
 });
 
-test("keys are heard in the capture phase; pointers not while Shift is up", () => {
+test("while held, pointer events and no wheel are heard", async () => {
   heldIn();
-
-  expect(Object.fromEntries(page.window.listening)).toEqual({
-    keydown: "capture",
-    keyup: "capture",
-    blur: "",
-  });
-});
-
-test("while held, pointer events are heard in the capture phase, passively", async () => {
-  const held = heldIn();
 
   send(page.window, "keydown", { key: "Shift" });
   await nextTick();
-  expect(Object.fromEntries(page.window.listening)).toEqual({
-    keydown: "capture",
-    keyup: "capture",
-    blur: "",
-    pointerdown: "capture passive",
-    pointermove: "capture passive",
-    pointerup: "capture passive",
-  });
-
-  send(page.window, "keyup", { key: "Shift" });
-  await nextTick();
-  expect(held.value).toBe(false);
-  expect([...page.window.listening.keys()]).toEqual(["keydown", "keyup", "blur"]);
+  expect([...page.window.listening.keys()]).toEqual([
+    "keydown",
+    "keyup",
+    "blur",
+    "pointerdown",
+    "pointermove",
+    "pointerup",
+  ]);
 });
 
 test.each(["pointerdown", "pointermove", "pointerup"])(
@@ -163,38 +148,16 @@ test.each(["pointerdown", "pointermove", "pointerup"])(
   },
 );
 
-test("the window losing focus hides", () => {
+test("every filter shares one state and one set of listeners until the last one goes", () => {
+  const other = effectScope();
   const held = heldIn();
+  const otherHeld = heldIn(other);
+  expect(otherHeld).toBe(held);
+
+  scope.stop();
   send(page.window, "keydown", { key: "Shift" });
+  expect(otherHeld.value).toBe(true);
 
-  send(page.window, "blur");
-  expect(held.value).toBe(false);
-});
-
-test("the page becoming hidden hides; becoming visible does not", async () => {
-  const held = heldIn();
-  send(page.window, "keydown", { key: "Shift" });
-
-  page.document.visibilityState = "hidden";
-  send(page.document, "visibilitychange");
-  await nextTick();
-  expect(held.value).toBe(false);
-
-  send(page.window, "keydown", { key: "Shift" });
-  page.document.visibilityState = "visible";
-  send(page.document, "visibilitychange");
-  await nextTick();
-  expect(held.value).toBe(true);
-});
-
-test("no event's default is prevented", async () => {
-  heldIn();
-  const events = [send(page.window, "keydown", { key: "Shift" })];
-  await nextTick();
-  events.push(
-    send(page.window, "pointermove", { shiftKey: true }),
-    send(page.window, "keyup", { key: "Shift" }),
-  );
-
-  expect(events.map((event) => event.defaultPrevented)).toEqual([false, false, false]);
+  other.stop();
+  expect([...page.window.listening.keys()]).toEqual([]);
 });

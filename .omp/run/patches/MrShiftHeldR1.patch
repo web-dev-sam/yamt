@@ -1,0 +1,511 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 8a537a7..b5c5a73 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -48,7 +48,7 @@ Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window,
+ 
+ Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). WebKit sends no pointer events to a disabled button, so a control that can be disabled (a CI job without a log, the row action, open changes while fetching) carries its tip on a wrapper and the button `disabled:pointer-events-none`. `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); it and the due-date box close on a scroll outside them (`useScrollOutside`, capture phase, the one copy of that rule). `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter>` for the three filters, finds each filter's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click; Escape with a filter list open closes the list, not the page.
+ 
+-Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (the "created … ago" hover is `dateTimeText`, "30.10.2026, 15:04", no locale; labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date `DD.MM.YYYY` over the days left in the error colour when overdue; its `role="dialog"` box "Choose a due date" holds a text field on its own draft (`v-model`, set to the shown date when the box opens, so a re-render never rewrites it) that `typedDay` reads on Enter — a refused text stays as typed, sets `aria-invalid` and the error border, saves nothing —, `MergeRequestCalendar.vue` and Today (`PICK_TODAY`) / Clear; only Enter, a click or a footer button saves, never blur), then discussions and approvals (`approversText`, one name per line). `MergeRequestCalendar.vue` (`selected`, `today`, emits `pick`) is shadcn's Calendar: it owns the focused day, and the shown month is the focused day's (`monthOf`); the caption between the Previous / Next month chevrons, `WEEKDAYS` and `monthGrid`'s six weeks as `role="grid"` labelled by the caption, each day a button named `dayName` (`aria-selected` on its gridcell, `aria-current="date"` today); one tab stop (roving `tabindex`), the WAI-ARIA date-picker keys by `movedDay` (arrows, Home/End, PageUp/PageDown, Shift for a year; Enter/Space are the button's click), and it focuses its day when it mounts. Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)` with the click's `shiftKey`; while Shift is held (`useShiftHeld.ts`: from Shift's keydown to its keyup by key name, since WebKitGTK on X11 reports Shift still set on its own release; off on blur, a hidden page, or a pointer event without `shiftKey`) every value shows a muted `circle-minus`, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
++Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (the "created … ago" hover is `dateTimeText`, "30.10.2026, 15:04", no locale; labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date `DD.MM.YYYY` over the days left in the error colour when overdue; its `role="dialog"` box "Choose a due date" holds a text field on its own draft (`v-model`, set to the shown date when the box opens, so a re-render never rewrites it) that `typedDay` reads on Enter — a refused text stays as typed, sets `aria-invalid` and the error border, saves nothing —, `MergeRequestCalendar.vue` and Today (`PICK_TODAY`) / Clear; only Enter, a click or a footer button saves, never blur), then discussions and approvals (`approversText`, one name per line). `MergeRequestCalendar.vue` (`selected`, `today`, emits `pick`) is shadcn's Calendar: it owns the focused day, and the shown month is the focused day's (`monthOf`); the caption between the Previous / Next month chevrons, `WEEKDAYS` and `monthGrid`'s six weeks as `role="grid"` labelled by the caption, each day a button named `dayName` (`aria-selected` on its gridcell, `aria-current="date"` today); one tab stop (roving `tabindex`), the WAI-ARIA date-picker keys by `movedDay` (arrows, Home/End, PageUp/PageDown, Shift for a year; Enter/Space are the button's click), and it focuses its day when it mounts. Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)` with the click's `shiftKey`; while Shift is held (`useShiftHeld.ts`, one instance per window shared by every filter through vueuse `createSharedComposable`: its rule `shiftHeldAfter` on `keyHold.ts`'s listeners, the shell Alt's hold uses too; from Shift's keydown to its keyup by key name, since WebKitGTK on X11 reports Shift still set on its own release; off on blur, a hidden page, or a pointer event without `shiftKey`) every value shows a muted `circle-minus`, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
+ 
+ Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid (`rechecked`, `mergeRequests/`) among its own load's rows only — `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap, `null` once a failed first load cleared them) is that load, else the load's own buffer (empty unless it is a refresh, read only by a refresh's swap) — so any other is dropped, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
+ 
+diff --git a/frontend/src/ui/altHold.ts b/frontend/src/ui/altHold.ts
+index 70bf566..b421b65 100644
+--- a/frontend/src/ui/altHold.ts
++++ b/frontend/src/ui/altHold.ts
+@@ -1,5 +1,6 @@
+-import { useDocumentVisibility, useEventListener } from "@vueuse/core";
+-import { shallowRef, watch, type ShallowRef } from "vue";
++import type { ShallowRef } from "vue";
++
++import { useKeyHold } from "./keyHold";
+ 
+ export type HoldEvent =
+   | { readonly kind: "keydown"; readonly key: string; readonly repeat: boolean }
+@@ -30,42 +31,5 @@ export function heldAfter(held: boolean, event: HoldEvent): boolean {
+ }
+ 
+ export function useAltHold(): Readonly<ShallowRef<boolean>> {
+-  const held = shallowRef(false);
+-  function apply(event: HoldEvent): void {
+-    held.value = heldAfter(held.value, event);
+-  }
+-
+-  useEventListener(
+-    window,
+-    "keydown",
+-    (event) => {
+-      apply({ kind: "keydown", key: event.key, repeat: event.repeat });
+-    },
+-    { capture: true },
+-  );
+-  useEventListener(
+-    window,
+-    "keyup",
+-    (event) => {
+-      apply({ kind: "keyup", key: event.key, altKey: event.altKey });
+-    },
+-    { capture: true },
+-  );
+-  useEventListener(window, "blur", () => {
+-    apply({ kind: "left" });
+-  });
+-  watch(useDocumentVisibility(), (visibility) => {
+-    if (visibility === "hidden") {
+-      apply({ kind: "left" });
+-    }
+-  });
+-  useEventListener<MouseEvent>(
+-    () => (held.value ? window : null),
+-    POINTER_EVENTS,
+-    (event) => {
+-      apply({ kind: "pointer", altKey: event.altKey });
+-    },
+-    { capture: true, passive: true },
+-  );
+-  return held;
++  return useKeyHold(heldAfter, POINTER_EVENTS);
+ }
+diff --git a/frontend/src/ui/keyHold.test.ts b/frontend/src/ui/keyHold.test.ts
+new file mode 100644
+index 0000000..3dad96f
+--- /dev/null
++++ b/frontend/src/ui/keyHold.test.ts
+@@ -0,0 +1,190 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { effectScope, nextTick, type EffectScope } from "vue";
++
++import { useKeyHold, type KeyHoldEvent } from "./keyHold";
++
++const page = vi.hoisted(() => {
++  class Target extends EventTarget {
++    readonly listening = new Map<string, string>();
++    override addEventListener(
++      type: string,
++      callback: EventListenerOrEventListenerObject | null,
++      options?: AddEventListenerOptions | boolean,
++    ): void {
++      const flags = typeof options === "object" ? options : { capture: options === true };
++      const words = [
++        flags.capture === true ? "capture" : "",
++        flags.passive === true ? "passive" : "",
++      ];
++      this.listening.set(type, words.filter((word) => word !== "").join(" "));
++      super.addEventListener(type, callback, options);
++    }
++    override removeEventListener(
++      type: string,
++      callback: EventListenerOrEventListenerObject | null,
++      options?: EventListenerOptions | boolean,
++    ): void {
++      this.listening.delete(type);
++      super.removeEventListener(type, callback, options);
++    }
++  }
++  const document = Object.assign(new Target(), {
++    visibilityState: "visible",
++    createElement: () => ({}),
++  });
++  const window = Object.assign(new Target(), { document });
++  vi.stubGlobal("window", window);
++  vi.stubGlobal("document", document);
++  return { window, document };
++});
++
++let scope: EffectScope;
++let seen: KeyHoldEvent[];
++let answer: boolean;
++
++beforeEach(() => {
++  page.document.visibilityState = "visible";
++  scope = effectScope();
++  seen = [];
++  answer = true;
++});
++
++afterEach(() => {
++  scope.stop();
++});
++
++function recording(_held: boolean, event: KeyHoldEvent): boolean {
++  seen.push(event);
++  return answer;
++}
++
++function holdIn(pointerEvents: string[] = ["pointermove", "wheel"]): Readonly<{ value: boolean }> {
++  const held = scope.run(() => useKeyHold(recording, pointerEvents));
++  if (held === undefined) {
++    throw new Error("scope stopped");
++  }
++  return held;
++}
++
++function send(target: EventTarget, type: string, fields: Record<string, unknown> = {}): Event {
++  const event = Object.assign(new Event(type, { cancelable: true }), fields);
++  target.dispatchEvent(event);
++  return event;
++}
++
++test("the rule's answer is the state, fed the state before", () => {
++  const passed: boolean[] = [];
++  const held = scope.run(() =>
++    useKeyHold((before) => {
++      passed.push(before);
++      return !before;
++    }, []),
++  );
++
++  send(page.window, "keydown", { key: "a", repeat: false });
++  expect(held?.value).toBe(true);
++  send(page.window, "keydown", { key: "a", repeat: false });
++  expect(held?.value).toBe(false);
++  expect(passed).toEqual([false, true]);
++});
++
++test("key presses and releases reach the rule with their key, repeat and modifiers", () => {
++  holdIn();
++
++  send(page.window, "keydown", { key: "Alt", repeat: true, altKey: true, shiftKey: true });
++  send(page.window, "keyup", { key: "Shift", repeat: true, altKey: true, shiftKey: false });
++  send(page.window, "keyup", { key: "a", altKey: false, shiftKey: true });
++  expect(seen).toEqual([
++    { kind: "keydown", key: "Alt", repeat: true },
++    { kind: "keyup", key: "Shift", altKey: true, shiftKey: false },
++    { kind: "keyup", key: "a", altKey: false, shiftKey: true },
++  ]);
++});
++
++test("keys are heard in the capture phase; pointers not while not held", () => {
++  answer = false;
++  holdIn();
++  send(page.window, "keydown", { key: "a", repeat: false });
++
++  expect(Object.fromEntries(page.window.listening)).toEqual({
++    keydown: "capture",
++    keyup: "capture",
++    blur: "",
++  });
++});
++
++test("while held, the rule's pointer events are heard in the capture phase, passively", async () => {
++  const held = holdIn(["pointerdown", "wheel"]);
++
++  send(page.window, "keydown", { key: "a", repeat: false });
++  await nextTick();
++  expect(Object.fromEntries(page.window.listening)).toEqual({
++    keydown: "capture",
++    keyup: "capture",
++    blur: "",
++    pointerdown: "capture passive",
++    wheel: "capture passive",
++  });
++
++  answer = false;
++  send(page.window, "keyup", { key: "a" });
++  await nextTick();
++  expect(held.value).toBe(false);
++  expect([...page.window.listening.keys()]).toEqual(["keydown", "keyup", "blur"]);
++});
++
++test("a pointer event reaches the rule with its modifiers", async () => {
++  holdIn(["pointerdown", "wheel"]);
++  send(page.window, "keydown", { key: "a", repeat: false });
++  await nextTick();
++
++  send(page.window, "pointerdown", { altKey: true, shiftKey: false });
++  send(page.window, "wheel", { altKey: false, shiftKey: true });
++  expect(seen.slice(1)).toEqual([
++    { kind: "pointer", altKey: true, shiftKey: false },
++    { kind: "pointer", altKey: false, shiftKey: true },
++  ]);
++});
++
++test("the window losing focus reaches the rule as leaving", () => {
++  holdIn();
++
++  send(page.window, "blur");
++  expect(seen).toEqual([{ kind: "left" }]);
++});
++
++test("the page becoming hidden reaches the rule as leaving; becoming visible does not", async () => {
++  holdIn();
++
++  page.document.visibilityState = "hidden";
++  send(page.document, "visibilitychange");
++  await nextTick();
++  expect(seen).toEqual([{ kind: "left" }]);
++
++  page.document.visibilityState = "visible";
++  send(page.document, "visibilitychange");
++  await nextTick();
++  expect(seen).toEqual([{ kind: "left" }]);
++});
++
++test("no event's default is prevented", async () => {
++  holdIn();
++  const events = [send(page.window, "keydown", { key: "a", repeat: false })];
++  await nextTick();
++  events.push(
++    send(page.window, "wheel", { altKey: true }),
++    send(page.window, "pointermove", { altKey: true }),
++    send(page.window, "keyup", { key: "a" }),
++  );
++
++  expect(events.map((event) => event.defaultPrevented)).toEqual([false, false, false, false]);
++});
++
++test("stopping the scope removes every listener", async () => {
++  holdIn();
++  send(page.window, "keydown", { key: "a", repeat: false });
++  await nextTick();
++
++  scope.stop();
++  expect([...page.window.listening.keys()]).toEqual([]);
++});
+diff --git a/frontend/src/ui/keyHold.ts b/frontend/src/ui/keyHold.ts
+new file mode 100644
+index 0000000..742c938
+--- /dev/null
++++ b/frontend/src/ui/keyHold.ts
+@@ -0,0 +1,56 @@
++import { useDocumentVisibility, useEventListener } from "@vueuse/core";
++import { shallowRef, watch, type ShallowRef } from "vue";
++
++export type KeyHoldEvent =
++  | { readonly kind: "keydown"; readonly key: string; readonly repeat: boolean }
++  | {
++      readonly kind: "keyup";
++      readonly key: string;
++      readonly altKey: boolean;
++      readonly shiftKey: boolean;
++    }
++  | { readonly kind: "pointer"; readonly altKey: boolean; readonly shiftKey: boolean }
++  | { readonly kind: "left" };
++
++type HoldRule = (held: boolean, event: KeyHoldEvent) => boolean;
++
++export function useKeyHold(rule: HoldRule, pointerEvents: string[]): Readonly<ShallowRef<boolean>> {
++  const held = shallowRef(false);
++  function apply(event: KeyHoldEvent): void {
++    held.value = rule(held.value, event);
++  }
++
++  useEventListener(
++    window,
++    "keydown",
++    (event) => {
++      apply({ kind: "keydown", key: event.key, repeat: event.repeat });
++    },
++    { capture: true },
++  );
++  useEventListener(
++    window,
++    "keyup",
++    (event) => {
++      apply({ kind: "keyup", key: event.key, altKey: event.altKey, shiftKey: event.shiftKey });
++    },
++    { capture: true },
++  );
++  useEventListener(window, "blur", () => {
++    apply({ kind: "left" });
++  });
++  watch(useDocumentVisibility(), (visibility) => {
++    if (visibility === "hidden") {
++      apply({ kind: "left" });
++    }
++  });
++  useEventListener<MouseEvent>(
++    () => (held.value ? window : null),
++    pointerEvents,
++    (event) => {
++      apply({ kind: "pointer", altKey: event.altKey, shiftKey: event.shiftKey });
++    },
++    { capture: true, passive: true },
++  );
++  return held;
++}
+diff --git a/frontend/src/ui/useShiftHeld.test.ts b/frontend/src/ui/useShiftHeld.test.ts
+index b30878b..8871603 100644
+--- a/frontend/src/ui/useShiftHeld.test.ts
++++ b/frontend/src/ui/useShiftHeld.test.ts
+@@ -49,8 +49,8 @@ afterEach(() => {
+   scope.stop();
+ });
+ 
+-function heldIn(): Readonly<{ value: boolean }> {
+-  const held = scope.run(() => useShiftHeld());
++function heldIn(within: EffectScope = scope): Readonly<{ value: boolean }> {
++  const held = within.run(() => useShiftHeld());
+   if (held === undefined) {
+     throw new Error("scope stopped");
+   }
+@@ -115,38 +115,23 @@ test("typing while Shift is held keeps the icons", () => {
+   send(page.window, "keydown", { key: "Shift" });
+ 
+   send(page.window, "keydown", { key: "A" });
+-  send(page.window, "keyup", { key: "A" });
++  send(page.window, "keyup", { key: "A", shiftKey: true });
+   expect(held.value).toBe(true);
+ });
+ 
+-test("keys are heard in the capture phase; pointers not while Shift is up", () => {
++test("while held, pointer events and no wheel are heard", async () => {
+   heldIn();
+ 
+-  expect(Object.fromEntries(page.window.listening)).toEqual({
+-    keydown: "capture",
+-    keyup: "capture",
+-    blur: "",
+-  });
+-});
+-
+-test("while held, pointer events are heard in the capture phase, passively", async () => {
+-  const held = heldIn();
+-
+   send(page.window, "keydown", { key: "Shift" });
+   await nextTick();
+-  expect(Object.fromEntries(page.window.listening)).toEqual({
+-    keydown: "capture",
+-    keyup: "capture",
+-    blur: "",
+-    pointerdown: "capture passive",
+-    pointermove: "capture passive",
+-    pointerup: "capture passive",
+-  });
+-
+-  send(page.window, "keyup", { key: "Shift" });
+-  await nextTick();
+-  expect(held.value).toBe(false);
+-  expect([...page.window.listening.keys()]).toEqual(["keydown", "keyup", "blur"]);
++  expect([...page.window.listening.keys()]).toEqual([
++    "keydown",
++    "keyup",
++    "blur",
++    "pointerdown",
++    "pointermove",
++    "pointerup",
++  ]);
+ });
+ 
+ test.each(["pointerdown", "pointermove", "pointerup"])(
+@@ -163,38 +148,16 @@ test.each(["pointerdown", "pointermove", "pointerup"])(
+   },
+ );
+ 
+-test("the window losing focus hides", () => {
++test("every filter shares one state and one set of listeners until the last one goes", () => {
++  const other = effectScope();
+   const held = heldIn();
++  const otherHeld = heldIn(other);
++  expect(otherHeld).toBe(held);
++
++  scope.stop();
+   send(page.window, "keydown", { key: "Shift" });
++  expect(otherHeld.value).toBe(true);
+ 
+-  send(page.window, "blur");
+-  expect(held.value).toBe(false);
+-});
+-
+-test("the page becoming hidden hides; becoming visible does not", async () => {
+-  const held = heldIn();
+-  send(page.window, "keydown", { key: "Shift" });
+-
+-  page.document.visibilityState = "hidden";
+-  send(page.document, "visibilitychange");
+-  await nextTick();
+-  expect(held.value).toBe(false);
+-
+-  send(page.window, "keydown", { key: "Shift" });
+-  page.document.visibilityState = "visible";
+-  send(page.document, "visibilitychange");
+-  await nextTick();
+-  expect(held.value).toBe(true);
+-});
+-
+-test("no event's default is prevented", async () => {
+-  heldIn();
+-  const events = [send(page.window, "keydown", { key: "Shift" })];
+-  await nextTick();
+-  events.push(
+-    send(page.window, "pointermove", { shiftKey: true }),
+-    send(page.window, "keyup", { key: "Shift" }),
+-  );
+-
+-  expect(events.map((event) => event.defaultPrevented)).toEqual([false, false, false]);
++  other.stop();
++  expect([...page.window.listening.keys()]).toEqual([]);
+ });
+diff --git a/frontend/src/ui/useShiftHeld.ts b/frontend/src/ui/useShiftHeld.ts
+index bd2f5bf..a653cdc 100644
+--- a/frontend/src/ui/useShiftHeld.ts
++++ b/frontend/src/ui/useShiftHeld.ts
+@@ -1,5 +1,6 @@
+-import { useDocumentVisibility, useEventListener } from "@vueuse/core";
+-import { shallowRef, watch, type ShallowRef } from "vue";
++import { createSharedComposable } from "@vueuse/core";
++
++import { useKeyHold } from "./keyHold";
+ 
+ export type ShiftEvent =
+   | { readonly kind: "keydown"; readonly key: string }
+@@ -14,6 +15,8 @@ export function shiftHeldAfter(held: boolean, event: ShiftEvent): boolean {
+   switch (event.kind) {
+     case "keydown":
+       return held || event.key === SHIFT;
++    // X11 sends a key event's modifiers as they were just before it (Xlib XKeyEvent `state`), so WebKitGTK reports
++    // Shift as still set on Shift's own release: only the key name tells.
+     case "keyup":
+       return held && event.key !== SHIFT;
+     case "pointer":
+@@ -23,45 +26,6 @@ export function shiftHeldAfter(held: boolean, event: ShiftEvent): boolean {
+   }
+ }
+ 
+-export function useShiftHeld(): Readonly<ShallowRef<boolean>> {
+-  const held = shallowRef(false);
+-  function apply(event: ShiftEvent): void {
+-    held.value = shiftHeldAfter(held.value, event);
+-  }
+-
+-  useEventListener(
+-    window,
+-    "keydown",
+-    (event) => {
+-      apply({ kind: "keydown", key: event.key });
+-    },
+-    { capture: true },
+-  );
+-  // X11 sends a key event's modifiers as they were just before it (Xlib XKeyEvent `state`), so WebKitGTK reports
+-  // Shift as still set on Shift's own release: only the key name tells.
+-  useEventListener(
+-    window,
+-    "keyup",
+-    (event) => {
+-      apply({ kind: "keyup", key: event.key });
+-    },
+-    { capture: true },
+-  );
+-  useEventListener(window, "blur", () => {
+-    apply({ kind: "left" });
+-  });
+-  watch(useDocumentVisibility(), (visibility) => {
+-    if (visibility === "hidden") {
+-      apply({ kind: "left" });
+-    }
+-  });
+-  useEventListener<PointerEvent>(
+-    () => (held.value ? window : null),
+-    POINTER_EVENTS,
+-    (event) => {
+-      apply({ kind: "pointer", shiftKey: event.shiftKey });
+-    },
+-    { capture: true, passive: true },
+-  );
+-  return held;
+-}
++export const useShiftHeld = createSharedComposable(() =>
++  useKeyHold(shiftHeldAfter, POINTER_EVENTS),
++);

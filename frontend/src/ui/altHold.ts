@@ -1,5 +1,6 @@
-import { useDocumentVisibility, useEventListener } from "@vueuse/core";
-import { shallowRef, watch, type ShallowRef } from "vue";
+import type { ShallowRef } from "vue";
+
+import { useKeyHold } from "./keyHold";
 
 export type HoldEvent =
   | { readonly kind: "keydown"; readonly key: string; readonly repeat: boolean }
@@ -30,42 +31,5 @@ export function heldAfter(held: boolean, event: HoldEvent): boolean {
 }
 
 export function useAltHold(): Readonly<ShallowRef<boolean>> {
-  const held = shallowRef(false);
-  function apply(event: HoldEvent): void {
-    held.value = heldAfter(held.value, event);
-  }
-
-  useEventListener(
-    window,
-    "keydown",
-    (event) => {
-      apply({ kind: "keydown", key: event.key, repeat: event.repeat });
-    },
-    { capture: true },
-  );
-  useEventListener(
-    window,
-    "keyup",
-    (event) => {
-      apply({ kind: "keyup", key: event.key, altKey: event.altKey });
-    },
-    { capture: true },
-  );
-  useEventListener(window, "blur", () => {
-    apply({ kind: "left" });
-  });
-  watch(useDocumentVisibility(), (visibility) => {
-    if (visibility === "hidden") {
-      apply({ kind: "left" });
-    }
-  });
-  useEventListener<MouseEvent>(
-    () => (held.value ? window : null),
-    POINTER_EVENTS,
-    (event) => {
-      apply({ kind: "pointer", altKey: event.altKey });
-    },
-    { capture: true, passive: true },
-  );
-  return held;
+  return useKeyHold(heldAfter, POINTER_EVENTS);
 }
