@@ -1,0 +1,1933 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index 60ec268..f91af5c 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -14,6 +14,8 @@ Resolving a merge request's conflicts (plan §2 #139–#143) adds three `MergeRe
+ 
+ A row's people (plan §2 #151–#156): the author, assignees, reviewers (with their `ReviewState`) and approvers (`approvedBy`, GitLab's order) are domain `Person`s whose `picture` is the one address the `<img>` loads: `toMergeRequestPage(raw, uploadedPicture)` and `toRerequestReply(raw, uploadedPicture)` turn an `uploaded` picture into `uploadedPicture(username)` (in the app `convertFileSrc(username, PICTURE_SCHEME)`, `tauriMergeRequests.ts`, `yamt-picture://localhost/<username>`, 404 when none), a `gravatar` one into Rust's checked address as sent, `none` into `null` (initials); no other address is built. Labels keep their colours (`null` when GitLab's are not hex) and rows `mayRerequest`. `rerequestReview(iid, username)` → `RerequestReply` (`requested` carries the row's reviewers now). Fixture mode: every row has an author (the next of `PEOPLE`), review states cycling requested, reviewed, approved, changes requested, `approvedBy` the first `index % 4` people, `mayRerequest` false on every 9th row from index 8; every 8th row from index 2 (!638, …) has three reviewers besides its assignee in three states (dmitri a done one on !638); label colours are CSS colour names (`docs` none); !635 has a zero size; pictures are `data:` addresses only (sam and anna load, ben's does not decode, chiara and dmitri none: `fixtureUploadedPicture` stands in for the scheme). Its `rerequestReview` answers after 1,000 ms and logs `mergeRequests.fixture_rerequest`: dmitri `refused`, a non-reviewer `notReviewer`, any other reviewer `requested` with that reviewer back at `requested`.
+ 
++Changing a merge request's people (request `docs/slices/request-mr-people.md`, plan §2 #169–#170): `searchPeople(text)` → `PeopleSearchReply` (`found { people }`, at most 20 in GitLab's order, or `glabMissing`, `notLoggedIn { detail }`, `failed { message }`) and `changePeople(iid, change)` → `PeopleChangeReply` (`changed`/`unchanged { people }`, both lists as GitLab answered, or `glabMissing`, `notLoggedIn`, `refused { message }`, `failed`), a `PeopleChange` being `{ group, action, username }`. `tauriMergeRequests.ts` converts them with `toPeopleSearchReply(raw, uploadedPicture)` and `toPeopleChangeReply(raw, uploadedPicture)` (`mergeRequestDomain.ts`): each person's picture as `toMergeRequestPage` makes it, a reviewer's state kept, other replies as sent. Fixture mode's `fixtureMergeRequestPeople.ts` `peopleScript(log, LISTED_ROWS)` logs `mergeRequests.fixture_people_search { text }` and answers after 300 ms: `PEOPLE` then `SEARCH_ONLY_PEOPLE` (erik, olga, rita; `fixtureMergeRequestData.ts`) whose username or name holds the text, any case; it logs `mergeRequests.fixture_people_change { iid, group, action, username }` and answers after 1,000 ms over its own lists per iid (first the listed row's, kept until the page reloads): an iid no row has `failed` "GitLab sent no merge request !<iid>", `REFUSED_PERSON` rita `refused` "Cannot assign @rita to !<iid>", an add of `FREE_TIER_PERSON` olga or anyone unknown `unchanged`, otherwise an add appends (a reviewer `requested`) and a remove drops → `changed`.
++
+ A failed job's log (request `docs/slices/request-ci-job-log.md`, plan §2 row 158): `readJobLog(page)` → `JobLogReply` (`mergeRequestDomain.ts`, an alias of the generated type: `log { text, cut }` with the raw text, colour codes and all, or `notOffered`, `noLog`, `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), passed through unchanged by `tauriMergeRequests.ts`; Rust answers only a job page this window's list offered and keeps the logs for the run. Fixture mode answers every script after `LOG_PAUSE_MS` (400 ms), logging `mergeRequests.fixture_job_log { page }` first, from `fixtureMergeRequestLogs.ts` `fixtureJobLog(page, listed)` (the `LISTED_ROWS` = 500 rows), answered by row and job name: every `lint:docs` a short timestamped log (`cut: false`; sections with and without `\e[0K` before `section_start`, a `\r` progress line, `\r\n` ends, a `00O+` continuation, basic, bright, 256 and truecolor runs, an OSC title, a markup line); every `test:unit` about 9,000 lines under 512,000 bytes, built once, `cut: true`; the `lint:docs` and `test:unit` of `NO_LOG_IID` (!632) `noLog` and `failed` "glab timed out", of `LOGGED_OUT_LOG_IID` (!624) `notLoggedIn` and `glabMissing`; any other page, or a listed job of another name, `notOffered`. No string in the file names a `#`-hex colour (the palette fence).
+ 
+ Each row's open discussions (request `docs/slices/request-mr-discussions.md`, plan §2 rows 162–164): `readDiscussions(iids)` → `RowDiscussions[]` (a non-empty prefix of at most Rust's `DISCUSSION_BATCH` distinct iids, in order, for a non-empty ask; the caller asks again for the rest), converted by `mergeRequestDomain.ts` `toRowDiscussions(raw, index, uploadedPicture)`: the iid branded, an `open` answer's notes with `createdAt` in milliseconds, `author` the domain `Person` (its picture as `toMergeRequestPage` makes it) and `page` through `toWebPage`; the refusals `glabMissing`, `notLoggedIn { detail }`, `failed { message }` as sent; a bad iid, time or page throws. `DiscussionPlace` and `DiscussionNote` stay module-local; `OpenDiscussion`, `DiscussionsAnswer` and `RowDiscussions` are exported from `index.ts`. Fixture mode: `fixtureMergeRequestDiscussions.ts` `discussionsScript(log, listedRows)`, spread into `createFixtureMergeRequests`, logs `mergeRequests.fixture_discussions { iids }` (comma-joined) and answers after `DISCUSSIONS_PAUSE_MS` (400 ms) the first `FIXTURE_ANSWERED` (10) distinct iids by `fixtureDiscussions(iid, listed)`: each row's `openDiscussions` open ones — discussion 0's last comment by the next row's author, discussion 1's (newer) by the row's first reviewer, so both turns occur for `sam` and another reviewer waits (review mode's orders, pinned by `the_review_orders_the_smoke_expects`) —, a markup text, !638's 400-character line, pageless notes on every sixth row; !615 (`DISCUSSIONS_FAILED_IID`, reviewed by chiara, none of sam's) `failed`, !629 (`DISCUSSIONS_LOGGED_OUT_IID`) `notLoggedIn`, an iid no row has `failed`. The setting: `setDiscussionDetails(current, details)` on `ChunkSource`/`SettingsSource` as `setAntialiasing`, in `tauri.ts` and `fixtureSettings.ts`; `DiscussionDetails` (`"full" | "lazy" | "off"`) aliases the generated type in `domain.ts`.
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index 6d26aae..d76d2bc 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -9,6 +9,9 @@ import type {
+   MergeRequestPage,
+   OpenReply,
+   PageOpened,
++  PeopleChange,
++  PeopleChangeReply,
++  PeopleSearchReply,
+   RerequestReply,
+   ResolveReply,
+   RowDiscussions,
+@@ -37,4 +40,11 @@ export interface MergeRequestSource {
+   readDiscussions(
+     iids: readonly MergeRequestIid[],
+   ): Promise<SourceResult<readonly RowDiscussions[]>>;
++  /** The project's people whose name, username or public email matches `text` (GitLab's autocomplete, ≤ 20, plan §2 row 169). */
++  searchPeople(text: string): Promise<SourceResult<PeopleSearchReply>>;
++  /** One person added to or removed from one list of merge request `iid`, against GitLab's list at that moment. */
++  changePeople(
++    iid: MergeRequestIid,
++    change: PeopleChange,
++  ): Promise<SourceResult<PeopleChangeReply>>;
+ }
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.ts b/frontend/src/ipc/fixtureMergeRequestData.ts
+index 45c5815..7a75238 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.ts
+@@ -51,7 +51,7 @@ const TITLES = [
+   "Let a card belong to two lists",
+ ];
+ 
+-const PEOPLE: readonly Generated.Person[] = [
++export const PEOPLE: readonly Generated.Person[] = [
+   { username: FIXTURE_ME, name: "Sam Weller", picture: { kind: "uploaded" } },
+   { username: "anna", name: "Anna Berg", picture: { kind: "gravatar", address: PNG_DATA } },
+   { username: "ben", name: "Ben Okafor", picture: { kind: "uploaded" } },
+@@ -59,6 +59,15 @@ const PEOPLE: readonly Generated.Person[] = [
+   { username: "dmitri", name: "Dmitri Volkov", picture: { kind: "none" } },
+ ];
+ 
++export const FREE_TIER_PERSON = "olga";
++export const REFUSED_PERSON = "rita";
++
++export const SEARCH_ONLY_PEOPLE: readonly Generated.Person[] = [
++  { username: "erik", name: "Erik Lund", picture: { kind: "gravatar", address: PNG_DATA } },
++  { username: FREE_TIER_PERSON, name: "Olga Novak", picture: { kind: "none" } },
++  { username: REFUSED_PERSON, name: "Rita Moreau", picture: { kind: "none" } },
++];
++
+ export const REFUSING_REVIEWER = "dmitri";
+ 
+ const LABELS = [DROPPED_LABEL, "frontend", "ui", "docs"];
+diff --git a/frontend/src/ipc/fixtureMergeRequestPeople.test.ts b/frontend/src/ipc/fixtureMergeRequestPeople.test.ts
+new file mode 100644
+index 0000000..4fbe4fd
+--- /dev/null
++++ b/frontend/src/ipc/fixtureMergeRequestPeople.test.ts
+@@ -0,0 +1,230 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++
++import { isMergeRequestIid, type MergeRequestIid, type SourceResult } from "./domain";
++import { fixtureUploadedPicture } from "./fixtureMergeRequestData";
++import { peopleScript } from "./fixtureMergeRequestPeople";
++import type { Log } from "./log";
++import type { PeopleChange, PeopleChangeReply } from "./mergeRequestDomain";
++import type { MergeRequestSource } from "./MergeRequestSource";
++import { branded } from "./validate";
++
++type Script = Pick<MergeRequestSource, "searchPeople" | "changePeople">;
++type Lists = { readonly assignees: readonly string[]; readonly reviewers: readonly string[] };
++
++const LISTED_ROWS = 40;
++const CHANGE_MS = 1000;
++
++let lines: string[] = [];
++
++beforeEach(() => {
++  vi.useFakeTimers();
++  lines = [];
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++});
++
++function quietLog(): Log {
++  function keep(event: string, fields: Record<string, string | number | boolean> = {}): void {
++    lines.push(`${event} ${JSON.stringify(fields)}`);
++  }
++  return { debug: keep, info: keep, warn: keep, error: keep };
++}
++
++function iid(value: number): MergeRequestIid {
++  return branded(value, isMergeRequestIid, "iid");
++}
++
++function script(): Script {
++  return peopleScript(quietLog(), LISTED_ROWS);
++}
++
++async function answered<T>(asked: Promise<SourceResult<T>>, ms: number): Promise<T> {
++  await vi.advanceTimersByTimeAsync(ms);
++  const result = await asked;
++  if (!result.ok) {
++    throw new Error("the fixture failed");
++  }
++  return result.value;
++}
++
++function change(
++  group: PeopleChange["group"],
++  action: PeopleChange["action"],
++  username: string,
++): PeopleChange {
++  return { group, action, username };
++}
++
++async function changed(
++  people: Script,
++  number: number,
++  asked: PeopleChange,
++): Promise<PeopleChangeReply> {
++  return answered(people.changePeople(iid(number), asked), CHANGE_MS);
++}
++
++function lists(reply: PeopleChangeReply): Lists & { readonly kind: string } {
++  if (reply.kind !== "changed" && reply.kind !== "unchanged") {
++    throw new Error(`no lists in ${reply.kind}`);
++  }
++  return {
++    kind: reply.kind,
++    assignees: reply.people.assignees.map((person) => person.username),
++    reviewers: reply.people.reviewers.map(({ person, state }) => `${person.username}:${state}`),
++  };
++}
++
++test("a_search_matches_username_or_name_after_300_ms_and_logs_its_text", async () => {
++  const people = script();
++  let reply: unknown = null;
++  void people.searchPeople("ER").then((result) => {
++    reply = result;
++  });
++  expect(lines).toEqual([`mergeRequests.fixture_people_search {"text":"ER"}`]);
++  await vi.advanceTimersByTimeAsync(299);
++  expect(reply).toBeNull();
++  await vi.advanceTimersByTimeAsync(1);
++  expect(reply).toEqual({
++    ok: true,
++    value: {
++      kind: "found",
++      people: [
++        { username: "sam", name: "Sam Weller", picture: fixtureUploadedPicture("sam") },
++        {
++          username: "anna",
++          name: "Anna Berg",
++          picture: expect.stringMatching(/^data:image\/png/u),
++        },
++        {
++          username: "erik",
++          name: "Erik Lund",
++          picture: expect.stringMatching(/^data:image\/png/u),
++        },
++      ],
++    },
++  });
++
++  const moreau = await answered(people.searchPeople("moreau"), CHANGE_MS);
++  expect(moreau).toEqual({
++    kind: "found",
++    people: [{ username: "rita", name: "Rita Moreau", picture: null }],
++  });
++  expect(await answered(people.searchPeople("zzz"), CHANGE_MS)).toEqual({
++    kind: "found",
++    people: [],
++  });
++  const everyone = await answered(people.searchPeople(""), CHANGE_MS);
++  expect(everyone.kind === "found" && everyone.people.map((person) => person.username)).toEqual([
++    "sam",
++    "anna",
++    "ben",
++    "chiara",
++    "dmitri",
++    "erik",
++    "olga",
++    "rita",
++  ]);
++});
++
++test("adding_then_removing_follows_the_scripts_own_lists", async () => {
++  const people = script();
++  expect(lists(await changed(people, 640, change("reviewers", "add", "ben")))).toEqual({
++    kind: "changed",
++    assignees: ["sam"],
++    reviewers: ["ben:requested"],
++  });
++  expect(lists(await changed(people, 640, change("assignees", "add", "erik")))).toEqual({
++    kind: "changed",
++    assignees: ["sam", "erik"],
++    reviewers: ["ben:requested"],
++  });
++  expect(lists(await changed(people, 640, change("assignees", "add", "erik")))).toEqual({
++    kind: "changed",
++    assignees: ["sam", "erik"],
++    reviewers: ["ben:requested"],
++  });
++  expect(lists(await changed(people, 640, change("assignees", "remove", "sam")))).toEqual({
++    kind: "changed",
++    assignees: ["erik"],
++    reviewers: ["ben:requested"],
++  });
++  expect(lists(await changed(people, 640, change("reviewers", "remove", "ben")))).toEqual({
++    kind: "changed",
++    assignees: ["erik"],
++    reviewers: [],
++  });
++  expect(lists(await changed(people, 639, change("assignees", "remove", "nobody")))).toEqual({
++    kind: "unchanged",
++    assignees: ["anna"],
++    reviewers: ["dmitri:reviewed"],
++  });
++  expect(await changed(people, 1, change("assignees", "add", "ben"))).toEqual({
++    kind: "failed",
++    message: "GitLab sent no merge request !1",
++  });
++  expect(lists(await changed(script(), 640, change("assignees", "add", "ben")))).toEqual({
++    kind: "changed",
++    assignees: ["sam", "ben"],
++    reviewers: [],
++  });
++});
++
++test("olga_is_unchanged_and_rita_refused", async () => {
++  const people = script();
++  await changed(people, 640, change("assignees", "add", "ben"));
++  expect(lists(await changed(people, 640, change("assignees", "add", "olga")))).toEqual({
++    kind: "unchanged",
++    assignees: ["sam", "ben"],
++    reviewers: [],
++  });
++  expect(lists(await changed(people, 640, change("reviewers", "add", "olga")))).toEqual({
++    kind: "unchanged",
++    assignees: ["sam", "ben"],
++    reviewers: [],
++  });
++  expect(await changed(people, 640, change("reviewers", "add", "rita"))).toEqual({
++    kind: "refused",
++    message: "Cannot assign @rita to !640",
++  });
++  expect(await changed(people, 639, change("assignees", "remove", "rita"))).toEqual({
++    kind: "refused",
++    message: "Cannot assign @rita to !639",
++  });
++  expect(lists(await changed(people, 640, change("assignees", "remove", "olga")))).toEqual({
++    kind: "changed",
++    assignees: ["sam", "ben"],
++    reviewers: [],
++  });
++  expect(lists(await changed(people, 640, change("assignees", "add", "olga")))).toEqual({
++    kind: "unchanged",
++    assignees: ["sam", "ben"],
++    reviewers: [],
++  });
++});
++
++test("a_new_reviewer_is_requested", async () => {
++  const reply = await changed(script(), 639, change("reviewers", "add", "erik"));
++  expect(lists(reply)).toEqual({
++    kind: "changed",
++    assignees: ["anna"],
++    reviewers: ["dmitri:reviewed", "erik:requested"],
++  });
++  expect(reply.kind === "changed" && reply.people.reviewers[1]?.person).toEqual({
++    username: "erik",
++    name: "Erik Lund",
++    picture: expect.stringMatching(/^data:image\/png/u),
++  });
++});
++
++test("each_call_is_logged", async () => {
++  const people = script();
++  void people.changePeople(iid(638), change("reviewers", "remove", "anna"));
++  void people.searchPeople("an");
++  expect(lines).toEqual([
++    `mergeRequests.fixture_people_change {"iid":638,"group":"reviewers","action":"remove","username":"anna"}`,
++    `mergeRequests.fixture_people_search {"text":"an"}`,
++  ]);
++  await vi.advanceTimersByTimeAsync(CHANGE_MS);
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequestPeople.ts b/frontend/src/ipc/fixtureMergeRequestPeople.ts
+new file mode 100644
+index 0000000..ed87879
+--- /dev/null
++++ b/frontend/src/ipc/fixtureMergeRequestPeople.ts
+@@ -0,0 +1,118 @@
++import type * as Generated from "./bindings";
++import { pause } from "./fixture";
++import {
++  FREE_TIER_PERSON,
++  fixtureRows,
++  fixtureUploadedPicture,
++  PEOPLE,
++  REFUSED_PERSON,
++  SEARCH_ONLY_PEOPLE,
++} from "./fixtureMergeRequestData";
++import type { Log } from "./log";
++import { toPeopleChangeReply, toPeopleSearchReply, type PeopleChange } from "./mergeRequestDomain";
++import type { MergeRequestSource } from "./MergeRequestSource";
++
++const FIXTURE_SEARCH_MS = 300;
++const PEOPLE_CHANGE_PAUSE_MS = 1000;
++const FOUND_LIMIT = 20;
++const KNOWN_PEOPLE = [...PEOPLE, ...SEARCH_ONLY_PEOPLE];
++
++function found(text: string): Generated.Person[] {
++  const wanted = text.toLowerCase();
++  return KNOWN_PEOPLE.filter(
++    ({ username, name }) =>
++      username.toLowerCase().includes(wanted) || name.toLowerCase().includes(wanted),
++  ).slice(0, FOUND_LIMIT);
++}
++
++function listAfter<T>(
++  list: readonly T[],
++  change: PeopleChange,
++  usernameOf: (each: T) => string,
++  added: T,
++): T[] {
++  const kept = list.filter((each) => usernameOf(each) !== change.username);
++  if (change.action === "remove") {
++    return kept;
++  }
++  return kept.length < list.length ? [...list] : [...list, added];
++}
++
++function peopleAfter(
++  people: Generated.MergeRequestPeople,
++  change: PeopleChange,
++  person: Generated.Person,
++): Generated.MergeRequestPeople {
++  switch (change.group) {
++    case "assignees":
++      return {
++        ...people,
++        assignees: listAfter(people.assignees, change, (each) => each.username, person),
++      };
++    case "reviewers":
++      return {
++        ...people,
++        reviewers: listAfter(people.reviewers, change, (each) => each.person.username, {
++          person,
++          state: "requested",
++        }),
++      };
++    default: {
++      const _exhaustive: never = change.group;
++      return _exhaustive;
++    }
++  }
++}
++
++function changeReply(
++  iid: number,
++  people: Generated.MergeRequestPeople | null,
++  change: PeopleChange,
++): Generated.PeopleChangeReply {
++  if (people === null) {
++    return { kind: "failed", message: `GitLab sent no merge request !${iid}` };
++  }
++  if (change.username === REFUSED_PERSON) {
++    return { kind: "refused", message: `Cannot assign @${REFUSED_PERSON} to !${iid}` };
++  }
++  const person = KNOWN_PEOPLE.find((each) => each.username === change.username);
++  if (person === undefined || (change.action === "add" && person.username === FREE_TIER_PERSON)) {
++    return { kind: "unchanged", people };
++  }
++  return { kind: "changed", people: peopleAfter(people, change, person) };
++}
++
++/** GitLab's people search, and its changes over the listed rows' people, kept per iid until the page reloads. */
++export function peopleScript(
++  log: Log,
++  listedRows: number,
++): Pick<MergeRequestSource, "searchPeople" | "changePeople"> {
++  const changed = new Map<number, Generated.MergeRequestPeople>();
++  function peopleOf(iid: number): Generated.MergeRequestPeople | null {
++    const row = fixtureRows(0, listedRows).find((each) => each.iid === iid);
++    const listed =
++      row === undefined ? null : { assignees: row.assignees, reviewers: row.reviewers };
++    return changed.get(iid) ?? listed;
++  }
++  return {
++    async searchPeople(text) {
++      log.info("mergeRequests.fixture_people_search", { text });
++      await pause(FIXTURE_SEARCH_MS);
++      const reply = toPeopleSearchReply(
++        { kind: "found", people: found(text) },
++        fixtureUploadedPicture,
++      );
++      return { ok: true, value: reply };
++    },
++    async changePeople(iid, change) {
++      const { group, action, username } = change;
++      log.info("mergeRequests.fixture_people_change", { iid, group, action, username });
++      await pause(PEOPLE_CHANGE_PAUSE_MS);
++      const reply = changeReply(iid, peopleOf(iid), change);
++      if (reply.kind === "changed") {
++        changed.set(iid, reply.people);
++      }
++      return { ok: true, value: toPeopleChangeReply(reply, fixtureUploadedPicture) };
++    },
++  };
++}
+diff --git a/frontend/src/ipc/fixtureMergeRequests.ts b/frontend/src/ipc/fixtureMergeRequests.ts
+index 4dc06c6..d028a04 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.ts
+@@ -16,6 +16,7 @@ import {
+ } from "./fixtureMergeRequestData";
+ import { discussionsScript } from "./fixtureMergeRequestDiscussions";
+ import { fixtureJobLog } from "./fixtureMergeRequestLogs";
++import { peopleScript } from "./fixtureMergeRequestPeople";
+ import type { Log } from "./log";
+ import {
+   toCheckedRow,
+@@ -280,5 +281,6 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
+     ...rerequestScript(log),
+     ...pageScript(log),
+     ...discussionsScript(log, LISTED_ROWS),
++    ...peopleScript(log, LISTED_ROWS),
+   };
+ }
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 7705253..3a40220 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -77,10 +77,15 @@ export type {
+   LocalMerge,
+   Label,
+   MergeRequestPage,
++  MergeRequestPeople,
+   MergeRequestRow,
+   OpenDiscussion,
+   OpenReply,
+   PageOpened,
++  PeopleChange,
++  PeopleChangeReply,
++  PeopleGroup,
++  PeopleSearchReply,
+   Person,
+   Readiness,
+   Refusal,
+diff --git a/frontend/src/ipc/mergeRequestDomain.test.ts b/frontend/src/ipc/mergeRequestDomain.test.ts
+index e25d508..838b05b 100644
+--- a/frontend/src/ipc/mergeRequestDomain.test.ts
++++ b/frontend/src/ipc/mergeRequestDomain.test.ts
+@@ -6,6 +6,8 @@ import {
+   toCheckedRow,
+   toMergeRequestPage,
+   toOpenReply,
++  toPeopleChangeReply,
++  toPeopleSearchReply,
+   toRerequestReply,
+   type MergeRequestRow,
+ } from "./mergeRequestDomain";
+@@ -163,6 +165,47 @@ test("a requested reply's reviewers get their pictures like a row's; other repli
+   expect(toRerequestReply(refused, uploadedPicture)).toBe(refused);
+ });
+ 
++test("found_and_changed_replies_get_pictures_like_a_rows_and_others_pass_unchanged", () => {
++  const sam: Generated.Person = {
++    username: "sam",
++    name: "Sam Weller",
++    picture: { kind: "uploaded" },
++  };
++  const gravatar: Generated.Person = { ...ANNA, picture: { kind: "gravatar", address: GRAVATAR } };
++  const samConverted = {
++    username: "sam",
++    name: "Sam Weller",
++    picture: "yamt-picture://localhost/sam",
++  };
++  const annaConverted = { username: "anna", name: "Anna Berg", picture: GRAVATAR };
++  expect(
++    toPeopleSearchReply({ kind: "found", people: [sam, gravatar, ANNA] }, uploadedPicture),
++  ).toEqual({
++    kind: "found",
++    people: [samConverted, annaConverted, { username: "anna", name: "Anna Berg", picture: null }],
++  });
++  const people: Generated.MergeRequestPeople = {
++    assignees: [sam],
++    reviewers: [{ person: gravatar, state: "approved" }],
++  };
++  const converted = {
++    assignees: [samConverted],
++    reviewers: [{ person: annaConverted, state: "approved" }],
++  };
++  expect(toPeopleChangeReply({ kind: "changed", people }, uploadedPicture)).toEqual({
++    kind: "changed",
++    people: converted,
++  });
++  expect(toPeopleChangeReply({ kind: "unchanged", people }, uploadedPicture)).toEqual({
++    kind: "unchanged",
++    people: converted,
++  });
++  const failed: Generated.PeopleSearchReply = { kind: "failed", message: "no autocompleteUsers" };
++  expect(toPeopleSearchReply(failed, uploadedPicture)).toBe(failed);
++  const refused: Generated.PeopleChangeReply = { kind: "refused", message: "Cannot assign" };
++  expect(toPeopleChangeReply(refused, uploadedPicture)).toBe(refused);
++});
++
+ test("a time with an offset is the same instant (catches a time read as local)", () => {
+   expect(firstRow({ createdAt: "2026-10-28T11:30:00+02:00" }).createdAt).toBe(
+     Date.UTC(2026, 9, 28, 9, 30),
+diff --git a/frontend/src/ipc/mergeRequestDomain.ts b/frontend/src/ipc/mergeRequestDomain.ts
+index 25d2517..872af2f 100644
+--- a/frontend/src/ipc/mergeRequestDomain.ts
++++ b/frontend/src/ipc/mergeRequestDomain.ts
+@@ -77,6 +77,19 @@ export type DiscussionsAnswer =
+   | { readonly kind: "open"; readonly discussions: readonly OpenDiscussion[] }
+   | Readonly<Exclude<Generated.DiscussionsAnswer, { kind: "open" }>>;
+ export type RowDiscussions = { readonly iid: MergeRequestIid; readonly answer: DiscussionsAnswer };
++export type PeopleGroup = Generated.PeopleGroup;
++export type PeopleChange = Readonly<Generated.PeopleChange>;
++export type MergeRequestPeople = {
++  readonly assignees: readonly Person[];
++  readonly reviewers: readonly Reviewer[];
++};
++export type PeopleSearchReply =
++  | { readonly kind: "found"; readonly people: readonly Person[] }
++  | Readonly<Exclude<Generated.PeopleSearchReply, { kind: "found" }>>;
++export type PeopleChangeReply =
++  | { readonly kind: "changed"; readonly people: MergeRequestPeople }
++  | { readonly kind: "unchanged"; readonly people: MergeRequestPeople }
++  | Readonly<Exclude<Generated.PeopleChangeReply, { kind: "changed" | "unchanged" }>>;
+ 
+ type UploadedPicture = (username: string) => string;
+ 
+@@ -216,3 +229,30 @@ export function toRowDiscussions(
+     answer: toAnswer(raw.answer, `${field}.answer`, uploadedPicture),
+   };
+ }
++
++/** Each person's picture as toMergeRequestPage converts it (toPerson, toReviewers); other replies pass unchanged. */
++export function toPeopleSearchReply(
++  raw: Generated.PeopleSearchReply,
++  uploadedPicture: UploadedPicture,
++): PeopleSearchReply {
++  return raw.kind === "found"
++    ? { kind: "found", people: raw.people.map((person) => toPerson(person, uploadedPicture)) }
++    : raw;
++}
++
++export function toPeopleChangeReply(
++  raw: Generated.PeopleChangeReply,
++  uploadedPicture: UploadedPicture,
++): PeopleChangeReply {
++  if (raw.kind !== "changed" && raw.kind !== "unchanged") {
++    return raw;
++  }
++  const { assignees, reviewers } = raw.people;
++  return {
++    kind: raw.kind,
++    people: {
++      assignees: assignees.map((person) => toPerson(person, uploadedPicture)),
++      reviewers: toReviewers(reviewers, uploadedPicture),
++    },
++  };
++}
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index 6b55560..8016db9 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -14,6 +14,8 @@ const commands = vi.hoisted(() => ({
+   rerequestReview: vi.fn(),
+   readJobLog: vi.fn(),
+   readDiscussions: vi.fn(),
++  searchPeople: vi.fn(),
++  changePeople: vi.fn(),
+ }));
+ 
+ vi.mock("./bindings", () => ({ commands }));
+@@ -301,6 +303,49 @@ test("a refused re-request comes back as GitLab said it", async () => {
+   ).toEqual({ ok: true, value: { kind: "refused", message: "Reviewer not found" } });
+ });
+ 
++test("searchPeople_and_changePeople_call_their_commands_with_the_arguments", async () => {
++  const ben: Generated.Person = {
++    username: "ben",
++    name: "Ben Okafor",
++    picture: { kind: "uploaded" },
++  };
++  const benConverted = {
++    username: "ben",
++    name: "Ben Okafor",
++    picture: "yamt-picture://localhost/ben",
++  };
++  commands.searchPeople.mockResolvedValue({
++    status: "ok",
++    data: { kind: "found", people: [ben] },
++  });
++  commands.changePeople.mockResolvedValue({
++    status: "ok",
++    data: {
++      kind: "changed",
++      people: { assignees: [ben], reviewers: [{ person: ben, state: "requested" }] },
++    },
++  });
++  const source = createTauriMergeRequests();
++  const change = { group: "reviewers", action: "add", username: "ben" } as const;
++
++  const found = await source.searchPeople("be");
++  const changed = await source.changePeople(branded(52, isMergeRequestIid, "iid"), change);
++
++  expect(commands.searchPeople).toHaveBeenCalledWith("be");
++  expect(commands.changePeople).toHaveBeenCalledWith(52, change);
++  expect(found).toEqual({ ok: true, value: { kind: "found", people: [benConverted] } });
++  expect(changed).toEqual({
++    ok: true,
++    value: {
++      kind: "changed",
++      people: {
++        assignees: [benConverted],
++        reviewers: [{ person: benConverted, state: "requested" }],
++      },
++    },
++  });
++});
++
+ test("a page is passed as it came and its answer comes back", async () => {
+   const page = "https://gitlab.example/x/-/merge_requests/7";
+   if (!isWebPage(page)) {
+@@ -446,6 +491,8 @@ test.each([
+   ["rerequestReview", { kind: "WorkerStopped" }],
+   ["readJobLog", { kind: "WorkerStopped" }],
+   ["readDiscussions", { kind: "WorkerStopped" }],
++  ["searchPeople", { kind: "WorkerStopped" }],
++  ["changePeople", { kind: "WorkerStopped" }],
+ ] as const)("a %s failure comes back unchanged", async (name, failure) => {
+   commands[name].mockResolvedValue({ status: "error", error: failure });
+   const source = createTauriMergeRequests();
+@@ -455,6 +502,13 @@ test.each([
+     rerequestReview: () => source.rerequestReview(branded(1, isMergeRequestIid, "iid"), "anna"),
+     readJobLog: () => source.readJobLog(jobPage()),
+     readDiscussions: () => source.readDiscussions([branded(1, isMergeRequestIid, "iid")]),
++    searchPeople: () => source.searchPeople("an"),
++    changePeople: () =>
++      source.changePeople(branded(1, isMergeRequestIid, "iid"), {
++        group: "assignees",
++        action: "remove",
++        username: "anna",
++      }),
+   };
+   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
+ });
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index fe0a852..70df3b5 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -6,6 +6,8 @@ import {
+   toCheckedRow,
+   toMergeRequestPage,
+   toOpenReply,
++  toPeopleChangeReply,
++  toPeopleSearchReply,
+   toRerequestReply,
+   toRowDiscussions,
+   type CheckedRow,
+@@ -63,6 +65,21 @@ function listed(
+   });
+ }
+ 
++function peopleCalls(): Pick<MergeRequestSource, "searchPeople" | "changePeople"> {
++  return {
++    async searchPeople(text) {
++      return converted(toResult(await commands.searchPeople(text)), (reply) =>
++        toPeopleSearchReply(reply, uploadedPicture),
++      );
++    },
++    async changePeople(iid, change) {
++      return converted(toResult(await commands.changePeople(iid, change)), (reply) =>
++        toPeopleChangeReply(reply, uploadedPicture),
++      );
++    },
++  };
++}
++
+ export function createTauriMergeRequests(): MergeRequestSource {
+   return {
+     async findGitLabProject() {
+@@ -97,5 +114,6 @@ export function createTauriMergeRequests(): MergeRequestSource {
+         rows.map((row, at) => toRowDiscussions(row, at, uploadedPicture)),
+       );
+     },
++    ...peopleCalls(),
+   };
+ }
+diff --git a/frontend/src/ui/mergeRequestPeople.test.ts b/frontend/src/ui/mergeRequestPeople.test.ts
+new file mode 100644
+index 0000000..be199f0
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestPeople.test.ts
+@@ -0,0 +1,378 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++
++import {
++  createFixtureCompareSource,
++  isMergeRequestIid,
++  log,
++  type MergeRequestIid,
++  type MergeRequestPeople,
++  type MergeRequestSource,
++  type PeopleChange,
++  type PeopleChangeReply,
++  type PeopleSearchReply,
++  type Person,
++  type SourceFailure,
++  type SourceResult,
++} from "../ipc";
++import { createPeopleChanges, SEARCH_PAUSE_MS, type PeopleChanges } from "./mergeRequestPeople";
++
++type Call<T> = {
++  readonly answer: (result: SourceResult<T>) => void;
++  readonly fail: (error: Error) => void;
++};
++type SearchCall = Call<PeopleSearchReply> & { readonly text: string };
++type ChangeCall = Call<PeopleChangeReply> & {
++  readonly iid: MergeRequestIid;
++  readonly change: PeopleChange;
++};
++
++type Rig = {
++  readonly slice: PeopleChanges;
++  readonly searches: SearchCall[];
++  readonly changes: ChangeCall[];
++  readonly replaced: [MergeRequestIid, MergeRequestPeople][];
++};
++
++const MICROTASKS = 10;
++const STOPPED: SourceFailure = { kind: "WorkerStopped" };
++const ANNA: Person = { username: "anna", name: "Anna Berg", picture: null };
++const BEN: Person = { username: "ben", name: "Ben Okafor", picture: null };
++const PEOPLE: MergeRequestPeople = {
++  assignees: [ANNA],
++  reviewers: [{ person: BEN, state: "requested" }],
++};
++const ADD_BEN: PeopleChange = { group: "reviewers", action: "add", username: "ben" };
++const REMOVE_BEN: PeopleChange = { group: "reviewers", action: "remove", username: "ben" };
++const ADD_ANNA: PeopleChange = { group: "assignees", action: "add", username: "anna" };
++const ASSIGN_BEN: PeopleChange = { group: "assignees", action: "add", username: "ben" };
++
++beforeEach(() => {
++  vi.useFakeTimers();
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++});
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is not an iid`);
++  }
++  return value;
++}
++
++function rig(): Rig {
++  const searches: SearchCall[] = [];
++  const changes: ChangeCall[] = [];
++  const replaced: [MergeRequestIid, MergeRequestPeople][] = [];
++  const source: MergeRequestSource = {
++    ...createFixtureCompareSource(log, "", {}),
++    searchPeople: (text) =>
++      new Promise((resolve, reject) => {
++        searches.push({ text, answer: resolve, fail: reject });
++      }),
++    changePeople: (asked, change) =>
++      new Promise((resolve, reject) => {
++        changes.push({ iid: asked, change, answer: resolve, fail: reject });
++      }),
++  };
++  const slice = createPeopleChanges({
++    source,
++    replaced: (asked, people) => replaced.push([asked, people]),
++  });
++  return { slice, searches, changes, replaced };
++}
++
++function at<T>(calls: readonly T[], index: number): T {
++  const found = calls[index];
++  if (found === undefined) {
++    throw new Error(`no call ${index}; ${calls.length} made`);
++  }
++  return found;
++}
++
++async function settled(): Promise<void> {
++  for (let turn = 0; turn < MICROTASKS; turn += 1) {
++    await Promise.resolve();
++  }
++}
++
++async function typed(live: Rig, text: string): Promise<void> {
++  live.slice.searchPeople(text);
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
++}
++
++function found(people: readonly Person[]): SourceResult<PeopleSearchReply> {
++  return { ok: true, value: { kind: "found", people } };
++}
++
++function asksOf(live: Rig, value: number): unknown {
++  return live.slice.peopleAsks.value.get(iid(value));
++}
++
++test("typing_waits_250_ms_then_asks_once_with_the_last_text", async () => {
++  const live = rig();
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
++  expect(live.searches).toEqual([]);
++  live.slice.searchPeople("b");
++  await vi.advanceTimersByTimeAsync(100);
++  live.slice.searchPeople("be");
++  await vi.advanceTimersByTimeAsync(100);
++  live.slice.searchPeople(" @ben ");
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS - 1);
++  expect(live.searches).toEqual([]);
++  expect(live.slice.peopleSearch.value).toEqual({ kind: "searching", text: "ben", people: [] });
++  await vi.advanceTimersByTimeAsync(1);
++  expect(live.searches.map((call) => call.text)).toEqual(["ben"]);
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
++  expect(live.searches).toHaveLength(1);
++});
++
++test("an_older_search_answer_is_dropped_once_a_newer_search_was_sent", async () => {
++  const live = rig();
++  await typed(live, "a");
++  await typed(live, "an");
++  at(live.searches, 0).answer(found([BEN]));
++  await settled();
++  expect(live.slice.peopleSearch.value).toEqual({ kind: "searching", text: "an", people: [] });
++  at(live.searches, 1).answer(found([ANNA]));
++  await settled();
++  expect(live.slice.peopleSearch.value).toEqual({ kind: "found", text: "an", people: [ANNA] });
++});
++
++test("an_answer_after_more_typing_is_dropped", async () => {
++  const live = rig();
++  await typed(live, "a");
++  live.slice.searchPeople("an");
++  at(live.searches, 0).answer(found([BEN]));
++  await settled();
++  expect(live.slice.peopleSearch.value).toEqual({ kind: "searching", text: "an", people: [] });
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
++  expect(live.searches.map((call) => call.text)).toEqual(["a", "an"]);
++});
++
++test("an_empty_or_at_only_text_shows_the_suggestions_and_asks_nothing", async () => {
++  const live = rig();
++  live.slice.searchPeople("a");
++  live.slice.searchPeople(" @ ");
++  expect(live.slice.peopleSearch.value).toEqual({ kind: "empty" });
++  live.slice.searchPeople("");
++  expect(live.slice.peopleSearch.value).toEqual({ kind: "empty" });
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
++  expect(live.searches).toEqual([]);
++});
++
++test("ending_the_search_drops_the_answer_in_flight", async () => {
++  const live = rig();
++  await typed(live, "a");
++  live.slice.endPeopleSearch();
++  expect(live.slice.peopleSearch.value).toEqual({ kind: "empty" });
++  at(live.searches, 0).answer(found([ANNA]));
++  await settled();
++  expect(live.slice.peopleSearch.value).toEqual({ kind: "empty" });
++
++  live.slice.searchPeople("b");
++  live.slice.endPeopleSearch();
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
++  expect(live.searches).toHaveLength(1);
++});
++
++test("searching_keeps_the_last_answers_people", async () => {
++  const live = rig();
++  await typed(live, "a");
++  at(live.searches, 0).answer(found([ANNA, BEN]));
++  await settled();
++  live.slice.searchPeople("an");
++  expect(live.slice.peopleSearch.value).toEqual({
++    kind: "searching",
++    text: "an",
++    people: [ANNA, BEN],
++  });
++  live.slice.searchPeople("ann");
++  expect(live.slice.peopleSearch.value).toEqual({
++    kind: "searching",
++    text: "ann",
++    people: [ANNA, BEN],
++  });
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
++  at(live.searches, 1).answer({ ok: true, value: { kind: "glabMissing" } });
++  await settled();
++  live.slice.searchPeople("anna");
++  expect(live.slice.peopleSearch.value).toEqual({ kind: "searching", text: "anna", people: [] });
++});
++
++test("a_refused_search_keeps_the_reply_and_a_thrown_one_is_failed_without_a_report", async () => {
++  const live = rig();
++  await typed(live, "a");
++  at(live.searches, 0).answer({ ok: true, value: { kind: "failed", message: "no field" } });
++  await settled();
++  expect(live.slice.peopleSearch.value).toEqual({
++    kind: "refused",
++    text: "a",
++    reply: { kind: "failed", message: "no field" },
++  });
++  await typed(live, "b");
++  at(live.searches, 1).answer({ ok: false, failure: STOPPED });
++  await settled();
++  expect(live.slice.peopleSearch.value).toEqual({ kind: "failed", text: "b", cause: STOPPED });
++  await typed(live, "c");
++  at(live.searches, 2).fail(new Error("boom"));
++  await settled();
++  expect(live.slice.peopleSearch.value).toEqual({
++    kind: "failed",
++    text: "c",
++    cause: { kind: "Unexpected", message: "boom" },
++  });
++});
++
++test("a_second_change_on_a_merge_request_waits_for_the_first", async () => {
++  const live = rig();
++  const answered: string[] = [];
++  void live.slice.changePeople(iid(1), ADD_BEN).then(() => answered.push("first"));
++  void live.slice.changePeople(iid(1), ADD_ANNA).then(() => answered.push("second"));
++  await settled();
++  expect(live.changes.map((call) => call.change)).toEqual([ADD_BEN]);
++  expect(asksOf(live, 1)).toEqual({ queue: [ADD_BEN, ADD_ANNA], notDone: [] });
++
++  at(live.changes, 0).answer({ ok: true, value: { kind: "changed", people: PEOPLE } });
++  await settled();
++  expect(answered).toEqual(["first"]);
++  expect(live.changes.map((call) => call.change)).toEqual([ADD_BEN, ADD_ANNA]);
++  expect(asksOf(live, 1)).toEqual({ queue: [ADD_ANNA], notDone: [] });
++
++  at(live.changes, 1).answer({ ok: true, value: { kind: "changed", people: PEOPLE } });
++  await settled();
++  expect(answered).toEqual(["first", "second"]);
++});
++
++test("changes_on_two_merge_requests_run_side_by_side", async () => {
++  const live = rig();
++  void live.slice.changePeople(iid(1), ADD_BEN);
++  void live.slice.changePeople(iid(2), ADD_BEN);
++  await settled();
++  expect(live.changes.map((call) => call.iid)).toEqual([1, 2]);
++  at(live.changes, 1).answer({ ok: true, value: { kind: "changed", people: PEOPLE } });
++  await settled();
++  expect(asksOf(live, 1)).toEqual({ queue: [ADD_BEN], notDone: [] });
++  expect(asksOf(live, 2)).toBeUndefined();
++});
++
++test("an_equal_change_already_queued_is_not_sent_twice", async () => {
++  const live = rig();
++  void live.slice.changePeople(iid(1), ADD_BEN);
++  void live.slice.changePeople(iid(1), { ...ADD_BEN });
++  void live.slice.changePeople(iid(1), REMOVE_BEN);
++  void live.slice.changePeople(iid(1), ASSIGN_BEN);
++  void live.slice.changePeople(iid(1), { ...REMOVE_BEN });
++  expect(asksOf(live, 1)).toEqual({ queue: [ADD_BEN, REMOVE_BEN, ASSIGN_BEN], notDone: [] });
++  for (let index = 0; index < 3; index += 1) {
++    await settled();
++    at(live.changes, index).answer({ ok: true, value: { kind: "changed", people: PEOPLE } });
++  }
++  await settled();
++  expect(live.changes.map((call) => call.change)).toEqual([ADD_BEN, REMOVE_BEN, ASSIGN_BEN]);
++});
++
++test("changed_hands_gitlabs_people_to_the_row", async () => {
++  const live = rig();
++  const changing = live.slice.changePeople(iid(7), ADD_BEN);
++  await settled();
++  at(live.changes, 0).answer({ ok: true, value: { kind: "changed", people: PEOPLE } });
++  await changing;
++  expect(live.replaced).toEqual([[7, PEOPLE]]);
++  expect(live.slice.peopleAsks.value.size).toBe(0);
++});
++
++test("an_unchanged_reply_takes_gitlabs_lists_and_keeps_its_sentence", async () => {
++  const live = rig();
++  const changing = live.slice.changePeople(iid(7), ADD_BEN);
++  await settled();
++  at(live.changes, 0).answer({ ok: true, value: { kind: "unchanged", people: PEOPLE } });
++  await changing;
++  expect(live.replaced).toEqual([[7, PEOPLE]]);
++  expect(asksOf(live, 7)).toEqual({
++    queue: [],
++    notDone: [{ change: ADD_BEN, why: { kind: "unchanged" } }],
++  });
++});
++
++test("a_refused_or_thrown_change_keeps_a_notice_and_the_queue_goes_on", async () => {
++  const live = rig();
++  const last = live.slice.changePeople(iid(7), ADD_BEN);
++  void live.slice.changePeople(iid(7), ADD_ANNA);
++  const third = live.slice.changePeople(iid(7), ASSIGN_BEN);
++  await settled();
++  at(live.changes, 0).answer({ ok: true, value: { kind: "refused", message: "Cannot assign" } });
++  await settled();
++  at(live.changes, 1).fail(new Error("boom"));
++  await settled();
++  at(live.changes, 2).answer({ ok: false, failure: STOPPED });
++  await Promise.all([last, third]);
++  expect(live.replaced).toEqual([]);
++  expect(asksOf(live, 7)).toEqual({
++    queue: [],
++    notDone: [
++      {
++        change: ADD_BEN,
++        why: { kind: "refused", reply: { kind: "refused", message: "Cannot assign" } },
++      },
++      { change: ADD_ANNA, why: { kind: "failed", cause: { kind: "Unexpected", message: "boom" } } },
++      { change: ASSIGN_BEN, why: { kind: "failed", cause: STOPPED } },
++    ],
++  });
++});
++
++test("closing_the_box_keeps_the_running_and_waiting_changes", async () => {
++  const live = rig();
++  const refused = live.slice.changePeople(iid(7), ASSIGN_BEN);
++  await settled();
++  at(live.changes, 0).answer({ ok: true, value: { kind: "refused", message: "no" } });
++  await refused;
++  void live.slice.changePeople(iid(7), ADD_BEN);
++  void live.slice.changePeople(iid(7), ADD_ANNA);
++  live.slice.peopleBoxOpened(iid(7));
++  live.slice.peopleBoxClosed(iid(7));
++  expect(asksOf(live, 7)).toEqual({ queue: [ADD_BEN, ADD_ANNA], notDone: [] });
++  await settled();
++  at(live.changes, 1).answer({ ok: true, value: { kind: "changed", people: PEOPLE } });
++  await settled();
++  expect(live.changes.map((call) => call.change)).toEqual([ASSIGN_BEN, ADD_BEN, ADD_ANNA]);
++});
++
++test("a_box_opened_on_two_rows_keeps_both_until_each_closes", async () => {
++  const live = rig();
++  const unchanged = live.slice.changePeople(iid(3), ADD_BEN);
++  await settled();
++  at(live.changes, 0).answer({ ok: true, value: { kind: "unchanged", people: PEOPLE } });
++  await unchanged;
++
++  live.slice.peopleBoxOpened(iid(1));
++  live.slice.peopleBoxOpened(iid(2));
++  live.slice.peopleBoxOpened(iid(2));
++  expect(live.slice.openPeopleBoxes.value).toEqual(new Set([1, 2]));
++  live.slice.peopleBoxClosed(iid(1));
++  expect(live.slice.openPeopleBoxes.value).toEqual(new Set([2]));
++  expect(live.slice.peopleAsks.value.size).toBe(1);
++  live.slice.peopleBoxClosed(iid(3));
++  expect(live.slice.openPeopleBoxes.value).toEqual(new Set([2]));
++  expect(asksOf(live, 3)).toBeUndefined();
++  live.slice.peopleBoxClosed(iid(2));
++  expect(live.slice.openPeopleBoxes.value).toEqual(new Set());
++});
++
++test("a_new_change_for_the_person_drops_their_old_notice", async () => {
++  const live = rig();
++  const first = live.slice.changePeople(iid(7), ADD_BEN);
++  const second = live.slice.changePeople(iid(7), ASSIGN_BEN);
++  await settled();
++  at(live.changes, 0).answer({ ok: true, value: { kind: "unchanged", people: PEOPLE } });
++  await settled();
++  at(live.changes, 1).answer({ ok: true, value: { kind: "unchanged", people: PEOPLE } });
++  await Promise.all([first, second]);
++
++  void live.slice.changePeople(iid(7), REMOVE_BEN);
++  expect(asksOf(live, 7)).toEqual({
++    queue: [REMOVE_BEN],
++    notDone: [{ change: ASSIGN_BEN, why: { kind: "unchanged" } }],
++  });
++});
+diff --git a/frontend/src/ui/mergeRequestPeople.ts b/frontend/src/ui/mergeRequestPeople.ts
+new file mode 100644
+index 0000000..d277a41
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestPeople.ts
+@@ -0,0 +1,213 @@
++import { useTimeoutFn } from "@vueuse/core";
++import { shallowRef, type ShallowRef } from "vue";
++
++import type {
++  MergeRequestIid,
++  MergeRequestPeople,
++  MergeRequestSource,
++  PeopleChange,
++  PeopleChangeReply,
++  PeopleSearchReply,
++  Person,
++} from "../ipc";
++import { searchedText } from "../mergeRequests";
++import { setRow } from "./mergeRequestActions";
++import { attempt, type Outcome, type ProblemCause } from "./problem";
++
++// GitLab's DEFAULT_DEBOUNCE_AND_THROTTLE_MS (app/assets/javascripts/lib/utils/constants.js), design §1.1.
++export const SEARCH_PAUSE_MS = 250;
++
++export type PeopleSearch =
++  | { readonly kind: "empty" }
++  /** Asked or waiting for the pause; `people` are the last answer's, still shown ([] at first). */
++  | { readonly kind: "searching"; readonly text: string; readonly people: readonly Person[] }
++  | { readonly kind: "found"; readonly text: string; readonly people: readonly Person[] }
++  | {
++      readonly kind: "refused";
++      readonly text: string;
++      readonly reply: Exclude<PeopleSearchReply, { kind: "found" }>;
++    }
++  | { readonly kind: "failed"; readonly text: string; readonly cause: ProblemCause };
++
++export type PeopleChangeFailure =
++  | { readonly kind: "unchanged" }
++  | {
++      readonly kind: "refused";
++      readonly reply: Exclude<PeopleChangeReply, { kind: "changed" | "unchanged" }>;
++    }
++  | { readonly kind: "failed"; readonly cause: ProblemCause };
++export type NotDone = { readonly change: PeopleChange; readonly why: PeopleChangeFailure };
++/** One merge request's changes: `queue[0]` is the one GitLab is answering, the rest wait in order (rule 4);
++ *  `notDone` the changes GitLab did not make, until the box closes (rule 6). */
++export type RowPeopleAsks = {
++  readonly queue: readonly PeopleChange[];
++  readonly notDone: readonly NotDone[];
++};
++
++export type PeopleChanges = {
++  readonly peopleSearch: Readonly<ShallowRef<PeopleSearch>>;
++  readonly peopleAsks: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, RowPeopleAsks>>>;
++  /** core searchedText(typed) "" → empty at once; else searching, asked SEARCH_PAUSE_MS after the last call. */
++  searchPeople(typed: string): void;
++  /** empty; a pending or running search's answer is dropped. */
++  endPeopleSearch(): void;
++  /** Queues `change` (an equal one already queued: nothing); settles when it is answered. */
++  changePeople(iid: MergeRequestIid, change: PeopleChange): Promise<void>;
++  /** Request rule 9 (the owner's answer, board item 2246): the rows whose people box is open. */
++  readonly openPeopleBoxes: Readonly<ShallowRef<ReadonlySet<MergeRequestIid>>>;
++  /** The box of row `iid` opened: the row stays shown while it is open. */
++  peopleBoxOpened(iid: MergeRequestIid): void;
++  /** The box of row `iid` closed (or unmounted while open): the row is released and its notDone dropped; its
++   *  queue stays. */
++  peopleBoxClosed(iid: MergeRequestIid): void;
++};
++
++type Deps = {
++  readonly source: MergeRequestSource;
++  readonly replaced: (iid: MergeRequestIid, people: MergeRequestPeople) => void;
++};
++
++type Asks = ShallowRef<ReadonlyMap<MergeRequestIid, RowPeopleAsks>>;
++
++const EMPTY: PeopleSearch = { kind: "empty" };
++const NO_ASKS: RowPeopleAsks = { queue: [], notDone: [] };
++
++function shownPeople(search: PeopleSearch): readonly Person[] {
++  return search.kind === "searching" || search.kind === "found" ? search.people : [];
++}
++
++function searchAnswer(text: string, outcome: Outcome<PeopleSearchReply>): PeopleSearch {
++  if (!outcome.ok) {
++    return { kind: "failed", text, cause: outcome.cause };
++  }
++  const reply = outcome.value;
++  return reply.kind === "found"
++    ? { kind: "found", text, people: reply.people }
++    : { kind: "refused", text, reply };
++}
++
++function searchOf(
++  source: MergeRequestSource,
++): Pick<PeopleChanges, "peopleSearch" | "searchPeople" | "endPeopleSearch"> {
++  const search = shallowRef<PeopleSearch>(EMPTY);
++  let calls = 0;
++  async function ask(text: string): Promise<void> {
++    const sent = calls;
++    const outcome = await attempt(() => source.searchPeople(text));
++    if (sent === calls) {
++      search.value = searchAnswer(text, outcome);
++    }
++  }
++  const pause = useTimeoutFn((text: string) => void ask(text), SEARCH_PAUSE_MS, {
++    immediate: false,
++  });
++  function stop(): void {
++    pause.stop();
++    calls += 1;
++  }
++  return {
++    peopleSearch: search,
++    searchPeople: (typed) => {
++      stop();
++      const text = searchedText(typed);
++      if (text === "") {
++        search.value = EMPTY;
++        return;
++      }
++      search.value = { kind: "searching", text, people: shownPeople(search.value) };
++      pause.start(text);
++    },
++    endPeopleSearch: () => {
++      stop();
++      search.value = EMPTY;
++    },
++  };
++}
++
++function samePerson(one: PeopleChange, other: PeopleChange): boolean {
++  return one.group === other.group && one.username === other.username;
++}
++
++function setAsks(asks: Asks, iid: MergeRequestIid, row: RowPeopleAsks): void {
++  setRow(asks, iid, row.queue.length === 0 && row.notDone.length === 0 ? null : row);
++}
++
++function failureOf(
++  deps: Deps,
++  iid: MergeRequestIid,
++  outcome: Outcome<PeopleChangeReply>,
++): PeopleChangeFailure | null {
++  if (!outcome.ok) {
++    return { kind: "failed", cause: outcome.cause };
++  }
++  const reply = outcome.value;
++  if (reply.kind !== "changed" && reply.kind !== "unchanged") {
++    return { kind: "refused", reply };
++  }
++  deps.replaced(iid, reply.people);
++  return reply.kind === "changed" ? null : { kind: "unchanged" };
++}
++
++async function answer(
++  deps: Deps,
++  asks: Asks,
++  iid: MergeRequestIid,
++  change: PeopleChange,
++): Promise<void> {
++  const why = failureOf(deps, iid, await attempt(() => deps.source.changePeople(iid, change)));
++  const row = asks.value.get(iid) ?? NO_ASKS;
++  setAsks(asks, iid, {
++    queue: row.queue.filter((queued) => queued !== change),
++    notDone: why === null ? row.notDone : [...row.notDone, { change, why }],
++  });
++}
++
++function changesOf(deps: Deps, asks: Asks): Pick<PeopleChanges, "changePeople"> {
++  const lastTurns = new Map<MergeRequestIid, Promise<void>>();
++  return {
++    changePeople: (iid, change) => {
++      const row = asks.value.get(iid) ?? NO_ASKS;
++      if (
++        row.queue.some((queued) => samePerson(queued, change) && queued.action === change.action)
++      ) {
++        return Promise.resolve();
++      }
++      setAsks(asks, iid, {
++        queue: [...row.queue, change],
++        notDone: row.notDone.filter((notDone) => !samePerson(notDone.change, change)),
++      });
++      const before = lastTurns.get(iid) ?? Promise.resolve();
++      const turn = before.then(() => answer(deps, asks, iid, change));
++      lastTurns.set(iid, turn);
++      return turn;
++    },
++  };
++}
++
++function boxesOf(
++  asks: Asks,
++): Pick<PeopleChanges, "openPeopleBoxes" | "peopleBoxOpened" | "peopleBoxClosed"> {
++  const open = shallowRef<ReadonlySet<MergeRequestIid>>(new Set());
++  return {
++    openPeopleBoxes: open,
++    peopleBoxOpened: (iid) => {
++      open.value = new Set(open.value).add(iid);
++    },
++    peopleBoxClosed: (iid) => {
++      const left = new Set(open.value);
++      left.delete(iid);
++      open.value = left;
++      setAsks(asks, iid, { queue: asks.value.get(iid)?.queue ?? [], notDone: [] });
++    },
++  };
++}
++
++export function createPeopleChanges(deps: Deps): PeopleChanges {
++  const asks: Asks = shallowRef(new Map());
++  return {
++    ...searchOf(deps.source),
++    peopleAsks: asks,
++    ...changesOf(deps, asks),
++    ...boxesOf(asks),
++  };
++}
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index af0d811..67d0d29 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -13,10 +13,12 @@ import {
+   type LocalMerge,
+   type MergeRequestIid,
+   type MergeRequestPage,
++  type MergeRequestPeople,
+   type MergeRequestRow,
+   type MergeRequestSource,
+   type OpenReply,
+   type PageOpened,
++  type PeopleChangeReply,
+   type RerequestReply,
+   type ResolveReply,
+   type Person,
+@@ -73,6 +75,7 @@ type Rig = {
+   readonly continues: Asked<ContinueMergeReply>[];
+   readonly localMerges: LocalMerge[];
+   readonly rerequests: Asked<RerequestReply>[];
++  readonly peopleChanges: Asked<PeopleChangeReply>[];
+   readonly storage: MemoryStorage;
+   readonly mode: ShallowRef<DiscussionDetails>;
+   readonly discussionCalls: DiscussionCall[];
+@@ -156,6 +159,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+   const continues: Asked<ContinueMergeReply>[] = [];
+   const localMerges: LocalMerge[] = [];
+   const rerequests: Asked<RerequestReply>[] = [];
++  const peopleChanges: Asked<PeopleChangeReply>[] = [];
+   const problems: Problem[] = [];
+   const discussionCalls: DiscussionCall[] = [];
+   const mode = shallowRef<DiscussionDetails>("full");
+@@ -191,6 +195,11 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+       new Promise((resolve) => {
+         discussionCalls.push({ iids: [...asked], answer: resolve });
+       }),
++    searchPeople: async () => ({ ok: true, value: { kind: "found", people: [] } }),
++    changePeople: (asked) =>
++      new Promise((resolve) => {
++        peopleChanges.push({ iid: asked, answer: resolve });
++      }),
+     ...edit,
+   };
+   const screen = shallowRef<Screen>({ kind: "files" });
+@@ -211,6 +220,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+     continues,
+     localMerges,
+     rerequests,
++    peopleChanges,
+     storage,
+     mode,
+     discussionCalls,
+@@ -1202,6 +1212,134 @@ test("a_rerequest_reply_replaces_that_rows_reviewers_in_rows_and_in_a_buffering_
+   expect(live.slice.rerequests.value.size).toBe(0);
+ });
+ 
++test("a_rerequest_still_rewrites_only_the_reviewers", async () => {
++  const live = rig();
++  await loaded(live);
++  const asking = live.slice.rerequestReview(iid(638), "chiara");
++  askedAt(live.rerequests, 0).answer({
++    ok: true,
++    value: { kind: "requested", reviewers: RE_REQUESTED },
++  });
++  await asking;
++  expect(rowOf(live.slice.rows.value, 638)).toEqual({
++    ...rowOf(ROWS, 638),
++    reviewers: RE_REQUESTED,
++  });
++});
++
++const ERIK: Person = { username: "erik", name: "Erik Lund", picture: null };
++const ADD_ERIK = { group: "reviewers", action: "add", username: "erik" } as const;
++
++function rowOf(rows: readonly MergeRequestRow[], value: number): MergeRequestRow {
++  const found = rows.find((row) => row.iid === value);
++  if (found === undefined) {
++    throw new Error(`no row !${value}`);
++  }
++  return found;
++}
++
++function erikReviews(value: number): MergeRequestPeople {
++  return {
++    assignees: rowOf(ROWS, value).assignees,
++    reviewers: [{ person: ERIK, state: "requested" }],
++  };
++}
++
++async function erikAdded(live: Rig, value: number, call: number): Promise<void> {
++  const adding = live.slice.changePeople(iid(value), ADD_ERIK);
++  await settled();
++  askedAt(live.peopleChanges, call).answer({
++    ok: true,
++    value: { kind: "changed", people: erikReviews(value) },
++  });
++  await adding;
++}
++
++test("a_people_change_rewrites_both_lists_in_rows_and_in_a_buffering_refresh", async () => {
++  const live = rig();
++  await loaded(live);
++  const reloading = live.slice.refresh();
++  loadAt(live, 1).send({ me: "sam", rows: ROWS });
++
++  const people: MergeRequestPeople = {
++    assignees: [ERIK],
++    reviewers: [{ person: ERIK, state: "requested" }],
++  };
++  const changing = live.slice.changePeople(iid(638), ADD_ERIK);
++  await settled();
++  askedAt(live.peopleChanges, 0).answer({ ok: true, value: { kind: "changed", people } });
++  await changing;
++  const changed = { ...rowOf(ROWS, 638), ...people };
++  expect(rowOf(live.slice.rows.value, 638)).toEqual(changed);
++  expect(live.slice.rows.value.filter((row) => row.iid !== 638)).toEqual(
++    ROWS.filter((row) => row.iid !== 638),
++  );
++
++  loadAt(live, 1).end(LOADED);
++  await reloading;
++  expect(rowOf(live.slice.rows.value, 638)).toEqual(changed);
++  expect(live.slice.peopleAsks.value.size).toBe(0);
++});
++
++test("the_filters_count_a_person_added_by_a_change", async () => {
++  const live = rig();
++  await loaded(live);
++  function erikCount(): number | undefined {
++    return live.slice.choices.value.reviewer.find(
++      (choice) => choice.value.kind === "person" && choice.value.username === "erik",
++    )?.count;
++  }
++  expect(erikCount()).toBeUndefined();
++  await erikAdded(live, 640, 0);
++  expect(erikCount()).toBe(1);
++  await erikAdded(live, 637, 1);
++  expect(erikCount()).toBe(2);
++});
++
++test("a_row_whose_people_box_is_open_stays_shown_after_a_change_drops_it_from_the_filters", async () => {
++  const live = rig();
++  await loaded(live);
++  const unreviewed = ROWS.filter((row) => row.reviewers.length === 0).length;
++  await live.slice.findProject();
++  live.slice.click("reviewer", { kind: "none" }, false);
++  expect(iids(live.slice.shownRows.value)).toContain(640);
++
++  live.slice.peopleBoxOpened(iid(640));
++  await erikAdded(live, 640, 0);
++  expect(iids(live.slice.shownRows.value)).toContain(640);
++  expect(live.slice.summary.value).toBe(`${unreviewed} of 40 merge requests`);
++
++  await erikAdded(live, 637, 1);
++  expect(iids(live.slice.shownRows.value)).not.toContain(637);
++
++  live.slice.peopleBoxClosed(iid(640));
++  expect(iids(live.slice.shownRows.value)).not.toContain(640);
++  expect(live.slice.summary.value).toBe(`${unreviewed - 2} of 40 merge requests`);
++});
++
++test("a_row_whose_people_box_is_open_stays_shown_when_the_search_no_longer_matches", async () => {
++  const live = rig();
++  await loaded(live);
++  live.slice.setSearch("!640");
++  live.slice.peopleBoxOpened(iid(640));
++  live.slice.setSearch("!630");
++  expect(iids(live.slice.shownRows.value)).toEqual([640, 630]);
++  live.slice.peopleBoxClosed(iid(640));
++  expect(iids(live.slice.shownRows.value)).toEqual([630]);
++});
++
++test("an_open_box_does_not_bring_back_a_row_a_refresh_dropped", async () => {
++  const live = rig();
++  await loaded(live);
++  live.slice.peopleBoxOpened(iid(640));
++  const reloading = live.slice.refresh();
++  loadAt(live, 1).send({ me: "sam", rows: ROWS.filter((row) => row.iid !== 640) });
++  loadAt(live, 1).end(LOADED);
++  await reloading;
++  expect(iids(live.slice.shownRows.value)).toEqual(iids(ROWS).filter((value) => value !== 640));
++  expect(live.slice.openPeopleBoxes.value).toEqual(new Set([640]));
++});
++
+ test("a later refresh's rows replace a re-requested row's reviewers", async () => {
+   const live = rig();
+   await loaded(live);
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 8f21ba9..58edd9d 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -2,19 +2,16 @@ import type { StorageLike } from "@vueuse/core";
+ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import type {
+-  CheckedRow,
+   DiscussionDetails,
+   GitLabProject,
+-  ListEnd,
+   MergeRequestIid,
+-  MergeRequestPage,
++  MergeRequestPeople,
+   MergeRequestRow,
+   MergeRequestSource,
+   OpenReply,
+-  Reviewer,
+   WebPage,
+ } from "../ipc";
+-import { merged, rechecked, type CalendarDay } from "../mergeRequests";
++import type { CalendarDay } from "../mergeRequests";
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
+ import {
+@@ -25,18 +22,22 @@ import {
+ } from "./mergeRequestDiscussions";
+ import { createDueDates, type DueDates } from "./mergeRequestDueDates";
+ import { createJobLogs, type JobLogs } from "./mergeRequestJobLogs";
++import { createPeopleChanges, type PeopleChanges } from "./mergeRequestPeople";
+ import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
++import { loadList, type ListLoad, type ListState } from "./mergeRequestsList";
+ import { shownOf, type Shown } from "./mergeRequestsShown";
+ import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
+ import { attempt, type Problem } from "./problem";
+ import type { Screen } from "./screen";
+ 
++export type {
++  NotDone,
++  PeopleChangeFailure,
++  PeopleSearch,
++  RowPeopleAsks,
++} from "./mergeRequestPeople";
+ export type { RerequestAsk } from "./mergeRequestRerequests";
+-
+-export type ListLoad =
+-  | { readonly kind: "notLoaded" }
+-  | { readonly kind: "loading"; readonly first: boolean }
+-  | { readonly kind: "done"; readonly end: ListEnd; readonly at: number };
++export type { ListLoad } from "./mergeRequestsList";
+ 
+ export type Opening =
+   | { readonly kind: "fetching" }
+@@ -46,7 +47,8 @@ export type MergeRequests = RowActions &
+   Rerequests &
+   JobLogs &
+   Discussions &
+-  Shown & {
++  Shown &
++  PeopleChanges & {
+     readonly project: Readonly<ShallowRef<GitLabProject>>;
+     readonly me: Readonly<ShallowRef<string | null>>;
+     readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
+@@ -76,107 +78,45 @@ type Deps = {
+   readonly discussionDetails: () => DiscussionDetails;
+ };
+ 
+-type Load = { readonly buffered: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
++type State = Deps &
++  ListState & {
++    readonly project: ShallowRef<GitLabProject>;
++    readonly repository: ComputedRef<string | null>;
++    readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
++    readonly search: ShallowRef<string>;
++    readonly pageProblem: ShallowRef<string | null>;
++    readonly dueDates: DueDates;
++    readonly rowActions: RowActions;
++    readonly discussionQueue: DiscussionQueue;
++  };
+ 
+-type State = Deps & {
+-  readonly project: ShallowRef<GitLabProject>;
+-  readonly repository: ComputedRef<string | null>;
+-  readonly me: ShallowRef<string | null>;
+-  readonly rows: ShallowRef<readonly MergeRequestRow[]>;
+-  readonly cut: ShallowRef<boolean>;
+-  readonly listing: ShallowRef<ListLoad>;
+-  readonly listedAt: ShallowRef<number | null>;
+-  readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
+-  readonly search: ShallowRef<string>;
+-  readonly pageProblem: ShallowRef<string | null>;
+-  readonly dueDates: DueDates;
+-  readonly rowActions: RowActions;
+-  readonly discussionQueue: DiscussionQueue;
+-  shown: Load | null;
+-  running: Load | null;
+-};
+-
+-function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
+-  if (load.buffered) {
+-    load.buffer = merged(load.buffer, rows);
+-    load.me = me;
+-    return;
++function withPeople(state: State, iid: MergeRequestIid, people: Partial<MergeRequestPeople>): void {
++  function changed(rows: readonly MergeRequestRow[]): readonly MergeRequestRow[] {
++    return rows.map((row) => (row.iid === iid ? { ...row, ...people } : row));
+   }
+-  state.rows.value = merged(state.rows.value, rows);
+-  state.me.value = me;
+-  state.discussionQueue.listed(rows);
+-}
+-
+-function ended(state: State, load: Load, end: ListEnd): void {
+-  const at = Date.now();
+-  const listed = listFailureText(end) === null;
+-  if (listed) {
+-    state.cut.value = end.kind === "cut";
+-    state.listedAt.value = at;
+-  }
+-  if (load.buffered && listed) {
+-    state.rows.value = load.buffer;
+-    state.me.value = load.me;
+-    state.shown = load;
+-    state.discussionQueue.replaced(state.rows.value);
+-  }
+-  if (end.kind === "loaded") {
+-    state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
+-  }
+-  state.listing.value = { kind: "done", end, at };
+-}
+-
+-function checked(state: State, load: Load, row: CheckedRow): void {
+-  if (state.shown === load) {
+-    state.rows.value = rechecked(state.rows.value, row);
+-  } else {
+-    load.buffer = rechecked(load.buffer, row);
++  state.rows.value = changed(state.rows.value);
++  if (state.running?.buffered === true) {
++    state.running.buffer = changed(state.running.buffer);
+   }
+ }
+ 
+-function rerequestsOf(state: State): Rerequests {
+-  function replaced(iid: MergeRequestIid, reviewers: readonly Reviewer[]): void {
+-    function withReviewers(rows: readonly MergeRequestRow[]): readonly MergeRequestRow[] {
+-      return rows.map((row) => (row.iid === iid ? { ...row, reviewers } : row));
+-    }
+-    state.rows.value = withReviewers(state.rows.value);
+-    if (state.running?.buffered === true) {
+-      state.running.buffer = withReviewers(state.running.buffer);
+-    }
+-  }
+-  return createRerequests({ source: state.source, report: state.report, replaced });
+-}
+-
+-async function load(state: State): Promise<void> {
+-  const before = state.listing.value;
+-  if (before.kind === "loading") {
+-    return;
+-  }
+-  const first = state.rows.value.length === 0;
+-  const running: Load = { buffered: !first, buffer: [], me: null };
+-  if (first) {
+-    state.shown = running;
+-  }
+-  state.listing.value = { kind: "loading", first };
+-  state.running = running;
+-  const outcome = await attempt(() =>
+-    state.source.listMergeRequests(
+-      (page) => received(state, running, page),
+-      (row) => checked(state, running, row),
+-    ),
+-  );
+-  state.running = null;
+-  if (outcome.ok) {
+-    ended(state, running, outcome.value);
+-    return;
+-  }
+-  state.listing.value = before;
+-  if (first) {
+-    state.rows.value = [];
+-    state.shown = null;
+-    state.discussionQueue.replaced([]);
+-  }
+-  state.report({ action: "mergeRequests", step: "list", cause: outcome.cause });
++function peopleOf(state: State): Rerequests & PeopleChanges {
++  const { source, report } = state;
++  return {
++    ...createRerequests({
++      source,
++      report,
++      replaced: (iid, reviewers) => {
++        withPeople(state, iid, { reviewers });
++      },
++    }),
++    ...createPeopleChanges({
++      source,
++      replaced: (iid, people) => {
++        withPeople(state, iid, people);
++      },
++    }),
++  };
+ }
+ 
+ function show(state: State): void {
+@@ -186,7 +126,7 @@ function show(state: State): void {
+   const listing = state.listing.value;
+   const stale = listing.kind === "done" && Date.now() - listing.at >= RECHECK_PAUSE_MS;
+   if (listing.kind === "notLoaded" || stale) {
+-    void load(state);
++    void loadList(state);
+   }
+ }
+ 
+@@ -261,6 +201,7 @@ function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setD
+ export function createMergeRequests(deps: Deps): MergeRequests {
+   const state = createState(deps);
+   const { me, rows, search } = state;
++  const people = peopleOf(state);
+   return {
+     project: state.project,
+     me,
+@@ -270,7 +211,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     failure: computed(() =>
+       state.listing.value.kind === "done" ? listFailureText(state.listing.value.end) : null,
+     ),
+-    ...shownOf(state, deps.storage),
++    ...shownOf({ ...state, openPeopleBoxes: people.openPeopleBoxes }, deps.storage),
+     search,
+     setSearch: (text) => {
+       search.value = text;
+@@ -285,14 +226,14 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     close: () => {
+       state.screen.value = { kind: "files" };
+     },
+-    refresh: () => load(state),
++    refresh: () => loadList(state),
+     openChanges: (iid) => openChanges(state, iid),
+     openPage: (clicked, page) => openPage(state, clicked, page),
+     dismissPageProblem: () => {
+       state.pageProblem.value = null;
+     },
+     ...state.rowActions,
+-    ...rerequestsOf(state),
++    ...people,
+     ...createJobLogs(deps),
+     ...discussionsOf(state.discussionQueue),
+   };
+diff --git a/frontend/src/ui/mergeRequestsList.ts b/frontend/src/ui/mergeRequestsList.ts
+new file mode 100644
+index 0000000..a855d0c
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestsList.ts
+@@ -0,0 +1,109 @@
++import type { ShallowRef } from "vue";
++
++import type {
++  CheckedRow,
++  ListEnd,
++  MergeRequestPage,
++  MergeRequestRow,
++  MergeRequestSource,
++} from "../ipc";
++import { merged, rechecked } from "../mergeRequests";
++import type { DiscussionQueue } from "./mergeRequestDiscussions";
++import type { DueDates } from "./mergeRequestDueDates";
++import { listFailureText } from "./mergeRequestsText";
++import { attempt, type Problem } from "./problem";
++
++export type ListLoad =
++  | { readonly kind: "notLoaded" }
++  | { readonly kind: "loading"; readonly first: boolean }
++  | { readonly kind: "done"; readonly end: ListEnd; readonly at: number };
++
++type Load = {
++  readonly buffered: boolean;
++  buffer: readonly MergeRequestRow[];
++  me: string | null;
++};
++
++export type ListState = {
++  readonly source: MergeRequestSource;
++  readonly report: (problem: Problem) => void;
++  readonly me: ShallowRef<string | null>;
++  readonly rows: ShallowRef<readonly MergeRequestRow[]>;
++  readonly cut: ShallowRef<boolean>;
++  readonly listing: ShallowRef<ListLoad>;
++  readonly listedAt: ShallowRef<number | null>;
++  readonly dueDates: Pick<DueDates, "keepOnly">;
++  readonly discussionQueue: Pick<DiscussionQueue, "listed" | "replaced">;
++  shown: Load | null;
++  running: Load | null;
++};
++
++function received(state: ListState, load: Load, { me, rows }: MergeRequestPage): void {
++  if (load.buffered) {
++    load.buffer = merged(load.buffer, rows);
++    load.me = me;
++    return;
++  }
++  state.rows.value = merged(state.rows.value, rows);
++  state.me.value = me;
++  state.discussionQueue.listed(rows);
++}
++
++function ended(state: ListState, load: Load, end: ListEnd): void {
++  const at = Date.now();
++  const listed = listFailureText(end) === null;
++  if (listed) {
++    state.cut.value = end.kind === "cut";
++    state.listedAt.value = at;
++  }
++  if (load.buffered && listed) {
++    state.rows.value = load.buffer;
++    state.me.value = load.me;
++    state.shown = load;
++    state.discussionQueue.replaced(state.rows.value);
++  }
++  if (end.kind === "loaded") {
++    state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
++  }
++  state.listing.value = { kind: "done", end, at };
++}
++
++function checked(state: ListState, load: Load, row: CheckedRow): void {
++  if (state.shown === load) {
++    state.rows.value = rechecked(state.rows.value, row);
++  } else {
++    load.buffer = rechecked(load.buffer, row);
++  }
++}
++
++export async function loadList(state: ListState): Promise<void> {
++  const before = state.listing.value;
++  if (before.kind === "loading") {
++    return;
++  }
++  const first = state.rows.value.length === 0;
++  const running: Load = { buffered: !first, buffer: [], me: null };
++  if (first) {
++    state.shown = running;
++  }
++  state.listing.value = { kind: "loading", first };
++  state.running = running;
++  const outcome = await attempt(() =>
++    state.source.listMergeRequests(
++      (page) => received(state, running, page),
++      (row) => checked(state, running, row),
++    ),
++  );
++  state.running = null;
++  if (outcome.ok) {
++    ended(state, running, outcome.value);
++    return;
++  }
++  state.listing.value = before;
++  if (first) {
++    state.rows.value = [];
++    state.shown = null;
++    state.discussionQueue.replaced([]);
++  }
++  state.report({ action: "mergeRequests", step: "list", cause: outcome.cause });
++}
+diff --git a/frontend/src/ui/mergeRequestsShown.ts b/frontend/src/ui/mergeRequestsShown.ts
+index ec4fc16..f904263 100644
+--- a/frontend/src/ui/mergeRequestsShown.ts
++++ b/frontend/src/ui/mergeRequestsShown.ts
+@@ -46,6 +46,7 @@ type Listed = {
+   readonly dueDates: DueDates;
+   readonly discussionDetails: () => DiscussionDetails;
+   readonly discussionQueue: Pick<Discussions, "discussions">;
++  readonly openPeopleBoxes: Readonly<Ref<ReadonlySet<MergeRequestIid>>>;
+ };
+ 
+ type Ordered = { readonly rows: readonly MergeRequestRow[]; readonly sort: ReviewSort | null };
+@@ -79,7 +80,9 @@ export function shownOf(listed: Listed, storage?: StorageLike): Shown {
+   const { filters } = remembered;
+   const viewer = computed(() => viewerOf(filters.value.review, me.value, rows.value));
+   const shown = computed((): Ordered => {
+-    const passing = searched(filtered(rows.value, filters.value, me.value), search.value);
++    const matching = new Set(searched(filtered(rows.value, filters.value, me.value), search.value));
++    const open = listed.openPeopleBoxes.value;
++    const passing = rows.value.filter((row) => matching.has(row) || open.has(row.iid));
+     return filters.value.review === null
+       ? { rows: listed.dueDates.datedFirst(passing), sort: null }
+       : ordered(listed, passing, viewer.value);
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 2bd5703..379eb0b 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -48,7 +48,9 @@ export type MergeRequestStep =
+   | "localMerge"
+   | "rerequestReview"
+   | "discussions"
+-  | "discussion";
++  | "discussion"
++  | "searchPeople"
++  | "changePeople";
+ 
+ export type Problem =
+   | { readonly action: "list"; readonly cause: ProblemCause }
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index 1c570ff..da01f82 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -327,6 +327,11 @@ test.each([
+   ["rerequestReview", "Could not re-request the review: yamt's worker stopped; try again."],
+   ["discussions", "Could not read the discussions: yamt's worker stopped; try again."],
+   ["discussion", "Could not open the comment's page: yamt's worker stopped; try again."],
++  ["searchPeople", "Could not search people: yamt's worker stopped; try again."],
++  [
++    "changePeople",
++    "Could not change the merge request's people: yamt's worker stopped; try again.",
++  ],
+ ] as const)("a failed merge-request call at %s says what failed", (step, words) => {
+   expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
+ });
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 232f79b..0253d36 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -83,6 +83,8 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
+   rerequestReview: "Could not re-request the review",
+   discussions: "Could not read the discussions",
+   discussion: "Could not open the comment's page",
++  searchPeople: "Could not search people",
++  changePeople: "Could not change the merge request's people",
+ };
+ 
+ const FIXED_ATTEMPT_WORDS: Readonly<

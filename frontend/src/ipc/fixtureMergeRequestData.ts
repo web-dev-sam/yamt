@@ -51,12 +51,21 @@ const TITLES = [
   "Let a card belong to two lists",
 ];
 
-const PEOPLE: readonly Generated.Person[] = [
+export const PEOPLE: readonly Generated.Person[] = [
   { username: FIXTURE_ME, name: "Sam Weller", picture: { kind: "uploaded" } },
   { username: "anna", name: "Anna Berg", picture: { kind: "gravatar", address: PNG_DATA } },
   { username: "ben", name: "Ben Okafor", picture: { kind: "uploaded" } },
   { username: "chiara", name: "Chiara Rossi", picture: { kind: "none" } },
   { username: "dmitri", name: "Dmitri Volkov", picture: { kind: "none" } },
+];
+
+export const FREE_TIER_PERSON = "olga";
+export const REFUSED_PERSON = "rita";
+
+export const SEARCH_ONLY_PEOPLE: readonly Generated.Person[] = [
+  { username: "erik", name: "Erik Lund", picture: { kind: "gravatar", address: PNG_DATA } },
+  { username: FREE_TIER_PERSON, name: "Olga Novak", picture: { kind: "none" } },
+  { username: REFUSED_PERSON, name: "Rita Moreau", picture: { kind: "none" } },
 ];
 
 export const REFUSING_REVIEWER = "dmitri";

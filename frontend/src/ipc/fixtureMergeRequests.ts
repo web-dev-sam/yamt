@@ -16,6 +16,7 @@ import {
 } from "./fixtureMergeRequestData";
 import { discussionsScript } from "./fixtureMergeRequestDiscussions";
 import { fixtureJobLog } from "./fixtureMergeRequestLogs";
+import { peopleScript } from "./fixtureMergeRequestPeople";
 import type { Log } from "./log";
 import {
   toCheckedRow,
@@ -280,5 +281,6 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
     ...rerequestScript(log),
     ...pageScript(log),
     ...discussionsScript(log, LISTED_ROWS),
+    ...peopleScript(log, LISTED_ROWS),
   };
 }

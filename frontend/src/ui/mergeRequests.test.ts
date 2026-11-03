@@ -13,10 +13,12 @@ import {
   type LocalMerge,
   type MergeRequestIid,
   type MergeRequestPage,
+  type MergeRequestPeople,
   type MergeRequestRow,
   type MergeRequestSource,
   type OpenReply,
   type PageOpened,
+  type PeopleChangeReply,
   type RerequestReply,
   type ResolveReply,
   type Person,
@@ -73,6 +75,7 @@ type Rig = {
   readonly continues: Asked<ContinueMergeReply>[];
   readonly localMerges: LocalMerge[];
   readonly rerequests: Asked<RerequestReply>[];
+  readonly peopleChanges: Asked<PeopleChangeReply>[];
   readonly storage: MemoryStorage;
   readonly mode: ShallowRef<DiscussionDetails>;
   readonly discussionCalls: DiscussionCall[];
@@ -156,6 +159,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
   const continues: Asked<ContinueMergeReply>[] = [];
   const localMerges: LocalMerge[] = [];
   const rerequests: Asked<RerequestReply>[] = [];
+  const peopleChanges: Asked<PeopleChangeReply>[] = [];
   const problems: Problem[] = [];
   const discussionCalls: DiscussionCall[] = [];
   const mode = shallowRef<DiscussionDetails>("full");
@@ -191,6 +195,11 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
       new Promise((resolve) => {
         discussionCalls.push({ iids: [...asked], answer: resolve });
       }),
+    searchPeople: async () => ({ ok: true, value: { kind: "found", people: [] } }),
+    changePeople: (asked) =>
+      new Promise((resolve) => {
+        peopleChanges.push({ iid: asked, answer: resolve });
+      }),
     ...edit,
   };
   const screen = shallowRef<Screen>({ kind: "files" });
@@ -211,6 +220,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
     continues,
     localMerges,
     rerequests,
+    peopleChanges,
     storage,
     mode,
     discussionCalls,
@@ -1200,6 +1210,134 @@ test("a_rerequest_reply_replaces_that_rows_reviewers_in_rows_and_in_a_buffering_
   await reloading;
   expect(reviewersOf(live.slice.rows.value, 638)).toEqual(RE_REQUESTED);
   expect(live.slice.rerequests.value.size).toBe(0);
+});
+
+test("a_rerequest_still_rewrites_only_the_reviewers", async () => {
+  const live = rig();
+  await loaded(live);
+  const asking = live.slice.rerequestReview(iid(638), "chiara");
+  askedAt(live.rerequests, 0).answer({
+    ok: true,
+    value: { kind: "requested", reviewers: RE_REQUESTED },
+  });
+  await asking;
+  expect(rowOf(live.slice.rows.value, 638)).toEqual({
+    ...rowOf(ROWS, 638),
+    reviewers: RE_REQUESTED,
+  });
+});
+
+const ERIK: Person = { username: "erik", name: "Erik Lund", picture: null };
+const ADD_ERIK = { group: "reviewers", action: "add", username: "erik" } as const;
+
+function rowOf(rows: readonly MergeRequestRow[], value: number): MergeRequestRow {
+  const found = rows.find((row) => row.iid === value);
+  if (found === undefined) {
+    throw new Error(`no row !${value}`);
+  }
+  return found;
+}
+
+function erikReviews(value: number): MergeRequestPeople {
+  return {
+    assignees: rowOf(ROWS, value).assignees,
+    reviewers: [{ person: ERIK, state: "requested" }],
+  };
+}
+
+async function erikAdded(live: Rig, value: number, call: number): Promise<void> {
+  const adding = live.slice.changePeople(iid(value), ADD_ERIK);
+  await settled();
+  askedAt(live.peopleChanges, call).answer({
+    ok: true,
+    value: { kind: "changed", people: erikReviews(value) },
+  });
+  await adding;
+}
+
+test("a_people_change_rewrites_both_lists_in_rows_and_in_a_buffering_refresh", async () => {
+  const live = rig();
+  await loaded(live);
+  const reloading = live.slice.refresh();
+  loadAt(live, 1).send({ me: "sam", rows: ROWS });
+
+  const people: MergeRequestPeople = {
+    assignees: [ERIK],
+    reviewers: [{ person: ERIK, state: "requested" }],
+  };
+  const changing = live.slice.changePeople(iid(638), ADD_ERIK);
+  await settled();
+  askedAt(live.peopleChanges, 0).answer({ ok: true, value: { kind: "changed", people } });
+  await changing;
+  const changed = { ...rowOf(ROWS, 638), ...people };
+  expect(rowOf(live.slice.rows.value, 638)).toEqual(changed);
+  expect(live.slice.rows.value.filter((row) => row.iid !== 638)).toEqual(
+    ROWS.filter((row) => row.iid !== 638),
+  );
+
+  loadAt(live, 1).end(LOADED);
+  await reloading;
+  expect(rowOf(live.slice.rows.value, 638)).toEqual(changed);
+  expect(live.slice.peopleAsks.value.size).toBe(0);
+});
+
+test("the_filters_count_a_person_added_by_a_change", async () => {
+  const live = rig();
+  await loaded(live);
+  function erikCount(): number | undefined {
+    return live.slice.choices.value.reviewer.find(
+      (choice) => choice.value.kind === "person" && choice.value.username === "erik",
+    )?.count;
+  }
+  expect(erikCount()).toBeUndefined();
+  await erikAdded(live, 640, 0);
+  expect(erikCount()).toBe(1);
+  await erikAdded(live, 637, 1);
+  expect(erikCount()).toBe(2);
+});
+
+test("a_row_whose_people_box_is_open_stays_shown_after_a_change_drops_it_from_the_filters", async () => {
+  const live = rig();
+  await loaded(live);
+  const unreviewed = ROWS.filter((row) => row.reviewers.length === 0).length;
+  await live.slice.findProject();
+  live.slice.click("reviewer", { kind: "none" }, false);
+  expect(iids(live.slice.shownRows.value)).toContain(640);
+
+  live.slice.peopleBoxOpened(iid(640));
+  await erikAdded(live, 640, 0);
+  expect(iids(live.slice.shownRows.value)).toContain(640);
+  expect(live.slice.summary.value).toBe(`${unreviewed} of 40 merge requests`);
+
+  await erikAdded(live, 637, 1);
+  expect(iids(live.slice.shownRows.value)).not.toContain(637);
+
+  live.slice.peopleBoxClosed(iid(640));
+  expect(iids(live.slice.shownRows.value)).not.toContain(640);
+  expect(live.slice.summary.value).toBe(`${unreviewed - 2} of 40 merge requests`);
+});
+
+test("a_row_whose_people_box_is_open_stays_shown_when_the_search_no_longer_matches", async () => {
+  const live = rig();
+  await loaded(live);
+  live.slice.setSearch("!640");
+  live.slice.peopleBoxOpened(iid(640));
+  live.slice.setSearch("!630");
+  expect(iids(live.slice.shownRows.value)).toEqual([640, 630]);
+  live.slice.peopleBoxClosed(iid(640));
+  expect(iids(live.slice.shownRows.value)).toEqual([630]);
+});
+
+test("an_open_box_does_not_bring_back_a_row_a_refresh_dropped", async () => {
+  const live = rig();
+  await loaded(live);
+  live.slice.peopleBoxOpened(iid(640));
+  const reloading = live.slice.refresh();
+  loadAt(live, 1).send({ me: "sam", rows: ROWS.filter((row) => row.iid !== 640) });
+  loadAt(live, 1).end(LOADED);
+  await reloading;
+  expect(iids(live.slice.shownRows.value)).toEqual(iids(ROWS).filter((value) => value !== 640));
+  expect(live.slice.openPeopleBoxes.value).toEqual(new Set([640]));
 });
 
 test("a later refresh's rows replace a re-requested row's reviewers", async () => {

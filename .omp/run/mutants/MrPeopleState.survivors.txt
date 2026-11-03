@@ -1,0 +1,8 @@
+just mutants HEAD: 1314 killed, 178 survived (140 in the untouched part of fixtureMergeRequestData.ts), 13 no coverage; after the kill tests, people files: 241 killed, 6 survived
+ui/mergeRequestPeople.ts:102 immediate:false→true / {} — wiring: vueuse starts an immediate timer only when a window exists; node tests have none. The new no-call check passes either way.
+ui/mergeRequestPeople.ts:106 calls+=1→-=1 — equivalent: every search or end call still gives a new, never-reused counter value
+ipc/fixtureMergeRequestPeople.ts:24 username toLowerCase→toUpperCase — equivalent on the fixed data: every username is its name's first word
+ipc/fixtureMergeRequestPeople.ts:22 .slice(0, 20) dropped — equivalent: the fixture knows 8 people
+ipc/fixtureMergeRequestPeople.ts:18 KNOWN_PEOPLE=[] — static: module level, not re-run under --ignoreStatic (#732); the search tests depend on it
+ipc/fixtureMergeRequestPeople.ts:60 exhaustive default — no coverage: unreachable over the closed PeopleGroup union
+ui/mergeRequestsList.ts:106 replaced([])→['…'] — equivalent: code moved unchanged; a row without openDiscussions is never queued

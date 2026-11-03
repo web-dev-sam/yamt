@@ -2,19 +2,16 @@ import type { StorageLike } from "@vueuse/core";
 import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import type {
-  CheckedRow,
   DiscussionDetails,
   GitLabProject,
-  ListEnd,
   MergeRequestIid,
-  MergeRequestPage,
+  MergeRequestPeople,
   MergeRequestRow,
   MergeRequestSource,
   OpenReply,
-  Reviewer,
   WebPage,
 } from "../ipc";
-import { merged, rechecked, type CalendarDay } from "../mergeRequests";
+import type { CalendarDay } from "../mergeRequests";
 import { RECHECK_PAUSE_MS } from "./glab";
 import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
 import {
@@ -25,18 +22,22 @@ import {
 } from "./mergeRequestDiscussions";
 import { createDueDates, type DueDates } from "./mergeRequestDueDates";
 import { createJobLogs, type JobLogs } from "./mergeRequestJobLogs";
+import { createPeopleChanges, type PeopleChanges } from "./mergeRequestPeople";
 import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
+import { loadList, type ListLoad, type ListState } from "./mergeRequestsList";
 import { shownOf, type Shown } from "./mergeRequestsShown";
 import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
 import { attempt, type Problem } from "./problem";
 import type { Screen } from "./screen";
 
+export type {
+  NotDone,
+  PeopleChangeFailure,
+  PeopleSearch,
+  RowPeopleAsks,
+} from "./mergeRequestPeople";
 export type { RerequestAsk } from "./mergeRequestRerequests";
-
-export type ListLoad =
-  | { readonly kind: "notLoaded" }
-  | { readonly kind: "loading"; readonly first: boolean }
-  | { readonly kind: "done"; readonly end: ListEnd; readonly at: number };
+export type { ListLoad } from "./mergeRequestsList";
 
 export type Opening =
   | { readonly kind: "fetching" }
@@ -46,7 +47,8 @@ export type MergeRequests = RowActions &
   Rerequests &
   JobLogs &
   Discussions &
-  Shown & {
+  Shown &
+  PeopleChanges & {
     readonly project: Readonly<ShallowRef<GitLabProject>>;
     readonly me: Readonly<ShallowRef<string | null>>;
     readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
@@ -76,107 +78,45 @@ type Deps = {
   readonly discussionDetails: () => DiscussionDetails;
 };
 
-type Load = { readonly buffered: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
+type State = Deps &
+  ListState & {
+    readonly project: ShallowRef<GitLabProject>;
+    readonly repository: ComputedRef<string | null>;
+    readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
+    readonly search: ShallowRef<string>;
+    readonly pageProblem: ShallowRef<string | null>;
+    readonly dueDates: DueDates;
+    readonly rowActions: RowActions;
+    readonly discussionQueue: DiscussionQueue;
+  };
 
-type State = Deps & {
-  readonly project: ShallowRef<GitLabProject>;
-  readonly repository: ComputedRef<string | null>;
-  readonly me: ShallowRef<string | null>;
-  readonly rows: ShallowRef<readonly MergeRequestRow[]>;
-  readonly cut: ShallowRef<boolean>;
-  readonly listing: ShallowRef<ListLoad>;
-  readonly listedAt: ShallowRef<number | null>;
-  readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
-  readonly search: ShallowRef<string>;
-  readonly pageProblem: ShallowRef<string | null>;
-  readonly dueDates: DueDates;
-  readonly rowActions: RowActions;
-  readonly discussionQueue: DiscussionQueue;
-  shown: Load | null;
-  running: Load | null;
-};
-
-function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
-  if (load.buffered) {
-    load.buffer = merged(load.buffer, rows);
-    load.me = me;
-    return;
+function withPeople(state: State, iid: MergeRequestIid, people: Partial<MergeRequestPeople>): void {
+  function changed(rows: readonly MergeRequestRow[]): readonly MergeRequestRow[] {
+    return rows.map((row) => (row.iid === iid ? { ...row, ...people } : row));
   }
-  state.rows.value = merged(state.rows.value, rows);
-  state.me.value = me;
-  state.discussionQueue.listed(rows);
-}
-
-function ended(state: State, load: Load, end: ListEnd): void {
-  const at = Date.now();
-  const listed = listFailureText(end) === null;
-  if (listed) {
-    state.cut.value = end.kind === "cut";
-    state.listedAt.value = at;
-  }
-  if (load.buffered && listed) {
-    state.rows.value = load.buffer;
-    state.me.value = load.me;
-    state.shown = load;
-    state.discussionQueue.replaced(state.rows.value);
-  }
-  if (end.kind === "loaded") {
-    state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
-  }
-  state.listing.value = { kind: "done", end, at };
-}
-
-function checked(state: State, load: Load, row: CheckedRow): void {
-  if (state.shown === load) {
-    state.rows.value = rechecked(state.rows.value, row);
-  } else {
-    load.buffer = rechecked(load.buffer, row);
+  state.rows.value = changed(state.rows.value);
+  if (state.running?.buffered === true) {
+    state.running.buffer = changed(state.running.buffer);
   }
 }
 
-function rerequestsOf(state: State): Rerequests {
-  function replaced(iid: MergeRequestIid, reviewers: readonly Reviewer[]): void {
-    function withReviewers(rows: readonly MergeRequestRow[]): readonly MergeRequestRow[] {
-      return rows.map((row) => (row.iid === iid ? { ...row, reviewers } : row));
-    }
-    state.rows.value = withReviewers(state.rows.value);
-    if (state.running?.buffered === true) {
-      state.running.buffer = withReviewers(state.running.buffer);
-    }
-  }
-  return createRerequests({ source: state.source, report: state.report, replaced });
-}
-
-async function load(state: State): Promise<void> {
-  const before = state.listing.value;
-  if (before.kind === "loading") {
-    return;
-  }
-  const first = state.rows.value.length === 0;
-  const running: Load = { buffered: !first, buffer: [], me: null };
-  if (first) {
-    state.shown = running;
-  }
-  state.listing.value = { kind: "loading", first };
-  state.running = running;
-  const outcome = await attempt(() =>
-    state.source.listMergeRequests(
-      (page) => received(state, running, page),
-      (row) => checked(state, running, row),
-    ),
-  );
-  state.running = null;
-  if (outcome.ok) {
-    ended(state, running, outcome.value);
-    return;
-  }
-  state.listing.value = before;
-  if (first) {
-    state.rows.value = [];
-    state.shown = null;
-    state.discussionQueue.replaced([]);
-  }
-  state.report({ action: "mergeRequests", step: "list", cause: outcome.cause });
+function peopleOf(state: State): Rerequests & PeopleChanges {
+  const { source, report } = state;
+  return {
+    ...createRerequests({
+      source,
+      report,
+      replaced: (iid, reviewers) => {
+        withPeople(state, iid, { reviewers });
+      },
+    }),
+    ...createPeopleChanges({
+      source,
+      replaced: (iid, people) => {
+        withPeople(state, iid, people);
+      },
+    }),
+  };
 }
 
 function show(state: State): void {
@@ -186,7 +126,7 @@ function show(state: State): void {
   const listing = state.listing.value;
   const stale = listing.kind === "done" && Date.now() - listing.at >= RECHECK_PAUSE_MS;
   if (listing.kind === "notLoaded" || stale) {
-    void load(state);
+    void loadList(state);
   }
 }
 
@@ -261,6 +201,7 @@ function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setD
 export function createMergeRequests(deps: Deps): MergeRequests {
   const state = createState(deps);
   const { me, rows, search } = state;
+  const people = peopleOf(state);
   return {
     project: state.project,
     me,
@@ -270,7 +211,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     failure: computed(() =>
       state.listing.value.kind === "done" ? listFailureText(state.listing.value.end) : null,
     ),
-    ...shownOf(state, deps.storage),
+    ...shownOf({ ...state, openPeopleBoxes: people.openPeopleBoxes }, deps.storage),
     search,
     setSearch: (text) => {
       search.value = text;
@@ -285,14 +226,14 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     close: () => {
       state.screen.value = { kind: "files" };
     },
-    refresh: () => load(state),
+    refresh: () => loadList(state),
     openChanges: (iid) => openChanges(state, iid),
     openPage: (clicked, page) => openPage(state, clicked, page),
     dismissPageProblem: () => {
       state.pageProblem.value = null;
     },
     ...state.rowActions,
-    ...rerequestsOf(state),
+    ...people,
     ...createJobLogs(deps),
     ...discussionsOf(state.discussionQueue),
   };

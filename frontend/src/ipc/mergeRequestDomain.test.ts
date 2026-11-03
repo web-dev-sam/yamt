@@ -6,6 +6,8 @@ import {
   toCheckedRow,
   toMergeRequestPage,
   toOpenReply,
+  toPeopleChangeReply,
+  toPeopleSearchReply,
   toRerequestReply,
   type MergeRequestRow,
 } from "./mergeRequestDomain";
@@ -161,6 +163,47 @@ test("a requested reply's reviewers get their pictures like a row's; other repli
   });
   const refused: Generated.RerequestReply = { kind: "refused", message: "not allowed" };
   expect(toRerequestReply(refused, uploadedPicture)).toBe(refused);
+});
+
+test("found_and_changed_replies_get_pictures_like_a_rows_and_others_pass_unchanged", () => {
+  const sam: Generated.Person = {
+    username: "sam",
+    name: "Sam Weller",
+    picture: { kind: "uploaded" },
+  };
+  const gravatar: Generated.Person = { ...ANNA, picture: { kind: "gravatar", address: GRAVATAR } };
+  const samConverted = {
+    username: "sam",
+    name: "Sam Weller",
+    picture: "yamt-picture://localhost/sam",
+  };
+  const annaConverted = { username: "anna", name: "Anna Berg", picture: GRAVATAR };
+  expect(
+    toPeopleSearchReply({ kind: "found", people: [sam, gravatar, ANNA] }, uploadedPicture),
+  ).toEqual({
+    kind: "found",
+    people: [samConverted, annaConverted, { username: "anna", name: "Anna Berg", picture: null }],
+  });
+  const people: Generated.MergeRequestPeople = {
+    assignees: [sam],
+    reviewers: [{ person: gravatar, state: "approved" }],
+  };
+  const converted = {
+    assignees: [samConverted],
+    reviewers: [{ person: annaConverted, state: "approved" }],
+  };
+  expect(toPeopleChangeReply({ kind: "changed", people }, uploadedPicture)).toEqual({
+    kind: "changed",
+    people: converted,
+  });
+  expect(toPeopleChangeReply({ kind: "unchanged", people }, uploadedPicture)).toEqual({
+    kind: "unchanged",
+    people: converted,
+  });
+  const failed: Generated.PeopleSearchReply = { kind: "failed", message: "no autocompleteUsers" };
+  expect(toPeopleSearchReply(failed, uploadedPicture)).toBe(failed);
+  const refused: Generated.PeopleChangeReply = { kind: "refused", message: "Cannot assign" };
+  expect(toPeopleChangeReply(refused, uploadedPicture)).toBe(refused);
 });
 
 test("a time with an offset is the same instant (catches a time read as local)", () => {

@@ -9,6 +9,9 @@ import type {
   MergeRequestPage,
   OpenReply,
   PageOpened,
+  PeopleChange,
+  PeopleChangeReply,
+  PeopleSearchReply,
   RerequestReply,
   ResolveReply,
   RowDiscussions,
@@ -37,4 +40,11 @@ export interface MergeRequestSource {
   readDiscussions(
     iids: readonly MergeRequestIid[],
   ): Promise<SourceResult<readonly RowDiscussions[]>>;
+  /** The project's people whose name, username or public email matches `text` (GitLab's autocomplete, ≤ 20, plan §2 row 169). */
+  searchPeople(text: string): Promise<SourceResult<PeopleSearchReply>>;
+  /** One person added to or removed from one list of merge request `iid`, against GitLab's list at that moment. */
+  changePeople(
+    iid: MergeRequestIid,
+    change: PeopleChange,
+  ): Promise<SourceResult<PeopleChangeReply>>;
 }

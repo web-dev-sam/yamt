@@ -14,6 +14,8 @@ const commands = vi.hoisted(() => ({
   rerequestReview: vi.fn(),
   readJobLog: vi.fn(),
   readDiscussions: vi.fn(),
+  searchPeople: vi.fn(),
+  changePeople: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -301,6 +303,49 @@ test("a refused re-request comes back as GitLab said it", async () => {
   ).toEqual({ ok: true, value: { kind: "refused", message: "Reviewer not found" } });
 });
 
+test("searchPeople_and_changePeople_call_their_commands_with_the_arguments", async () => {
+  const ben: Generated.Person = {
+    username: "ben",
+    name: "Ben Okafor",
+    picture: { kind: "uploaded" },
+  };
+  const benConverted = {
+    username: "ben",
+    name: "Ben Okafor",
+    picture: "yamt-picture://localhost/ben",
+  };
+  commands.searchPeople.mockResolvedValue({
+    status: "ok",
+    data: { kind: "found", people: [ben] },
+  });
+  commands.changePeople.mockResolvedValue({
+    status: "ok",
+    data: {
+      kind: "changed",
+      people: { assignees: [ben], reviewers: [{ person: ben, state: "requested" }] },
+    },
+  });
+  const source = createTauriMergeRequests();
+  const change = { group: "reviewers", action: "add", username: "ben" } as const;
+
+  const found = await source.searchPeople("be");
+  const changed = await source.changePeople(branded(52, isMergeRequestIid, "iid"), change);
+
+  expect(commands.searchPeople).toHaveBeenCalledWith("be");
+  expect(commands.changePeople).toHaveBeenCalledWith(52, change);
+  expect(found).toEqual({ ok: true, value: { kind: "found", people: [benConverted] } });
+  expect(changed).toEqual({
+    ok: true,
+    value: {
+      kind: "changed",
+      people: {
+        assignees: [benConverted],
+        reviewers: [{ person: benConverted, state: "requested" }],
+      },
+    },
+  });
+});
+
 test("a page is passed as it came and its answer comes back", async () => {
   const page = "https://gitlab.example/x/-/merge_requests/7";
   if (!isWebPage(page)) {
@@ -446,6 +491,8 @@ test.each([
   ["rerequestReview", { kind: "WorkerStopped" }],
   ["readJobLog", { kind: "WorkerStopped" }],
   ["readDiscussions", { kind: "WorkerStopped" }],
+  ["searchPeople", { kind: "WorkerStopped" }],
+  ["changePeople", { kind: "WorkerStopped" }],
 ] as const)("a %s failure comes back unchanged", async (name, failure) => {
   commands[name].mockResolvedValue({ status: "error", error: failure });
   const source = createTauriMergeRequests();
@@ -455,6 +502,13 @@ test.each([
     rerequestReview: () => source.rerequestReview(branded(1, isMergeRequestIid, "iid"), "anna"),
     readJobLog: () => source.readJobLog(jobPage()),
     readDiscussions: () => source.readDiscussions([branded(1, isMergeRequestIid, "iid")]),
+    searchPeople: () => source.searchPeople("an"),
+    changePeople: () =>
+      source.changePeople(branded(1, isMergeRequestIid, "iid"), {
+        group: "assignees",
+        action: "remove",
+        username: "anna",
+      }),
   };
   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
 });

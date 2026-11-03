@@ -46,6 +46,7 @@ type Listed = {
   readonly dueDates: DueDates;
   readonly discussionDetails: () => DiscussionDetails;
   readonly discussionQueue: Pick<Discussions, "discussions">;
+  readonly openPeopleBoxes: Readonly<Ref<ReadonlySet<MergeRequestIid>>>;
 };
 
 type Ordered = { readonly rows: readonly MergeRequestRow[]; readonly sort: ReviewSort | null };
@@ -79,7 +80,9 @@ export function shownOf(listed: Listed, storage?: StorageLike): Shown {
   const { filters } = remembered;
   const viewer = computed(() => viewerOf(filters.value.review, me.value, rows.value));
   const shown = computed((): Ordered => {
-    const passing = searched(filtered(rows.value, filters.value, me.value), search.value);
+    const matching = new Set(searched(filtered(rows.value, filters.value, me.value), search.value));
+    const open = listed.openPeopleBoxes.value;
+    const passing = rows.value.filter((row) => matching.has(row) || open.has(row.iid));
     return filters.value.review === null
       ? { rows: listed.dueDates.datedFirst(passing), sort: null }
       : ordered(listed, passing, viewer.value);

@@ -6,6 +6,8 @@ import {
   toCheckedRow,
   toMergeRequestPage,
   toOpenReply,
+  toPeopleChangeReply,
+  toPeopleSearchReply,
   toRerequestReply,
   toRowDiscussions,
   type CheckedRow,
@@ -63,6 +65,21 @@ function listed(
   });
 }
 
+function peopleCalls(): Pick<MergeRequestSource, "searchPeople" | "changePeople"> {
+  return {
+    async searchPeople(text) {
+      return converted(toResult(await commands.searchPeople(text)), (reply) =>
+        toPeopleSearchReply(reply, uploadedPicture),
+      );
+    },
+    async changePeople(iid, change) {
+      return converted(toResult(await commands.changePeople(iid, change)), (reply) =>
+        toPeopleChangeReply(reply, uploadedPicture),
+      );
+    },
+  };
+}
+
 export function createTauriMergeRequests(): MergeRequestSource {
   return {
     async findGitLabProject() {
@@ -97,5 +114,6 @@ export function createTauriMergeRequests(): MergeRequestSource {
         rows.map((row, at) => toRowDiscussions(row, at, uploadedPicture)),
       );
     },
+    ...peopleCalls(),
   };
 }

@@ -77,6 +77,19 @@ export type DiscussionsAnswer =
   | { readonly kind: "open"; readonly discussions: readonly OpenDiscussion[] }
   | Readonly<Exclude<Generated.DiscussionsAnswer, { kind: "open" }>>;
 export type RowDiscussions = { readonly iid: MergeRequestIid; readonly answer: DiscussionsAnswer };
+export type PeopleGroup = Generated.PeopleGroup;
+export type PeopleChange = Readonly<Generated.PeopleChange>;
+export type MergeRequestPeople = {
+  readonly assignees: readonly Person[];
+  readonly reviewers: readonly Reviewer[];
+};
+export type PeopleSearchReply =
+  | { readonly kind: "found"; readonly people: readonly Person[] }
+  | Readonly<Exclude<Generated.PeopleSearchReply, { kind: "found" }>>;
+export type PeopleChangeReply =
+  | { readonly kind: "changed"; readonly people: MergeRequestPeople }
+  | { readonly kind: "unchanged"; readonly people: MergeRequestPeople }
+  | Readonly<Exclude<Generated.PeopleChangeReply, { kind: "changed" | "unchanged" }>>;
 
 type UploadedPicture = (username: string) => string;
 
@@ -214,5 +227,32 @@ export function toRowDiscussions(
   return {
     iid: branded(raw.iid, isMergeRequestIid, `${field}.iid`),
     answer: toAnswer(raw.answer, `${field}.answer`, uploadedPicture),
+  };
+}
+
+/** Each person's picture as toMergeRequestPage converts it (toPerson, toReviewers); other replies pass unchanged. */
+export function toPeopleSearchReply(
+  raw: Generated.PeopleSearchReply,
+  uploadedPicture: UploadedPicture,
+): PeopleSearchReply {
+  return raw.kind === "found"
+    ? { kind: "found", people: raw.people.map((person) => toPerson(person, uploadedPicture)) }
+    : raw;
+}
+
+export function toPeopleChangeReply(
+  raw: Generated.PeopleChangeReply,
+  uploadedPicture: UploadedPicture,
+): PeopleChangeReply {
+  if (raw.kind !== "changed" && raw.kind !== "unchanged") {
+    return raw;
+  }
+  const { assignees, reviewers } = raw.people;
+  return {
+    kind: raw.kind,
+    people: {
+      assignees: assignees.map((person) => toPerson(person, uploadedPicture)),
+      reviewers: toReviewers(reviewers, uploadedPicture),
+    },
   };
 }
