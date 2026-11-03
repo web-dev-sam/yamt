@@ -71,6 +71,14 @@ type Asks = ShallowRef<ReadonlyMap<MergeRequestIid, RowPeopleAsks>>;
 const EMPTY: PeopleSearch = { kind: "empty" };
 const NO_ASKS: RowPeopleAsks = { queue: [], notDone: [] };
 
+/** `iid`'s asks; a merge request with none has an empty queue and no notice. */
+export function rowPeopleAsks(
+  asks: ReadonlyMap<MergeRequestIid, RowPeopleAsks>,
+  iid: MergeRequestIid,
+): RowPeopleAsks {
+  return asks.get(iid) ?? NO_ASKS;
+}
+
 function shownPeople(search: PeopleSearch): readonly Person[] {
   return search.kind === "searching" || search.kind === "found" ? search.people : [];
 }
@@ -151,7 +159,7 @@ async function answer(
     deps.replaced(iid, outcome.value.people);
   }
   const why = failureOf(outcome);
-  const row = asks.value.get(iid) ?? NO_ASKS;
+  const row = rowPeopleAsks(asks.value, iid);
   setAsks(asks, iid, {
     queue: row.queue.filter((queued) => queued !== change),
     notDone: why === null ? row.notDone : [...row.notDone, { change, why }],
@@ -162,7 +170,7 @@ function changesOf(deps: Deps, asks: Asks): Pick<PeopleChanges, "changePeople"> 
   const lastTurns = new Map<MergeRequestIid, Promise<void>>();
   return {
     changePeople: (iid, change) => {
-      const row = asks.value.get(iid) ?? NO_ASKS;
+      const row = rowPeopleAsks(asks.value, iid);
       if (
         row.queue.some((queued) => samePerson(queued, change) && queued.action === change.action)
       ) {

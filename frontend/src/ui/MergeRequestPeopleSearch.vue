@@ -6,12 +6,12 @@ import type { MergeRequestRow, PeopleGroup } from "../ipc";
 import { ARROW_STEPS } from "./menuKeys";
 import {
   keptHighlight,
-  NO_PEOPLE_ASKS,
   pickList,
   steppedHighlight,
   type PickLine,
 } from "./mergeRequestPeopleLines";
 import MergeRequestPicture from "./MergeRequestPicture.vue";
+import { rowPeopleAsks } from "./mergeRequests";
 import { useMergeRequests } from "./mergeRequestsStore";
 import { alreadyText, SEARCH_PEOPLE, SEARCH_PEOPLE_PLACEHOLDER } from "./mergeRequestsText";
 
@@ -31,7 +31,7 @@ const list = computed(() =>
     group: props.group,
     me: me.value,
     search: peopleSearch.value,
-    asks: peopleAsks.value.get(props.row.iid) ?? NO_PEOPLE_ASKS,
+    asks: rowPeopleAsks(peopleAsks.value, props.row.iid),
     platform: navigator.platform,
   }),
 );
@@ -83,7 +83,9 @@ async function add(line: PickLine): Promise<void> {
   if (field.value !== null && text.value === typedAtPick) {
     text.value = "";
     searchPeople("");
-    field.value.focus();
+    if (document.activeElement === document.body) {
+      field.value.focus();
+    }
   }
 }
 

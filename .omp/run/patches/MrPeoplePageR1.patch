@@ -1,0 +1,307 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index cc173bb..e0b8d24 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -66,4 +66,4 @@ Merge-request conflicts (plan §2 #138–#143): `MergeRequestRow.vue` shows the
+ 
+ The merge window of a merge request (plan §2 #138–#143): `question.ts` is what is asked; `questionText.ts` is its words (`cancel: null` draws one button; a bullet list is kind `lines`). Abort of a merge yamt started (`mergeRequest`, written only by `listing.ts`) asks by returnTo/branchBefore, then shows the one-button notice if git left anything (`leftoverText.ts`, the page's `gitRefused` line uses it too), then `closeEndedMerge`. `pushing.ts` offers the push after Continue answers ReadyToPush: only Push pushes (RK45), a failure asks pushFailed again, Keep Local or Escape closes once. A failed push is the `push` problem ("Could not push <branch>"); a failed `closeEndedMerge`, after the push offer or after Abort's leftovers, is the `closeMerge` problem of the merge read before the action began ("Could not close the merge of <target> into <branch>"), never Abort's. Once Continue answers ReadyToPush, or Abort answers leftovers, git stays running: the window is ended for every reader.
+ 
+-People on a merge request (request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, plan §2 #169, #170): `useMergeRequests()` carries `peopleSearch`/`searchPeople`/`endPeopleSearch` (the window's one search, 250 ms after the last call, newest answer only), `peopleAsks`/`changePeople` (`mergeRequestPeople.ts`: one change at a time per merge request, `queue[0]` running, `notDone` kept until the box closes) and `openPeopleBoxes`/`peopleBoxOpened`/`peopleBoxClosed`: `shownRows` keeps a row whose box is open (rule 9), so `MergeRequestPeople.vue` calls Opened when `useHoverBox`'s `open` turns true and Closed when it turns false or the box unmounts open. On a row with `mayRerequest` the box always shows both groups ("None" when empty; a row with nobody opens it from the dimmed icon), each header with a `user-plus` add button that opens `MergeRequestPeopleSearch.vue` under it (one field per box, `adding`): a `role="combobox"` field over a `role="listbox"` of `mergeRequestPeopleLines.ts` `pickList` (the core's `peopleSuggestions` while empty, else the search's people; "Already an assignee/reviewer" lines `aria-disabled`, a queued add spinning), arrows over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines change (`keptHighlight`), Enter or a click (its `mousedown` prevented) adds, and the field clears and keeps focus once that add is answered unless the text changed meanwhile; Escape closes the field (focus to its add button), a second Escape the box. Each assignee and reviewer line ends with `MergeRequestPersonMenu.vue` (`ellipsis-vertical`, one `useDropdownMenu<true>` menu with "Remove assignee/reviewer", `position: fixed` inside the box so the hover box holds it; the spinner, `aria-disabled` and no menu while that remove is queued or running). A change GitLab did not make is one `peopleChangeText` sentence (`personState` under the listed person for a remove, else `groupNotices` under the group). Every control of a line carries `data-control`; when a reply removes the focused one, focus moves to the box.
++People on a merge request (request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, plan §2 #169, #170): `useMergeRequests()` carries `peopleSearch`/`searchPeople`/`endPeopleSearch` (the window's one search, 250 ms after the last call, newest answer only), `peopleAsks`/`changePeople` (`mergeRequestPeople.ts`: one change at a time per merge request, `queue[0]` running, `notDone` kept until the box closes; `rowPeopleAsks(peopleAsks, iid)` is the one reader of a row's asks, empty for a row with none) and `openPeopleBoxes`/`peopleBoxOpened`/`peopleBoxClosed`: `shownRows` keeps a row whose box is open (rule 9), so `MergeRequestPeople.vue` calls Opened when `useHoverBox`'s `open` turns true and Closed when it turns false or the box unmounts open. On a row with `mayRerequest` the box always shows both groups ("None" when empty; a row with nobody opens it from the dimmed icon), each header with a `user-plus` add button that opens `MergeRequestPeopleSearch.vue` under it (one field per box, `adding`): a `role="combobox"` field over a `role="listbox"` of `mergeRequestPeopleLines.ts` `pickList` (the core's `peopleSuggestions` while empty, else the search's people; "Already an assignee/reviewer" lines `aria-disabled`, a queued add spinning), arrows over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines change (`keptHighlight`), Enter or a click (its `mousedown` prevented) adds, and once that add is answered the field clears unless its text changed meanwhile (not at the pick, so the picked line shows its spinner) and takes focus back only from `document.body`, never from a control the user moved to while waiting; Escape closes the field (focus to its add button), a second Escape the box. Each assignee and reviewer line ends with `MergeRequestPersonMenu.vue` (`ellipsis-vertical`, one `useDropdownMenu<true>` menu with "Remove assignee/reviewer", `position: fixed` inside the box so the hover box holds it; the spinner, `aria-disabled` and no menu while that remove is queued or running). A change GitLab did not make is one `peopleChangeText` sentence (`personState` under the listed person for a remove, else `groupNotices` under the group). Every control of a line carries `data-control`, its key built once on the line (`BoxLine`'s `review.rerequest.control` and `menuControl`, null when not shown) and bound by the template; when a reply removes the focused one (`lineControls` over the same lines), focus moves to the box.
+diff --git a/frontend/src/ui/MergeRequestPeople.vue b/frontend/src/ui/MergeRequestPeople.vue
+index 01077cf..c547caa 100644
+--- a/frontend/src/ui/MergeRequestPeople.vue
++++ b/frontend/src/ui/MergeRequestPeople.vue
+@@ -18,16 +18,11 @@ import {
+   reviewStateText,
+   type ReviewState,
+ } from "../mergeRequests";
+-import {
+-  groupNotices,
+-  NO_PEOPLE_ASKS,
+-  personState,
+-  type PersonState,
+-} from "./mergeRequestPeopleLines";
++import { groupNotices, personState, type PersonState } from "./mergeRequestPeopleLines";
+ import MergeRequestPeopleSearch from "./MergeRequestPeopleSearch.vue";
+ import MergeRequestPersonMenu from "./MergeRequestPersonMenu.vue";
+ import MergeRequestPicture from "./MergeRequestPicture.vue";
+-import type { RerequestAsk } from "./mergeRequests";
++import { rowPeopleAsks, type RerequestAsk } from "./mergeRequests";
+ import { useMergeRequests } from "./mergeRequestsStore";
+ import {
+   ADD_ASSIGNEE,
+@@ -48,7 +43,11 @@ type StateLook = { readonly icon: Component; readonly tone: string };
+ type Review = {
+   readonly look: StateLook;
+   readonly stateText: string;
+-  readonly rerequest: { readonly label: string; readonly running: boolean } | null;
++  readonly rerequest: {
++    readonly control: string;
++    readonly label: string;
++    readonly running: boolean;
++  } | null;
+   readonly refusal: string | null;
+ };
+ type BoxLine = {
+@@ -56,6 +55,7 @@ type BoxLine = {
+   readonly name: string;
+   readonly state: PersonState;
+   readonly review: Review | null;
++  readonly menuControl: string | null;
+ };
+ type GroupWords = { readonly title: string; readonly add: string; readonly remove: string };
+ type BoxGroup = {
+@@ -104,10 +104,7 @@ const groups = computed(() =>
+   GROUPS.map(boxGroup).filter((group) => editable.value || group.lines.length > 0),
+ );
+ const controls = computed(
+-  () =>
+-    new Set(
+-      groups.value.flatMap((group) => group.lines.flatMap((line) => controlsOf(group, line))),
+-    ),
++  () => new Set(groups.value.flatMap((group) => group.lines.flatMap(lineControls))),
+ );
+ 
+ watch(open, (isOpen) => {
+@@ -127,13 +124,18 @@ onBeforeUnmount(() => {
+ });
+ 
+ function review(reviewer: Reviewer, name: string): Review {
+-  const ask = props.asks.get(reviewer.person.username);
++  const username = reviewer.person.username;
++  const ask = props.asks.get(username);
+   return {
+     look: REVIEW_STATE_LOOKS[reviewer.state],
+     stateText: reviewStateText(reviewer.state),
+     rerequest:
+       editable.value && reviewDone(reviewer.state)
+-        ? { label: rerequestLabel(name), running: ask?.kind === "running" }
++        ? {
++            control: `rerequest:${username}`,
++            label: rerequestLabel(name),
++            running: ask?.kind === "running",
++          }
+         : null,
+     refusal: ask?.kind === "refused" ? rerequestReplyText(ask.reply, name) : null,
+   };
+@@ -143,7 +145,7 @@ function boxGroup(group: PeopleGroup): BoxGroup {
+   const place = {
+     row: props.row,
+     group,
+-    asks: peopleAsks.value.get(props.row.iid) ?? NO_PEOPLE_ASKS,
++    asks: rowPeopleAsks(peopleAsks.value, props.row.iid),
+     platform: navigator.platform,
+   };
+   function line(person: Person, reviewer: Reviewer | null): BoxLine {
+@@ -153,6 +155,7 @@ function boxGroup(group: PeopleGroup): BoxGroup {
+       name,
+       state: personState(place, person.username),
+       review: reviewer === null ? null : review(reviewer, name),
++      menuControl: editable.value ? `more:${group}:${person.username}` : null,
+     };
+   }
+   return {
+@@ -166,12 +169,11 @@ function boxGroup(group: PeopleGroup): BoxGroup {
+   };
+ }
+ 
+-function controlsOf(group: BoxGroup, line: BoxLine): string[] {
+-  const username = line.person.username;
+-  const rerequest = line.review !== null && line.review.rerequest !== null;
++function lineControls(line: BoxLine): string[] {
++  const rerequest = line.review?.rerequest ?? null;
+   return [
+-    ...(rerequest ? [`rerequest:${username}`] : []),
+-    ...(editable.value ? [`more:${group.group}:${username}`] : []),
++    ...(rerequest === null ? [] : [rerequest.control]),
++    ...(line.menuControl === null ? [] : [line.menuControl]),
+   ];
+ }
+ 
+@@ -307,7 +309,7 @@ function remove(group: PeopleGroup, username: string): void {
+                     v-if="line.review.rerequest !== null"
+                     v-tooltip="REREQUEST_REVIEW"
+                     type="button"
+-                    :data-control="`rerequest:${line.person.username}`"
++                    :data-control="line.review.rerequest.control"
+                     :aria-label="line.review.rerequest.label"
+                     :aria-busy="line.review.rerequest.running"
+                     :aria-disabled="line.review.rerequest.running"
+@@ -332,8 +334,8 @@ function remove(group: PeopleGroup, username: string): void {
+                   </span>
+                 </template>
+                 <MergeRequestPersonMenu
+-                  v-if="editable"
+-                  :data-control="`more:${group.group}:${line.person.username}`"
++                  v-if="line.menuControl !== null"
++                  :data-control="line.menuControl"
+                   :name="line.name"
+                   :item="group.words.remove"
+                   :working="line.state.removing"
+diff --git a/frontend/src/ui/MergeRequestPeopleSearch.vue b/frontend/src/ui/MergeRequestPeopleSearch.vue
+index 6259f13..834cca2 100644
+--- a/frontend/src/ui/MergeRequestPeopleSearch.vue
++++ b/frontend/src/ui/MergeRequestPeopleSearch.vue
+@@ -6,12 +6,12 @@ import type { MergeRequestRow, PeopleGroup } from "../ipc";
+ import { ARROW_STEPS } from "./menuKeys";
+ import {
+   keptHighlight,
+-  NO_PEOPLE_ASKS,
+   pickList,
+   steppedHighlight,
+   type PickLine,
+ } from "./mergeRequestPeopleLines";
+ import MergeRequestPicture from "./MergeRequestPicture.vue";
++import { rowPeopleAsks } from "./mergeRequests";
+ import { useMergeRequests } from "./mergeRequestsStore";
+ import { alreadyText, SEARCH_PEOPLE, SEARCH_PEOPLE_PLACEHOLDER } from "./mergeRequestsText";
+ 
+@@ -31,7 +31,7 @@ const list = computed(() =>
+     group: props.group,
+     me: me.value,
+     search: peopleSearch.value,
+-    asks: peopleAsks.value.get(props.row.iid) ?? NO_PEOPLE_ASKS,
++    asks: rowPeopleAsks(peopleAsks.value, props.row.iid),
+     platform: navigator.platform,
+   }),
+ );
+@@ -83,7 +83,9 @@ async function add(line: PickLine): Promise<void> {
+   if (field.value !== null && text.value === typedAtPick) {
+     text.value = "";
+     searchPeople("");
+-    field.value.focus();
++    if (document.activeElement === document.body) {
++      field.value.focus();
++    }
+   }
+ }
+ 
+diff --git a/frontend/src/ui/mergeRequestPeople.test.ts b/frontend/src/ui/mergeRequestPeople.test.ts
+index be199f0..76449db 100644
+--- a/frontend/src/ui/mergeRequestPeople.test.ts
++++ b/frontend/src/ui/mergeRequestPeople.test.ts
+@@ -14,7 +14,12 @@ import {
+   type SourceFailure,
+   type SourceResult,
+ } from "../ipc";
+-import { createPeopleChanges, SEARCH_PAUSE_MS, type PeopleChanges } from "./mergeRequestPeople";
++import {
++  createPeopleChanges,
++  rowPeopleAsks,
++  SEARCH_PAUSE_MS,
++  type PeopleChanges,
++} from "./mergeRequestPeople";
+ 
+ type Call<T> = {
+   readonly answer: (result: SourceResult<T>) => void;
+@@ -376,3 +381,11 @@ test("a_new_change_for_the_person_drops_their_old_notice", async () => {
+     notDone: [{ change: ASSIGN_BEN, why: { kind: "unchanged" } }],
+   });
+ });
++
++test("a_row_with_no_asks_reads_an_empty_queue_and_no_notice", () => {
++  const live = rig();
++  void live.slice.changePeople(iid(7), ADD_BEN);
++  const asks = live.slice.peopleAsks.value;
++  expect(rowPeopleAsks(asks, iid(8))).toEqual({ queue: [], notDone: [] });
++  expect(rowPeopleAsks(asks, iid(7))).toEqual({ queue: [ADD_BEN], notDone: [] });
++});
+diff --git a/frontend/src/ui/mergeRequestPeople.ts b/frontend/src/ui/mergeRequestPeople.ts
+index cf434f5..c910c64 100644
+--- a/frontend/src/ui/mergeRequestPeople.ts
++++ b/frontend/src/ui/mergeRequestPeople.ts
+@@ -71,6 +71,14 @@ type Asks = ShallowRef<ReadonlyMap<MergeRequestIid, RowPeopleAsks>>;
+ const EMPTY: PeopleSearch = { kind: "empty" };
+ const NO_ASKS: RowPeopleAsks = { queue: [], notDone: [] };
+ 
++/** `iid`'s asks; a merge request with none has an empty queue and no notice. */
++export function rowPeopleAsks(
++  asks: ReadonlyMap<MergeRequestIid, RowPeopleAsks>,
++  iid: MergeRequestIid,
++): RowPeopleAsks {
++  return asks.get(iid) ?? NO_ASKS;
++}
++
+ function shownPeople(search: PeopleSearch): readonly Person[] {
+   return search.kind === "searching" || search.kind === "found" ? search.people : [];
+ }
+@@ -151,7 +159,7 @@ async function answer(
+     deps.replaced(iid, outcome.value.people);
+   }
+   const why = failureOf(outcome);
+-  const row = asks.value.get(iid) ?? NO_ASKS;
++  const row = rowPeopleAsks(asks.value, iid);
+   setAsks(asks, iid, {
+     queue: row.queue.filter((queued) => queued !== change),
+     notDone: why === null ? row.notDone : [...row.notDone, { change, why }],
+@@ -162,7 +170,7 @@ function changesOf(deps: Deps, asks: Asks): Pick<PeopleChanges, "changePeople">
+   const lastTurns = new Map<MergeRequestIid, Promise<void>>();
+   return {
+     changePeople: (iid, change) => {
+-      const row = asks.value.get(iid) ?? NO_ASKS;
++      const row = rowPeopleAsks(asks.value, iid);
+       if (
+         row.queue.some((queued) => samePerson(queued, change) && queued.action === change.action)
+       ) {
+diff --git a/frontend/src/ui/mergeRequestPeopleLines.test.ts b/frontend/src/ui/mergeRequestPeopleLines.test.ts
+index ed22393..e29c0f0 100644
+--- a/frontend/src/ui/mergeRequestPeopleLines.test.ts
++++ b/frontend/src/ui/mergeRequestPeopleLines.test.ts
+@@ -11,7 +11,6 @@ import {
+   firstAddable,
+   groupNotices,
+   keptHighlight,
+-  NO_PEOPLE_ASKS,
+   personState,
+   pickList,
+   steppedHighlight,
+@@ -19,7 +18,12 @@ import {
+   type PickInput,
+   type PickLine,
+ } from "./mergeRequestPeopleLines";
+-import type { NotDone, PeopleSearch, RowPeopleAsks } from "./mergeRequests";
++import {
++  rowPeopleAsks,
++  type NotDone,
++  type PeopleSearch,
++  type RowPeopleAsks,
++} from "./mergeRequests";
+ 
+ const PLATFORM = "Linux x86_64";
+ const SAM: Person = { username: "sam", name: "Sam Reed", picture: null };
+@@ -63,7 +67,7 @@ function input(edit: Partial<PickInput>): PickInput {
+     group: "assignees",
+     me: "sam",
+     search: { kind: "empty" },
+-    asks: NO_PEOPLE_ASKS,
++    asks: rowPeopleAsks(new Map(), shown.iid),
+     platform: PLATFORM,
+     ...edit,
+   };
+diff --git a/frontend/src/ui/mergeRequestPeopleLines.ts b/frontend/src/ui/mergeRequestPeopleLines.ts
+index 5c04631..cef0232 100644
+--- a/frontend/src/ui/mergeRequestPeopleLines.ts
++++ b/frontend/src/ui/mergeRequestPeopleLines.ts
+@@ -45,9 +45,6 @@ export type PersonState = { readonly removing: boolean; readonly notices: readon
+ 
+ type Shown = Omit<PickLine, "state">;
+ 
+-/** A row with no change queued and no notice. */
+-export const NO_PEOPLE_ASKS: RowPeopleAsks = { queue: [], notDone: [] };
+-
+ function usernamesIn(row: MergeRequestRow, group: PeopleGroup): readonly string[] {
+   return group === "assignees"
+     ? row.assignees.map((person) => person.username)
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 58edd9d..63091ad 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -36,6 +36,7 @@ export type {
+   PeopleSearch,
+   RowPeopleAsks,
+ } from "./mergeRequestPeople";
++export { rowPeopleAsks } from "./mergeRequestPeople";
+ export type { RerequestAsk } from "./mergeRequestRerequests";
+ export type { ListLoad } from "./mergeRequestsList";
+ 

@@ -14,7 +14,12 @@ import {
   type SourceFailure,
   type SourceResult,
 } from "../ipc";
-import { createPeopleChanges, SEARCH_PAUSE_MS, type PeopleChanges } from "./mergeRequestPeople";
+import {
+  createPeopleChanges,
+  rowPeopleAsks,
+  SEARCH_PAUSE_MS,
+  type PeopleChanges,
+} from "./mergeRequestPeople";
 
 type Call<T> = {
   readonly answer: (result: SourceResult<T>) => void;
@@ -375,4 +380,12 @@ test("a_new_change_for_the_person_drops_their_old_notice", async () => {
     queue: [REMOVE_BEN],
     notDone: [{ change: ASSIGN_BEN, why: { kind: "unchanged" } }],
   });
+});
+
+test("a_row_with_no_asks_reads_an_empty_queue_and_no_notice", () => {
+  const live = rig();
+  void live.slice.changePeople(iid(7), ADD_BEN);
+  const asks = live.slice.peopleAsks.value;
+  expect(rowPeopleAsks(asks, iid(8))).toEqual({ queue: [], notDone: [] });
+  expect(rowPeopleAsks(asks, iid(7))).toEqual({ queue: [ADD_BEN], notDone: [] });
 });

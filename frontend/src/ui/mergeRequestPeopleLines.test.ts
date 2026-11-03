@@ -11,7 +11,6 @@ import {
   firstAddable,
   groupNotices,
   keptHighlight,
-  NO_PEOPLE_ASKS,
   personState,
   pickList,
   steppedHighlight,
@@ -19,7 +18,12 @@ import {
   type PickInput,
   type PickLine,
 } from "./mergeRequestPeopleLines";
-import type { NotDone, PeopleSearch, RowPeopleAsks } from "./mergeRequests";
+import {
+  rowPeopleAsks,
+  type NotDone,
+  type PeopleSearch,
+  type RowPeopleAsks,
+} from "./mergeRequests";
 
 const PLATFORM = "Linux x86_64";
 const SAM: Person = { username: "sam", name: "Sam Reed", picture: null };
@@ -63,7 +67,7 @@ function input(edit: Partial<PickInput>): PickInput {
     group: "assignees",
     me: "sam",
     search: { kind: "empty" },
-    asks: NO_PEOPLE_ASKS,
+    asks: rowPeopleAsks(new Map(), shown.iid),
     platform: PLATFORM,
     ...edit,
   };

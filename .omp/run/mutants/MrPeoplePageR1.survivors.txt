@@ -1,0 +1,2 @@
+just mutants HEAD (StrykerJS: mergeRequestPeople.ts, mergeRequestPeopleLines.ts, mergeRequests.ts; .vue not mutated): 420 killed, 6 survived, 2 no coverage
+

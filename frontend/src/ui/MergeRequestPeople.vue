@@ -18,16 +18,11 @@ import {
   reviewStateText,
   type ReviewState,
 } from "../mergeRequests";
-import {
-  groupNotices,
-  NO_PEOPLE_ASKS,
-  personState,
-  type PersonState,
-} from "./mergeRequestPeopleLines";
+import { groupNotices, personState, type PersonState } from "./mergeRequestPeopleLines";
 import MergeRequestPeopleSearch from "./MergeRequestPeopleSearch.vue";
 import MergeRequestPersonMenu from "./MergeRequestPersonMenu.vue";
 import MergeRequestPicture from "./MergeRequestPicture.vue";
-import type { RerequestAsk } from "./mergeRequests";
+import { rowPeopleAsks, type RerequestAsk } from "./mergeRequests";
 import { useMergeRequests } from "./mergeRequestsStore";
 import {
   ADD_ASSIGNEE,
@@ -48,7 +43,11 @@ type StateLook = { readonly icon: Component; readonly tone: string };
 type Review = {
   readonly look: StateLook;
   readonly stateText: string;
-  readonly rerequest: { readonly label: string; readonly running: boolean } | null;
+  readonly rerequest: {
+    readonly control: string;
+    readonly label: string;
+    readonly running: boolean;
+  } | null;
   readonly refusal: string | null;
 };
 type BoxLine = {
@@ -56,6 +55,7 @@ type BoxLine = {
   readonly name: string;
   readonly state: PersonState;
   readonly review: Review | null;
+  readonly menuControl: string | null;
 };
 type GroupWords = { readonly title: string; readonly add: string; readonly remove: string };
 type BoxGroup = {
@@ -104,10 +104,7 @@ const groups = computed(() =>
   GROUPS.map(boxGroup).filter((group) => editable.value || group.lines.length > 0),
 );
 const controls = computed(
-  () =>
-    new Set(
-      groups.value.flatMap((group) => group.lines.flatMap((line) => controlsOf(group, line))),
-    ),
+  () => new Set(groups.value.flatMap((group) => group.lines.flatMap(lineControls))),
 );
 
 watch(open, (isOpen) => {
@@ -127,13 +124,18 @@ onBeforeUnmount(() => {
 });
 
 function review(reviewer: Reviewer, name: string): Review {
-  const ask = props.asks.get(reviewer.person.username);
+  const username = reviewer.person.username;
+  const ask = props.asks.get(username);
   return {
     look: REVIEW_STATE_LOOKS[reviewer.state],
     stateText: reviewStateText(reviewer.state),
     rerequest:
       editable.value && reviewDone(reviewer.state)
-        ? { label: rerequestLabel(name), running: ask?.kind === "running" }
+        ? {
+            control: `rerequest:${username}`,
+            label: rerequestLabel(name),
+            running: ask?.kind === "running",
+          }
         : null,
     refusal: ask?.kind === "refused" ? rerequestReplyText(ask.reply, name) : null,
   };
@@ -143,7 +145,7 @@ function boxGroup(group: PeopleGroup): BoxGroup {
   const place = {
     row: props.row,
     group,
-    asks: peopleAsks.value.get(props.row.iid) ?? NO_PEOPLE_ASKS,
+    asks: rowPeopleAsks(peopleAsks.value, props.row.iid),
     platform: navigator.platform,
   };
   function line(person: Person, reviewer: Reviewer | null): BoxLine {
@@ -153,6 +155,7 @@ function boxGroup(group: PeopleGroup): BoxGroup {
       name,
       state: personState(place, person.username),
       review: reviewer === null ? null : review(reviewer, name),
+      menuControl: editable.value ? `more:${group}:${person.username}` : null,
     };
   }
   return {
@@ -166,12 +169,11 @@ function boxGroup(group: PeopleGroup): BoxGroup {
   };
 }
 
-function controlsOf(group: BoxGroup, line: BoxLine): string[] {
-  const username = line.person.username;
-  const rerequest = line.review !== null && line.review.rerequest !== null;
+function lineControls(line: BoxLine): string[] {
+  const rerequest = line.review?.rerequest ?? null;
   return [
-    ...(rerequest ? [`rerequest:${username}`] : []),
-    ...(editable.value ? [`more:${group.group}:${username}`] : []),
+    ...(rerequest === null ? [] : [rerequest.control]),
+    ...(line.menuControl === null ? [] : [line.menuControl]),
   ];
 }
 
@@ -307,7 +309,7 @@ function remove(group: PeopleGroup, username: string): void {
                     v-if="line.review.rerequest !== null"
                     v-tooltip="REREQUEST_REVIEW"
                     type="button"
-                    :data-control="`rerequest:${line.person.username}`"
+                    :data-control="line.review.rerequest.control"
                     :aria-label="line.review.rerequest.label"
                     :aria-busy="line.review.rerequest.running"
                     :aria-disabled="line.review.rerequest.running"
@@ -332,8 +334,8 @@ function remove(group: PeopleGroup, username: string): void {
                   </span>
                 </template>
                 <MergeRequestPersonMenu
-                  v-if="editable"
-                  :data-control="`more:${group.group}:${line.person.username}`"
+                  v-if="line.menuControl !== null"
+                  :data-control="line.menuControl"
                   :name="line.name"
                   :item="group.words.remove"
                   :working="line.state.removing"

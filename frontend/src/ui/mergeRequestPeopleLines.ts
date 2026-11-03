@@ -45,9 +45,6 @@ export type PersonState = { readonly removing: boolean; readonly notices: readon
 
 type Shown = Omit<PickLine, "state">;
 
-/** A row with no change queued and no notice. */
-export const NO_PEOPLE_ASKS: RowPeopleAsks = { queue: [], notDone: [] };
-
 function usernamesIn(row: MergeRequestRow, group: PeopleGroup): readonly string[] {
   return group === "assignees"
     ? row.assignees.map((person) => person.username)

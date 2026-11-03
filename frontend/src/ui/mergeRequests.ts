@@ -36,6 +36,7 @@ export type {
   PeopleSearch,
   RowPeopleAsks,
 } from "./mergeRequestPeople";
+export { rowPeopleAsks } from "./mergeRequestPeople";
 export type { RerequestAsk } from "./mergeRequestRerequests";
 export type { ListLoad } from "./mergeRequestsList";
 
