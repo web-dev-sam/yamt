@@ -96,6 +96,7 @@ pub(crate) struct Nodes<T> {
 struct Node {
     iid: String,
     title: String,
+    description: Option<String>,
     created_at: String,
     draft: bool,
     author: Option<UserNode>,
@@ -209,6 +210,7 @@ fn row(
     let row = MergeRequestRow {
         iid,
         title: node.title,
+        has_description: node.description.is_some_and(|text| !text.trim().is_empty()),
         created_at: node.created_at,
         draft: node.draft,
         author: node.author.map(|author| people.person(author)),

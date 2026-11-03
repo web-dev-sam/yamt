@@ -145,11 +145,17 @@ pub enum BlockedReason {
 /// One open merge request as a row of the list.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "four independent facts GitLab sends about a row; no two of them make one state"
+)]
 pub struct MergeRequestRow {
     /// Its number.
     pub iid: MergeRequestIid,
     /// Its title, GitLab's "Draft: " prefix included.
     pub title: String,
+    /// GitLab's description holds more than white space.
+    pub has_description: bool,
     /// GitLab's ISO 8601 time, as sent.
     pub created_at: String,
     /// Whether it is a draft.

@@ -6,8 +6,14 @@ use yamt_gitio::Glab;
 
 use crate::web_page::{is_number, is_path_segment, is_web_path};
 
+const MIB: usize = 1 << 20;
 /// The largest picture yamt takes from GitLab.
-pub const MAX_PICTURE_BYTES: usize = 1 << 20;
+pub const MAX_PICTURE_BYTES: usize = MIB;
+/// The largest upload a description names that yamt takes from GitLab: a screenshot is often over 1 MiB.
+pub const MAX_UPLOAD_BYTES: usize = 10 << 20;
+/// glab's last line for an HTTP 403 or 404 ends so (`tests/glab/README.md`): GitLab older than 17.4 has no uploads
+/// API, and a project you are no member of may refuse it.
+const REFUSED_ENDINGS: [&str; 2] = ["(HTTP 403)", "(HTTP 404)"];
 
 const UPLOADED_AVATARS: &str = "/uploads/-/system/user/avatar/";
 const GRAVATAR_HOSTS: [&str; 2] = ["https://secure.gravatar.com", "https://www.gravatar.com"];
@@ -15,7 +21,6 @@ const GRAVATAR_PATH: &str = "/avatar/";
 const MD5_HEX_DIGITS: usize = 32;
 const SHA256_HEX_DIGITS: usize = 64;
 const NOT_AN_IMAGE: &str = "GitLab's picture is not a PNG, JPEG, GIF or WebP image";
-const TOO_LARGE: &str = "GitLab's picture is larger than 1 MiB";
 const PNG_START: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 const JPEG_START: &[u8] = &[0xFF, 0xD8, 0xFF];
 const GIF_START: &[u8] = b"GIF8";
@@ -29,15 +34,33 @@ const WEBP_MARK_AT: usize = 8;
 #[serde(transparent)]
 pub struct GravatarAddress(String);
 
-/// An uploaded avatar's address on the project's GitLab (never sent to the window); only `avatar_source` makes one.
+/// A picture's address on the project's GitLab (never sent to the window): an uploaded avatar, or an upload a
+/// description names; only `avatar_source` and `image_of` make one.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PictureAddress(String);
+pub struct PictureAddress(Address);
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Address {
+    Avatar(String),
+    /// `route`: the uploads API's `projects/<id or path>/uploads/<secret>/<file>`; `web`: its `https` address.
+    Upload {
+        route: String,
+        web: String,
+    },
+}
 
 impl PictureAddress {
+    pub(crate) fn upload(route: String, web: String) -> PictureAddress {
+        PictureAddress(Address::Upload { route, web })
+    }
+
     /// The picture's `https` address.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        &self.0
+        match &self.0 {
+            Address::Avatar(address) => address,
+            Address::Upload { web, .. } => web,
+        }
     }
 }
 
@@ -98,7 +121,7 @@ impl ImageKind {
 pub struct Picture {
     /// Its format.
     pub kind: ImageKind,
-    /// Its bytes, at most `MAX_PICTURE_BYTES`.
+    /// Its bytes, at most `MAX_PICTURE_BYTES`, or `MAX_UPLOAD_BYTES` for an upload.
     pub bytes: Vec<u8>,
 }
 
@@ -118,7 +141,7 @@ pub(crate) fn avatar_source(origin: Option<&str>, avatar_url: Option<&str>) -> A
     };
     let path = avatar_url.strip_prefix(origin).unwrap_or(avatar_url);
     if is_uploaded_avatar(path) {
-        AvatarSource::Uploaded(PictureAddress(format!("{origin}{path}")))
+        AvatarSource::Uploaded(PictureAddress(Address::Avatar(format!("{origin}{path}"))))
     } else {
         AvatarSource::None
     }
@@ -163,20 +186,41 @@ fn is_query_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '=' | '&' | '.' | '_' | '-')
 }
 
-/// `glab api <address>` in `root`, stdin closed; `Err` in glab's words, or when GitLab's answer is no picture yamt
-/// shows or larger than `MAX_PICTURE_BYTES`.
+/// An avatar: `glab api <address>`. An upload: `glab api <its uploads API route>`, then, when that ends in HTTP 403
+/// or 404, `glab api <its web address>`. In `root`, stdin closed; `Err` in glab's words, or when GitLab's answer is
+/// no picture yamt shows or larger than `MAX_PICTURE_BYTES` (an avatar) or `MAX_UPLOAD_BYTES` (an upload).
 pub fn fetch_picture(
     glab: &Glab,
     root: &Path,
     address: &PictureAddress,
 ) -> Result<Picture, String> {
-    let bytes = glab.get(root, &["api", address.as_str()])?;
-    picture_from(bytes)
+    fetched(address, &mut |args| glab.get(root, args))
 }
 
-fn picture_from(bytes: Vec<u8>) -> Result<Picture, String> {
-    if bytes.len() > MAX_PICTURE_BYTES {
-        return Err(TOO_LARGE.to_owned());
+/// What `glab <args>` printed in the repository's root.
+type Get<'a> = dyn FnMut(&[&str]) -> Result<Vec<u8>, String> + 'a;
+
+fn fetched(address: &PictureAddress, get: &mut Get) -> Result<Picture, String> {
+    match &address.0 {
+        Address::Avatar(address) => picture_from(get(&["api", address])?, MAX_PICTURE_BYTES),
+        Address::Upload { route, web } => {
+            let bytes = match get(&["api", route]) {
+                Err(line) if REFUSED_ENDINGS.iter().any(|end| line.ends_with(end)) => {
+                    get(&["api", web])
+                }
+                answered => answered,
+            };
+            picture_from(bytes?, MAX_UPLOAD_BYTES)
+        }
+    }
+}
+
+fn picture_from(bytes: Vec<u8>, largest: usize) -> Result<Picture, String> {
+    if bytes.len() > largest {
+        return Err(format!(
+            "GitLab's picture is larger than {} MiB",
+            largest / MIB
+        ));
     }
     let kind = ImageKind::of(&bytes).ok_or(NOT_AN_IMAGE)?;
     Ok(Picture { kind, bytes })

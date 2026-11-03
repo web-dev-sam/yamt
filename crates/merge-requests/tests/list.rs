@@ -216,7 +216,8 @@ fn detailed_rows() -> Value {
         |status: &str| json!({ "status": status, "failedJobs": [], "moreFailedJobs": false });
     let colourless = json!({ "title": "odd", "colors": null });
     json!([
-        { "iid": 52, "title": "Colour the card labels", "createdAt": "2026-11-01T10:00:00Z", "draft": false,
+        { "iid": 52, "title": "Colour the card labels", "hasDescription": false, "createdAt": "2026-11-01T10:00:00Z",
+          "draft": false,
           "author": anna, "assignees": [sam],
           "reviewers": [reviewer(&ben, "reviewed"), reviewer(&chiara, "approved"),
               reviewer(&dmitri, "requested")],
@@ -224,11 +225,13 @@ fn detailed_rows() -> Value {
           "openDiscussions": 0, "approvedBy": [chiara], "mayRerequest": true, "pipeline": no_jobs("passed"),
           "page": page_of(52), "size": { "additions": 0, "deletions": 0, "files": 0 },
           "readiness": { "kind": "ready" }, "fromFork": false },
-        { "iid": 51, "title": "Archive old boards", "createdAt": "2026-10-31T15:30:00Z", "draft": false,
+        { "iid": 51, "title": "Archive old boards", "hasDescription": false, "createdAt": "2026-10-31T15:30:00Z",
+          "draft": false,
           "author": null, "assignees": [], "reviewers": [], "labels": [], "openDiscussions": 0, "approvedBy": [],
           "mayRerequest": true, "pipeline": null, "page": page_of(51), "size": null,
           "readiness": { "kind": "checking" }, "fromFork": false },
-        { "iid": 50, "title": "Keyboard shortcuts for cards", "createdAt": "2026-10-30T08:45:00Z", "draft": false,
+        { "iid": 50, "title": "Keyboard shortcuts for cards", "hasDescription": false,
+          "createdAt": "2026-10-30T08:45:00Z", "draft": false,
           "author": ben, "assignees": [dmitri],
           "reviewers": [reviewer(&anna, "changesRequested"), reviewer(&sam, "requested"),
               reviewer(&ben, "reviewed"), reviewer(&erik, "requested")],

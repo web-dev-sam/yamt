@@ -28,6 +28,11 @@ const REREQUEST_MUTATION: &str = "mutation RerequestReview($projectPath: ID!, $i
      errors mergeRequest { reviewers { nodes { username name avatarUrl \
      mergeRequestInteraction { approved reviewState } } } } } }";
 
+/// A merge request's description as GitLab renders it, asked afresh on every open of the panel: 10 of GitLab's limit
+/// of 200 logged out on gitlab.com, measured 2026-11-04. The operation name routes the fake glab.
+const DESCRIPTION_QUERY: &str = "query MergeRequestDescription($fullPath: ID!, $iid: String!) { \
+     project(fullPath: $fullPath) { mergeRequest(iid: $iid) { descriptionHtml } } }";
+
 /// `glab api graphql` reading the request's JSON body from stdin.
 pub(crate) const GRAPHQL_BODY_ARGS: [&str; 4] = ["api", "graphql", "--input", "-"];
 
@@ -52,12 +57,14 @@ const SET_REVIEWERS_MUTATION: &str = "mutation SetReviewers($projectPath: ID!, $
      mergeRequest { assignees { nodes { username name avatarUrl } } \
      reviewers { nodes { username name avatarUrl mergeRequestInteraction { approved reviewState } } } } } }";
 
-/// One page of the project's open merge requests, newest created first, each with its latest pipeline's failed
-/// jobs (the latest run of each), its merge status and size, its people, labels and your permission to update it, and
-/// its target branch and head commit for the local conflict check; 170 of GitLab's complexity limit of 250, measured
-/// on gitlab.com on 2026-11-02 (`docs/slices/briefs/mr-row-details-rust.md`; `.omp/run/notes/MrOverviewDesign.md`
-/// §2.2, `docs/slices/briefs/mr-conflicts-design.md` §1, `docs/slices/briefs/local-conflicts-design.md` §1,
-/// `docs/slices/briefs/mr-row-details-design.md` §1.1). One line, so the fake glab logs each call on one line.
+/// One page of the project's open merge requests, newest created first, each with its description (only whether it
+/// holds more than white space reaches the window), its latest pipeline's failed jobs (the latest run of each), its
+/// merge status and size, its people, labels and your permission to update it, and its target branch and head commit
+/// for the local conflict check; 172 of GitLab's complexity limit of 250, measured logged in on gitlab.com on
+/// 2026-11-04 (`docs/slices/briefs/mr-row-details-rust.md`; `.omp/run/notes/MrOverviewDesign.md` §2.2,
+/// `docs/slices/briefs/mr-conflicts-design.md` §1, `docs/slices/briefs/local-conflicts-design.md` §1,
+/// `docs/slices/briefs/mr-row-details-design.md` §1.1, `docs/slices/briefs/mr-description-design.md` §1.3). One line,
+/// so the fake glab logs each call on one line.
 fn list_query() -> String {
     format!(
         "query MergeRequestPage($fullPath: ID!, $first: Int!, $after: String) {{ \
@@ -67,7 +74,7 @@ fn list_query() -> String {
          mergeRequests(state: opened, sort: CREATED_DESC, first: $first, after: $after) {{ \
          pageInfo {{ hasNextPage endCursor }} \
          nodes {{ \
-         iid title createdAt draft \
+         iid title description createdAt draft \
          author {{ username name avatarUrl }} \
          labels {{ nodes {{ title color textColor }} }} \
          assignees {{ nodes {{ username name avatarUrl }} }} \
@@ -116,6 +123,11 @@ pub(crate) fn branches_args(full_path: &str, iid: MergeRequestIid) -> Vec<String
 /// `glab api graphql` for merge request `iid`'s state and reviewers.
 pub(crate) fn reviewers_args(full_path: &str, iid: MergeRequestIid) -> Vec<String> {
     merge_request_args(REVIEWERS_QUERY, full_path, iid)
+}
+
+/// `glab api graphql` for merge request `iid`'s description as GitLab renders it.
+pub(crate) fn description_args(full_path: &str, iid: MergeRequestIid) -> Vec<String> {
+    merge_request_args(DESCRIPTION_QUERY, full_path, iid)
 }
 
 /// The open discussions of the merge requests `$iids`, each with its last notes, read by `read_discussions`

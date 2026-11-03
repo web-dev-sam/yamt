@@ -1,0 +1,3172 @@
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+index 8c384e7..dcaf8ec 100644
+--- a/crates/merge-requests/AGENTS.md
++++ b/crates/merge-requests/AGENTS.md
+@@ -5,3 +5,7 @@ A failed job's log (plan §2 #158, request `docs/slices/request-ci-job-log.md`,
+ Each row's open discussions (plan §2 #162, #163; request `docs/slices/request-mr-discussions.md`, design `docs/slices/briefs/mr-discussions-design.md` option A, §1.1, §1.2, §1.5, §1.8): `discussions.rs` (the IPC types `RowDiscussions` (`iid`, `answer`), `DiscussionsAnswer` `open { discussions }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, `OpenDiscussion` (`place`, `last`), `DiscussionPlace` `overview`/`file { path, line }` (`newLine`, else `oldLine`), `DiscussionNote` (`author` through `People::person`, `createdAt` as sent, `text` the raw body, `page`); the shell's `ReadDiscussions { rows, pictures }`; `DISCUSSION_BATCH` 20 merge requests per glab call (100 took 22.22 s, past glab's deadline), `DISCUSSIONS_PER_PAGE` 100, `NOTES_READ` 20, `MAX_DISCUSSION_PAGES` 10; `read_discussions`: the first 20 distinct iids in the asked order, nothing (and no glab run) for none; glab missing → each `GlabMissing`, `logged_in_project` refused → each `NotLoggedIn`/`Failed` (`From<NoProject>`), one `discussions_args` call for the batch (`-F iids=<JSON array> -F first=<count>`), its failure or GraphQL `errors` → each `Failed`; per row: `hasNextPage` → the same query for that iid alone with `-f discussionsAfter=<endCursor>`, at most 10 pages (more → "more than 1,000 discussions"), a failing later page or an iid the answer does not name fails that row alone; open = `resolvable && !resolved`; the last note with `system: false` of `notes(last: 20)` (a bot's note counts), none with `hasPreviousPage` → the row `Failed`, none without → left out; a note's `url` is a page only through `WebPage::note` (the merge request's page plus `#note_<digits>`); uploaded pictures one per username (`list.rs` `one_per_username`); one `info` line per call: asked, answered, failed, queries and the batch's `queryComplexity`, never a name, a body or an address; `unread_discussions`: the same cut, each `Failed`), `discussions/answer.rs` (GitLab's answer of the discussions query as parsed, `parsed_batch`: each merge request's discussions by iid, through `graphql_data`). The query is `query.rs` `discussions_query` (design §1.1, one line; 58 of 250 for 20 merge requests on gitlab.com). Tests: `discussions/tests.rs` (system notes after and between replies, resolved and unresolvable left out, the places, twenty system notes with earlier ones, a missing iid, GraphQL errors and a failed call, the batch cut, pictures once per username, ten and eleven pages, a failing later page, no cursor, foreign note urls), `web_page.rs` (`a_note_url_is_a_page_only_as_gitlab_builds_it`), `tests/discussions.rs` (`mr-discussions/`: !82's three in order, !81 alone in one call, !79's later page, markup kept, 77's glab failure, glab missing, logged out, an empty ask).
+ 
+ People on a merge request (plan §2 #153 amended, #169; request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, §1.1–1.5): `people_search.rs` (the IPC type `PeopleSearchReply` `found { people }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`; the shell's `FoundPeople { reply, pictures }`; `search_people`: glab missing → `GlabMissing`, `logged_in_project`, one `Glab::get` of `people_search_args` — `api graphql -f query=<PeopleSearch> -f fullPath=<path> -f search=<text>`, the text a raw `-f` field (glab 1.126.0 searched `@sam` as text on gitlab.com, 2026-11-03) — asking `project.autocompleteUsers(search:)` as GitLab's own merge-request dropdown does (everyone with access, invited groups included, at most 20, by name; 13 of 250 on gitlab-org/gitlab, about 1 s); glab's failure or a GraphQL error (an older GitLab's missing field included) → `Failed`, `project: null` → `Failed` (page.rs `NO_PROJECT`), `autocompleteUsers: null` → `Found` with nobody; people through `People`, their uploaded pictures one per username; one `info` line: the outcome's kind and the count, never the text or a name), `people_change.rs` (the IPC types `PeopleGroup` `assignees`/`reviewers`, `PeopleAction` `add`/`remove`, `PeopleChange` (`group`, `action`, `username`; sent by the window), `MergeRequestPeople` (`assignees`, `reviewers`), `PeopleChangeReply` `changed { people }`/`unchanged { people }`/`glabMissing`/`notLoggedIn { detail }`/`refused { message }`/`failed { message }`; the shell's `ChangedPeople { reply, pictures }`; `change_people`: glab missing → `GlabMissing`, `logged_in_project`, then exactly one `Glab::post` of `people_change_body` with `GRAPHQL_BODY_ARGS`, nothing read before it (rule 8) — the group's `mergeRequestSetAssignees`/`mergeRequestSetReviewers`, aliased `changed`, with `usernames: [<one>]` and `mode` `APPEND` for add, `REMOVE` for remove, never `REPLACE`, the username only a variable; both mutations answer both lists with the list query's fields; glab's failure or GitLab's top-level error → `Failed`, no payload or no `mergeRequest` → `Failed` (`NO_MERGE_REQUEST`), the payload's first `errors` entry → `Refused`; else GitLab's answered group decides (usernames compared with `eq_ignore_ascii_case`): an add listed or a remove not listed → `Changed`, otherwise `Unchanged` (GitLab Free's one assignee and one reviewer, no permission, an unknown user), both with the two lists as answered; unknown review states warned of; uploaded pictures of everyone in both lists, one per username; one `info` line: iid, group, action and the outcome's kind, never a username). The shell offers each reply's pictures before the reply reaches the window (`src-tauri/src/merge_requests/people.rs`, RK53). Tests: `people_search.rs` and `people_change/tests.rs` (inline answers: order and pictures, null project and null list, glab's and GitLab's words, the `changed`/`unchanged` table for both groups and actions, ASCII case, refused against failed, no payload or merge request, pictures once, each outcome's logged kind), `tests/people.rs` (`mr-people/`: the search argv exact and nothing written, nobody found, glab's failure; posts 1–8 through `answered_posts`: the exact `APPEND` body, a reviewer's state, two `REMOVE`s and nothing else asked, GitLab Free's dropped add and a remove not made `Unchanged`, a mutation error `Refused`, a top-level error `Failed`; a run of eight changes writes only one `APPEND` or `REMOVE` of one username each, never `REPLACE`, `-X` or REST ids (RK54); glab missing or logged out before any query).
++
++A merge request's description (plan §2 #171–#174; request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, §1.1–§1.6): `description.rs` (the IPC types `DescriptionReply` `read { description }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, `Description { blocks }`, `DescriptionBlock` `paragraph`/`heading { level: HeadingLevel h1–h6 }`/`code { language, text }`/`list { numbering: ListNumbering bullets|numbers { start }, items: DescriptionItem { task: TaskBox none|open|done|inapplicable, blocks } }`/`quote`/`rule`/`table { head, body: DescriptionRow { cells: DescriptionCell { header, align: CellAlign start|center|end, inlines } } }`/`details { open, summary, blocks }`, `DescriptionInline` `text`/`emphasis`/`strong`/`strike`/`code`/`link { link: DescriptionLink page { page }|refused { address } }`/`image { image: DescriptionImage uploaded { key }|web { address }|refused, caption }`/`lineBreak`; the shell's `ReadDescription { reply, pages, uploads }` and `OfferedUpload { key, address }`; `read_description`: glab missing → `GlabMissing`, `logged_in_project`, `fetch_description` — the one request, `request-mr-links.md` reuses it: one `Glab::get` of `description_args` (`MergeRequestDescription { project { mergeRequest(iid) { descriptionHtml } } }`, 10 of 250 logged in, 1.0 s, measured 2026-11-04), glab's line or GitLab's first error → `failed` in those words, `project: null` → `NO_PROJECT`, `mergeRequest: null` → `NO_MERGE_REQUEST`, `descriptionHtml: null` → "" — then `described` against `WebPage::merge_request` (None off https); one `info` line with iid, outcome, blocks, pages, uploads and web images, never text or an address). **The walk** (`description/html.rs` `described`, `MAX_NESTING` 32): `dom_query` parses the fragment; `Walk::children` is the one place rule 6 is kept — it drops comments, the `LEFT_OUT` elements with all their text (`script`, `style`, `template`, `noscript`, `iframe`, `frame`, `frameset`, `object`, `embed`, `applet`, `video`, `audio`, `source`, `track`, `canvas`, `svg`, `math`, `link`, `meta`, `base`, `head`, `title`, `button`, `select`, `textarea`, `option`, `input`) and every element deeper than 32 (one `warn` per read); block elements `p`, `h1`–`h6`, `pre`, `ul`, `ol`, `blockquote`, `hr`, `table`, `details`, `div` end the inline run before them, which becomes a paragraph unless it is only white space; inline elements `em`/`i`, `strong`/`b`, `del`/`s`/`strike`, `code`, `a`, `img`, `br`; every other element gives its content in place (`span`, `gl-emoji`, `copy-code`, `section`, `form` …); `li`, `thead`/`tbody`/`tfoot`, `tr`, `th`/`td` and `summary` count only inside their parents; a link without `href`, inside another link or left with nothing but white space gives its content only, and its images follow it (`lifted`), so a link never holds an image; an image's address is `data-src` (GitLab's lazy images) else `src`, its caption alt, else title, else the address as written; pages and uploads are collected once each in document order. `description/element.rs` reads what one element says: the code language (`data-canonical-lang`, else `lang`, empty → none; the `<pre>`'s text with one final `\n` removed), `<ol start>` (else 1), the heading level, the task box (the item's first content, or its first paragraph's, an `input.task-list-item-checkbox`: `data-inapplicable` → inapplicable, `checked` → done, else open) and the cell alignment (exactly `text-align: center`/`right`, else start). **Addresses** (`description/address.rs`, the only maker of `UploadKey` and, beside `avatar_source`, of `PictureAddress`): `WebPage::linked` (an `http`/`https` `url::Url` as `url` serialises it: no space, quote, `<`, `>` or control character), `link_of` (`Url::options().base_url(base).parse(href)`; http/https → `page`, else `refused { address: href }`), `image_of` (an empty address or anything but https → `refused`; https on `base`'s origin with the path `[<segments>]/-/project/<digits>/uploads/<32 lowercase hex>/<file>` or `<the merge request's project web path>/uploads/<secret>/<file>`, `<file>` one segment of `[A-Za-z0-9._~%+-]`, not `..` → `uploaded { key: "upload~<secret>" }` with the route `projects/<digits, or the web path with "/" as "%2F">/uploads/<secret>/<file>` and the address without query or fragment; any other https → `web { address }`). **Uploads** (`picture.rs`): `PictureAddress` holds an avatar or an upload (route and web address), `as_str` the https address; `fetch_picture` asks an upload by `glab api <route>`, then, only when glab's line ends `(HTTP 403)` or `(HTTP 404)`, by `glab api <web address>` (both answered gitlab-org/gitlab !200000's screenshots, 62–158 KB PNGs, on 2026-11-04); an upload may be up to `MAX_UPLOAD_BYTES` 10 MiB, an avatar still 1 MiB. The list query asks `description` after `title` (172 of 250 logged in, +2), and `page.rs` folds it to `MergeRequestRow.hasDescription` (more than white space); the text goes nowhere else. Tests: `description/tests.rs` over the measured GitLab shapes and the planted answer of the scenario `mr-description`, `picture/tests.rs` for both routes and the two limits, `tests/description.rs` over the fake glab (`tests/glab/README.md`).
++
++What the description changes above: `WebPage` has a fourth maker, `WebPage::linked`; `PictureAddress` is made by `avatar_source` and `image_of` only; `NoProject` also turns into `DescriptionReply`; the list query is 172 of 250 with `description`; `MergeRequestRow` carries `hasDescription`; `fetch_picture`'s limit is per kind (`MAX_PICTURE_BYTES` for an avatar, `MAX_UPLOAD_BYTES` for an upload).
+diff --git a/crates/merge-requests/src/description.rs b/crates/merge-requests/src/description.rs
+new file mode 100644
+index 0000000..2e5f96b
+--- /dev/null
++++ b/crates/merge-requests/src/description.rs
+@@ -0,0 +1,408 @@
++pub(crate) mod address;
++mod element;
++mod html;
++
++use std::path::Path;
++
++use serde::{Deserialize, Serialize};
++use specta::Type;
++use yamt_gitio::Glab;
++
++use crate::page::{NO_MERGE_REQUEST, NO_PROJECT, graphql_data};
++use crate::project::{Project, logged_in_project};
++use crate::query::description_args;
++use crate::{GitLabRepository, MergeRequestIid, PictureAddress, WebPage};
++
++pub use address::UploadKey;
++use html::{Described, described};
++
++/// How reading a merge request's description ended.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DescriptionReply {
++    /// GitLab's rendering of the description as yamt shows it; no blocks for an empty one.
++    Read {
++        /// The description.
++        description: Description,
++    },
++    /// glab is not found on PATH.
++    GlabMissing,
++    /// `glab auth status` failed.
++    NotLoggedIn {
++        /// glab's first line, which names the instance.
++        detail: String,
++    },
++    /// glab's or GitLab's words; `page.rs` `NO_MERGE_REQUEST` when GitLab names no such merge request.
++    Failed {
++        /// What went wrong.
++        message: String,
++    },
++}
++
++/// A merge request's description: GitLab's rendering, reduced to what yamt shows.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct Description {
++    /// Its blocks, in order.
++    pub blocks: Vec<DescriptionBlock>,
++}
++
++/// A block of a description.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DescriptionBlock {
++    /// A paragraph.
++    Paragraph {
++        /// Its content.
++        inlines: Vec<DescriptionInline>,
++    },
++    /// A heading.
++    Heading {
++        /// Its level.
++        level: HeadingLevel,
++        /// Its content.
++        inlines: Vec<DescriptionInline>,
++    },
++    /// A code block. Mermaid, math and other undrawn diagrams are code too.
++    Code {
++        /// GitLab's `data-canonical-lang` on the `<pre>` (else its `lang`); None when neither or empty.
++        language: Option<String>,
++        /// The `<pre>`'s text, one final "\n" removed.
++        text: String,
++    },
++    /// A list.
++    List {
++        /// Bullets or numbers.
++        numbering: ListNumbering,
++        /// Its items.
++        items: Vec<DescriptionItem>,
++    },
++    /// A block quote.
++    Quote {
++        /// Its content.
++        blocks: Vec<DescriptionBlock>,
++    },
++    /// A horizontal rule.
++    Rule,
++    /// A table.
++    Table {
++        /// The rows of its head.
++        head: Vec<DescriptionRow>,
++        /// The rows of its body.
++        body: Vec<DescriptionRow>,
++    },
++    /// A collapsible section.
++    Details {
++        /// Whether it starts open.
++        open: bool,
++        /// What shows while it is closed.
++        summary: Vec<DescriptionInline>,
++        /// What opening it shows.
++        blocks: Vec<DescriptionBlock>,
++    },
++}
++
++/// A heading's level, `<h1>` to `<h6>`.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "lowercase")]
++pub enum HeadingLevel {
++    /// `<h1>`.
++    H1,
++    /// `<h2>`.
++    H2,
++    /// `<h3>`.
++    H3,
++    /// `<h4>`.
++    H4,
++    /// `<h5>`.
++    H5,
++    /// `<h6>`.
++    H6,
++}
++
++/// How a list numbers its items.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum ListNumbering {
++    /// `<ul>`.
++    Bullets,
++    /// `<ol>`.
++    Numbers {
++        /// The first item's number: `<ol start>`, else 1.
++        start: u32,
++    },
++}
++
++/// An item of a list.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct DescriptionItem {
++    /// Its task box.
++    pub task: TaskBox,
++    /// Its content.
++    pub blocks: Vec<DescriptionBlock>,
++}
++
++/// GitLab's task box: `input.task-list-item-checkbox` first in the item; `data-inapplicable` → Inapplicable,
++/// `checked` → Done, else Open; no such input → None.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub enum TaskBox {
++    /// No task box: a plain item.
++    None,
++    /// A task not done.
++    Open,
++    /// A task done.
++    Done,
++    /// A task GitLab marks not applicable.
++    Inapplicable,
++}
++
++/// A row of a table.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct DescriptionRow {
++    /// Its cells.
++    pub cells: Vec<DescriptionCell>,
++}
++
++/// A cell of a table: `header` for a `th`; `align` from `style="text-align: left|center|right"` exactly as GitLab
++/// keeps it, else Start.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct DescriptionCell {
++    /// Whether it is a header cell.
++    pub header: bool,
++    /// Its alignment.
++    pub align: CellAlign,
++    /// Its content.
++    pub inlines: Vec<DescriptionInline>,
++}
++
++/// A table cell's alignment.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub enum CellAlign {
++    /// Left, the default.
++    Start,
++    /// Centred.
++    Center,
++    /// Right.
++    End,
++}
++
++/// A piece of a paragraph, heading, cell or summary.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DescriptionInline {
++    /// Text as GitLab wrote it.
++    Text {
++        /// The text.
++        text: String,
++    },
++    /// `<em>` or `<i>`.
++    Emphasis {
++        /// Its content.
++        inlines: Vec<DescriptionInline>,
++    },
++    /// `<strong>` or `<b>`.
++    Strong {
++        /// Its content.
++        inlines: Vec<DescriptionInline>,
++    },
++    /// `<del>`, `<s>` or `<strike>`.
++    Strike {
++        /// Its content.
++        inlines: Vec<DescriptionInline>,
++    },
++    /// `<code>` outside a `<pre>`, inline math too.
++    Code {
++        /// The code.
++        text: String,
++    },
++    /// Never holds an Image: an image inside a link is lifted out after it; a link left with no inline is dropped.
++    Link {
++        /// Where it leads.
++        link: DescriptionLink,
++        /// Its content.
++        inlines: Vec<DescriptionInline>,
++    },
++    /// An image.
++    Image {
++        /// Where it loads from.
++        image: DescriptionImage,
++        /// alt, else title, else the address as written (empty when there is none).
++        caption: String,
++    },
++    /// `<br>`.
++    LineBreak,
++}
++
++/// Where a link leads.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DescriptionLink {
++    /// An http or https address, absolute or resolved against the merge request's GitLab page.
++    Page {
++        /// The page the opener may open.
++        page: WebPage,
++    },
++    /// Any other address, or one yamt cannot read: as written, for the tooltip; opens nothing.
++    Refused {
++        /// The address as written.
++        address: String,
++    },
++}
++
++/// Where an image loads from.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DescriptionImage {
++    /// Uploaded to the project's GitLab: the window asks the picture scheme by `key` (offered with the reply).
++    Uploaded {
++        /// The upload's key.
++        key: UploadKey,
++    },
++    /// Any other https address (`url`'s serialisation): the window loads it itself, without the login.
++    Web {
++        /// The address.
++        address: String,
++    },
++    /// http, data, file, anything else or unreadable: nothing loads, the caption shows.
++    Refused,
++}
++
++/// Not IPC: what the shell offers before it replies.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct ReadDescription {
++    /// The reply the window gets.
++    pub reply: DescriptionReply,
++    /// The pages its links lead to, once each, in document order.
++    pub pages: Vec<WebPage>,
++    /// The uploads its images name, once each, in document order.
++    pub uploads: Vec<OfferedUpload>,
++}
++
++/// Not IPC: an upload a description named.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct OfferedUpload {
++    /// The key the window asks by.
++    pub key: UploadKey,
++    /// Where it is on the project's GitLab.
++    pub address: PictureAddress,
++}
++
++#[derive(Deserialize)]
++struct DescriptionData {
++    project: Option<DescriptionProject>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct DescriptionProject {
++    merge_request: Option<DescriptionNode>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct DescriptionNode {
++    description_html: Option<String>,
++}
++
++/// glab missing → `GlabMissing`; `logged_in_project`; `fetch_description`; then `described`. `pages` and `uploads`
++/// once each, in document order; both empty unless `Read`. One `tracing::info!`: iid, outcome kind, blocks, pages,
++/// uploads, web images; never text or an address.
++pub fn read_description(
++    repository: &GitLabRepository,
++    glab: Option<&Glab>,
++    iid: MergeRequestIid,
++) -> ReadDescription {
++    let read = read(repository, glab, iid);
++    let (blocks, web_images) = read.as_ref().map_or((0, 0), |read| {
++        (read.description.blocks.len(), read.web_images)
++    });
++    let (reply, pages, uploads) = match read {
++        Ok(read) => {
++            let description = read.description;
++            (
++                DescriptionReply::Read { description },
++                read.pages,
++                read.uploads,
++            )
++        }
++        Err(reply) => (reply, Vec::new(), Vec::new()),
++    };
++    tracing::info!(
++        iid = iid.0,
++        outcome = outcome(&reply),
++        blocks,
++        pages = pages.len(),
++        uploads = uploads.len(),
++        web_images,
++        "read a merge request's description"
++    );
++    ReadDescription {
++        reply,
++        pages,
++        uploads,
++    }
++}
++
++fn read(
++    repository: &GitLabRepository,
++    glab: Option<&Glab>,
++    iid: MergeRequestIid,
++) -> Result<Described, DescriptionReply> {
++    let Some(glab) = glab else {
++        return Err(DescriptionReply::GlabMissing);
++    };
++    let root = repository.root();
++    let project = logged_in_project(glab, root)?;
++    let html = fetch_description(glab, root, &project, iid)?;
++    let base = project
++        .web_origin
++        .as_deref()
++        .and_then(|origin| WebPage::merge_request(origin, &project.web_path, iid));
++    Ok(described(&html, base.as_ref()))
++}
++
++/// The one request for a description (request-mr-links reuses it): one `Glab::get` of `description_args`.
++pub(crate) fn fetch_description(
++    glab: &Glab,
++    root: &Path,
++    project: &Project,
++    iid: MergeRequestIid,
++) -> Result<String, DescriptionReply> {
++    let args = description_args(&project.full_path, iid);
++    let args: Vec<&str> = args.iter().map(String::as_str).collect();
++    html_of(glab.get(root, &args))
++}
++
++/// `Err(line)` or a GraphQL error → `Failed` in those words; `project: null` → `Failed(NO_PROJECT)`; `mergeRequest:
++/// null` → `Failed(NO_MERGE_REQUEST)`; `descriptionHtml: null` → "".
++fn html_of(printed: Result<Vec<u8>, String>) -> Result<String, DescriptionReply> {
++    let failed = |message: &str| DescriptionReply::Failed {
++        message: message.to_owned(),
++    };
++    let data: DescriptionData = printed
++        .and_then(|json| graphql_data(&json))
++        .map_err(|message| failed(&message))?;
++    let project = data.project.ok_or_else(|| failed(NO_PROJECT))?;
++    let merge_request = project
++        .merge_request
++        .ok_or_else(|| failed(NO_MERGE_REQUEST))?;
++    Ok(merge_request.description_html.unwrap_or_default())
++}
++
++/// The reply's kind, as the log names it: never the description's text or an address.
++fn outcome(reply: &DescriptionReply) -> &'static str {
++    match reply {
++        DescriptionReply::Read { .. } => "read",
++        DescriptionReply::GlabMissing => "glabMissing",
++        DescriptionReply::NotLoggedIn { .. } => "notLoggedIn",
++        DescriptionReply::Failed { .. } => "failed",
++    }
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/crates/merge-requests/src/description/address.rs b/crates/merge-requests/src/description/address.rs
+new file mode 100644
+index 0000000..7613e39
+--- /dev/null
++++ b/crates/merge-requests/src/description/address.rs
+@@ -0,0 +1,117 @@
++use serde::Serialize;
++use specta::Type;
++use url::Url;
++
++use super::{DescriptionImage, DescriptionLink, OfferedUpload};
++use crate::job_log::ESCAPED_SLASH;
++use crate::web_page::{MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_number, is_web_path};
++use crate::{PictureAddress, WebPage};
++
++const HTTP_SCHEME: &str = "http";
++const HTTPS_SCHEME: &str = "https";
++const UPLOADS_SEGMENT: &str = "/uploads/";
++const PROJECT_SEGMENT: &str = "/-/project/";
++const SECRET_HEX_DIGITS: usize = 32;
++const UPLOAD_KEY_PREFIX: &str = "upload~";
++
++/// `upload~<the upload's 32 hex digit secret>`; `~` is in no username, so it never names an avatar. Only
++/// `description/address.rs` makes one.
++#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Type)]
++#[serde(transparent)]
++pub struct UploadKey(String);
++
++impl UploadKey {
++    /// The key as the window asks the picture scheme for it.
++    #[must_use]
++    pub fn as_str(&self) -> &str {
++        &self.0
++    }
++}
++
++impl WebPage {
++    /// An http or https `url` as `url` serialises it.
++    pub(crate) fn linked(url: &Url) -> Option<WebPage> {
++        let is_web = matches!(url.scheme(), HTTP_SCHEME | HTTPS_SCHEME);
++        is_web.then(|| WebPage(url.as_str().to_owned()))
++    }
++}
++
++/// `address` when absolute, else resolved against `base`; None when `url` cannot read it or it is relative without
++/// `base`.
++fn resolved(base: Option<&Url>, address: &str) -> Option<Url> {
++    Url::options().base_url(base).parse(address).ok()
++}
++
++/// An http or https address, absolute or resolved against `base` → `Page`; anything else → `Refused` as written.
++pub(crate) fn link_of(base: Option<&Url>, href: &str) -> DescriptionLink {
++    match resolved(base, href).as_ref().and_then(WebPage::linked) {
++        Some(page) => DescriptionLink::Page { page },
++        None => DescriptionLink::Refused {
++            address: href.to_owned(),
++        },
++    }
++}
++
++/// The image and, for an upload, what to offer: an https upload on `base`'s origin → `Uploaded`; any other https
++/// address → `Web`; anything else, or no address → `Refused`.
++pub(crate) fn image_of(base: Option<&Url>, src: &str) -> (DescriptionImage, Option<OfferedUpload>) {
++    if src.trim().is_empty() {
++        return (DescriptionImage::Refused, None);
++    }
++    let https = resolved(base, src).filter(|url| url.scheme() == HTTPS_SCHEME);
++    let Some(url) = https else {
++        return (DescriptionImage::Refused, None);
++    };
++    if let Some(upload) = base.and_then(|base| upload_of(base, &url)) {
++        let key = upload.key.clone();
++        return (DescriptionImage::Uploaded { key }, Some(upload));
++    }
++    let address = url.as_str().to_owned();
++    (DescriptionImage::Web { address }, None)
++}
++
++/// An upload on `base`'s origin: the path `[<segments>]/-/project/<digits>/uploads/<secret>/<file>` or `<the
++/// project's web path>/uploads/<secret>/<file>`, its query and fragment dropped.
++fn upload_of(base: &Url, url: &Url) -> Option<OfferedUpload> {
++    if url.origin() != base.origin() {
++        return None;
++    }
++    let (before, upload) = url.path().rsplit_once(UPLOADS_SEGMENT)?;
++    let (secret, file) = upload.split_once('/')?;
++    if !is_secret(secret) || !is_upload_file(file) {
++        return None;
++    }
++    let project = project_of(base, before)?;
++    let route = format!("projects/{project}/uploads/{secret}/{file}");
++    let mut web = url.clone();
++    web.set_query(None);
++    web.set_fragment(None);
++    Some(OfferedUpload {
++        key: UploadKey(format!("{UPLOAD_KEY_PREFIX}{secret}")),
++        address: PictureAddress::upload(route, web.as_str().to_owned()),
++    })
++}
++
++/// The project in an upload's path before `/uploads/`, as the uploads API names it: `[<segments>]/-/project/<id>` →
++/// the id; the merge request's project web path (`base` before `/-/merge_requests/`) → that path, "/" as "%2F".
++fn project_of(base: &Url, before: &str) -> Option<String> {
++    if let Some((root, id)) = before.rsplit_once(PROJECT_SEGMENT) {
++        let is_root = root.is_empty() || is_web_path(root);
++        return (is_root && is_number(id)).then(|| id.to_owned());
++    }
++    let (project, _) = base.path().rsplit_once(MERGE_REQUESTS_SEGMENT)?;
++    let path = project.strip_prefix('/')?;
++    (before == project).then(|| path.replace('/', ESCAPED_SLASH))
++}
++
++fn is_secret(secret: &str) -> bool {
++    let is_lower_hex = |c: char| c.is_ascii_digit() || ('a'..='f').contains(&c);
++    secret.len() == SECRET_HEX_DIGITS && secret.chars().all(is_lower_hex)
++}
++
++/// One segment of `[A-Za-z0-9._~%+-]`, not `..`.
++fn is_upload_file(file: &str) -> bool {
++    let is_file_char =
++        |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '~' | '%' | '+' | '-');
++    !file.is_empty() && file != PARENT_SEGMENT && file.chars().all(is_file_char)
++}
+diff --git a/crates/merge-requests/src/description/element.rs b/crates/merge-requests/src/description/element.rs
+new file mode 100644
+index 0000000..50d2c7a
+--- /dev/null
++++ b/crates/merge-requests/src/description/element.rs
+@@ -0,0 +1,77 @@
++use dom_query::NodeRef;
++
++use super::{CellAlign, DescriptionBlock, HeadingLevel, ListNumbering, TaskBox};
++
++const TASK_BOX_CLASS: &str = "task-list-item-checkbox";
++const LANGUAGE_ATTRIBUTES: [&str; 2] = ["data-canonical-lang", "lang"];
++
++/// A `<pre>`'s code block: its language from GitLab's `data-canonical-lang`, else `lang`; its text, one final "\n"
++/// removed.
++pub(super) fn code(text: &str, pre: &NodeRef) -> DescriptionBlock {
++    let language = LANGUAGE_ATTRIBUTES
++        .iter()
++        .find_map(|name| pre.attr(name).filter(|value| !value.is_empty()));
++    DescriptionBlock::Code {
++        language: language.map(|language| language.to_string()),
++        text: text.strip_suffix('\n').unwrap_or(text).to_owned(),
++    }
++}
++
++/// `<ol start>`, else 1.
++pub(super) fn numbers(list: &NodeRef) -> ListNumbering {
++    let start = list
++        .attr("start")
++        .and_then(|start| start.trim().parse().ok());
++    ListNumbering::Numbers {
++        start: start.unwrap_or(1),
++    }
++}
++
++pub(super) fn heading_level(name: &str) -> Option<HeadingLevel> {
++    match name {
++        "h1" => Some(HeadingLevel::H1),
++        "h2" => Some(HeadingLevel::H2),
++        "h3" => Some(HeadingLevel::H3),
++        "h4" => Some(HeadingLevel::H4),
++        "h5" => Some(HeadingLevel::H5),
++        "h6" => Some(HeadingLevel::H6),
++        _ => None,
++    }
++}
++
++/// GitLab's task box: the item's first element or text (or its first paragraph's, in a loose list) when it is
++/// `input.task-list-item-checkbox`.
++pub(super) fn task_box(item: &NodeRef) -> TaskBox {
++    let input = match first_content(item) {
++        Some(paragraph) if paragraph.has_name("p") => first_content(&paragraph),
++        first => first,
++    };
++    let Some(input) =
++        input.filter(|input| input.has_name("input") && input.has_class(TASK_BOX_CLASS))
++    else {
++        return TaskBox::None;
++    };
++    if input.has_attr("data-inapplicable") {
++        TaskBox::Inapplicable
++    } else if input.has_attr("checked") {
++        TaskBox::Done
++    } else {
++        TaskBox::Open
++    }
++}
++
++/// The first element or text that is not only white space among `parent`'s children.
++fn first_content<'a>(parent: &NodeRef<'a>) -> Option<NodeRef<'a>> {
++    let is_content =
++        |node: &NodeRef| node.is_element() || (node.is_text() && !node.text().trim().is_empty());
++    parent.children().into_iter().find(is_content)
++}
++
++/// The only style GitLab keeps on a cell (`sanitization_filter.rb` `TABLE_ALIGNMENT_PATTERN`).
++pub(super) fn align(cell: &NodeRef) -> CellAlign {
++    match cell.attr("style").as_deref() {
++        Some("text-align: center") => CellAlign::Center,
++        Some("text-align: right") => CellAlign::End,
++        _ => CellAlign::Start,
++    }
++}
+diff --git a/crates/merge-requests/src/description/html.rs b/crates/merge-requests/src/description/html.rs
+new file mode 100644
+index 0000000..a63a437
+--- /dev/null
++++ b/crates/merge-requests/src/description/html.rs
+@@ -0,0 +1,379 @@
++use std::mem;
++
++use dom_query::{Document, NodeRef};
++use url::Url;
++
++use super::address::{image_of, link_of};
++use super::element::{align, code, heading_level, numbers, task_box};
++use super::{
++    Description, DescriptionBlock, DescriptionCell, DescriptionImage, DescriptionInline,
++    DescriptionItem, DescriptionLink, DescriptionRow, ListNumbering, OfferedUpload,
++};
++use crate::WebPage;
++
++/// The deepest element of a description yamt shows; deeper content is left out, so a planted nesting cannot
++/// exhaust the walk's stack.
++pub(crate) const MAX_NESTING: usize = 32;
++
++/// Elements left out with their text: what runs, loads, submits or takes input, and what only a page's head holds
++/// (rule 6, RK66). The task box `input` is read by its list item.
++const LEFT_OUT: [&str; 27] = [
++    "script", "style", "template", "noscript", "iframe", "frame", "frameset", "object", "embed",
++    "applet", "video", "audio", "source", "track", "canvas", "svg", "math", "link", "meta", "base",
++    "head", "title", "button", "select", "textarea", "option", "input",
++];
++const CAPTION_ATTRIBUTES: [&str; 2] = ["alt", "title"];
++
++/// What a description's HTML gives: the tree, and every page and upload it names.
++pub(crate) struct Described {
++    pub description: Description,
++    pub pages: Vec<WebPage>,
++    pub uploads: Vec<OfferedUpload>,
++    /// Its images from other sites, for the log.
++    pub web_images: usize,
++}
++
++/// A node the walk looks at: text, or an element neither left out nor too deep, with its name and depth.
++enum Child<'a> {
++    Text(String),
++    Element {
++        node: NodeRef<'a>,
++        name: String,
++        depth: usize,
++    },
++}
++
++/// The walk's findings so far.
++struct Walk {
++    base: Option<Url>,
++    pages: Vec<WebPage>,
++    uploads: Vec<OfferedUpload>,
++    web_images: usize,
++    /// Inside a link, images go to `lifted` and follow the link.
++    in_link: bool,
++    lifted: Vec<DescriptionInline>,
++    too_deep: bool,
++}
++
++/// `base`: the merge request's GitLab page (`WebPage::merge_request`), None off https.
++pub(crate) fn described(html: &str, base: Option<&WebPage>) -> Described {
++    let mut walk = Walk {
++        base: base.and_then(|page| Url::parse(page.as_str()).ok()),
++        pages: Vec::new(),
++        uploads: Vec::new(),
++        web_images: 0,
++        in_link: false,
++        lifted: Vec::new(),
++        too_deep: false,
++    };
++    let document = Document::fragment(html);
++    let top = document.root().first_element_child();
++    let blocks = top.map_or_else(Vec::new, |top| walk.blocks(&top, 0));
++    if walk.too_deep {
++        tracing::warn!(
++            MAX_NESTING,
++            "a description nests deeper than yamt shows; the deeper part is left out"
++        );
++    }
++    Described {
++        description: Description { blocks },
++        pages: walk.pages,
++        uploads: walk.uploads,
++        web_images: walk.web_images,
++    }
++}
++
++impl Walk {
++    /// `parent`'s children the walk looks at; `depth` is `parent`'s, the top's 0. Comments, left-out elements and
++    /// elements deeper than `MAX_NESTING` are not among them.
++    fn children<'a>(&mut self, parent: &NodeRef<'a>, depth: usize) -> Vec<Child<'a>> {
++        let mut children = Vec::new();
++        for node in parent.children() {
++            if node.is_text() {
++                children.push(Child::Text(node.text().to_string()));
++                continue;
++            }
++            let Some(name) = node.node_name() else {
++                continue;
++            };
++            let name = name.to_string();
++            if LEFT_OUT.contains(&name.as_str()) {
++                continue;
++            }
++            if depth >= MAX_NESTING {
++                self.too_deep = true;
++                continue;
++            }
++            children.push(Child::Element {
++                node,
++                name,
++                depth: depth + 1,
++            });
++        }
++        children
++    }
++
++    fn blocks(&mut self, parent: &NodeRef, depth: usize) -> Vec<DescriptionBlock> {
++        let mut blocks = Vec::new();
++        let mut run = Vec::new();
++        self.blocks_into(parent, depth, &mut blocks, &mut run);
++        push_paragraph(&mut blocks, run);
++        blocks
++    }
++
++    /// `parent`'s blocks into `blocks`; inline content gathers in `run` until a block ends it as a paragraph. An
++    /// element neither block nor inline gives its content in place.
++    fn blocks_into(
++        &mut self,
++        parent: &NodeRef,
++        depth: usize,
++        blocks: &mut Vec<DescriptionBlock>,
++        run: &mut Vec<DescriptionInline>,
++    ) {
++        for child in self.children(parent, depth) {
++            let (node, name, depth) = match child {
++                Child::Text(text) => {
++                    run.push(DescriptionInline::Text { text });
++                    continue;
++                }
++                Child::Element { node, name, depth } => (node, name, depth),
++            };
++            if let Some(inlines) = self.inline(&node, &name, depth) {
++                run.extend(inlines);
++            } else if let Some(found) = self.block(&node, &name, depth) {
++                push_paragraph(blocks, mem::take(run));
++                blocks.extend(found);
++            } else {
++                self.blocks_into(&node, depth, blocks, run);
++            }
++        }
++    }
++
++    /// The blocks a block element makes; None for any other element.
++    fn block(&mut self, node: &NodeRef, name: &str, depth: usize) -> Option<Vec<DescriptionBlock>> {
++        let block = match name {
++            "p" => {
++                let mut paragraph = Vec::new();
++                push_paragraph(&mut paragraph, self.inlines(node, depth));
++                return Some(paragraph);
++            }
++            "div" => return Some(self.blocks(node, depth)),
++            "summary" => return Some(Vec::new()),
++            "pre" => code(&self.plain_text(node, depth), node),
++            "ul" => self.list(node, ListNumbering::Bullets, depth),
++            "ol" => self.list(node, numbers(node), depth),
++            "blockquote" => DescriptionBlock::Quote {
++                blocks: self.blocks(node, depth),
++            },
++            "hr" => DescriptionBlock::Rule,
++            "table" => self.table(node, depth),
++            "details" => self.details(node, depth),
++            _ => {
++                let level = heading_level(name)?;
++                let inlines = self.inlines(node, depth);
++                DescriptionBlock::Heading { level, inlines }
++            }
++        };
++        Some(vec![block])
++    }
++
++    /// `parent`'s inline content; a block element in it gives its content.
++    fn inlines(&mut self, parent: &NodeRef, depth: usize) -> Vec<DescriptionInline> {
++        let mut inlines = Vec::new();
++        for child in self.children(parent, depth) {
++            match child {
++                Child::Text(text) => inlines.push(DescriptionInline::Text { text }),
++                Child::Element { node, name, depth } => match self.inline(&node, &name, depth) {
++                    Some(found) => inlines.extend(found),
++                    None => inlines.extend(self.inlines(&node, depth)),
++                },
++            }
++        }
++        inlines
++    }
++
++    /// What an inline element makes; None for any other element.
++    fn inline(
++        &mut self,
++        node: &NodeRef,
++        name: &str,
++        depth: usize,
++    ) -> Option<Vec<DescriptionInline>> {
++        let inline = match name {
++            "em" | "i" => DescriptionInline::Emphasis {
++                inlines: self.inlines(node, depth),
++            },
++            "strong" | "b" => DescriptionInline::Strong {
++                inlines: self.inlines(node, depth),
++            },
++            "del" | "s" | "strike" => DescriptionInline::Strike {
++                inlines: self.inlines(node, depth),
++            },
++            "code" => DescriptionInline::Code {
++                text: self.plain_text(node, depth),
++            },
++            "br" => DescriptionInline::LineBreak,
++            "a" => return Some(self.link(node, depth)),
++            "img" => return Some(self.image(node)),
++            _ => return None,
++        };
++        Some(vec![inline])
++    }
++
++    /// The link, then the images lifted out of it; a link with an empty content, without `href` or inside another
++    /// link gives its content only.
++    fn link(&mut self, node: &NodeRef, depth: usize) -> Vec<DescriptionInline> {
++        let href = node.attr("href").filter(|_| !self.in_link);
++        let Some(href) = href else {
++            return self.inlines(node, depth);
++        };
++        self.in_link = true;
++        let inlines = self.inlines(node, depth);
++        self.in_link = false;
++        let mut found = Vec::new();
++        if !is_blank(&inlines) {
++            let link = link_of(self.base.as_ref(), &href);
++            if let DescriptionLink::Page { page } = &link
++                && !self.pages.contains(page)
++            {
++                self.pages.push(page.clone());
++            }
++            found.push(DescriptionInline::Link { link, inlines });
++        }
++        found.append(&mut self.lifted);
++        found
++    }
++
++    /// The image from `data-src` (GitLab's lazy images), else `src`; inside a link it waits in `lifted`.
++    fn image(&mut self, node: &NodeRef) -> Vec<DescriptionInline> {
++        let address = node.attr("data-src").or_else(|| node.attr("src"));
++        let written = address.as_deref().unwrap_or_default();
++        let (image, upload) = image_of(self.base.as_ref(), written);
++        if let Some(upload) = upload
++            && !self.uploads.iter().any(|offered| offered.key == upload.key)
++        {
++            self.uploads.push(upload);
++        }
++        if let DescriptionImage::Web { .. } = image {
++            self.web_images += 1;
++        }
++        let caption = CAPTION_ATTRIBUTES
++            .iter()
++            .find_map(|name| node.attr(name).filter(|value| !value.is_empty()))
++            .map_or_else(|| written.to_owned(), |caption| caption.to_string());
++        let image = DescriptionInline::Image { image, caption };
++        if self.in_link {
++            self.lifted.push(image);
++            return Vec::new();
++        }
++        vec![image]
++    }
++
++    /// The text of `parent`'s children, elements' text included.
++    fn plain_text(&mut self, parent: &NodeRef, depth: usize) -> String {
++        let mut text = String::new();
++        for child in self.children(parent, depth) {
++            match child {
++                Child::Text(piece) => text.push_str(&piece),
++                Child::Element { node, depth, .. } => text.push_str(&self.plain_text(&node, depth)),
++            }
++        }
++        text
++    }
++
++    /// `parent`'s child elements named one of `names`, each with its name and depth.
++    fn elements<'a>(
++        &mut self,
++        parent: &NodeRef<'a>,
++        depth: usize,
++        names: &[&str],
++    ) -> Vec<(NodeRef<'a>, String, usize)> {
++        let mut elements = Vec::new();
++        for child in self.children(parent, depth) {
++            if let Child::Element { node, name, depth } = child
++                && names.contains(&name.as_str())
++            {
++                elements.push((node, name, depth));
++            }
++        }
++        elements
++    }
++
++    /// Its `li` children as items; anything else in a list is left out.
++    fn list(&mut self, node: &NodeRef, numbering: ListNumbering, depth: usize) -> DescriptionBlock {
++        let mut items = Vec::new();
++        for (item, _, depth) in self.elements(node, depth, &["li"]) {
++            let task = task_box(&item);
++            let blocks = self.blocks(&item, depth);
++            items.push(DescriptionItem { task, blocks });
++        }
++        DescriptionBlock::List { numbering, items }
++    }
++
++    /// `thead`'s rows as the head, `tbody`'s and `tfoot`'s as the body (the parser puts every bare `tr` in a
++    /// `tbody`).
++    fn table(&mut self, node: &NodeRef, depth: usize) -> DescriptionBlock {
++        let mut head = Vec::new();
++        let mut body = Vec::new();
++        for (section, name, depth) in self.elements(node, depth, &["thead", "tbody", "tfoot"]) {
++            let rows = self.rows(&section, depth);
++            if name == "thead" {
++                head.extend(rows);
++            } else {
++                body.extend(rows);
++            }
++        }
++        DescriptionBlock::Table { head, body }
++    }
++
++    fn rows(&mut self, section: &NodeRef, depth: usize) -> Vec<DescriptionRow> {
++        let mut rows = Vec::new();
++        for (row, _, depth) in self.elements(section, depth, &["tr"]) {
++            let cells = self.cells(&row, depth);
++            rows.push(DescriptionRow { cells });
++        }
++        rows
++    }
++
++    fn cells(&mut self, row: &NodeRef, depth: usize) -> Vec<DescriptionCell> {
++        let mut cells = Vec::new();
++        for (cell, name, depth) in self.elements(row, depth, &["th", "td"]) {
++            let inlines = self.inlines(&cell, depth);
++            let align = align(&cell);
++            cells.push(DescriptionCell {
++                header: name == "th",
++                align,
++                inlines,
++            });
++        }
++        cells
++    }
++
++    /// Its first `summary` child as the summary, the rest as its blocks.
++    fn details(&mut self, node: &NodeRef, depth: usize) -> DescriptionBlock {
++        let summaries = self.elements(node, depth, &["summary"]);
++        let summary = match summaries.first() {
++            Some((summary, _, inner)) => self.inlines(summary, *inner),
++            None => Vec::new(),
++        };
++        DescriptionBlock::Details {
++            open: node.has_attr("open"),
++            summary,
++            blocks: self.blocks(node, depth),
++        }
++    }
++}
++
++/// A paragraph of `inlines` at the end of `blocks`, unless they are only white space.
++fn push_paragraph(blocks: &mut Vec<DescriptionBlock>, inlines: Vec<DescriptionInline>) {
++    if !is_blank(&inlines) {
++        blocks.push(DescriptionBlock::Paragraph { inlines });
++    }
++}
++
++/// Nothing, or only white-space text.
++fn is_blank(inlines: &[DescriptionInline]) -> bool {
++    inlines
++        .iter()
++        .all(|inline| matches!(inline, DescriptionInline::Text { text } if text.trim().is_empty()))
++}
+diff --git a/crates/merge-requests/src/description/tests.rs b/crates/merge-requests/src/description/tests.rs
+new file mode 100644
+index 0000000..09a0648
+--- /dev/null
++++ b/crates/merge-requests/src/description/tests.rs
+@@ -0,0 +1,919 @@
++use std::collections::BTreeSet;
++
++use serde_json::{Value, json};
++use url::Url;
++
++use super::address::{image_of, link_of};
++use super::html::{MAX_NESTING, described};
++use super::*;
++
++const BASE: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/52";
++const MERGE_REQUESTS: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/";
++const SUB_PATH_BASE: &str = "https://gitlab.example/gitlab/taskboard/taskboard/-/merge_requests/52";
++const ORIGIN: &str = "https://gitlab.example";
++const HEX_A: &str = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
++const HEX_B: &str = "f9e8d7c6b5a4938271605f4e3d2c1b0a";
++const RICH: &str =
++    include_str!("../../../../tests/glab/mr-description/graphql-description-52.json");
++const PLANTED: &str =
++    include_str!("../../../../tests/glab/mr-description/graphql-description-50.json");
++
++/// Every field name of the Contract's types, as serialised.
++const CONTRACT_KEYS: [&str; 24] = [
++    "kind",
++    "description",
++    "blocks",
++    "inlines",
++    "level",
++    "language",
++    "text",
++    "numbering",
++    "start",
++    "items",
++    "task",
++    "head",
++    "body",
++    "cells",
++    "header",
++    "align",
++    "open",
++    "summary",
++    "link",
++    "page",
++    "address",
++    "image",
++    "caption",
++    "key",
++];
++
++fn base() -> Url {
++    Url::parse(BASE).unwrap()
++}
++
++fn read(html: &str) -> Described {
++    described(html, Some(&WebPage(BASE.to_owned())))
++}
++
++fn blocks(html: &str) -> Vec<DescriptionBlock> {
++    read(html).description.blocks
++}
++
++/// The `descriptionHtml` of a recorded answer.
++fn html_in(answer: &str) -> String {
++    let answer: Value = serde_json::from_str(answer).unwrap();
++    let html = &answer["data"]["project"]["mergeRequest"]["descriptionHtml"];
++    html.as_str().unwrap().to_owned()
++}
++
++fn text(text: &str) -> DescriptionInline {
++    DescriptionInline::Text {
++        text: text.to_owned(),
++    }
++}
++
++fn paragraph(inlines: Vec<DescriptionInline>) -> DescriptionBlock {
++    DescriptionBlock::Paragraph { inlines }
++}
++
++fn said(words: &str) -> DescriptionBlock {
++    paragraph(vec![text(words)])
++}
++
++fn page(address: &str) -> DescriptionLink {
++    DescriptionLink::Page {
++        page: WebPage(address.to_owned()),
++    }
++}
++
++fn refused(address: &str) -> DescriptionLink {
++    DescriptionLink::Refused {
++        address: address.to_owned(),
++    }
++}
++
++fn web(address: &str) -> DescriptionImage {
++    DescriptionImage::Web {
++        address: address.to_owned(),
++    }
++}
++
++/// An uploaded image of `secret`, its key made by the one maker, `image_of`.
++fn uploaded(secret: &str) -> DescriptionImage {
++    let src = format!("/-/project/7/uploads/{secret}/any.png");
++    let (image, _) = image_of(Some(&base()), &src);
++    assert_eq!(
++        serde_json::to_value(&image).unwrap(),
++        json!({ "kind": "uploaded", "key": format!("upload~{secret}") })
++    );
++    image
++}
++
++fn image(image: DescriptionImage, caption: &str) -> DescriptionInline {
++    DescriptionInline::Image {
++        image,
++        caption: caption.to_owned(),
++    }
++}
++
++fn item(task: TaskBox, blocks: Vec<DescriptionBlock>) -> DescriptionItem {
++    DescriptionItem { task, blocks }
++}
++
++fn cell(header: bool, align: CellAlign, words: &str) -> DescriptionCell {
++    DescriptionCell {
++        header,
++        align,
++        inlines: vec![text(words)],
++    }
++}
++
++fn upload(route: &str, web: &str) -> PictureAddress {
++    PictureAddress::upload(route.to_owned(), web.to_owned())
++}
++
++fn list_parts(block: &DescriptionBlock) -> (ListNumbering, &[DescriptionItem]) {
++    let DescriptionBlock::List { numbering, items } = block else {
++        panic!("not a list: {block:?}");
++    };
++    (*numbering, items)
++}
++
++/// Every object key in `value`, and every string, at any depth.
++fn keys_and_strings(value: &Value, keys: &mut BTreeSet<String>, strings: &mut Vec<String>) {
++    match value {
++        Value::Object(fields) => {
++            for (key, field) in fields {
++                keys.insert(key.clone());
++                keys_and_strings(field, keys, strings);
++            }
++        }
++        Value::Array(values) => {
++            for each in values {
++                keys_and_strings(each, keys, strings);
++            }
++        }
++        Value::String(string) => strings.push(string.clone()),
++        Value::Null | Value::Bool(_) | Value::Number(_) => {}
++    }
++}
++
++#[test]
++fn every_element_of_rule_3_becomes_its_block_or_inline() {
++    let html = "<h1>One</h1><h2>Two</h2><h3>Three</h3><h4>Four</h4><h5>Five</h5><h6>Six</h6>\n\
++        <p><em>e</em><i>i</i><strong>s</strong><b>b</b><del>d</del><s>s</s><strike>k</strike><code>c</code><br>\
++        <a href=\"/x\">a</a><img src=\"https://images.example/cat.png\" alt=\"cat\"></p>\n\
++        <pre><code>plain\n</code></pre>\n<ul><li>bullet</li></ul>\n<ol><li>number</li></ol>\n\
++        <blockquote><p>quoted</p></blockquote>\n<hr>\n\
++        <table><thead><tr><th>h</th></tr></thead><tbody><tr><td>d</td></tr></tbody></table>\n\
++        <details><summary>more</summary><p>hidden</p></details>";
++
++    let heading = |level: &str, words: &str| json!({ "kind": "heading", "level": level, "inlines": [{ "kind": "text", "text": words }] });
++    let wrapped = |kind: &str, words: &str| json!({ "kind": kind, "inlines": [{ "kind": "text", "text": words }] });
++    let only = |words: &str| json!([{ "kind": "paragraph", "inlines": [{ "kind": "text", "text": words }] }]);
++    let item = |words: &str| json!({ "task": "none", "blocks": only(words) });
++    let cell = |header: bool, words: &str| json!({ "cells": [{ "header": header, "align": "start", "inlines": [{ "kind": "text", "text": words }] }] });
++    let expected = json!([
++        heading("h1", "One"), heading("h2", "Two"), heading("h3", "Three"),
++        heading("h4", "Four"), heading("h5", "Five"), heading("h6", "Six"),
++        { "kind": "paragraph", "inlines": [
++            wrapped("emphasis", "e"), wrapped("emphasis", "i"), wrapped("strong", "s"), wrapped("strong", "b"),
++            wrapped("strike", "d"), wrapped("strike", "s"), wrapped("strike", "k"),
++            { "kind": "code", "text": "c" }, { "kind": "lineBreak" },
++            { "kind": "link", "link": { "kind": "page", "page": "https://gitlab.example/x" },
++              "inlines": [{ "kind": "text", "text": "a" }] },
++            { "kind": "image", "image": { "kind": "web", "address": "https://images.example/cat.png" },
++              "caption": "cat" },
++        ] },
++        { "kind": "code", "language": null, "text": "plain" },
++        { "kind": "list", "numbering": { "kind": "bullets" }, "items": [item("bullet")] },
++        { "kind": "list", "numbering": { "kind": "numbers", "start": 1 }, "items": [item("number")] },
++        { "kind": "quote", "blocks": only("quoted") },
++        { "kind": "rule" },
++        { "kind": "table", "head": [cell(true, "h")], "body": [cell(false, "d")] },
++        { "kind": "details", "open": false, "summary": [{ "kind": "text", "text": "more" }],
++          "blocks": only("hidden") },
++    ]);
++    assert_eq!(serde_json::to_value(blocks(html)).unwrap(), expected);
++}
++
++#[test]
++fn gitlabs_code_block_keeps_its_language_and_text_without_the_colour_spans() {
++    let measured = "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"46:4-49:6\" \
++        data-canonical-lang=\"ruby\" class=\"code highlight js-syntax-highlight language-ruby\" v-pre=\"true\"><code>\
++        <span id=\"LC1\" class=\"line\" data-lang=\"ruby\"><span class=\"no\">Feature</span><span class=\"p\">.</span>\
++        <span class=\"nf\">enable</span><span class=\"p\">(</span><span class=\"ss\">:rate_limit</span>\
++        <span class=\"p\">)</span></span>&#x000A;<span id=\"LC2\" class=\"line\" data-lang=\"ruby\">\
++        <span class=\"nb\">puts</span> <span class=\"s2\">\"&lt;done&gt;\"</span></span></code></pre><copy-code>\
++        </copy-code><insert-code-snippet></insert-code-snippet></div>";
++    let code = |language: Option<&str>, text: &str| DescriptionBlock::Code {
++        language: language.map(str::to_owned),
++        text: text.to_owned(),
++    };
++
++    let ruby = code(Some("ruby"), "Feature.enable(:rate_limit)\nputs \"<done>\"");
++    assert_eq!(blocks(measured), [ruby]);
++    let older = "<pre lang=\"js\"><code>a\n\n</code></pre><pre data-canonical-lang=\"\"><code>b</code></pre>\
++        <pre data-canonical-lang=\"mermaid\" lang=\"x\"><code class=\"js-render-mermaid\">graph TD;\nA--&gt;B\n</code></pre>";
++    let expected = [
++        code(Some("js"), "a\n"),
++        code(None, "b"),
++        code(Some("mermaid"), "graph TD;\nA-->B"),
++    ];
++    assert_eq!(blocks(older), expected);
++}
++
++#[test]
++fn a_lazy_image_is_read_from_data_src_and_its_link_is_dropped() {
++    let path = format!("/-/project/278964/uploads/{HEX_A}/Screenshot_2025-08-01_at_4.25.21_pm.png");
++    let measured = format!(
++        "<p><a class=\"no-attachment-icon gfm\" href=\"{path}\" target=\"_blank\" rel=\"noopener noreferrer\" \
++         data-canonical-src=\"/uploads/{HEX_A}/Screenshot_2025-08-01_at_4.25.21_pm.png\" data-link=\"true\">\
++         <img data-sourcepos=\"21:5-21:125\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" \
++         alt=\"Screenshot_2025-08-01_at_4.25.21_pm\" decoding=\"async\" class=\"lazy gfm\" data-src=\"{path}\" \
++         data-canonical-src=\"/uploads/{HEX_A}/Screenshot_2025-08-01_at_4.25.21_pm.png\"></a></p>"
++    );
++
++    let read = read(&measured);
++
++    let shot = image(uploaded(HEX_A), "Screenshot_2025-08-01_at_4.25.21_pm");
++    assert_eq!(read.description.blocks, [paragraph(vec![shot])]);
++    assert_eq!(read.pages, Vec::<WebPage>::new());
++    let route = format!("projects/278964/uploads/{HEX_A}/Screenshot_2025-08-01_at_4.25.21_pm.png");
++    assert_eq!(
++        read.uploads[0].address,
++        upload(&route, &format!("{ORIGIN}{path}"))
++    );
++
++    let worded = "<p><a href=\"https://docs.example/x\">see <strong>the <img src=\"https://images.example/cat.png\" \
++        alt=\"cat\"></strong></a></p>";
++    let read = described(worded, Some(&WebPage(BASE.to_owned())));
++    let link = DescriptionInline::Link {
++        link: page("https://docs.example/x"),
++        inlines: vec![
++            text("see "),
++            DescriptionInline::Strong {
++                inlines: vec![text("the ")],
++            },
++        ],
++    };
++    let cat = image(web("https://images.example/cat.png"), "cat");
++    assert_eq!(read.description.blocks, [paragraph(vec![link, cat])]);
++    assert_eq!(read.web_images, 1);
++}
++
++#[test]
++fn an_images_caption_is_its_alt_else_its_title_else_its_address() {
++    let html = "<p><img src=\"https://images.example/a.png\" alt=\"alt\" title=\"title\">\
++        <img src=\"https://images.example/b.png\" alt=\"\" title=\"title\">\
++        <img src=\"https://images.example/c.png\"><img alt=\"\"></p>";
++
++    let expected = paragraph(vec![
++        image(web("https://images.example/a.png"), "alt"),
++        image(web("https://images.example/b.png"), "title"),
++        image(
++            web("https://images.example/c.png"),
++            "https://images.example/c.png",
++        ),
++        image(DescriptionImage::Refused, ""),
++    ]);
++    assert_eq!(blocks(html), [expected]);
++}
++
++#[test]
++fn a_heading_anchor_link_leaves_nothing() {
++    let measured = "<h2 id=\"user-content-what-does-this-mr-do-and-why\" data-sourcepos=\"1:1-1:32\" dir=\"auto\">\
++        What does this MR do and why?<a href=\"#what-does-this-mr-do-and-why\" aria-label=\"Link to heading 'What \
++        does this MR do and why?'\" data-heading-content=\"What does this MR do and why?\" class=\"anchor\"></a></h2>";
++
++    let read = read(measured);
++
++    let heading = DescriptionBlock::Heading {
++        level: HeadingLevel::H2,
++        inlines: vec![text("What does this MR do and why?")],
++    };
++    assert_eq!(read.description.blocks, [heading]);
++    assert_eq!(read.pages, Vec::<WebPage>::new());
++    let spaced = blocks("<p><a href=\"/x\"> \n </a>text</p>");
++    assert_eq!(spaced, [paragraph(vec![text("text")])]);
++}
++
++#[test]
++fn task_boxes_are_done_open_inapplicable_or_none() {
++    let measured = "<ul class=\"task-list\" dir=\"auto\">\n\
++        <li class=\"task-list-item\" data-sourcepos=\"33:1-33:79\"><input type=\"checkbox\" \
++        data-checkbox-sourcepos=\"33:4-33:4\" class=\"task-list-item-checkbox\" checked=\"\" disabled=\"\" \
++        aria-label=\"Check option: Changelog entry\"> Changelog entry</li>\n\
++        <li class=\"task-list-item\"><input type=\"checkbox\" class=\"task-list-item-checkbox\" disabled=\"\"> open</li>\n\
++        <li class=\"task-list-item inapplicable\"><input type=\"checkbox\" class=\"task-list-item-checkbox\" \
++        data-inapplicable=\"\" checked=\"\" disabled=\"\"> <s>dropped</s></li>\n\
++        <li>plain</li>\n<li><input type=\"checkbox\" checked=\"\"> not GitLab's box</li>\n\
++        <li>after text <input type=\"checkbox\" class=\"task-list-item-checkbox\" checked=\"\"></li>\n\
++        </ul>\n<ul class=\"task-list\"><li class=\"task-list-item\"><p><input type=\"checkbox\" \
++        class=\"task-list-item-checkbox\" checked=\"\"> loose</p></li>\n<li>\n  <!-- c --> <input type=\"checkbox\" \
++        class=\"task-list-item-checkbox\"> spaced</li></ul>";
++
++    let lists = blocks(measured);
++
++    let tasks: Vec<Vec<TaskBox>> = lists
++        .iter()
++        .map(|list| list_parts(list).1.iter().map(|item| item.task).collect())
++        .collect();
++    let (done, open, inapplicable, none) = (
++        TaskBox::Done,
++        TaskBox::Open,
++        TaskBox::Inapplicable,
++        TaskBox::None,
++    );
++    assert_eq!(
++        tasks,
++        [
++            vec![done, open, inapplicable, none, none, none],
++            vec![done, open]
++        ]
++    );
++    let DescriptionBlock::List { items, .. } = &lists[0] else {
++        panic!("not a list");
++    };
++    assert_eq!(items[0].blocks, [said(" Changelog entry")]);
++    let struck = DescriptionInline::Strike {
++        inlines: vec![text("dropped")],
++    };
++    assert_eq!(items[2].blocks, [paragraph(vec![text(" "), struck])]);
++}
++
++#[test]
++fn table_cells_keep_gitlabs_alignment_and_header() {
++    let html = "<table>\n<thead>\n<tr>\n<th style=\"text-align: left\">L</th>\n<th style=\"text-align: center\">C</th>\n\
++        <th style=\"text-align: right\">R</th>\n<th>N</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n\
++        <td style=\"text-align: left\">1</td>\n<td style=\"text-align: center\">2</td>\n\
++        <td style=\"text-align: right\">3</td>\n<td style=\"text-align:right; color: red\">4</td>\n</tr>\n</tbody>\n\
++        <tfoot><tr><td>f</td></tr></tfoot></table><table><tr><td>bare</td></tr></table>";
++    let row = |cells| DescriptionRow { cells };
++
++    let expected = [
++        DescriptionBlock::Table {
++            head: vec![row(vec![
++                cell(true, CellAlign::Start, "L"),
++                cell(true, CellAlign::Center, "C"),
++                cell(true, CellAlign::End, "R"),
++                cell(true, CellAlign::Start, "N"),
++            ])],
++            body: vec![
++                row(vec![
++                    cell(false, CellAlign::Start, "1"),
++                    cell(false, CellAlign::Center, "2"),
++                    cell(false, CellAlign::End, "3"),
++                    cell(false, CellAlign::Start, "4"),
++                ]),
++                row(vec![cell(false, CellAlign::Start, "f")]),
++            ],
++        },
++        DescriptionBlock::Table {
++            head: Vec::new(),
++            body: vec![row(vec![cell(false, CellAlign::Start, "bare")])],
++        },
++    ];
++    assert_eq!(blocks(html), expected);
++}
++
++#[test]
++fn details_keep_their_summary_and_open_state() {
++    let html = "<details open><summary>Logs <code>x</code></summary><pre>a</pre>text</details>\
++        <details><p>no summary</p></details>";
++
++    let expected = [
++        DescriptionBlock::Details {
++            open: true,
++            summary: vec![
++                text("Logs "),
++                DescriptionInline::Code {
++                    text: "x".to_owned(),
++                },
++            ],
++            blocks: vec![
++                DescriptionBlock::Code {
++                    language: None,
++                    text: "a".to_owned(),
++                },
++                said("text"),
++            ],
++        },
++        DescriptionBlock::Details {
++            open: false,
++            summary: Vec::new(),
++            blocks: vec![said("no summary")],
++        },
++    ];
++    assert_eq!(blocks(html), expected);
++}
++
++#[test]
++fn an_ordered_list_keeps_its_start() {
++    let html = "<ol start=\"3\"><li>c</li></ol><ol><li>a</li></ol><ol start=\"x\"><li>b</li></ol>\
++        <ol start=\"0\"><li>z</li></ol><ol start=\"-2\"><li>m</li></ol>";
++
++    let starts: Vec<ListNumbering> = blocks(html).iter().map(|list| list_parts(list).0).collect();
++    let numbers = |start| ListNumbering::Numbers { start };
++    assert_eq!(
++        starts,
++        [numbers(3), numbers(1), numbers(1), numbers(0), numbers(1)]
++    );
++}
++
++#[test]
++fn inline_runs_beside_blocks_become_paragraphs_and_white_space_between_blocks_vanishes() {
++    let html = "<blockquote>\n  before <em>x</em>\n<p>para</p>\n  \n<ul><li>i</li></ul> after</blockquote>\n\
++        <div>a</div><div>b</div>\n<section>in <span>a</span> <gl-emoji title=\"robot\" data-name=\"robot\">🤖</gl-emoji>\
++        <p>block</p></section>";
++
++    let expected = [
++        DescriptionBlock::Quote {
++            blocks: vec![
++                paragraph(vec![
++                    text("\n  before "),
++                    DescriptionInline::Emphasis {
++                        inlines: vec![text("x")],
++                    },
++                    text("\n"),
++                ]),
++                said("para"),
++                DescriptionBlock::List {
++                    numbering: ListNumbering::Bullets,
++                    items: vec![item(TaskBox::None, vec![said("i")])],
++                },
++                said(" after"),
++            ],
++        },
++        said("a"),
++        said("b"),
++        paragraph(vec![
++            text("\n"),
++            text("in "),
++            text("a"),
++            text(" "),
++            text("🤖"),
++        ]),
++        said("block"),
++    ];
++    assert_eq!(blocks(html), expected);
++}
++
++#[test]
++fn an_empty_or_comment_only_description_has_no_blocks() {
++    for html in [
++        "",
++        "<!-- only a comment -->",
++        "\n \n",
++        "<p> </p>",
++        "&#x000A;<!-- a -->&#x000A;",
++    ] {
++        assert_eq!(blocks(html), [], "{html:?}");
++    }
++}
++
++#[test]
++fn planted_script_style_frame_object_media_and_form_leave_nothing() {
++    let read = read(&html_in(PLANTED));
++
++    let tree = serde_json::to_string(&read.description).unwrap();
++    let planted = [
++        "yamtPlanted",
++        "evil.example",
++        "frame text",
++        "display",
++        "planted value",
++        "Go planted",
++        "svg text",
++        "object text",
++        "embed",
++        "video text",
++        "audio text",
++        "noscript text",
++        "template text",
++        "textarea text",
++        "option text",
++        "title text",
++        "deepest",
++    ];
++    for words in planted {
++        assert!(!tree.contains(words), "{words} in {tree}");
++    }
++    let blocks = &read.description.blocks;
++    let starts = [
++        said("before"),
++        paragraph(vec![image(web(&format!("{MERGE_REQUESTS}x")), "x")]),
++        paragraph(vec![DescriptionInline::Link {
++            link: page(&format!("{MERGE_REQUESTS}relative")),
++            inlines: vec![text("relative link")],
++        }]),
++        said("text"),
++    ];
++    assert_eq!(blocks[..4], starts);
++    assert_eq!(blocks.last(), Some(&said("after")));
++    assert_eq!(read.uploads, Vec::<OfferedUpload>::new());
++}
++
++#[test]
++fn no_key_but_the_contracts_crosses() {
++    for answer in [PLANTED, RICH] {
++        let read = read(&html_in(answer));
++        let reply = DescriptionReply::Read {
++            description: read.description,
++        };
++        let mut keys = BTreeSet::new();
++        let mut strings = Vec::new();
++        keys_and_strings(
++            &serde_json::to_value(&reply).unwrap(),
++            &mut keys,
++            &mut strings,
++        );
++
++        let contract: BTreeSet<String> =
++            CONTRACT_KEYS.iter().map(|key| (*key).to_owned()).collect();
++        assert!(keys.is_subset(&contract), "{keys:?}");
++        for string in strings {
++            for planted in ["onerror", "onclick", "onload", "display:none", "color:red"] {
++                assert!(!string.contains(planted), "{string}");
++            }
++        }
++    }
++}
++
++#[test]
++fn a_base_or_meta_element_changes_no_address() {
++    let html = "<base href=\"https://evil.example/\"><meta http-equiv=\"refresh\" content=\"0;url=https://evil.example/\">\
++        <p><a href=\"x\">x</a><img src=\"y.png\" alt=\"y\"></p>";
++
++    let read = read(html);
++
++    let link = DescriptionInline::Link {
++        link: page(&format!("{MERGE_REQUESTS}x")),
++        inlines: vec![text("x")],
++    };
++    let y = image(web(&format!("{MERGE_REQUESTS}y.png")), "y");
++    assert_eq!(read.description.blocks, [paragraph(vec![link, y])]);
++    assert_eq!(read.pages, [WebPage(format!("{MERGE_REQUESTS}x"))]);
++}
++
++#[test]
++fn nesting_past_32_levels_is_left_out() {
++    let quotes = format!(
++        "{}<p>deepest</p>{}",
++        "<blockquote>".repeat(40),
++        "</blockquote>".repeat(40)
++    );
++    let ems = format!("<p>{}deep{}</p>", "<em>".repeat(40), "</em>".repeat(40));
++    let html = format!("{quotes}{ems}<p>after</p>");
++
++    let blocks = blocks(&html);
++
++    let mut levels = 0;
++    let mut inside = &blocks[..1];
++    while let [DescriptionBlock::Quote { blocks }] = inside {
++        levels += 1;
++        inside = blocks;
++    }
++    assert_eq!((levels, inside), (MAX_NESTING, &[][..]));
++    let DescriptionBlock::Paragraph { inlines } = &blocks[1] else {
++        panic!("not a paragraph: {:?}", blocks[1]);
++    };
++    let mut levels = 0;
++    let mut inside = &inlines[..];
++    while let [DescriptionInline::Emphasis { inlines }] = inside {
++        levels += 1;
++        inside = inlines;
++    }
++    assert_eq!((levels, inside), (MAX_NESTING - 1, &[][..]));
++    assert_eq!(blocks[2..], [said("after")]);
++    assert_eq!(MAX_NESTING, 32);
++}
++
++#[test]
++fn an_https_or_http_link_is_a_page() {
++    let base = base();
++    for (href, expected) in [
++        ("https://docs.example/x", "https://docs.example/x"),
++        ("http://plain.example/", "http://plain.example/"),
++        (
++            "HTTPS://Docs.Example/X?a=1#b",
++            "https://docs.example/X?a=1#b",
++        ),
++        ("//other.example/y", "https://other.example/y"),
++    ] {
++        assert_eq!(link_of(Some(&base), href), page(expected), "{href}");
++    }
++    assert_eq!(
++        link_of(None, "https://docs.example/x"),
++        page("https://docs.example/x")
++    );
++}
++
++#[test]
++fn a_relative_link_resolves_on_the_merge_requests_gitlab_page() {
++    let base = base();
++    let sub_path = Url::parse(SUB_PATH_BASE).unwrap();
++    let cases = [
++        (&base, "/x", "https://gitlab.example/x"),
++        (
++            &base,
++            "x",
++            "https://gitlab.example/taskboard/taskboard/-/merge_requests/x",
++        ),
++        (
++            &base,
++            "#frag",
++            "https://gitlab.example/taskboard/taskboard/-/merge_requests/52#frag",
++        ),
++        (
++            &base,
++            "/taskboard/taskboard/-/issues/12",
++            "https://gitlab.example/taskboard/taskboard/-/issues/12",
++        ),
++        (
++            &sub_path,
++            "/gitlab/anna",
++            "https://gitlab.example/gitlab/anna",
++        ),
++        (
++            &sub_path,
++            "../../-/issues/12",
++            "https://gitlab.example/gitlab/taskboard/taskboard/-/issues/12",
++        ),
++        (
++            &sub_path,
++            "#frag",
++            "https://gitlab.example/gitlab/taskboard/taskboard/-/merge_requests/52#frag",
++        ),
++    ];
++    for (base, href, expected) in cases {
++        assert_eq!(link_of(Some(base), href), page(expected), "{href}");
++    }
++}
++
++#[test]
++fn mailto_file_javascript_data_and_unreadable_links_are_refused_with_their_address() {
++    let base = base();
++    let refused_hrefs = [
++        "mailto:anna@example.com",
++        "file:///etc/passwd",
++        "javascript:alert(1)",
++        " JaVaScRiPt:alert(1)",
++        "java\tscript:alert(1)",
++        "data:text/html,<script>alert(1)</script>",
++        "vscode://open",
++        "http://[::1",
++        "https://exa mple.example/",
++    ];
++    for href in refused_hrefs {
++        assert_eq!(link_of(Some(&base), href), refused(href), "{href}");
++    }
++}
++
++#[test]
++fn a_described_page_has_no_space_quote_or_control_character() {
++    let base = base();
++    let hrefs = [
++        "https://docs.example/a b\"c<d>e\tf\u{7}g'h`i",
++        "a b\"c<d>e\u{7}f",
++        "https://docs.example/?q=a b\"<\u{7}#x y\"",
++    ];
++    for href in hrefs {
++        let DescriptionLink::Page { page } = link_of(Some(&base), href) else {
++            panic!("refused: {href:?}");
++        };
++        let quoting = |c: char| c.is_whitespace() || c.is_control() || matches!(c, '"' | '<' | '>');
++        assert!(!page.as_str().contains(quoting), "{page:?}");
++    }
++}
++
++#[test]
++fn without_an_https_origin_a_relative_link_is_refused() {
++    for href in ["/x", "x", "#frag"] {
++        assert_eq!(link_of(None, href), refused(href));
++    }
++    let html = "<p><a href=\"/x\">x</a><a href=\"https://docs.example/\">d</a>\
++        <img src=\"/-/project/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/a.png\" alt=\"a\"></p>";
++    let read = described(html, None);
++    let expected = paragraph(vec![
++        DescriptionInline::Link {
++            link: refused("/x"),
++            inlines: vec![text("x")],
++        },
++        DescriptionInline::Link {
++            link: page("https://docs.example/"),
++            inlines: vec![text("d")],
++        },
++        image(DescriptionImage::Refused, "a"),
++    ]);
++    assert_eq!(read.description.blocks, [expected]);
++    assert_eq!(read.pages, [WebPage("https://docs.example/".to_owned())]);
++    let absolute = format!("{ORIGIN}/-/project/7/uploads/{HEX_A}/a.png");
++    assert_eq!(image_of(None, &absolute), (web(&absolute), None));
++}
++
++#[test]
++fn an_upload_on_the_projects_origin_is_uploaded_in_both_path_forms() {
++    let base = base();
++    let sub_path = Url::parse(SUB_PATH_BASE).unwrap();
++    let by_id = format!("{ORIGIN}/-/project/7/uploads/{HEX_A}/shot.png");
++    let cases = [
++        (
++            &base,
++            format!("/-/project/7/uploads/{HEX_A}/shot.png"),
++            HEX_A,
++            format!("projects/7/uploads/{HEX_A}/shot.png"),
++            by_id.clone(),
++        ),
++        (
++            &base,
++            format!("{by_id}?w=1#x"),
++            HEX_A,
++            format!("projects/7/uploads/{HEX_A}/shot.png"),
++            by_id.clone(),
++        ),
++        (
++            &sub_path,
++            format!("/gitlab/-/project/7/uploads/{HEX_A}/shot.png"),
++            HEX_A,
++            format!("projects/7/uploads/{HEX_A}/shot.png"),
++            format!("{ORIGIN}/gitlab/-/project/7/uploads/{HEX_A}/shot.png"),
++        ),
++        (
++            &base,
++            format!("/taskboard/taskboard/uploads/{HEX_B}/old a+b~c%20d.png"),
++            HEX_B,
++            format!("projects/taskboard%2Ftaskboard/uploads/{HEX_B}/old%20a+b~c%20d.png"),
++            format!("{ORIGIN}/taskboard/taskboard/uploads/{HEX_B}/old%20a+b~c%20d.png"),
++        ),
++    ];
++    for (base, src, secret, route, address) in cases {
++        let (image, offered) = image_of(Some(base), &src);
++        assert_eq!(image, uploaded(secret), "{src}");
++        let offered = offered.unwrap();
++        assert_eq!(offered.address, upload(&route, &address), "{src}");
++        assert_eq!(offered.address.as_str(), address);
++    }
++}
++
++#[test]
++fn an_upload_shaped_address_that_breaks_a_rule_is_a_web_image() {
++    let base = base();
++    let on_origin_but_no_upload = [
++        format!("/-/project/x7/uploads/{HEX_A}/a.png"),
++        format!("/-/project//uploads/{HEX_A}/a.png"),
++        format!("/-/project/7/uploads/{}/a.png", HEX_A.to_uppercase()),
++        format!("/-/project/7/uploads/{}/a.png", &HEX_A[1..]),
++        format!("/-/project/7/uploads/{HEX_A}0/a.png"),
++        format!("/-/project/7/uploads/{HEX_A}/a/b.png"),
++        format!("/-/project/7/uploads/{HEX_A}/"),
++        format!("/-/project/7/uploads/{HEX_A}/a!.png"),
++        format!("/x$/-/project/7/uploads/{HEX_A}/a.png"),
++        format!("/-/group/7/uploads/{HEX_A}/a.png"),
++        format!("/other/project/uploads/{HEX_A}/a.png"),
++        format!("/taskboard/uploads/{HEX_A}/a.png"),
++        format!("/-/project/7/files/{HEX_A}/a.png"),
++    ];
++    for src in on_origin_but_no_upload {
++        let (image, offered) = image_of(Some(&base), &src);
++        assert!(
++            matches!(image, DescriptionImage::Web { .. }),
++            "{src}: {image:?}"
++        );
++        assert_eq!(offered, None, "{src}");
++    }
++}
++
++#[test]
++fn an_upload_path_on_another_host_is_another_sites_image() {
++    let base = base();
++    for src in [
++        format!("https://evil.example/-/project/7/uploads/{HEX_A}/x.png"),
++        format!("https://gitlab.example:8443/-/project/7/uploads/{HEX_A}/x.png"),
++        format!("https://evil.example/taskboard/taskboard/uploads/{HEX_A}/x.png"),
++    ] {
++        assert_eq!(image_of(Some(&base), &src), (web(&src), None), "{src}");
++    }
++}
++
++#[test]
++fn http_data_and_file_images_are_refused() {
++    let base = base();
++    let http_upload = format!("http://gitlab.example/-/project/7/uploads/{HEX_A}/x.png");
++    let refused_srcs = [
++        "http://plain.example/p.png",
++        http_upload.as_str(),
++        "data:image/png;base64,iVBORw0KGgo=",
++        "file:///etc/passwd",
++        "javascript:alert(1)",
++        "https://[::1",
++        "",
++        "  ",
++    ];
++    for src in refused_srcs {
++        assert_eq!(
++            image_of(Some(&base), src),
++            (DescriptionImage::Refused, None),
++            "{src:?}"
++        );
++    }
++}
++
++#[test]
++fn an_upload_key_is_never_a_username() {
++    let (image, offered) = image_of(
++        Some(&base()),
++        &format!("/-/project/7/uploads/{HEX_A}/a.png"),
++    );
++    let key = offered.unwrap().key;
++
++    assert_eq!(key.as_str(), format!("upload~{HEX_A}"));
++    assert!(key.as_str().contains('~'), "GitLab usernames hold no ~");
++    assert_eq!(
++        serde_json::to_value(&image).unwrap(),
++        json!({ "kind": "uploaded", "key": key.as_str() })
++    );
++}
++
++#[test]
++fn pages_and_uploads_are_collected_once_each_in_order() {
++    let a = format!("/-/project/7/uploads/{HEX_A}/a.png");
++    let b = format!("/-/project/7/uploads/{HEX_B}/b.png");
++    let html = format!(
++        "<p><a href=\"https://docs.example/a\">a</a><img src=\"{b}\"><a href=\"/b\">b</a>\
++         <a href=\"https://docs.example/a\">a again</a><a href=\"mailto:x@example.com\">m</a><a href=\"/empty\"></a>\
++         <img src=\"{a}\"><img src=\"{b}\"><img src=\"https://images.example/c.png\"><a href=\"/c\">c</a></p>"
++    );
++
++    let read = read(&html);
++
++    let pages = [
++        "https://docs.example/a",
++        "https://gitlab.example/b",
++        "https://gitlab.example/c",
++    ];
++    let expected: Vec<WebPage> = pages
++        .iter()
++        .map(|page| WebPage((*page).to_owned()))
++        .collect();
++    assert_eq!(read.pages, expected);
++    let keys: Vec<&str> = read
++        .uploads
++        .iter()
++        .map(|offered| offered.key.as_str())
++        .collect();
++    assert_eq!(keys, [format!("upload~{HEX_B}"), format!("upload~{HEX_A}")]);
++    assert_eq!(read.web_images, 1);
++}
++
++#[test]
++fn glabs_or_gitlabs_failure_is_the_reply_and_no_html_is_empty() {
++    let failed = |message: &str| {
++        Err(DescriptionReply::Failed {
++            message: message.to_owned(),
++        })
++    };
++    let answer = |data: Value| Ok(json!({ "data": data }).to_string().into_bytes());
++    let refused =
++        json!({ "data": null, "errors": [{ "message": "Field 'descriptionHtml' doesn't exist" }] });
++
++    assert_eq!(
++        html_of(Err("glab: a deadline line".to_owned())),
++        failed("glab: a deadline line")
++    );
++    assert_eq!(
++        html_of(Ok(refused.to_string().into_bytes())),
++        failed("Field 'descriptionHtml' doesn't exist")
++    );
++    assert_eq!(
++        html_of(answer(json!({ "project": null }))),
++        failed(NO_PROJECT)
++    );
++    let no_merge_request = json!({ "project": { "mergeRequest": null } });
++    assert_eq!(html_of(answer(no_merge_request)), failed(NO_MERGE_REQUEST));
++    let no_html = json!({ "project": { "mergeRequest": { "descriptionHtml": null } } });
++    assert_eq!(html_of(answer(no_html)), Ok(String::new()));
++    let html = json!({ "project": { "mergeRequest": { "descriptionHtml": "<p>x</p>" } } });
++    assert_eq!(html_of(answer(html)), Ok("<p>x</p>".to_owned()));
++}
++
++#[test]
++fn the_log_names_each_replys_kind_as_the_window_does() {
++    let replies = [
++        DescriptionReply::Read {
++            description: Description { blocks: Vec::new() },
++        },
++        DescriptionReply::GlabMissing,
++        DescriptionReply::NotLoggedIn {
++            detail: "gitlab.com".to_owned(),
++        },
++        DescriptionReply::Failed {
++            message: "glab: a deadline line".to_owned(),
++        },
++    ];
++    for reply in replies {
++        assert_eq!(
++            json!(outcome(&reply)),
++            serde_json::to_value(&reply).unwrap()["kind"]
++        );
++    }
++}
+diff --git a/crates/merge-requests/src/job_log.rs b/crates/merge-requests/src/job_log.rs
+index b6c0e41..8a5bbfb 100644
+--- a/crates/merge-requests/src/job_log.rs
++++ b/crates/merge-requests/src/job_log.rs
+@@ -11,7 +11,7 @@ use crate::{GitLabRepository, WebPage};
+ pub const MAX_LOG_BYTES: usize = 500 * 1024;
+ /// glab's last line for an HTTP 404 ends so (`tests/glab/README.md`); GitLab answers 404 for a job without a log.
+ const NOT_FOUND: &str = "(HTTP 404)";
+-const ESCAPED_SLASH: &str = "%2F";
++pub(crate) const ESCAPED_SLASH: &str = "%2F";
+ 
+ /// A failed job's log as the window shows it.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+diff --git a/crates/merge-requests/src/lib.rs b/crates/merge-requests/src/lib.rs
+index 99c5a40..7577e28 100644
+--- a/crates/merge-requests/src/lib.rs
++++ b/crates/merge-requests/src/lib.rs
+@@ -1,11 +1,13 @@
+ //! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab,
+ //! each row's conflicts checked by yamt's own merge of GitLab's two commits, each one's changes prepared for a window
+ //! of their own, its page or a failed job's opened in the browser, a failed job's log read, each row's open
+-//! discussions read with their last person's note, its assignees and reviewers added and removed.
++//! discussions read with their last person's note, its assignees and reviewers added and removed, its description
++//! read as GitLab renders it.
+ #![forbid(unsafe_code)]
+ #![warn(missing_docs)]
+ 
+ mod check;
++mod description;
+ mod detect;
+ mod discussions;
+ mod job_log;
+@@ -32,6 +34,11 @@ use serde::{Deserialize, Serialize};
+ use specta::Type;
+ 
+ pub use check::{CheckSummary, ConflictCheck, MergedPairs, check_conflicts};
++pub use description::{
++    CellAlign, Description, DescriptionBlock, DescriptionCell, DescriptionImage, DescriptionInline,
++    DescriptionItem, DescriptionLink, DescriptionReply, DescriptionRow, HeadingLevel,
++    ListNumbering, OfferedUpload, ReadDescription, TaskBox, UploadKey, read_description,
++};
+ pub use detect::{GitLabRepository, gitlab_repository};
+ pub use discussions::{
+     DISCUSSION_BATCH, DiscussionNote, DiscussionPlace, DiscussionsAnswer, OpenDiscussion,
+@@ -48,7 +55,8 @@ pub use people_change::{
+ };
+ pub use people_search::{FoundPeople, PeopleSearchReply, search_people};
+ pub use picture::{
+-    GravatarAddress, ImageKind, MAX_PICTURE_BYTES, Picture, PictureAddress, fetch_picture,
++    GravatarAddress, ImageKind, MAX_PICTURE_BYTES, MAX_UPLOAD_BYTES, Picture, PictureAddress,
++    fetch_picture,
+ };
+ pub use rerequest::{RerequestReply, rerequest_review};
+ pub use resolve::prepare_resolve;
+@@ -84,8 +92,9 @@ pub enum GitLabProject {
+ )]
+ pub struct MergeRequestIid(pub u32);
+ 
+-/// The address of a page on the project's GitLab that this window may open in the browser: a failed job's log, a
+-/// merge request or a note on one; only `WebPage::job`, `WebPage::merge_request` and `WebPage::note` make one.
++/// The address of a page this window may open in the browser: a failed job's log, a merge request or a note on one,
++/// on the project's GitLab, or a link in a description; only `WebPage::job`, `::merge_request`, `::note` and
++/// `::linked` make one.
+ #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
+ pub struct WebPage(String);
+ 
+diff --git a/crates/merge-requests/src/list.rs b/crates/merge-requests/src/list.rs
+index bf4513e..3aca136 100644
+--- a/crates/merge-requests/src/list.rs
++++ b/crates/merge-requests/src/list.rs
+@@ -155,6 +155,7 @@ mod tests {
+         MergeRequestRow {
+             iid: MergeRequestIid(iid),
+             title: format!("MR {iid}"),
++            has_description: false,
+             created_at: "2026-10-30T00:00:00Z".to_owned(),
+             draft: false,
+             author: None,
+diff --git a/crates/merge-requests/src/page.rs b/crates/merge-requests/src/page.rs
+index f3a8193..c6baac9 100644
+--- a/crates/merge-requests/src/page.rs
++++ b/crates/merge-requests/src/page.rs
+@@ -96,6 +96,7 @@ pub(crate) struct Nodes<T> {
+ struct Node {
+     iid: String,
+     title: String,
++    description: Option<String>,
+     created_at: String,
+     draft: bool,
+     author: Option<UserNode>,
+@@ -209,6 +210,7 @@ fn row(
+     let row = MergeRequestRow {
+         iid,
+         title: node.title,
++        has_description: node.description.is_some_and(|text| !text.trim().is_empty()),
+         created_at: node.created_at,
+         draft: node.draft,
+         author: node.author.map(|author| people.person(author)),
+diff --git a/crates/merge-requests/src/page/tests.rs b/crates/merge-requests/src/page/tests.rs
+index c65102b..4cf640a 100644
+--- a/crates/merge-requests/src/page/tests.rs
++++ b/crates/merge-requests/src/page/tests.rs
+@@ -63,6 +63,7 @@ fn snooze_a_reminder() -> MergeRequestRow {
+     MergeRequestRow {
+         iid: MergeRequestIid(13),
+         title: "Snooze a reminder".to_owned(),
++        has_description: false,
+         created_at: "2026-10-28T09:15:00Z".to_owned(),
+         draft: false,
+         author: None,
+@@ -111,6 +112,19 @@ fn blocked(reason: BlockedReason) -> Readiness {
+     Readiness::Blocked { reason }
+ }
+ 
++#[test]
++fn a_description_of_white_space_or_none_is_no_description() {
++    let described =
++        |description: Value| row_with(&json!({ "description": description })).has_description;
++
++    assert!(described(json!("Fixes the label colours.")));
++    assert!(described(json!("  <!-- only a comment -->  ")));
++    assert!(!described(json!("  \n \t")));
++    assert!(!described(json!("")));
++    assert!(!described(Value::Null));
++    assert!(!row_with(&json!({})).has_description);
++}
++
+ fn size(additions: u32, deletions: u32, files: u32) -> ChangeSize {
+     ChangeSize {
+         additions,
+diff --git a/crates/merge-requests/src/picture.rs b/crates/merge-requests/src/picture.rs
+index aea69da..08f602a 100644
+--- a/crates/merge-requests/src/picture.rs
++++ b/crates/merge-requests/src/picture.rs
+@@ -6,8 +6,14 @@ use yamt_gitio::Glab;
+ 
+ use crate::web_page::{is_number, is_path_segment, is_web_path};
+ 
++const MIB: usize = 1 << 20;
+ /// The largest picture yamt takes from GitLab.
+-pub const MAX_PICTURE_BYTES: usize = 1 << 20;
++pub const MAX_PICTURE_BYTES: usize = MIB;
++/// The largest upload a description names that yamt takes from GitLab: a screenshot is often over 1 MiB.
++pub const MAX_UPLOAD_BYTES: usize = 10 << 20;
++/// glab's last line for an HTTP 403 or 404 ends so (`tests/glab/README.md`): GitLab older than 17.4 has no uploads
++/// API, and a project you are no member of may refuse it.
++const REFUSED_ENDINGS: [&str; 2] = ["(HTTP 403)", "(HTTP 404)"];
+ 
+ const UPLOADED_AVATARS: &str = "/uploads/-/system/user/avatar/";
+ const GRAVATAR_HOSTS: [&str; 2] = ["https://secure.gravatar.com", "https://www.gravatar.com"];
+@@ -15,7 +21,6 @@ const GRAVATAR_PATH: &str = "/avatar/";
+ const MD5_HEX_DIGITS: usize = 32;
+ const SHA256_HEX_DIGITS: usize = 64;
+ const NOT_AN_IMAGE: &str = "GitLab's picture is not a PNG, JPEG, GIF or WebP image";
+-const TOO_LARGE: &str = "GitLab's picture is larger than 1 MiB";
+ const PNG_START: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+ const JPEG_START: &[u8] = &[0xFF, 0xD8, 0xFF];
+ const GIF_START: &[u8] = b"GIF8";
+@@ -29,15 +34,33 @@ const WEBP_MARK_AT: usize = 8;
+ #[serde(transparent)]
+ pub struct GravatarAddress(String);
+ 
+-/// An uploaded avatar's address on the project's GitLab (never sent to the window); only `avatar_source` makes one.
++/// A picture's address on the project's GitLab (never sent to the window): an uploaded avatar, or an upload a
++/// description names; only `avatar_source` and `image_of` make one.
+ #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+-pub struct PictureAddress(String);
++pub struct PictureAddress(Address);
++
++#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
++enum Address {
++    Avatar(String),
++    /// `route`: the uploads API's `projects/<id or path>/uploads/<secret>/<file>`; `web`: its `https` address.
++    Upload {
++        route: String,
++        web: String,
++    },
++}
+ 
+ impl PictureAddress {
++    pub(crate) fn upload(route: String, web: String) -> PictureAddress {
++        PictureAddress(Address::Upload { route, web })
++    }
++
+     /// The picture's `https` address.
+     #[must_use]
+     pub fn as_str(&self) -> &str {
+-        &self.0
++        match &self.0 {
++            Address::Avatar(address) => address,
++            Address::Upload { web, .. } => web,
++        }
+     }
+ }
+ 
+@@ -98,7 +121,7 @@ impl ImageKind {
+ pub struct Picture {
+     /// Its format.
+     pub kind: ImageKind,
+-    /// Its bytes, at most `MAX_PICTURE_BYTES`.
++    /// Its bytes, at most `MAX_PICTURE_BYTES`, or `MAX_UPLOAD_BYTES` for an upload.
+     pub bytes: Vec<u8>,
+ }
+ 
+@@ -118,7 +141,7 @@ pub(crate) fn avatar_source(origin: Option<&str>, avatar_url: Option<&str>) -> A
+     };
+     let path = avatar_url.strip_prefix(origin).unwrap_or(avatar_url);
+     if is_uploaded_avatar(path) {
+-        AvatarSource::Uploaded(PictureAddress(format!("{origin}{path}")))
++        AvatarSource::Uploaded(PictureAddress(Address::Avatar(format!("{origin}{path}"))))
+     } else {
+         AvatarSource::None
+     }
+@@ -163,20 +186,41 @@ fn is_query_char(c: char) -> bool {
+     c.is_ascii_alphanumeric() || matches!(c, '=' | '&' | '.' | '_' | '-')
+ }
+ 
+-/// `glab api <address>` in `root`, stdin closed; `Err` in glab's words, or when GitLab's answer is no picture yamt
+-/// shows or larger than `MAX_PICTURE_BYTES`.
++/// An avatar: `glab api <address>`. An upload: `glab api <its uploads API route>`, then, when that ends in HTTP 403
++/// or 404, `glab api <its web address>`. In `root`, stdin closed; `Err` in glab's words, or when GitLab's answer is
++/// no picture yamt shows or larger than `MAX_PICTURE_BYTES` (an avatar) or `MAX_UPLOAD_BYTES` (an upload).
+ pub fn fetch_picture(
+     glab: &Glab,
+     root: &Path,
+     address: &PictureAddress,
+ ) -> Result<Picture, String> {
+-    let bytes = glab.get(root, &["api", address.as_str()])?;
+-    picture_from(bytes)
++    fetched(address, &mut |args| glab.get(root, args))
+ }
+ 
+-fn picture_from(bytes: Vec<u8>) -> Result<Picture, String> {
+-    if bytes.len() > MAX_PICTURE_BYTES {
+-        return Err(TOO_LARGE.to_owned());
++/// What `glab <args>` printed in the repository's root.
++type Get<'a> = dyn FnMut(&[&str]) -> Result<Vec<u8>, String> + 'a;
++
++fn fetched(address: &PictureAddress, get: &mut Get) -> Result<Picture, String> {
++    match &address.0 {
++        Address::Avatar(address) => picture_from(get(&["api", address])?, MAX_PICTURE_BYTES),
++        Address::Upload { route, web } => {
++            let bytes = match get(&["api", route]) {
++                Err(line) if REFUSED_ENDINGS.iter().any(|end| line.ends_with(end)) => {
++                    get(&["api", web])
++                }
++                answered => answered,
++            };
++            picture_from(bytes?, MAX_UPLOAD_BYTES)
++        }
++    }
++}
++
++fn picture_from(bytes: Vec<u8>, largest: usize) -> Result<Picture, String> {
++    if bytes.len() > largest {
++        return Err(format!(
++            "GitLab's picture is larger than {} MiB",
++            largest / MIB
++        ));
+     }
+     let kind = ImageKind::of(&bytes).ok_or(NOT_AN_IMAGE)?;
+     Ok(Picture { kind, bytes })
+diff --git a/crates/merge-requests/src/picture/tests.rs b/crates/merge-requests/src/picture/tests.rs
+index 5d697e6..f2e63a7 100644
+--- a/crates/merge-requests/src/picture/tests.rs
++++ b/crates/merge-requests/src/picture/tests.rs
+@@ -1,4 +1,7 @@
++use url::Url;
++
+ use super::*;
++use crate::description::address::image_of;
+ 
+ const ORIGIN: &str = "https://gitlab.example";
+ const AVATAR_PATH: &str = "/uploads/-/system/user/avatar/2/avatar.png";
+@@ -10,7 +13,27 @@ fn source(avatar_url: &str) -> AvatarSource {
+ }
+ 
+ fn uploaded(address: &str) -> AvatarSource {
+-    AvatarSource::Uploaded(PictureAddress(address.to_owned()))
++    AvatarSource::Uploaded(PictureAddress(Address::Avatar(address.to_owned())))
++}
++
++/// What `fetched` asked glab for, each call's arguments joined by spaces, when glab answers `answers` in turn.
++fn asked(
++    address: &PictureAddress,
++    answers: Vec<Result<Vec<u8>, String>>,
++) -> (Vec<String>, Result<Picture, String>) {
++    let mut answers = answers.into_iter();
++    let mut calls = Vec::new();
++    let picture = fetched(address, &mut |args| {
++        calls.push(args.join(" "));
++        answers.next().unwrap()
++    });
++    (calls, picture)
++}
++
++fn png_of(len: usize) -> Vec<u8> {
++    let mut bytes = PNG_START.to_vec();
++    bytes.resize(len, 0);
++    bytes
+ }
+ 
+ fn gravatar(address: &str) -> AvatarSource {
+@@ -116,7 +139,8 @@ fn only_gravatars_avatar_path_on_its_two_hosts_is_a_gravatar_address() {
+ 
+ #[test]
+ fn a_picture_that_is_not_png_jpeg_gif_or_webp_is_refused() {
+-    let kind_of = |bytes: &[u8]| picture_from(bytes.to_vec()).map(|picture| picture.kind);
++    let kind_of =
++        |bytes: &[u8]| picture_from(bytes.to_vec(), MAX_PICTURE_BYTES).map(|picture| picture.kind);
+     let png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00];
+     assert_eq!(kind_of(&png), Ok(ImageKind::Png));
+     assert_eq!(kind_of(&[0xFF, 0xD8, 0xFF, 0xE0]), Ok(ImageKind::Jpeg));
+@@ -145,17 +169,86 @@ fn a_picture_that_is_not_png_jpeg_gif_or_webp_is_refused() {
+ }
+ 
+ #[test]
+-fn a_picture_over_one_mib_is_refused() {
+-    let mut bytes = PNG_START.to_vec();
+-    bytes.resize(MAX_PICTURE_BYTES, 0);
+-    let largest = picture_from(bytes.clone()).unwrap();
+-    assert_eq!(largest.bytes, bytes);
++fn an_avatar_still_stops_at_1_mib() {
++    let avatar = PictureAddress(Address::Avatar(format!("{ORIGIN}{AVATAR_PATH}")));
++    let largest = png_of(MAX_PICTURE_BYTES);
+ 
+-    bytes.push(0);
+-    assert_eq!(picture_from(bytes), Err(TOO_LARGE.to_owned()));
++    let (calls, picture) = asked(&avatar, vec![Ok(largest.clone())]);
++    assert_eq!(calls, [format!("api {ORIGIN}{AVATAR_PATH}")]);
++    assert_eq!(picture.unwrap().bytes, largest);
++
++    let (_, picture) = asked(&avatar, vec![Ok(png_of(MAX_PICTURE_BYTES + 1))]);
++    assert_eq!(
++        picture,
++        Err("GitLab's picture is larger than 1 MiB".to_owned())
++    );
++    let refused = "glab: 404 Not Found (HTTP 404)".to_owned();
++    let (calls, picture) = asked(&avatar, vec![Err(refused.clone())]);
++    assert_eq!((calls.len(), picture), (1, Err(refused)));
+     assert_eq!(MAX_PICTURE_BYTES, 1024 * 1024);
+ }
+ 
++#[test]
++fn an_upload_up_to_10_mib_is_taken_and_larger_is_refused() {
++    let upload = PictureAddress::upload(
++        "projects/7/uploads/0123456789abcdef0123456789abcdef/shot.png".to_owned(),
++        format!("{ORIGIN}/-/project/7/uploads/0123456789abcdef0123456789abcdef/shot.png"),
++    );
++    let largest = png_of(MAX_UPLOAD_BYTES);
++
++    let (_, picture) = asked(&upload, vec![Ok(largest.clone())]);
++    assert_eq!(picture.unwrap().bytes, largest);
++    let (_, picture) = asked(&upload, vec![Ok(png_of(MAX_UPLOAD_BYTES + 1))]);
++    assert_eq!(
++        picture,
++        Err("GitLab's picture is larger than 10 MiB".to_owned())
++    );
++    let (_, picture) = asked(&upload, vec![Ok(b"<svg/>".to_vec())]);
++    assert_eq!(picture, Err(NOT_AN_IMAGE.to_owned()));
++    assert_eq!(MAX_UPLOAD_BYTES, 10 * 1024 * 1024);
++}
++
++#[test]
++fn an_upload_is_asked_through_the_uploads_api_route() {
++    let base =
++        Url::parse("https://gitlab.example/taskboard/taskboard/-/merge_requests/52").unwrap();
++    let secret = "0123456789abcdef0123456789abcdef";
++    let by_id = format!("/-/project/7/uploads/{secret}/shot.png");
++    let by_path = format!("/taskboard/taskboard/uploads/{secret}/old%20shot.png?w=1");
++    let address_of = |src: &str| image_of(Some(&base), src).1.unwrap().address;
++    let png = png_of(16);
++    let refused = |code: &str| Err(format!("glab: 404 Not Found (HTTP {code})"));
++
++    let (calls, picture) = asked(&address_of(&by_id), vec![Ok(png.clone())]);
++    assert_eq!(calls, [format!("api projects/7/uploads/{secret}/shot.png")]);
++    assert_eq!(picture.unwrap().bytes, png);
++
++    for code in ["404", "403"] {
++        let (calls, picture) = asked(&address_of(&by_path), vec![refused(code), Ok(png.clone())]);
++        let expected = [
++            format!("api projects/taskboard%2Ftaskboard/uploads/{secret}/old%20shot.png"),
++            format!("api {ORIGIN}/taskboard/taskboard/uploads/{secret}/old%20shot.png"),
++        ];
++        assert_eq!(calls, expected);
++        assert_eq!(picture.unwrap().bytes, png);
++    }
++
++    let other = Err("glab: 500 Internal Server Error (HTTP 500)".to_owned());
++    let (calls, picture) = asked(&address_of(&by_id), vec![other.clone()]);
++    assert_eq!(
++        (calls.len(), picture.map(|picture| picture.bytes)),
++        (1, other)
++    );
++    let (calls, picture) = asked(
++        &address_of(&by_id),
++        vec![refused("404"), Err("glab: HTTP 404".to_owned())],
++    );
++    assert_eq!(
++        (calls.len(), picture),
++        (2, Err("glab: HTTP 404".to_owned()))
++    );
++}
++
+ #[test]
+ fn each_kind_names_its_media_type() {
+     let kinds = [
+diff --git a/crates/merge-requests/src/project.rs b/crates/merge-requests/src/project.rs
+index c6146d4..88f8330 100644
+--- a/crates/merge-requests/src/project.rs
++++ b/crates/merge-requests/src/project.rs
+@@ -5,8 +5,8 @@ use yamt_gitio::{AuthStatus, Glab};
+ 
+ use crate::web_page::HTTPS;
+ use crate::{
+-    DiscussionsAnswer, JobLogReply, ListEnd, OpenReply, PeopleChangeReply, PeopleSearchReply,
+-    RerequestReply, ResolveRefusal,
++    DescriptionReply, DiscussionsAnswer, JobLogReply, ListEnd, OpenReply, PeopleChangeReply,
++    PeopleSearchReply, RerequestReply, ResolveRefusal,
+ };
+ 
+ /// glab fills `:fullpath` with the project of the folder's remotes (glab docs, `glab api`).
+@@ -141,6 +141,15 @@ impl From<NoProject> for PeopleChangeReply {
+     }
+ }
+ 
++impl From<NoProject> for DescriptionReply {
++    fn from(refused: NoProject) -> DescriptionReply {
++        match refused {
++            NoProject::NotLoggedIn { detail } => DescriptionReply::NotLoggedIn { detail },
++            NoProject::Failed { message } => DescriptionReply::Failed { message },
++        }
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/crates/merge-requests/src/query.rs b/crates/merge-requests/src/query.rs
+index 82b0b6c..bd1071c 100644
+--- a/crates/merge-requests/src/query.rs
++++ b/crates/merge-requests/src/query.rs
+@@ -28,6 +28,11 @@ const REREQUEST_MUTATION: &str = "mutation RerequestReview($projectPath: ID!, $i
+      errors mergeRequest { reviewers { nodes { username name avatarUrl \
+      mergeRequestInteraction { approved reviewState } } } } } }";
+ 
++/// A merge request's description as GitLab renders it, asked afresh on every open of the panel: 10 of GitLab's limit
++/// of 200 logged out on gitlab.com, measured 2026-11-04. The operation name routes the fake glab.
++const DESCRIPTION_QUERY: &str = "query MergeRequestDescription($fullPath: ID!, $iid: String!) { \
++     project(fullPath: $fullPath) { mergeRequest(iid: $iid) { descriptionHtml } } }";
++
+ /// `glab api graphql` reading the request's JSON body from stdin.
+ pub(crate) const GRAPHQL_BODY_ARGS: [&str; 4] = ["api", "graphql", "--input", "-"];
+ 
+@@ -52,12 +57,14 @@ const SET_REVIEWERS_MUTATION: &str = "mutation SetReviewers($projectPath: ID!, $
+      mergeRequest { assignees { nodes { username name avatarUrl } } \
+      reviewers { nodes { username name avatarUrl mergeRequestInteraction { approved reviewState } } } } } }";
+ 
+-/// One page of the project's open merge requests, newest created first, each with its latest pipeline's failed
+-/// jobs (the latest run of each), its merge status and size, its people, labels and your permission to update it, and
+-/// its target branch and head commit for the local conflict check; 170 of GitLab's complexity limit of 250, measured
+-/// on gitlab.com on 2026-11-02 (`docs/slices/briefs/mr-row-details-rust.md`; `.omp/run/notes/MrOverviewDesign.md`
+-/// §2.2, `docs/slices/briefs/mr-conflicts-design.md` §1, `docs/slices/briefs/local-conflicts-design.md` §1,
+-/// `docs/slices/briefs/mr-row-details-design.md` §1.1). One line, so the fake glab logs each call on one line.
++/// One page of the project's open merge requests, newest created first, each with its description (only whether it
++/// holds more than white space reaches the window), its latest pipeline's failed jobs (the latest run of each), its
++/// merge status and size, its people, labels and your permission to update it, and its target branch and head commit
++/// for the local conflict check; 172 of GitLab's complexity limit of 250, measured logged in on gitlab.com on
++/// 2026-11-04 (`docs/slices/briefs/mr-row-details-rust.md`; `.omp/run/notes/MrOverviewDesign.md` §2.2,
++/// `docs/slices/briefs/mr-conflicts-design.md` §1, `docs/slices/briefs/local-conflicts-design.md` §1,
++/// `docs/slices/briefs/mr-row-details-design.md` §1.1, `docs/slices/briefs/mr-description-design.md` §1.3). One line,
++/// so the fake glab logs each call on one line.
+ fn list_query() -> String {
+     format!(
+         "query MergeRequestPage($fullPath: ID!, $first: Int!, $after: String) {{ \
+@@ -67,7 +74,7 @@ fn list_query() -> String {
+          mergeRequests(state: opened, sort: CREATED_DESC, first: $first, after: $after) {{ \
+          pageInfo {{ hasNextPage endCursor }} \
+          nodes {{ \
+-         iid title createdAt draft \
++         iid title description createdAt draft \
+          author {{ username name avatarUrl }} \
+          labels {{ nodes {{ title color textColor }} }} \
+          assignees {{ nodes {{ username name avatarUrl }} }} \
+@@ -118,6 +125,11 @@ pub(crate) fn reviewers_args(full_path: &str, iid: MergeRequestIid) -> Vec<Strin
+     merge_request_args(REVIEWERS_QUERY, full_path, iid)
+ }
+ 
++/// `glab api graphql` for merge request `iid`'s description as GitLab renders it.
++pub(crate) fn description_args(full_path: &str, iid: MergeRequestIid) -> Vec<String> {
++    merge_request_args(DESCRIPTION_QUERY, full_path, iid)
++}
++
+ /// The open discussions of the merge requests `$iids`, each with its last notes, read by `read_discussions`
+ /// (`docs/slices/briefs/mr-discussions-design.md` §1.1, §1.2): 58 of GitLab's limit of 250 for 20 merge requests,
+ /// measured on gitlab.com on 2026-11-03. One line, so the fake glab logs each call on one line.
+diff --git a/crates/merge-requests/src/query/tests.rs b/crates/merge-requests/src/query/tests.rs
+index 3db4680..c4849d3 100644
+--- a/crates/merge-requests/src/query/tests.rs
++++ b/crates/merge-requests/src/query/tests.rs
+@@ -24,7 +24,7 @@ fn the_list_query_asks_per_file_diff_stats_never_the_summary() {
+ #[test]
+ fn the_list_query_asks_people_with_pictures_review_states_the_permission_and_label_colours() {
+     let query = list_query();
+-    let people = "iid title createdAt draft author { username name avatarUrl } \
++    let people = "iid title description createdAt draft author { username name avatarUrl } \
+          labels { nodes { title color textColor } } assignees { nodes { username name avatarUrl } } \
+          reviewers { nodes { username name avatarUrl mergeRequestInteraction { approved reviewState } } } \
+          approvedBy { nodes { username name avatarUrl } } userPermissions { updateMergeRequest } \
+@@ -32,6 +32,40 @@ fn the_list_query_asks_people_with_pictures_review_states_the_permission_and_lab
+     assert!(query.contains(people), "{query}");
+ }
+ 
++#[test]
++fn the_list_query_asks_the_description_and_stays_one_line() {
++    let query = list_query();
++    assert!(!query.contains('\n'), "{query}");
++    assert_eq!(query.matches('{').count(), query.matches('}').count());
++    assert!(
++        query.contains(" iid title description createdAt "),
++        "{query}"
++    );
++    assert!(!query.contains("descriptionHtml"), "{query}");
++}
++
++#[test]
++fn the_description_query_is_one_line_and_asks_only_description_html() {
++    let query = "query=query MergeRequestDescription($fullPath: ID!, $iid: String!) { \
++         project(fullPath: $fullPath) { mergeRequest(iid: $iid) { descriptionHtml } } }";
++    assert!(!query.contains('\n'));
++    assert_eq!(query.matches('{').count(), query.matches('}').count());
++
++    let args = description_args("taskboard/taskboard", MergeRequestIid(52));
++
++    let expected = [
++        "api",
++        "graphql",
++        "-f",
++        query,
++        "-f",
++        "fullPath=taskboard/taskboard",
++        "-f",
++        "iid=52",
++    ];
++    assert_eq!(args, expected);
++}
++
+ #[test]
+ fn the_reviewers_query_is_one_line_with_balanced_braces_and_its_argv_is_exact() {
+     let query = "query=query MergeRequestReviewers($fullPath: ID!, $iid: String!) { \
+diff --git a/crates/merge-requests/src/row.rs b/crates/merge-requests/src/row.rs
+index a74a666..c61beaa 100644
+--- a/crates/merge-requests/src/row.rs
++++ b/crates/merge-requests/src/row.rs
+@@ -145,11 +145,17 @@ pub enum BlockedReason {
+ /// One open merge request as a row of the list.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ #[serde(rename_all = "camelCase")]
++#[expect(
++    clippy::struct_excessive_bools,
++    reason = "four independent facts GitLab sends about a row; no two of them make one state"
++)]
+ pub struct MergeRequestRow {
+     /// Its number.
+     pub iid: MergeRequestIid,
+     /// Its title, GitLab's "Draft: " prefix included.
+     pub title: String,
++    /// GitLab's description holds more than white space.
++    pub has_description: bool,
+     /// GitLab's ISO 8601 time, as sent.
+     pub created_at: String,
+     /// Whether it is a draft.
+diff --git a/crates/merge-requests/src/web_page.rs b/crates/merge-requests/src/web_page.rs
+index aeb9f96..d73480b 100644
+--- a/crates/merge-requests/src/web_page.rs
++++ b/crates/merge-requests/src/web_page.rs
+@@ -5,9 +5,9 @@ use crate::{MergeRequestIid, PageOpened, WebPage};
+ 
+ pub(crate) const HTTPS: &str = "https://";
+ const JOBS_SEGMENT: &str = "/-/jobs/";
+-const MERGE_REQUESTS_SEGMENT: &str = "/-/merge_requests/";
++pub(crate) const MERGE_REQUESTS_SEGMENT: &str = "/-/merge_requests/";
+ const NOTE_ANCHOR: &str = "#note_";
+-const PARENT_SEGMENT: &str = "..";
++pub(crate) const PARENT_SEGMENT: &str = "..";
+ #[cfg(target_os = "macos")]
+ const OPENER: &str = "/usr/bin/open";
+ #[cfg(windows)]
+diff --git a/crates/merge-requests/tests/description.rs b/crates/merge-requests/tests/description.rs
+new file mode 100644
+index 0000000..1ffc7ff
+--- /dev/null
++++ b/crates/merge-requests/tests/description.rs
+@@ -0,0 +1,322 @@
++#![cfg(test)]
++#![cfg(unix)]
++
++#[expect(dead_code, reason = "these tests use part of the shared helpers")]
++mod fake_glab;
++
++use std::fs;
++use std::sync::mpsc;
++
++use serde_json::{Value, json};
++use yamt_conflict_repo::{TempDir, git_ok};
++use yamt_merge_requests::{
++    DescriptionReply, GitLabRepository, ImageKind, ListedPage, MergeRequestIid, ReadDescription,
++    WebPage, fetch_picture, gitlab_repository, list_merge_requests, read_description,
++};
++
++use fake_glab::{Fake, in_this_repository};
++
++const GITLAB_REMOTE: &str = "https://gitlab.example/taskboard/taskboard.git";
++const SCENARIO: &str = "mr-description";
++const PROJECT: &str = "https://gitlab.example/taskboard/taskboard";
++const HEX_A: &str = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
++const HEX_B: &str = "f9e8d7c6b5a4938271605f4e3d2c1b0a";
++const HEX_C: &str = "1111aaaa2222bbbb3333cccc4444dddd";
++const DESCRIPTION_QUERY: &str = "query=query MergeRequestDescription($fullPath: ID!, $iid: String!) { \
++     project(fullPath: $fullPath) { mergeRequest(iid: $iid) { descriptionHtml } } }";
++
++/// A repository whose `origin` is on gitlab.example, and its `GitLabRepository`.
++fn gitlab_repo() -> (TempDir, GitLabRepository) {
++    let repo = TempDir::new().unwrap();
++    git_ok(repo.path(), &["init", "-q"]).unwrap();
++    git_ok(repo.path(), &["remote", "add", "origin", GITLAB_REMOTE]).unwrap();
++    let repository = gitlab_repository(repo.path()).unwrap();
++    (repo, repository)
++}
++
++fn read(fake: &Fake, repository: &GitLabRepository, iid: u32) -> ReadDescription {
++    read_description(repository, Some(&fake.glab), MergeRequestIid(iid))
++}
++
++/// The reply as the window gets it.
++fn sent(reply: &DescriptionReply) -> Value {
++    serde_json::to_value(reply).unwrap()
++}
++
++fn failed(message: &str) -> DescriptionReply {
++    DescriptionReply::Failed {
++        message: message.to_owned(),
++    }
++}
++
++fn scenario_file(path: &str) -> Vec<u8> {
++    fs::read(in_this_repository(&format!("tests/glab/{SCENARIO}/{path}"))).unwrap()
++}
++
++/// The pages !52's links lead to, in document order.
++fn pages_of_52() -> [String; 7] {
++    [
++        "https://docs.example/x".to_owned(),
++        "http://plain.example/".to_owned(),
++        format!("{PROJECT}/-/issues/12"),
++        "https://gitlab.example/anna".to_owned(),
++        format!("{PROJECT}/-/commit/9c1ba3f2e4b5a6c7d8e9f0a1b2c3d4e5f6a7b8c9"),
++        format!("{PROJECT}/-/merge_requests?label_name=frontend"),
++        format!("{PROJECT}/-/merge_requests/52#section"),
++    ]
++}
++
++#[test]
++fn a_description_comes_back_with_its_pages_and_uploads() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &repository, 52);
++
++    let reply = sent(&read.reply);
++    assert_eq!(reply["kind"], "read");
++    let blocks = reply["description"]["blocks"].as_array().unwrap();
++    let kinds: Vec<&str> = blocks
++        .iter()
++        .map(|block| block["kind"].as_str().unwrap())
++        .collect();
++    let expected_kinds = "heading heading heading paragraph code code code paragraph list list list table quote \
++         rule details paragraph paragraph";
++    assert_eq!(kinds.join(" "), expected_kinds);
++    let ruby = json!({ "kind": "code", "language": "ruby", "text": "Label.colour(:red)\nend" });
++    assert_eq!(blocks[4], ruby);
++    let pages: Vec<&str> = read.pages.iter().map(WebPage::as_str).collect();
++    assert_eq!(pages, pages_of_52());
++    let uploads: Vec<String> = read
++        .uploads
++        .iter()
++        .map(|offered| format!("{} {}", offered.key.as_str(), offered.address.as_str()))
++        .collect();
++    let upload = |secret: &str, file: &str| {
++        format!("upload~{secret} https://gitlab.example/-/project/7/uploads/{secret}/{file}")
++    };
++    let expected_uploads = [
++        upload(HEX_A, "shot.png"),
++        upload(HEX_B, "old.png"),
++        upload(HEX_C, "gone.png"),
++    ];
++    assert_eq!(uploads, expected_uploads);
++    let asked = format!(
++        "argv: api graphql -f {DESCRIPTION_QUERY} -f fullPath=taskboard/taskboard -f iid=52"
++    );
++    assert_eq!(fake.logged("argv: api graphql"), [asked]);
++}
++
++#[test]
++fn an_upload_is_fetched_with_the_login_through_the_uploads_api() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++    let read = read(&fake, &repository, 52);
++
++    let picture = fetch_picture(&fake.glab, repository.root(), &read.uploads[0].address).unwrap();
++
++    let shot = scenario_file(&format!("uploads/7/uploads/{HEX_A}/shot.png"));
++    assert_eq!((picture.kind, picture.bytes), (ImageKind::Png, shot));
++    let argv = fake.logged("argv: ");
++    let rest = format!("argv: api projects/7/uploads/{HEX_A}/shot.png");
++    assert_eq!(argv.last(), Some(&rest));
++    let is_a_write = |line: &&String| {
++        ["-X", "--method", "--input"]
++            .iter()
++            .any(|flag| line.contains(flag))
++    };
++    assert_eq!(argv.iter().find(is_a_write), None);
++}
++
++#[test]
++fn an_upload_the_api_does_not_know_is_fetched_on_its_web_path() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++    let read = read(&fake, &repository, 52);
++
++    let picture = fetch_picture(&fake.glab, repository.root(), &read.uploads[1].address).unwrap();
++
++    let old = scenario_file(&format!("pictures/-/project/7/uploads/{HEX_B}/old.png"));
++    assert_eq!(picture.bytes, old);
++    let argv = fake.logged("argv: ");
++    let asked = [
++        format!("argv: api projects/7/uploads/{HEX_B}/old.png"),
++        format!("argv: api https://gitlab.example/-/project/7/uploads/{HEX_B}/old.png"),
++    ];
++    assert_eq!(argv[argv.len() - 2..], asked);
++}
++
++#[test]
++fn an_upload_missing_on_both_routes_is_an_error() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++    let read = read(&fake, &repository, 52);
++
++    let fetched = fetch_picture(&fake.glab, repository.root(), &read.uploads[2].address);
++
++    assert!(fetched.is_err(), "{fetched:?}");
++    let answered = fake.logged("answered: ");
++    let both = [
++        format!("answered: projects/7/uploads/{HEX_C}/gone.png"),
++        format!("answered: https://gitlab.example/-/project/7/uploads/{HEX_C}/gone.png"),
++    ];
++    assert_eq!(answered, both);
++}
++
++#[test]
++fn another_sites_image_never_reaches_glab() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++    let read = read(&fake, &repository, 52);
++
++    for offered in &read.uploads {
++        let _ = fetch_picture(&fake.glab, repository.root(), &offered.address);
++    }
++
++    let reply = sent(&read.reply).to_string();
++    for site in ["images.example", "evil.example"] {
++        assert!(reply.contains(site), "the tree names {site}");
++    }
++    let argv = fake.logged("argv: ");
++    for site in ["images.example", "evil.example", "plain.example"] {
++        let named = argv.iter().find(|line| line.contains(site));
++        assert_eq!(named, None, "{site}");
++    }
++}
++
++#[test]
++fn an_empty_description_has_no_blocks() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &repository, 51);
++
++    assert_eq!(
++        sent(&read.reply),
++        json!({ "kind": "read", "description": { "blocks": [] } })
++    );
++    assert!(read.pages.is_empty() && read.uploads.is_empty());
++}
++
++#[test]
++fn the_planted_description_keeps_only_text_and_safe_pieces() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &repository, 50);
++
++    let reply = sent(&read.reply).to_string();
++    for planted in [
++        "yamtPlanted",
++        "evil.example",
++        "display",
++        "onerror",
++        "onclick",
++        "Go planted",
++        "deepest",
++    ] {
++        assert!(!reply.contains(planted), "{planted} in {reply}");
++    }
++    for kept in ["before", "relative link", "\"text\"", "after"] {
++        assert!(reply.contains(kept), "{kept} missing in {reply}");
++    }
++    let relative = format!("{PROJECT}/-/merge_requests/relative");
++    let pages: Vec<&str> = read.pages.iter().map(WebPage::as_str).collect();
++    assert_eq!(pages, [relative.as_str()]);
++    assert_eq!(read.uploads.len(), 0);
++}
++
++#[test]
++fn a_failed_read_keeps_glabs_words() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &repository, 49);
++
++    assert_eq!(read.reply, failed("glab: a deadline line"));
++    assert!(read.pages.is_empty() && read.uploads.is_empty());
++}
++
++#[test]
++fn a_missing_merge_request_fails() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &repository, 48);
++
++    assert_eq!(read.reply, failed("GitLab's answer names no merge request"));
++}
++
++#[test]
++fn glab_missing_or_logged_out_answers_before_any_query() {
++    let (_repo, repository) = gitlab_repo();
++
++    let missing = read_description(&repository, None, MergeRequestIid(52));
++    assert_eq!(missing.reply, DescriptionReply::GlabMissing);
++    assert!(missing.pages.is_empty() && missing.uploads.is_empty());
++
++    let fake = Fake::new("logged-out");
++    let logged_out = read(&fake, &repository, 52);
++    let detail = "gitlab.com".to_owned();
++    assert_eq!(logged_out.reply, DescriptionReply::NotLoggedIn { detail });
++    assert_eq!(fake.logged("argv: "), ["argv: auth status"]);
++}
++
++#[test]
++fn the_list_says_which_rows_have_a_description() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++    let (sender, sent_pages) = mpsc::channel();
++
++    list_merge_requests(&repository, Some(&fake.glab), &|listed: ListedPage| {
++        sender.send(listed.page).unwrap();
++    });
++
++    let page = sent_pages.recv().unwrap();
++    let described: Vec<(u32, bool)> = page
++        .rows
++        .iter()
++        .map(|row| (row.iid.0, row.has_description))
++        .collect();
++    let expected = [
++        (52, true),
++        (51, true),
++        (50, true),
++        (49, true),
++        (48, true),
++        (47, false),
++        (46, false),
++    ];
++    assert_eq!(described, expected);
++    let asked = fake.logged("argv: api graphql");
++    assert!(
++        asked[0].contains(" iid title description createdAt "),
++        "{}",
++        asked[0]
++    );
++}
++
++#[test]
++fn reading_a_description_writes_nothing() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &repository, 52);
++    for offered in &read.uploads {
++        let _ = fetch_picture(&fake.glab, repository.root(), &offered.address);
++    }
++
++    assert_eq!(fake.logged("stdin: "), Vec::<String>::new());
++    let is_a_read = |line: &String| {
++        let upload = line.contains("/uploads/") && line.matches(' ').count() == 2;
++        line == "argv: auth status"
++            || line == "argv: api projects/:fullpath"
++            || line.starts_with("argv: api graphql -f ")
++            || (line.starts_with("argv: api ") && upload)
++    };
++    let argv = fake.logged("argv: ");
++    assert_eq!(argv.len(), 3 + 1 + 2 + 2, "{argv:#?}");
++    for line in argv {
++        assert!(is_a_read(&line), "{line}");
++    }
++}
+diff --git a/crates/merge-requests/tests/list.rs b/crates/merge-requests/tests/list.rs
+index acc6adf..5630a74 100644
+--- a/crates/merge-requests/tests/list.rs
++++ b/crates/merge-requests/tests/list.rs
+@@ -216,7 +216,8 @@ fn detailed_rows() -> Value {
+         |status: &str| json!({ "status": status, "failedJobs": [], "moreFailedJobs": false });
+     let colourless = json!({ "title": "odd", "colors": null });
+     json!([
+-        { "iid": 52, "title": "Colour the card labels", "createdAt": "2026-11-01T10:00:00Z", "draft": false,
++        { "iid": 52, "title": "Colour the card labels", "hasDescription": false, "createdAt": "2026-11-01T10:00:00Z",
++          "draft": false,
+           "author": anna, "assignees": [sam],
+           "reviewers": [reviewer(&ben, "reviewed"), reviewer(&chiara, "approved"),
+               reviewer(&dmitri, "requested")],
+@@ -224,11 +225,13 @@ fn detailed_rows() -> Value {
+           "openDiscussions": 0, "approvedBy": [chiara], "mayRerequest": true, "pipeline": no_jobs("passed"),
+           "page": page_of(52), "size": { "additions": 0, "deletions": 0, "files": 0 },
+           "readiness": { "kind": "ready" }, "fromFork": false },
+-        { "iid": 51, "title": "Archive old boards", "createdAt": "2026-10-31T15:30:00Z", "draft": false,
++        { "iid": 51, "title": "Archive old boards", "hasDescription": false, "createdAt": "2026-10-31T15:30:00Z",
++          "draft": false,
+           "author": null, "assignees": [], "reviewers": [], "labels": [], "openDiscussions": 0, "approvedBy": [],
+           "mayRerequest": true, "pipeline": null, "page": page_of(51), "size": null,
+           "readiness": { "kind": "checking" }, "fromFork": false },
+-        { "iid": 50, "title": "Keyboard shortcuts for cards", "createdAt": "2026-10-30T08:45:00Z", "draft": false,
++        { "iid": 50, "title": "Keyboard shortcuts for cards", "hasDescription": false,
++          "createdAt": "2026-10-30T08:45:00Z", "draft": false,
+           "author": ben, "assignees": [dmitri],
+           "reviewers": [reviewer(&anna, "changesRequested"), reviewer(&sam, "requested"),
+               reviewer(&ben, "reviewed"), reviewer(&erik, "requested")],
+diff --git a/scripts/fake-glab/glab b/scripts/fake-glab/glab
+index caa4ae5..b4d02d3 100755
+--- a/scripts/fake-glab/glab
++++ b/scripts/fake-glab/glab
+@@ -123,8 +123,9 @@ post() {
+ 
+ # Merge requests' discussions with a field iids=<JSON array>: graphql-discussions-<the iids joined by "-">, with
+ # -after-<cursor> for a field discussionsAfter. Else the project's people with a field search=<text>:
+-# graphql-people-<text>. Else a merge request's details with a field iid=<n>; else a page of the list: the first
+-# without a field after, the n-th for after=page-<n>.
++# graphql-people-<text>. Else a merge request's description with a field query starting
++# "query MergeRequestDescription" and a field iid=<n>: graphql-description-<n>. Else a merge request's details with a
++# field iid=<n>; else a page of the list: the first without a field after, the n-th for after=page-<n>.
+ graphql() {
+ 	iids=$(field iids)
+ 	if [ -n "$iids" ]; then
+@@ -140,6 +141,9 @@ graphql() {
+ 		reply "$scenario/graphql-people-$search" '200 OK'
+ 	fi
+ 	iid=$(field iid)
++	case $(field query) in
++	'query MergeRequestDescription'*) reply "$scenario/graphql-description-$iid" '200 OK' ;;
++	esac
+ 	if [ -n "$iid" ]; then
+ 		reply "$scenario/graphql-merge-request-$iid" '200 OK'
+ 	fi
+@@ -181,6 +185,12 @@ trace() {
+ 	serve_file "$scenario/traces/${job%/trace}.log"
+ }
+ 
++# An upload by the uploads API, GET projects/<project>/uploads/<secret>/<file>: $scenario/uploads/<the endpoint after
++# projects/>.
++upload() {
++	serve_file "$scenario/uploads/${endpoint#projects/}"
++}
++
+ api() {
+ 	while [ $# -gt 0 ]; do
+ 		case $1 in
+@@ -231,6 +241,7 @@ api() {
+ 		answer_file merge-request.json
+ 		;;
+ 	"GET projects/"*"/jobs/"*"/trace") trace ;;
++	"GET projects/"*"/uploads/"*) upload ;;
+ 	*) answer '404 Not Found' '{"message":"404 Not Found"}' ;;
+ 	esac
+ }
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index ffaaa22..f57d5d3 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -39,12 +39,14 @@ A Rust test that needs post n without making posts 1 to n − 1 first calls `Fak
+ | `graphql-page-<n>.json`                       | `glab api graphql` without `--input -` and without a field `iids`, `search` or `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`)                                                                                                                               |
+ | `graphql-discussions-<iids>.json`             | `glab api graphql` without `--input -`, with a field `iids=<JSON array>` (the discussions query): `<iids>` is the array without its quotes, brackets and spaces, its commas as `-` (`iids=["82","81"]` → `graphql-discussions-82-81`); with a field `discussionsAfter=<cursor>`, `graphql-discussions-<iids>-after-<cursor>` |
+ | `graphql-people-<text>.json`                  | `glab api graphql` without `--input -` and without a field `iids`, with a field `search=<text>` (the project's people search): `<text>` as given (`search=er` → `graphql-people-er`)                                                                                                                                         |
+-| `graphql-merge-request-<iid>.json`            | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `iid=<iid>`                                                                                                                                                                                                                      |
++| `graphql-description-<iid>.json`              | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `query` starting `query MergeRequestDescription` (a merge request's description) and a field `iid=<iid>`                                                                                                                         |
++| `graphql-merge-request-<iid>.json`            | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `iid=<iid>` and any other query                                                                                                                                                                                                  |
+ | `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`)                                                                                                                                                                                                                                                  |
+ | `pictures/<path>`                             | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`                                                                                                         |
+ | `pictures/<path>.sleep`                       | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists                                                                                                                                                                                                                             |
+ | `traces/<n>.log`                              | `glab api` GET `projects/<project>/jobs/<n>/trace` (a job's log, any project): printed with `cat` byte for byte, exit 0 (an empty file prints nothing); no such file answers `404 Not Found`                                                                                                                                 |
+ | `traces/<n>.log.sleep`                        | seconds to wait before that log's answer, whether or not the log exists                                                                                                                                                                                                                                                      |
++| `uploads/<project>/uploads/<secret>/<file>`   | `glab api` GET `projects/<project>/uploads/<secret>/<file>` (the uploads API; `<project>` as asked, an id or an encoded path): printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`                                                                                                                |
+ 
+ `glab api` keeps the value of every `-f`/`--raw-field`/`-F`/`--field` as `name=value` (the first wins when a name
+ is given twice) and, as glab does, sends a POST when a field or `--input` is given without `-X`/`--method`. A GET
+@@ -214,6 +216,28 @@ answered: <address or endpoint>            (a picture or a job's log, after its
+   permission to perform this action" with `data: {"changed": null}`; 8, remove reviewer ben, not made → reviewers
+   still ben, dmitri, erik. `pictures/uploads/-/system/user/avatar/1/avatar.png` and `/2/avatar.png` are
+   `mr-row-details/`'s PNGs, `/7/avatar.png` erik's small PNG.
++- `mr-description/` — a merge request's description and its uploads (`crates/merge-requests/tests/description.rs`):
++  logged in; `mr-row-details/`'s project (id 7, `https://gitlab.example/taskboard/taskboard`); user `sam`; one page,
++  the last (`queryComplexity` 172 of 250, as gitlab.com scored the list query with `description` logged in on
++  2026-11-04), each node with a `description`: !52–!48 a short text, !47 `"  \n "`, !46 `null`; no `diffHeadSha`.
++  `graphql-description-52.json` is GitLab's rendering in its own shapes (measured on gitlab-org/gitlab !200000,
++  !267727, !50000 on 2026-11-04): h1–h3 each with its empty anchor link; a paragraph with `em`, `strong`, `del`,
++  `code`, a `br` and a `gl-emoji`; a ruby code block (`div`/`pre data-canonical-lang`/`span.line`), one without a
++  language, a mermaid block; inline math; a list, an `ol start="3"`, a task list (done, open, inapplicable); a table
++  aligned left, centre and right; a quote, a rule, a `details` with its `summary`; links to `https://docs.example/x`,
++  `http://plain.example/`, the issue `#12`, `@anna`, a commit, the label `frontend`, `#section`, `mailto:`, `file:`
++  and `javascript:`; lazy images (placeholder `src`, real `data-src`, each in its `a.no-attachment-icon`): the uploads
++  `/-/project/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png` (served by the uploads API,
++  `uploads/7/uploads/…/shot.png`), `…/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png` (the API answers 404; served on its
++  web path, `pictures/-/project/7/uploads/…/old.png`), `…/1111aaaa2222bbbb3333cccc4444dddd/gone.png` (on neither),
++  `https://images.example/cat.png`, `https://evil.example/-/project/7/uploads/5555eeee6666ffff7777000088881111/x.png`
++  and `http://plain.example/p.png`. `graphql-description-51.json` holds `descriptionHtml: ""`;
++  `graphql-description-50.json` planted markup: a `script`, an `img` with `onerror`, an `iframe`, a `style`, a
++  stylesheet `link`, a `base` and a relative link after it, a `meta` refresh, a `form` with an `input` and a
++  `button`, a `p` with `onclick`, `style`, `class` and `id`, an `svg` with `onload`, an `object`, an `embed`, a
++  `video`, an `audio`, `noscript`, `template`, `title`, `textarea` and `select`, and 40 nested `blockquote`s;
++  `graphql-description-49.err` and `.exit` (1) fail before any answer with "glab: a deadline line";
++  `graphql-description-48.json` holds `mergeRequest: null`.
+ 
+ ## Fake browser opener
+ 
+diff --git a/tests/glab/mr-description/graphql-description-48.json b/tests/glab/mr-description/graphql-description-48.json
+new file mode 100644
+index 0000000..1f530b6
+--- /dev/null
++++ b/tests/glab/mr-description/graphql-description-48.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":null}}}
+diff --git a/tests/glab/mr-description/graphql-description-49.err b/tests/glab/mr-description/graphql-description-49.err
+new file mode 100644
+index 0000000..d65513d
+--- /dev/null
++++ b/tests/glab/mr-description/graphql-description-49.err
+@@ -0,0 +1 @@
++glab: a deadline line
+diff --git a/tests/glab/mr-description/graphql-description-49.exit b/tests/glab/mr-description/graphql-description-49.exit
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/glab/mr-description/graphql-description-49.exit
+@@ -0,0 +1 @@
++1
+diff --git a/tests/glab/mr-description/graphql-description-50.json b/tests/glab/mr-description/graphql-description-50.json
+new file mode 100644
+index 0000000..a79e688
+--- /dev/null
++++ b/tests/glab/mr-description/graphql-description-50.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":{"descriptionHtml":"<p>before</p>&#x000A;<script>window.yamtPlanted=1</script>&#x000A;<p><img src=\"x\" onerror=\"window.yamtPlanted=1\"></p>&#x000A;<iframe src=\"https://evil.example/\">frame text</iframe>&#x000A;<style>body{display:none}</style>&#x000A;<link rel=\"stylesheet\" href=\"https://evil.example/s.css\">&#x000A;<base href=\"https://evil.example/\">&#x000A;<p><a href=\"relative\">relative link</a></p>&#x000A;<meta http-equiv=\"refresh\" content=\"0;url=https://evil.example/\">&#x000A;<form action=\"https://evil.example/\"><input name=\"q\" value=\"planted value\"><button>Go planted</button></form>&#x000A;<p onclick=\"window.yamtPlanted=1\" style=\"color:red\" class=\"x\" id=\"y\">text</p>&#x000A;<svg onload=\"window.yamtPlanted=1\"><text>svg text</text></svg>&#x000A;<object data=\"https://evil.example/o\">object text</object>&#x000A;<embed src=\"https://evil.example/e\">&#x000A;<video src=\"https://evil.example/v.mp4\">video text</video>&#x000A;<audio src=\"https://evil.example/a.mp3\">audio text</audio>&#x000A;<noscript>noscript text</noscript><template>template text</template><title>title text</title><textarea>textarea text</textarea><select><option>option text</option></select>&#x000A;<blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><blockquote><p>deepest</p></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote></blockquote>&#x000A;<p>after</p>"}}}}
+diff --git a/tests/glab/mr-description/graphql-description-51.json b/tests/glab/mr-description/graphql-description-51.json
+new file mode 100644
+index 0000000..0ac7c01
+--- /dev/null
++++ b/tests/glab/mr-description/graphql-description-51.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":{"descriptionHtml":""}}}}
+diff --git a/tests/glab/mr-description/graphql-description-52.json b/tests/glab/mr-description/graphql-description-52.json
+new file mode 100644
+index 0000000..8b93f97
+--- /dev/null
++++ b/tests/glab/mr-description/graphql-description-52.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":{"descriptionHtml":"<h1 id=\"user-content-colour-the-card-labels\" data-sourcepos=\"1:1-1:24\" dir=\"auto\">Colour the card labels<a href=\"#colour-the-card-labels\" aria-label=\"Link to heading 'Colour the card labels'\" data-heading-content=\"Colour the card labels\" class=\"anchor\"></a></h1>&#x000A;<h2 id=\"user-content-what\" data-sourcepos=\"3:1-3:7\" dir=\"auto\">What<a href=\"#what\" aria-label=\"Link to heading 'What'\" data-heading-content=\"What\" class=\"anchor\"></a></h2>&#x000A;<h3 id=\"user-content-why\" data-sourcepos=\"5:1-5:7\" dir=\"auto\">Why<a href=\"#why\" aria-label=\"Link to heading 'Why'\" data-heading-content=\"Why\" class=\"anchor\"></a></h3>&#x000A;<p data-sourcepos=\"7:1-8:20\" dir=\"auto\">Labels get <em data-sourcepos=\"7:12-7:18\">their</em> <strong data-sourcepos=\"7:20-7:29\">colour</strong>, <del data-sourcepos=\"7:32-7:42\">no grey</del> and <code data-sourcepos=\"7:48-7:62\">labelColour()</code>.<br>&#x000A;A second line <gl-emoji title=\"robot\" data-name=\"robot\" data-unicode-version=\"8.0\">🤖</gl-emoji></p>&#x000A;<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"10:1-13:3\" data-canonical-lang=\"ruby\" class=\"code highlight js-syntax-highlight language-ruby\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"ruby\"><span class=\"no\">Label</span><span class=\"p\">.</span><span class=\"nf\">colour</span><span class=\"p\">(</span><span class=\"ss\">:red</span><span class=\"p\">)</span></span>&#x000A;<span id=\"LC2\" class=\"line\" data-lang=\"ruby\"><span class=\"k\">end</span></span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>&#x000A;<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"15:1-17:3\" class=\"code highlight js-syntax-highlight language-plaintext\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" lang=\"plaintext\">plain text</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>&#x000A;<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"19:1-22:3\" data-canonical-lang=\"mermaid\" class=\"code highlight js-syntax-highlight language-mermaid\" v-pre=\"true\"><code class=\"js-render-mermaid\"><span id=\"LC1\" class=\"line\" lang=\"mermaid\">graph TD;</span>&#x000A;<span id=\"LC2\" class=\"line\" lang=\"mermaid\">  A--&gt;B;</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>&#x000A;<p data-sourcepos=\"24:1-24:22\" dir=\"auto\">Math: <code data-sourcepos=\"24:7-24:18\" data-math-style=\"inline\" class=\"code math js-render-math\">a^2+b^2</code></p>&#x000A;<ul data-sourcepos=\"26:1-27:5\" dir=\"auto\">&#x000A;<li data-sourcepos=\"26:1-26:5\">one</li>&#x000A;<li data-sourcepos=\"27:1-27:5\">two</li>&#x000A;</ul>&#x000A;<ol start=\"3\" data-sourcepos=\"29:1-30:8\" dir=\"auto\">&#x000A;<li data-sourcepos=\"29:1-29:8\">three</li>&#x000A;<li data-sourcepos=\"30:1-30:7\">four</li>&#x000A;</ol>&#x000A;<ul data-sourcepos=\"32:1-34:22\" class=\"task-list\" dir=\"auto\">&#x000A;<li class=\"task-list-item\" data-sourcepos=\"32:1-32:10\"><input type=\"checkbox\" data-checkbox-sourcepos=\"32:4-32:4\" class=\"task-list-item-checkbox\" checked=\"\" disabled=\"\" aria-label=\"Check option: done\"> done</li>&#x000A;<li class=\"task-list-item\" data-sourcepos=\"33:1-33:10\"><input type=\"checkbox\" data-checkbox-sourcepos=\"33:4-33:4\" class=\"task-list-item-checkbox\" disabled=\"\" aria-label=\"Check option: open\"> open</li>&#x000A;<li class=\"task-list-item inapplicable\" data-sourcepos=\"34:1-34:22\"><input type=\"checkbox\" data-checkbox-sourcepos=\"34:4-34:4\" class=\"task-list-item-checkbox\" data-inapplicable=\"\" disabled=\"\" aria-label=\"Check option: inapplicable\"> <s>inapplicable</s></li>&#x000A;</ul>&#x000A;<table data-sourcepos=\"36:1-38:19\" dir=\"auto\">&#x000A;<thead>&#x000A;<tr data-sourcepos=\"36:1-36:23\">&#x000A;<th style=\"text-align: left\" data-sourcepos=\"36:2-36:7\">Left</th>&#x000A;<th style=\"text-align: center\" data-sourcepos=\"36:9-36:16\">Centre</th>&#x000A;<th style=\"text-align: right\" data-sourcepos=\"36:18-36:22\">Right</th>&#x000A;</tr>&#x000A;</thead>&#x000A;<tbody>&#x000A;<tr data-sourcepos=\"38:1-38:19\">&#x000A;<td style=\"text-align: left\" data-sourcepos=\"38:2-38:4\">l</td>&#x000A;<td style=\"text-align: center\" data-sourcepos=\"38:6-38:8\">c</td>&#x000A;<td style=\"text-align: right\" data-sourcepos=\"38:10-38:12\">r</td>&#x000A;</tr>&#x000A;</tbody>&#x000A;</table>&#x000A;<blockquote data-sourcepos=\"40:1-40:8\" dir=\"auto\">&#x000A;<p data-sourcepos=\"40:3-40:8\">quoted</p>&#x000A;</blockquote>&#x000A;<hr data-sourcepos=\"42:1-42:3\">&#x000A;<details>&#x000A;<summary>More</summary>&#x000A;<p data-sourcepos=\"46:1-46:6\">hidden</p>&#x000A;</details>&#x000A;<p data-sourcepos=\"49:1-49:200\" dir=\"auto\">Links: <a data-sourcepos=\"49:8-49:38\" href=\"https://docs.example/x\" rel=\"nofollow noreferrer noopener\" target=\"_blank\">docs</a>, <a data-sourcepos=\"49:41-49:70\" href=\"http://plain.example/\" rel=\"nofollow noreferrer noopener\" target=\"_blank\">plain</a>, <a href=\"/taskboard/taskboard/-/issues/12\" data-reference-type=\"issue\" data-original=\"#12\" data-link=\"false\" data-link-reference=\"false\" data-issue=\"512\" data-project=\"7\" data-iid=\"12\" data-namespace-path=\"taskboard\" data-project-path=\"taskboard/taskboard\" data-issue-type=\"issue\" data-container=\"body\" data-placement=\"top\" title=\"Fix the card\" class=\"gfm gfm-issue\">#12</a>, <a href=\"/anna\" data-reference-type=\"user\" data-user=\"2\" data-container=\"body\" data-placement=\"top\" class=\"gfm gfm-project_member js-user-link\" title=\"Anna Berg\">@anna</a>, <a href=\"/taskboard/taskboard/-/commit/9c1ba3f2e4b5a6c7d8e9f0a1b2c3d4e5f6a7b8c9\" data-reference-type=\"commit\" data-original=\"9c1ba3f2\" data-link=\"false\" data-link-reference=\"false\" data-project=\"7\" data-commit=\"9c1ba3f2e4b5a6c7d8e9f0a1b2c3d4e5f6a7b8c9\" data-container=\"body\" data-placement=\"top\" title=\"Colour the labels\" class=\"gfm gfm-commit has-tooltip\">9c1ba3f2</a>, <span class=\"gl-label\"><a href=\"/taskboard/taskboard/-/merge_requests?label_name=frontend\" data-reference-type=\"label\" data-original=\"~frontend\" data-link=\"false\" data-link-reference=\"false\" data-project=\"7\" data-label=\"3\" data-container=\"body\" data-placement=\"top\" title=\"\" class=\"gfm gfm-label has-tooltip gl-link gl-label-link\"><span class=\"gl-label-text gl-label-text-light\" data-container=\"body\" data-html=\"true\" style=\"background-color: #428BCA\">frontend</span></a></span>, <a data-sourcepos=\"49:150-49:170\" href=\"#section\">section</a>, <a data-sourcepos=\"49:173-49:200\" href=\"mailto:anna@example.com\">mail</a>, <a href=\"file:///etc/passwd\">file</a>, <a href=\"javascript:alert(1)\">script</a></p>&#x000A;<p data-sourcepos=\"51:1-56:60\" dir=\"auto\"><a class=\"no-attachment-icon gfm\" href=\"/-/project/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png\" target=\"_blank\" rel=\"noopener noreferrer\" data-canonical-src=\"/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png\" data-link=\"true\"><img data-sourcepos=\"51:1-51:60\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" alt=\"shot\" decoding=\"async\" class=\"lazy gfm\" data-src=\"/-/project/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png\" data-canonical-src=\"/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png\"></a>&#x000A;<a class=\"no-attachment-icon gfm\" href=\"/-/project/7/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png\" target=\"_blank\" rel=\"noopener noreferrer\" data-canonical-src=\"/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png\" data-link=\"true\"><img data-sourcepos=\"52:1-52:60\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" alt=\"old\" decoding=\"async\" class=\"lazy gfm\" data-src=\"/-/project/7/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png\" data-canonical-src=\"/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png\"></a>&#x000A;<a class=\"no-attachment-icon gfm\" href=\"/-/project/7/uploads/1111aaaa2222bbbb3333cccc4444dddd/gone.png\" target=\"_blank\" rel=\"noopener noreferrer\" data-canonical-src=\"/uploads/1111aaaa2222bbbb3333cccc4444dddd/gone.png\" data-link=\"true\"><img data-sourcepos=\"53:1-53:60\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" alt=\"gone\" decoding=\"async\" class=\"lazy gfm\" data-src=\"/-/project/7/uploads/1111aaaa2222bbbb3333cccc4444dddd/gone.png\" data-canonical-src=\"/uploads/1111aaaa2222bbbb3333cccc4444dddd/gone.png\"></a>&#x000A;<a class=\"no-attachment-icon\" href=\"https://images.example/cat.png\" target=\"_blank\" rel=\"nofollow noreferrer noopener\"><img data-sourcepos=\"54:1-54:40\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" alt=\"cat\" decoding=\"async\" class=\"lazy\" data-src=\"https://images.example/cat.png\"></a>&#x000A;<a class=\"no-attachment-icon\" href=\"https://evil.example/-/project/7/uploads/5555eeee6666ffff7777000088881111/x.png\" target=\"_blank\" rel=\"nofollow noreferrer noopener\"><img data-sourcepos=\"55:1-55:80\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" alt=\"evil\" decoding=\"async\" class=\"lazy\" data-src=\"https://evil.example/-/project/7/uploads/5555eeee6666ffff7777000088881111/x.png\"></a>&#x000A;<a class=\"no-attachment-icon\" href=\"http://plain.example/p.png\" target=\"_blank\" rel=\"nofollow noreferrer noopener\"><img data-sourcepos=\"56:1-56:40\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" alt=\"plain\" decoding=\"async\" class=\"lazy\" data-src=\"http://plain.example/p.png\"></a></p>"}}}}
+diff --git a/tests/glab/mr-description/graphql-page-1.json b/tests/glab/mr-description/graphql-page-1.json
+new file mode 100644
+index 0000000..7912534
+--- /dev/null
++++ b/tests/glab/mr-description/graphql-page-1.json
+@@ -0,0 +1,102 @@
++{
++  "data": {
++    "queryComplexity": { "score": 172, "limit": 250 },
++    "currentUser": { "username": "sam" },
++    "project": {
++      "mergeRequests": {
++        "pageInfo": { "hasNextPage": false, "endCursor": null },
++        "nodes": [
++          {
++            "iid": "52",
++            "title": "Colour the card labels",
++            "description": "# Colour the card labels\n\nLabels get *their* **colour**.",
++            "createdAt": "2026-11-04T10:00:00Z",
++            "draft": false,
++            "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "diffStats": [],
++            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main",
++            "diffHeadSha": null,
++            "headPipeline": null
++          },
++          {
++            "iid": "51",
++            "title": "Show nothing for an empty description",
++            "description": "Its rendering is empty.",
++            "createdAt": "2026-11-04T09:00:00Z",
++            "draft": false,
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main"
++          },
++          {
++            "iid": "50",
++            "title": "Plant markup in a description",
++            "description": "<script>window.yamtPlanted=1</script>",
++            "createdAt": "2026-11-04T08:00:00Z",
++            "draft": false,
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main"
++          },
++          {
++            "iid": "49",
++            "title": "Time out reading a description",
++            "description": "Its read fails.",
++            "createdAt": "2026-11-04T07:00:00Z",
++            "draft": false,
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main"
++          },
++          {
++            "iid": "48",
++            "title": "Gone since the list loaded",
++            "description": "GitLab names it no more.",
++            "createdAt": "2026-11-04T06:00:00Z",
++            "draft": false,
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main"
++          },
++          {
++            "iid": "47",
++            "title": "White space only",
++            "description": "  \n ",
++            "createdAt": "2026-11-04T05:00:00Z",
++            "draft": false,
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main"
++          },
++          {
++            "iid": "46",
++            "title": "No description at all",
++            "description": null,
++            "createdAt": "2026-11-04T04:00:00Z",
++            "draft": false,
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
++            "targetBranch": "main"
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/tests/glab/mr-description/pictures/-/project/7/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png b/tests/glab/mr-description/pictures/-/project/7/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..3a295f56ad1008595b4c6ffab8007f030cdf498f
+GIT binary patch
+literal 362
+zcme7R@N?(olHy`uVBq!ia0y~yU=RRd0VW0ph69XSN*Nd!4Lw~PLo7}w?@1Nc5?*n}
+z!T5la!>+I+@lROlOzUUe&#6gv+{7xdIMR$OPkd5ShrzWCx#_$46aVM`eEQQ{aMhM+
+zfE}FwP*N{D;)C>AGk>FSu4QR*ht1eRcWjDL**jTsNkQacr=E*z<b=+vo-&yGsroqg
+zN%7c%sS#@v6^~^cGubAv&FkCSPnlds0w3qk<4?D(ICM&3qgzvhsn3o_4AU<PFbFoD
+zc=So0WkE!POz#Oc$D8+`-WHvspt4LSP;9{x-c1b4glB%pZfG%`a`xwjPY3NdIyJjb
+zcUtH+xZM38x&PXqtm7seN=y@5R~&h%{$x?po)oUc|6WygKX1;r|M%YZ{z8>tw=<hK
+z(%lX-7D)1%@&+@91nM^1A2w$5*mbPK;mL+$sV08%3BTC(^PkXp({a&<hk@by@|V@A
+T4%WR43=9mOu6{1-oD!M<*l?JO
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/glab/mr-description/project.json b/tests/glab/mr-description/project.json
+new file mode 100644
+index 0000000..d591a82
+--- /dev/null
++++ b/tests/glab/mr-description/project.json
+@@ -0,0 +1 @@
++{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example/taskboard/taskboard"}
+diff --git a/tests/glab/mr-description/uploads/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png b/tests/glab/mr-description/uploads/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..159c465cf94c3a42d0205214e3c8ef01716fe5e6
+GIT binary patch
+literal 201
+zcmeAS@N?(olHy`uVBq!ia0y~yU{C;I0VW0phBY0A4;UC2CV09yhD02GJL5L*0R;}%
+z+e;=}x>$#p8z0mx;9|9Ek$*P9icx(h{|B9?wb`~C-g6nw{r=8SjA74AJ|l;Ymlb9G
+z8`&;g6yjRwy~5Y5;c~D>bLUN=u4#@=DGcJTGa3XgcbXa2i#Lf&*3VtGJb;P+La>H2
+z{{qH8_gl9y`~0&#Fil`D`w!nakK#FUlXkJc(EP%9*KA%B$AQ_C85kHCJYD@<);T3K
+F0RT$1N#6hf
+
+literal 0
+HcmV?d00001
+

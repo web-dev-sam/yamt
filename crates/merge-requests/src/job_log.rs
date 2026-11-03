@@ -11,7 +11,7 @@ use crate::{GitLabRepository, WebPage};
 pub const MAX_LOG_BYTES: usize = 500 * 1024;
 /// glab's last line for an HTTP 404 ends so (`tests/glab/README.md`); GitLab answers 404 for a job without a log.
 const NOT_FOUND: &str = "(HTTP 404)";
-const ESCAPED_SLASH: &str = "%2F";
+pub(crate) const ESCAPED_SLASH: &str = "%2F";
 
 /// A failed job's log as the window shows it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]

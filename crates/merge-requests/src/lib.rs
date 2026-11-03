@@ -1,11 +1,13 @@
 //! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab,
 //! each row's conflicts checked by yamt's own merge of GitLab's two commits, each one's changes prepared for a window
 //! of their own, its page or a failed job's opened in the browser, a failed job's log read, each row's open
-//! discussions read with their last person's note, its assignees and reviewers added and removed.
+//! discussions read with their last person's note, its assignees and reviewers added and removed, its description
+//! read as GitLab renders it.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 mod check;
+mod description;
 mod detect;
 mod discussions;
 mod job_log;
@@ -32,6 +34,11 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 pub use check::{CheckSummary, ConflictCheck, MergedPairs, check_conflicts};
+pub use description::{
+    CellAlign, Description, DescriptionBlock, DescriptionCell, DescriptionImage, DescriptionInline,
+    DescriptionItem, DescriptionLink, DescriptionReply, DescriptionRow, HeadingLevel,
+    ListNumbering, OfferedUpload, ReadDescription, TaskBox, UploadKey, read_description,
+};
 pub use detect::{GitLabRepository, gitlab_repository};
 pub use discussions::{
     DISCUSSION_BATCH, DiscussionNote, DiscussionPlace, DiscussionsAnswer, OpenDiscussion,
@@ -48,7 +55,8 @@ pub use people_change::{
 };
 pub use people_search::{FoundPeople, PeopleSearchReply, search_people};
 pub use picture::{
-    GravatarAddress, ImageKind, MAX_PICTURE_BYTES, Picture, PictureAddress, fetch_picture,
+    GravatarAddress, ImageKind, MAX_PICTURE_BYTES, MAX_UPLOAD_BYTES, Picture, PictureAddress,
+    fetch_picture,
 };
 pub use rerequest::{RerequestReply, rerequest_review};
 pub use resolve::prepare_resolve;
@@ -84,8 +92,9 @@ pub enum GitLabProject {
 )]
 pub struct MergeRequestIid(pub u32);
 
-/// The address of a page on the project's GitLab that this window may open in the browser: a failed job's log, a
-/// merge request or a note on one; only `WebPage::job`, `WebPage::merge_request` and `WebPage::note` make one.
+/// The address of a page this window may open in the browser: a failed job's log, a merge request or a note on one,
+/// on the project's GitLab, or a link in a description; only `WebPage::job`, `::merge_request`, `::note` and
+/// `::linked` make one.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
 pub struct WebPage(String);
 

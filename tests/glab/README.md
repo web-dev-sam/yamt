@@ -39,12 +39,14 @@ A Rust test that needs post n without making posts 1 to n − 1 first calls `Fak
 | `graphql-page-<n>.json`                       | `glab api graphql` without `--input -` and without a field `iids`, `search` or `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`)                                                                                                                               |
 | `graphql-discussions-<iids>.json`             | `glab api graphql` without `--input -`, with a field `iids=<JSON array>` (the discussions query): `<iids>` is the array without its quotes, brackets and spaces, its commas as `-` (`iids=["82","81"]` → `graphql-discussions-82-81`); with a field `discussionsAfter=<cursor>`, `graphql-discussions-<iids>-after-<cursor>` |
 | `graphql-people-<text>.json`                  | `glab api graphql` without `--input -` and without a field `iids`, with a field `search=<text>` (the project's people search): `<text>` as given (`search=er` → `graphql-people-er`)                                                                                                                                         |
-| `graphql-merge-request-<iid>.json`            | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `iid=<iid>`                                                                                                                                                                                                                      |
+| `graphql-description-<iid>.json`              | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `query` starting `query MergeRequestDescription` (a merge request's description) and a field `iid=<iid>`                                                                                                                         |
+| `graphql-merge-request-<iid>.json`            | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `iid=<iid>` and any other query                                                                                                                                                                                                  |
 | `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`)                                                                                                                                                                                                                                                  |
 | `pictures/<path>`                             | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`                                                                                                         |
 | `pictures/<path>.sleep`                       | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists                                                                                                                                                                                                                             |
 | `traces/<n>.log`                              | `glab api` GET `projects/<project>/jobs/<n>/trace` (a job's log, any project): printed with `cat` byte for byte, exit 0 (an empty file prints nothing); no such file answers `404 Not Found`                                                                                                                                 |
 | `traces/<n>.log.sleep`                        | seconds to wait before that log's answer, whether or not the log exists                                                                                                                                                                                                                                                      |
+| `uploads/<project>/uploads/<secret>/<file>`   | `glab api` GET `projects/<project>/uploads/<secret>/<file>` (the uploads API; `<project>` as asked, an id or an encoded path): printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`                                                                                                                |
 
 `glab api` keeps the value of every `-f`/`--raw-field`/`-F`/`--field` as `name=value` (the first wins when a name
 is given twice) and, as glab does, sends a POST when a field or `--input` is given without `-X`/`--method`. A GET
@@ -214,6 +216,28 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   permission to perform this action" with `data: {"changed": null}`; 8, remove reviewer ben, not made → reviewers
   still ben, dmitri, erik. `pictures/uploads/-/system/user/avatar/1/avatar.png` and `/2/avatar.png` are
   `mr-row-details/`'s PNGs, `/7/avatar.png` erik's small PNG.
+- `mr-description/` — a merge request's description and its uploads (`crates/merge-requests/tests/description.rs`):
+  logged in; `mr-row-details/`'s project (id 7, `https://gitlab.example/taskboard/taskboard`); user `sam`; one page,
+  the last (`queryComplexity` 172 of 250, as gitlab.com scored the list query with `description` logged in on
+  2026-11-04), each node with a `description`: !52–!48 a short text, !47 `"  \n "`, !46 `null`; no `diffHeadSha`.
+  `graphql-description-52.json` is GitLab's rendering in its own shapes (measured on gitlab-org/gitlab !200000,
+  !267727, !50000 on 2026-11-04): h1–h3 each with its empty anchor link; a paragraph with `em`, `strong`, `del`,
+  `code`, a `br` and a `gl-emoji`; a ruby code block (`div`/`pre data-canonical-lang`/`span.line`), one without a
+  language, a mermaid block; inline math; a list, an `ol start="3"`, a task list (done, open, inapplicable); a table
+  aligned left, centre and right; a quote, a rule, a `details` with its `summary`; links to `https://docs.example/x`,
+  `http://plain.example/`, the issue `#12`, `@anna`, a commit, the label `frontend`, `#section`, `mailto:`, `file:`
+  and `javascript:`; lazy images (placeholder `src`, real `data-src`, each in its `a.no-attachment-icon`): the uploads
+  `/-/project/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png` (served by the uploads API,
+  `uploads/7/uploads/…/shot.png`), `…/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png` (the API answers 404; served on its
+  web path, `pictures/-/project/7/uploads/…/old.png`), `…/1111aaaa2222bbbb3333cccc4444dddd/gone.png` (on neither),
+  `https://images.example/cat.png`, `https://evil.example/-/project/7/uploads/5555eeee6666ffff7777000088881111/x.png`
+  and `http://plain.example/p.png`. `graphql-description-51.json` holds `descriptionHtml: ""`;
+  `graphql-description-50.json` planted markup: a `script`, an `img` with `onerror`, an `iframe`, a `style`, a
+  stylesheet `link`, a `base` and a relative link after it, a `meta` refresh, a `form` with an `input` and a
+  `button`, a `p` with `onclick`, `style`, `class` and `id`, an `svg` with `onload`, an `object`, an `embed`, a
+  `video`, an `audio`, `noscript`, `template`, `title`, `textarea` and `select`, and 40 nested `blockquote`s;
+  `graphql-description-49.err` and `.exit` (1) fail before any answer with "glab: a deadline line";
+  `graphql-description-48.json` holds `mergeRequest: null`.
 
 ## Fake browser opener
 

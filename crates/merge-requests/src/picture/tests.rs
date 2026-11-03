@@ -1,4 +1,7 @@
+use url::Url;
+
 use super::*;
+use crate::description::address::image_of;
 
 const ORIGIN: &str = "https://gitlab.example";
 const AVATAR_PATH: &str = "/uploads/-/system/user/avatar/2/avatar.png";
@@ -10,7 +13,27 @@ fn source(avatar_url: &str) -> AvatarSource {
 }
 
 fn uploaded(address: &str) -> AvatarSource {
-    AvatarSource::Uploaded(PictureAddress(address.to_owned()))
+    AvatarSource::Uploaded(PictureAddress(Address::Avatar(address.to_owned())))
+}
+
+/// What `fetched` asked glab for, each call's arguments joined by spaces, when glab answers `answers` in turn.
+fn asked(
+    address: &PictureAddress,
+    answers: Vec<Result<Vec<u8>, String>>,
+) -> (Vec<String>, Result<Picture, String>) {
+    let mut answers = answers.into_iter();
+    let mut calls = Vec::new();
+    let picture = fetched(address, &mut |args| {
+        calls.push(args.join(" "));
+        answers.next().unwrap()
+    });
+    (calls, picture)
+}
+
+fn png_of(len: usize) -> Vec<u8> {
+    let mut bytes = PNG_START.to_vec();
+    bytes.resize(len, 0);
+    bytes
 }
 
 fn gravatar(address: &str) -> AvatarSource {
@@ -116,7 +139,8 @@ fn only_gravatars_avatar_path_on_its_two_hosts_is_a_gravatar_address() {
 
 #[test]
 fn a_picture_that_is_not_png_jpeg_gif_or_webp_is_refused() {
-    let kind_of = |bytes: &[u8]| picture_from(bytes.to_vec()).map(|picture| picture.kind);
+    let kind_of =
+        |bytes: &[u8]| picture_from(bytes.to_vec(), MAX_PICTURE_BYTES).map(|picture| picture.kind);
     let png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00];
     assert_eq!(kind_of(&png), Ok(ImageKind::Png));
     assert_eq!(kind_of(&[0xFF, 0xD8, 0xFF, 0xE0]), Ok(ImageKind::Jpeg));
@@ -145,15 +169,84 @@ fn a_picture_that_is_not_png_jpeg_gif_or_webp_is_refused() {
 }
 
 #[test]
-fn a_picture_over_one_mib_is_refused() {
-    let mut bytes = PNG_START.to_vec();
-    bytes.resize(MAX_PICTURE_BYTES, 0);
-    let largest = picture_from(bytes.clone()).unwrap();
-    assert_eq!(largest.bytes, bytes);
+fn an_avatar_still_stops_at_1_mib() {
+    let avatar = PictureAddress(Address::Avatar(format!("{ORIGIN}{AVATAR_PATH}")));
+    let largest = png_of(MAX_PICTURE_BYTES);
 
-    bytes.push(0);
-    assert_eq!(picture_from(bytes), Err(TOO_LARGE.to_owned()));
+    let (calls, picture) = asked(&avatar, vec![Ok(largest.clone())]);
+    assert_eq!(calls, [format!("api {ORIGIN}{AVATAR_PATH}")]);
+    assert_eq!(picture.unwrap().bytes, largest);
+
+    let (_, picture) = asked(&avatar, vec![Ok(png_of(MAX_PICTURE_BYTES + 1))]);
+    assert_eq!(
+        picture,
+        Err("GitLab's picture is larger than 1 MiB".to_owned())
+    );
+    let refused = "glab: 404 Not Found (HTTP 404)".to_owned();
+    let (calls, picture) = asked(&avatar, vec![Err(refused.clone())]);
+    assert_eq!((calls.len(), picture), (1, Err(refused)));
     assert_eq!(MAX_PICTURE_BYTES, 1024 * 1024);
+}
+
+#[test]
+fn an_upload_up_to_10_mib_is_taken_and_larger_is_refused() {
+    let upload = PictureAddress::upload(
+        "projects/7/uploads/0123456789abcdef0123456789abcdef/shot.png".to_owned(),
+        format!("{ORIGIN}/-/project/7/uploads/0123456789abcdef0123456789abcdef/shot.png"),
+    );
+    let largest = png_of(MAX_UPLOAD_BYTES);
+
+    let (_, picture) = asked(&upload, vec![Ok(largest.clone())]);
+    assert_eq!(picture.unwrap().bytes, largest);
+    let (_, picture) = asked(&upload, vec![Ok(png_of(MAX_UPLOAD_BYTES + 1))]);
+    assert_eq!(
+        picture,
+        Err("GitLab's picture is larger than 10 MiB".to_owned())
+    );
+    let (_, picture) = asked(&upload, vec![Ok(b"<svg/>".to_vec())]);
+    assert_eq!(picture, Err(NOT_AN_IMAGE.to_owned()));
+    assert_eq!(MAX_UPLOAD_BYTES, 10 * 1024 * 1024);
+}
+
+#[test]
+fn an_upload_is_asked_through_the_uploads_api_route() {
+    let base =
+        Url::parse("https://gitlab.example/taskboard/taskboard/-/merge_requests/52").unwrap();
+    let secret = "0123456789abcdef0123456789abcdef";
+    let by_id = format!("/-/project/7/uploads/{secret}/shot.png");
+    let by_path = format!("/taskboard/taskboard/uploads/{secret}/old%20shot.png?w=1");
+    let address_of = |src: &str| image_of(Some(&base), src).1.unwrap().address;
+    let png = png_of(16);
+    let refused = |code: &str| Err(format!("glab: 404 Not Found (HTTP {code})"));
+
+    let (calls, picture) = asked(&address_of(&by_id), vec![Ok(png.clone())]);
+    assert_eq!(calls, [format!("api projects/7/uploads/{secret}/shot.png")]);
+    assert_eq!(picture.unwrap().bytes, png);
+
+    for code in ["404", "403"] {
+        let (calls, picture) = asked(&address_of(&by_path), vec![refused(code), Ok(png.clone())]);
+        let expected = [
+            format!("api projects/taskboard%2Ftaskboard/uploads/{secret}/old%20shot.png"),
+            format!("api {ORIGIN}/taskboard/taskboard/uploads/{secret}/old%20shot.png"),
+        ];
+        assert_eq!(calls, expected);
+        assert_eq!(picture.unwrap().bytes, png);
+    }
+
+    let other = Err("glab: 500 Internal Server Error (HTTP 500)".to_owned());
+    let (calls, picture) = asked(&address_of(&by_id), vec![other.clone()]);
+    assert_eq!(
+        (calls.len(), picture.map(|picture| picture.bytes)),
+        (1, other)
+    );
+    let (calls, picture) = asked(
+        &address_of(&by_id),
+        vec![refused("404"), Err("glab: HTTP 404".to_owned())],
+    );
+    assert_eq!(
+        (calls.len(), picture),
+        (2, Err("glab: HTTP 404".to_owned()))
+    );
 }
 
 #[test]

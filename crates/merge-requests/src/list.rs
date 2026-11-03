@@ -155,6 +155,7 @@ mod tests {
         MergeRequestRow {
             iid: MergeRequestIid(iid),
             title: format!("MR {iid}"),
+            has_description: false,
             created_at: "2026-10-30T00:00:00Z".to_owned(),
             draft: false,
             author: None,

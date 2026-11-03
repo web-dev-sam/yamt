@@ -1,0 +1,2 @@
+just mutants HEAD → 156 mutants, 114 caught, 42 unviable, 0 missed (first run: 3 missed, killed by adding the white-space-first task item and the_log_names_each_replys_kind_as_the_window_does)
+

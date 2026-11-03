@@ -1,0 +1,102 @@
+{
+  "data": {
+    "queryComplexity": { "score": 172, "limit": 250 },
+    "currentUser": { "username": "sam" },
+    "project": {
+      "mergeRequests": {
+        "pageInfo": { "hasNextPage": false, "endCursor": null },
+        "nodes": [
+          {
+            "iid": "52",
+            "title": "Colour the card labels",
+            "description": "# Colour the card labels\n\nLabels get *their* **colour**.",
+            "createdAt": "2026-11-04T10:00:00Z",
+            "draft": false,
+            "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "diffStats": [],
+            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main",
+            "diffHeadSha": null,
+            "headPipeline": null
+          },
+          {
+            "iid": "51",
+            "title": "Show nothing for an empty description",
+            "description": "Its rendering is empty.",
+            "createdAt": "2026-11-04T09:00:00Z",
+            "draft": false,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main"
+          },
+          {
+            "iid": "50",
+            "title": "Plant markup in a description",
+            "description": "<script>window.yamtPlanted=1</script>",
+            "createdAt": "2026-11-04T08:00:00Z",
+            "draft": false,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main"
+          },
+          {
+            "iid": "49",
+            "title": "Time out reading a description",
+            "description": "Its read fails.",
+            "createdAt": "2026-11-04T07:00:00Z",
+            "draft": false,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main"
+          },
+          {
+            "iid": "48",
+            "title": "Gone since the list loaded",
+            "description": "GitLab names it no more.",
+            "createdAt": "2026-11-04T06:00:00Z",
+            "draft": false,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main"
+          },
+          {
+            "iid": "47",
+            "title": "White space only",
+            "description": "  \n ",
+            "createdAt": "2026-11-04T05:00:00Z",
+            "draft": false,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main"
+          },
+          {
+            "iid": "46",
+            "title": "No description at all",
+            "description": null,
+            "createdAt": "2026-11-04T04:00:00Z",
+            "draft": false,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main"
+          }
+        ]
+      }
+    }
+  }
+}

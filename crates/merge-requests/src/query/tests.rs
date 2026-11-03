@@ -24,12 +24,46 @@ fn the_list_query_asks_per_file_diff_stats_never_the_summary() {
 #[test]
 fn the_list_query_asks_people_with_pictures_review_states_the_permission_and_label_colours() {
     let query = list_query();
-    let people = "iid title createdAt draft author { username name avatarUrl } \
+    let people = "iid title description createdAt draft author { username name avatarUrl } \
          labels { nodes { title color textColor } } assignees { nodes { username name avatarUrl } } \
          reviewers { nodes { username name avatarUrl mergeRequestInteraction { approved reviewState } } } \
          approvedBy { nodes { username name avatarUrl } } userPermissions { updateMergeRequest } \
          resolvableDiscussionsCount";
     assert!(query.contains(people), "{query}");
+}
+
+#[test]
+fn the_list_query_asks_the_description_and_stays_one_line() {
+    let query = list_query();
+    assert!(!query.contains('\n'), "{query}");
+    assert_eq!(query.matches('{').count(), query.matches('}').count());
+    assert!(
+        query.contains(" iid title description createdAt "),
+        "{query}"
+    );
+    assert!(!query.contains("descriptionHtml"), "{query}");
+}
+
+#[test]
+fn the_description_query_is_one_line_and_asks_only_description_html() {
+    let query = "query=query MergeRequestDescription($fullPath: ID!, $iid: String!) { \
+         project(fullPath: $fullPath) { mergeRequest(iid: $iid) { descriptionHtml } } }";
+    assert!(!query.contains('\n'));
+    assert_eq!(query.matches('{').count(), query.matches('}').count());
+
+    let args = description_args("taskboard/taskboard", MergeRequestIid(52));
+
+    let expected = [
+        "api",
+        "graphql",
+        "-f",
+        query,
+        "-f",
+        "fullPath=taskboard/taskboard",
+        "-f",
+        "iid=52",
+    ];
+    assert_eq!(args, expected);
 }
 
 #[test]

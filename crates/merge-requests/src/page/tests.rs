@@ -63,6 +63,7 @@ fn snooze_a_reminder() -> MergeRequestRow {
     MergeRequestRow {
         iid: MergeRequestIid(13),
         title: "Snooze a reminder".to_owned(),
+        has_description: false,
         created_at: "2026-10-28T09:15:00Z".to_owned(),
         draft: false,
         author: None,
@@ -109,6 +110,19 @@ fn conflicts(also: &[BlockedReason]) -> Readiness {
 
 fn blocked(reason: BlockedReason) -> Readiness {
     Readiness::Blocked { reason }
+}
+
+#[test]
+fn a_description_of_white_space_or_none_is_no_description() {
+    let described =
+        |description: Value| row_with(&json!({ "description": description })).has_description;
+
+    assert!(described(json!("Fixes the label colours.")));
+    assert!(described(json!("  <!-- only a comment -->  ")));
+    assert!(!described(json!("  \n \t")));
+    assert!(!described(json!("")));
+    assert!(!described(Value::Null));
+    assert!(!row_with(&json!({})).has_description);
 }
 
 fn size(additions: u32, deletions: u32, files: u32) -> ChangeSize {

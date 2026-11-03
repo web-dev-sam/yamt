@@ -5,9 +5,9 @@ use crate::{MergeRequestIid, PageOpened, WebPage};
 
 pub(crate) const HTTPS: &str = "https://";
 const JOBS_SEGMENT: &str = "/-/jobs/";
-const MERGE_REQUESTS_SEGMENT: &str = "/-/merge_requests/";
+pub(crate) const MERGE_REQUESTS_SEGMENT: &str = "/-/merge_requests/";
 const NOTE_ANCHOR: &str = "#note_";
-const PARENT_SEGMENT: &str = "..";
+pub(crate) const PARENT_SEGMENT: &str = "..";
 #[cfg(target_os = "macos")]
 const OPENER: &str = "/usr/bin/open";
 #[cfg(windows)]

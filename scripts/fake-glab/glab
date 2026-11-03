@@ -123,8 +123,9 @@ post() {
 
 # Merge requests' discussions with a field iids=<JSON array>: graphql-discussions-<the iids joined by "-">, with
 # -after-<cursor> for a field discussionsAfter. Else the project's people with a field search=<text>:
-# graphql-people-<text>. Else a merge request's details with a field iid=<n>; else a page of the list: the first
-# without a field after, the n-th for after=page-<n>.
+# graphql-people-<text>. Else a merge request's description with a field query starting
+# "query MergeRequestDescription" and a field iid=<n>: graphql-description-<n>. Else a merge request's details with a
+# field iid=<n>; else a page of the list: the first without a field after, the n-th for after=page-<n>.
 graphql() {
 	iids=$(field iids)
 	if [ -n "$iids" ]; then
@@ -140,6 +141,9 @@ graphql() {
 		reply "$scenario/graphql-people-$search" '200 OK'
 	fi
 	iid=$(field iid)
+	case $(field query) in
+	'query MergeRequestDescription'*) reply "$scenario/graphql-description-$iid" '200 OK' ;;
+	esac
 	if [ -n "$iid" ]; then
 		reply "$scenario/graphql-merge-request-$iid" '200 OK'
 	fi
@@ -179,6 +183,12 @@ picture() {
 trace() {
 	job=${endpoint#*/jobs/}
 	serve_file "$scenario/traces/${job%/trace}.log"
+}
+
+# An upload by the uploads API, GET projects/<project>/uploads/<secret>/<file>: $scenario/uploads/<the endpoint after
+# projects/>.
+upload() {
+	serve_file "$scenario/uploads/${endpoint#projects/}"
 }
 
 api() {
@@ -231,6 +241,7 @@ api() {
 		answer_file merge-request.json
 		;;
 	"GET projects/"*"/jobs/"*"/trace") trace ;;
+	"GET projects/"*"/uploads/"*) upload ;;
 	*) answer '404 Not Found' '{"message":"404 Not Found"}' ;;
 	esac
 }
