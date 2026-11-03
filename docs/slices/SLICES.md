@@ -99,6 +99,27 @@ passes never sent a real Shift release (synthetic keydown only), so they missed 
 | 1   | fix (`briefs/mr-shift-held.md`), reproduce with real keys | web-impl | done   | `2a5cf8b2` + R1 `8b9b2b6b` (#2147 #2148: one `keyHold` shell for Alt and Shift, one shared Shift state); reproduced with real X11 keys (WebDriver keys don't); 86/86 mutants; reviews pass; #2149 dropped. Docs `e4caf12d`, `ce73ad38`. Notes `MrShiftHeld*.md` |
 | 2   | verify: `just check`, real-key WebKit and real-app steps  | verifier | done   | `MrShiftHeldFinal` at `ce73ad38`: `just check` pass; fixture + real app Shift down 6/6 (3/3), up 6/0 (3/0) at once and after 2 s; Shift+click leaves only the red icon; plain click includes; Alt minimap unchanged. Notes `MrShiftHeldFinal.md`                |
 
+## Failed CI job's log (session 45; owner #2154–#2155: "see the logs of the failed CI job in my application")
+
+Request `docs/slices/request-ci-job-log.md` (rules 1–9, acceptance, non-goals); facts
+`.omp/run/notes/PlanScoutCiLogFacts.md`. Owner's answers: a Shift press, not a hold (#2154); search text remembered per
+job name (#2155). Design `briefs/ci-job-log-design.md` option A (raw tail over IPC, TS parser, CSS Highlight API),
+proposed plan #158–#161, RK57–RK59. Designer's two questions decided by design §2.4/§6 (OR13, row #161, owner may
+veto): Shift in the search field types a capital, so switching jobs by pointer needs a click in the log first; 256
+colours show as the nearest of the theme's 16. No product question open. Order: 2 ∥ 3, `just bindings`, 4 ∥ 5, 6, 7, 8.
+
+| row | slice                                                                                       | owner        | status  | evidence                                                                     |
+| --- | ------------------------------------------------------------------------------------------- | ------------ | ------- | ---------------------------------------------------------------------------- |
+| 1   | design: measured facts, IPC shape, render and search approach, Shift press                  | designer     | done    | `CiJobLogDesign` `88aa2cd0`: option A, six briefs. Notes `CiJobLogDesign.md` |
+| 2   | rust (`briefs/ci-job-log-rust.md`): offered-only `/trace`, 500 KiB cut, per-run memory      | rust-impl    | running |                                                                              |
+| 3   | core (`briefs/ci-job-log-core.md`): SGR → styled lines, hit places, search steps            | web-impl     | running |                                                                              |
+| 3b  | `just bindings` after row 2 lands                                                           | orchestrator | todo    |                                                                              |
+| 4   | state (`briefs/ci-job-log-state.md`): shown log, source call, remembered texts, fixtures    | web-impl     | todo    |                                                                              |
+| 5   | palette (`briefs/ci-job-log-palette.md`): 16 `--color-ansi-*` per theme, contrast rule      | web-impl     | todo    |                                                                              |
+| 6   | page (`briefs/ci-job-log-page.md`): log box, Shift tap, hover, words; wires the window      | web-impl     | todo    |                                                                              |
+| 7   | docs keeper: design §4 "Shared edits", plan #158–#161, RK57–RK59                            | docs-keeper  | todo    |                                                                              |
+| 8   | verify (`briefs/ci-job-log-verify.md`): smoke after 6; final `just check`, WebKit, real app | verifier     | todo    |                                                                              |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
