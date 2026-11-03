@@ -31,6 +31,12 @@ const SET_REVIEWERS: &str = "mutation SetReviewers($projectPath: ID!, $iid: Stri
      reviewers { nodes { username name avatarUrl mergeRequestInteraction { approved reviewState } } } } } }";
 const DENIED: &str = "The resource that you are attempting to access does not exist or you don't have permission \
      to perform this action";
+/// A change's whole glab run: the login and project are asked, then the one write, nothing read before it.
+const CHANGE_ARGV: [&str; 3] = [
+    "argv: auth status",
+    "argv: api projects/:fullpath",
+    "argv: api graphql --input -",
+];
 
 /// A repository whose `origin` is on gitlab.example, and its `GitLabRepository`.
 fn gitlab_repo() -> (TempDir, GitLabRepository) {
@@ -164,8 +170,7 @@ fn adding_an_assignee_sends_one_append_with_the_exact_body() {
     let expected = json!({ "query": SET_ASSIGNEES, "variables": {
         "projectPath": "taskboard/taskboard", "iid": "52", "usernames": ["erik"], "mode": "APPEND" } });
     assert_eq!(bodies(&fake), [expected]);
-    let argv = fake.logged("argv: ");
-    assert_eq!(argv.last().unwrap(), "argv: api graphql --input -");
+    assert_eq!(fake.logged("argv: "), CHANGE_ARGV);
 }
 
 #[test]
@@ -211,8 +216,7 @@ fn removing_sends_one_remove_of_one_username() {
         json!({ "query": SET_REVIEWERS, "variables": variables("chiara") }),
     ];
     assert_eq!(bodies(&fake), expected);
-    let queries = fake.logged("argv: api graphql");
-    assert_eq!(queries, ["argv: api graphql --input -"; 2]);
+    assert_eq!(fake.logged("argv: "), [CHANGE_ARGV, CHANGE_ARGV].concat());
 }
 
 #[test]

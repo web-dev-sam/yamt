@@ -49,7 +49,8 @@ impl Pictures {
         self.shelf.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Remembers the pictures a list page offered, each username's latest address winning.
+    /// Remembers the uploaded pictures a list page, a discussions reply, a search or a change offered, each
+    /// username's latest address winning.
     pub(crate) fn offer(&self, pictures: Vec<OfferedPicture>) {
         let mut held = self.shelf();
         for picture in pictures {

@@ -17,6 +17,7 @@ use crate::{
 
 const NO_DATA: &str = "GitLab's answer holds no data";
 pub(crate) const NO_PROJECT: &str = "GitLab finds no such project, or you may not see it";
+pub(crate) const NO_MERGE_REQUEST: &str = "GitLab's answer names no merge request";
 const NO_CURSOR: &str = "GitLab says more merge requests follow, but sent no cursor for them";
 
 /// One GraphQL answer of the list query.

@@ -5,11 +5,10 @@ use specta::Type;
 use yamt_gitio::Glab;
 
 use crate::list::one_per_username;
-use crate::page::{Nodes, graphql_data, listed};
+use crate::page::{NO_MERGE_REQUEST, Nodes, graphql_data, listed};
 use crate::people::{People, ReviewerNode, UserNode, warn_unknown_review_state};
 use crate::project::{Project, logged_in_project};
 use crate::query::{GRAPHQL_BODY_ARGS, people_change_body};
-use crate::rerequest::NO_MERGE_REQUEST;
 use crate::{GitLabRepository, MergeRequestIid, OfferedPicture, Person, Reviewer};
 
 /// Which list of a merge request a change is for.
