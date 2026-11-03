@@ -1,0 +1,3 @@
+just mutants HEAD: 94.90% (335 killed, 4 survived, 14 no coverage); mergeRequestDiscussions.ts 96.25%, mergeRequestsText.ts 93.78% (100% covered)
+mergeRequestDiscussions.ts:207 `load.value === undefined`→`!==` in the watch source — equivalent: the source only signals each flip of that boolean, and its negation flips at the same moments; the callback reads only isOpen
+Not on changed lines (pre-existing): mergeRequestDiscussions.ts:88, :137, :145 and :167, and mergeRequestsText.ts :140, :181, :202, :242, :266 and :284. The :167 and mergeRequestsText ones are exhaustive defaults (TS3).

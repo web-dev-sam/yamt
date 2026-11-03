@@ -30,7 +30,7 @@ import {
   DISCUSSION_DETAILS_HINT,
   DISCUSSION_DETAILS_OPTIONS,
   DISCUSSIONS_LOADING,
-  discussionsRefusedText,
+  glabRefusalText,
   discussionsText,
   dueDateLabel,
   jobTitle,
@@ -105,7 +105,7 @@ test.each<[Exclude<DiscussionsAnswer, { kind: "open" }>, string]>([
 ])(
   "a refused discussions answer %j reads %j, the list's words (catches the two drifting apart)",
   (answer, words) => {
-    expect(discussionsRefusedText(answer)).toBe(words);
+    expect(glabRefusalText(answer)).toBe(words);
   },
 );
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useTemplateRef, watch } from "vue";
+import { computed, useTemplateRef } from "vue";
 import MessageSquare from "~icons/lucide/message-square";
 
 import type { MergeRequestRow, WebPage } from "../ipc";
@@ -14,10 +14,10 @@ import {
   turnSummaryText,
   turnText,
 } from "../mergeRequests";
-import type { DiscussionLoad } from "./mergeRequestDiscussions";
+import { useRowDiscussions, type DiscussionLoad } from "./mergeRequestDiscussions";
 import MergeRequestPicture from "./MergeRequestPicture.vue";
 import { useMergeRequests } from "./mergeRequestsStore";
-import { discussionsRefusedText, discussionsText, DISCUSSIONS_LOADING } from "./mergeRequestsText";
+import { discussionsText, DISCUSSIONS_LOADING, glabRefusalText } from "./mergeRequestsText";
 import { problemText } from "./problemText";
 import { vTooltip } from "./tooltip";
 import { useHoverBox } from "./useHoverBox";
@@ -26,7 +26,8 @@ type Header = { readonly text: string; readonly failed: boolean };
 
 const props = defineProps<{ row: MergeRequestRow; now: number }>();
 
-const { discussions, discussionDetails, askDiscussions, me, openPage } = useMergeRequests();
+const mergeRequests = useMergeRequests();
+const { discussionDetails, me, openPage } = mergeRequests;
 const area = useTemplateRef<HTMLSpanElement>("area");
 const opener = useTemplateRef<HTMLButtonElement>("opener");
 const box = useTemplateRef<HTMLDivElement>("box");
@@ -35,11 +36,15 @@ const { open, placement, on } = useHoverBox({
   opener: () => opener.value,
   box,
 });
+const load = useRowDiscussions(
+  mergeRequests,
+  () => props.row.iid,
+  () => open.value,
+);
 
 const count = computed(() => props.row.openDiscussions);
 const label = computed(() => discussionsText(count.value));
 const boxed = computed(() => discussionDetails.value !== "off" && count.value > 0);
-const load = computed(() => discussions.value.get(props.row.iid));
 const header = computed(() => headerOf(load.value));
 const lines = computed(() =>
   load.value?.kind === "read"
@@ -57,12 +62,6 @@ const lines = computed(() =>
     : [],
 );
 
-watch(open, (isOpen) => {
-  if (isOpen) {
-    askDiscussions(props.row.iid);
-  }
-});
-
 function headerOf(shown: DiscussionLoad | undefined): Header {
   if (shown === undefined) {
     return { text: DISCUSSIONS_LOADING, failed: false };
@@ -73,7 +72,7 @@ function headerOf(shown: DiscussionLoad | undefined): Header {
     case "read":
       return { text: turnSummaryText(turnCounts(shown.discussions, me.value)), failed: false };
     case "refused":
-      return { text: discussionsRefusedText(shown.answer), failed: true };
+      return { text: glabRefusalText(shown.answer), failed: true };
     case "failed":
       return {
         text: problemText(

@@ -1,7 +1,6 @@
 import type {
   ContinueMergeReply,
   DiscussionDetails,
-  DiscussionsAnswer,
   ListEnd,
   MergeRequestIid,
   OpenReply,
@@ -61,9 +60,12 @@ export const DISCUSSION_DETAILS_HINT =
   "On the merge-request page: every listed merge request's open discussions, right after the list; one merge " +
   "request's, when you first hover its count; or none.";
 
-export function discussionsRefusedText(
-  answer: Exclude<DiscussionsAnswer, { readonly kind: "open" }>,
-): string {
+type GlabRefusal =
+  | { readonly kind: "glabMissing" }
+  | { readonly kind: "notLoggedIn"; readonly detail: string }
+  | { readonly kind: "failed"; readonly message: string };
+
+export function glabRefusalText(answer: GlabRefusal): string {
   switch (answer.kind) {
     case "glabMissing":
       return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
@@ -75,7 +77,7 @@ export function discussionsRefusedText(
 }
 
 export function listFailureText(end: ListEnd): string | null {
-  return end.kind === "loaded" || end.kind === "cut" ? null : discussionsRefusedText(end);
+  return end.kind === "loaded" || end.kind === "cut" ? null : glabRefusalText(end);
 }
 
 export function mergeRequestReference(iid: MergeRequestIid): string {
@@ -131,7 +133,7 @@ export function rerequestReplyText(
       return "This merge request is no longer open.";
     case "glabMissing":
     case "notLoggedIn":
-      return discussionsRefusedText(reply);
+      return glabRefusalText(reply);
     case "refused":
     case "failed":
       return reply.message;

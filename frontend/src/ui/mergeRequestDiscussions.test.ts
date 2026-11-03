@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
-import { nextTick, shallowRef, type ShallowRef } from "vue";
+import { effectScope, nextTick, shallowRef, type ShallowRef } from "vue";
 
 import {
   createFixtureCompareSource,
@@ -16,6 +16,7 @@ import {
 } from "../ipc";
 import {
   createDiscussions,
+  useRowDiscussions,
   type DiscussionLoad,
   type DiscussionQueue,
 } from "./mergeRequestDiscussions";
@@ -224,6 +225,52 @@ test("lazy_never_asks_unhovered_rows", async () => {
 
   expect(live.calls).toEqual([]);
   expect(live.queue.discussions.value.size).toBe(0);
+});
+
+test("an_open_box_asks_again_when_a_refresh_swap_drops_its_entry_and_a_closed_one_waits", async () => {
+  const live = rig("lazy");
+  const open = shallowRef(false);
+  const closed = shallowRef(false);
+  const scope = effectScope();
+  const boxes = scope.run(() => ({
+    shown: useRowDiscussions(
+      live.queue,
+      () => iid(639),
+      () => open.value,
+    ),
+    other: useRowDiscussions(
+      live.queue,
+      () => iid(638),
+      () => closed.value,
+    ),
+  }));
+  if (boxes === undefined) {
+    throw new Error("the scope ran nothing");
+  }
+  await nextTick();
+  expect(live.calls).toEqual([]);
+
+  open.value = true;
+  closed.value = true;
+  await nextTick();
+  await answered(live, 0);
+  await answered(live, 1);
+  expect([boxes.shown.value, boxes.other.value]).toEqual([read(), read()]);
+
+  closed.value = false;
+  await nextTick();
+  live.queue.replaced(ROWS);
+  await nextTick();
+  expect(boxes.shown.value).toEqual(LOADING);
+  expect(boxes.other.value).toBeUndefined();
+  expect(live.calls.map((call) => call.iids)).toEqual([[639], [638], [639]]);
+
+  await answered(live, 2);
+  expect(live.calls).toHaveLength(3);
+  closed.value = true;
+  await nextTick();
+  expect(callAt(live, 3).iids).toEqual([638]);
+  scope.stop();
 });
 
 test("off_asks_nothing_and_drops_an_answer_in_flight", async () => {

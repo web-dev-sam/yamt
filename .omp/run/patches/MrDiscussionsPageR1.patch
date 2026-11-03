@@ -1,0 +1,293 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index c02f9bb..c336fb7 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -52,7 +52,7 @@ Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of t
+ 
+ Job logs (request `docs/slices/request-ci-job-log.md`, plan §2 #158–#161): `mergeRequestJobLogs.ts` holds the window's one log box (`jobLog`): Shift over the job already loading or shown changes nothing; any other job writes a new `loading` entry, and a reply is written only into the entry it was asked for (parsed once by `mergeRequests/` `jobLogView`); `closeJobLog` sets null. The search texts are remembered per job name, no repository key (`jobSearch`/`setJobSearch`, key `yamt.mergeRequests.jobSearches`); "" forgets one. A Shift tap is `useShiftTaps()` (`useShiftHeld.ts`): Shift down then up with no other key and no pointer press between, so Shift+Tab, Shift+click and a typed capital never count. `CiStatusBox.vue` watches the count, never `open && held` (a Shift held as the box opens would count), and asks for the pointed job (its `<li>`, since a disabled button gets no pointer events), else the focused one, only while its box is open, the job has a page and focus is in no text field (`typingTarget.ts` `isTypingTarget`, window-neutral; the log's own field included, so Shift there types a capital and switches nothing). The pointed and focused jobs are forgotten when the CI box closes (Escape removes the `<li>` without its `pointerleave`). The job whose log is shown has no hover tip (its tip would cover the log's header; a Shift press does not hide a tip). `CiStatusJobLog.vue` is a DOM child of the CI box's hover area, after the box, so `useHoverBox`'s one inside rule holds both and a scroll inside the log closes nothing; it sits left of the CI box, tops level (`useMenuPlacement`, clamped), is keyed by the job's page and closes when the CI box does. Escape in the log is the log's: it prevents the default and closes, and `CiStatusBox` puts focus on that job's button (found by its `data-job-page`); `useHoverBox` ignores an Escape already `defaultPrevented`, so a second Escape closes the CI box. A refused or failed log moves focus from the field to the log body, so Shift over the job asks again as its words say. Lines are static: one `div` per line, one `span` per run with `mergeRequestLogLook.ts` `runClasses` and the run's text as text (never markup); a run with an ANSI background takes the panel colour as its text colour (every `--color-ansi-*` is ≥ 4.5:1 against `--color-panel`, so the pair is too); the log opens at its end (`useFollowEnd`). The search (`search/` `matcherOf`, case-insensitive, mapped onto runs by `hitPlaces`) paints CSS Custom Highlights `job-log-match` and `job-log-current` over those text nodes, with no DOM change; every hit counts and is stepped, but `job-log-match` holds only the hits on lines in view ± one screen (`mergeRequests/` `firstLineBelow` on the lines' `offsetTop`, `placesOnLines`), rebuilt at once on a search and once per animation frame on a scroll or a step (tens of thousands of live ranges freeze WebKitGTK for seconds); the current hit starts at the last one and is centred by `scrollTop` only; Enter / Shift+Enter step it. Each name is registered once per log with one `Highlight`, cleared and refilled on every rebuild: WebKitGTK 2.54 leaves the ranges of a `Highlight` that `CSS.highlights.set` replaces painted (#2191). Both are deleted when the log unmounts. Opening fills the field with the remembered text, selected and searched. Words in `mergeRequestLogText.ts`.
+ 
+-Discussions (request `docs/slices/request-mr-discussions.md`, design `docs/slices/briefs/mr-discussions-design.md` option A, plan §2 #163, #164): `mergeRequestDiscussions.ts` owns `discussions` (its only writer), one entry per asked row while the list stands. One call at a time; a generation is raised by `replaced` and by "off", so an older answer is dropped. "Load fully": the rows with a count above 0 are queued from `received` (`listed`), all again at `ended`'s swap (`replaced`), and a watch on the setting asks them when it turns to full, with no reload. "Load lazily": `askDiscussions(iid)` puts that row first and asks it once. "Off": every entry and any call in flight dropped. Log `mergeRequests.discussions_read` (counts only). `MergeRequestDiscussions.vue` is the row's count: with "Off" or a count of 0 the plain count (`vTooltip` `discussionsText`, muted at 0), no box and no ask; else the people box's shape (`useHoverBox`, an opener button named by `discussionsText` with no tooltip, #154) whose `open` watch calls `askDiscussions`, so a hover and keyboard focus both ask. Its `role="status"` header is `DISCUSSIONS_LOADING` with no entry or while loading, `turnSummaryText(turnCounts(…, me))` once read, else `discussionsRefusedText` (the list's glab words) or `problemText` at step `discussions` in the error colour — never the problem bar. Its list is `discussionTurns(…, me)` (the viewer's turn first, newest first); each line is a button calling `openPage("discussion", page)` when the last note has a page, else a `div`: the author's picture and `noteAuthorName`, `agoText`, `turnText` (the viewer's turn in `text-primary`), `placeText`, and `noteExcerpt` clamped to 3 lines. All of its text is interpolated, never `v-html` (RK60). `MergeRequestDiscussionSetting.vue` is Settings → "Discussion details" (`DISCUSSION_DETAILS_OPTIONS` through `ChoiceButtons`, `setDiscussionDetails` on the settings seam, the hint under it); the compare and the range root put it into `SettingsView`'s slot, and the merge window, which has no merge-request page, has no such section.
++Discussions (request `docs/slices/request-mr-discussions.md`, design `docs/slices/briefs/mr-discussions-design.md` option A, plan §2 #163, #164): `mergeRequestDiscussions.ts` owns `discussions` (its only writer), one entry per asked row while the list stands. One call at a time; a generation is raised by `replaced` and by "off", so an older answer is dropped. "Load fully": the rows with a count above 0 are queued from `received` (`listed`), all again at `ended`'s swap (`replaced`: a Refresh, or a show 30 s or more after the last load, `RECHECK_PAUSE_MS`), and a watch on the setting asks them when it turns to full, with no reload. "Load lazily": `askDiscussions(iid)` puts that row first and asks it once. "Off": every entry and any call in flight dropped. Log `mergeRequests.discussions_read` (counts only). `MergeRequestDiscussions.vue` is the row's count: with "Off" or a count of 0 the plain count (`vTooltip` `discussionsText`, muted at 0), no box and no ask; else the people box's shape (`useHoverBox`, an opener button named by `discussionsText` with no tooltip, #154) whose entry comes from `useRowDiscussions`, which calls `askDiscussions` when the box opens and again when an open box loses its entry (a swap), so a hover and keyboard focus both ask. Its `role="status"` header is `DISCUSSIONS_LOADING` with no entry or while loading, `turnSummaryText(turnCounts(…, me))` once read, else `glabRefusalText` (the glab words of the list, the box and a re-request reply) or `problemText` at step `discussions` in the error colour — never the problem bar. Its list is `discussionTurns(…, me)` (the viewer's turn first, newest first); each line is a button calling `openPage("discussion", page)` when the last note has a page, else a `div`: the author's picture and `noteAuthorName`, `agoText`, `turnText` (the viewer's turn in `text-primary`), `placeText`, and `noteExcerpt` clamped to 3 lines. All of its text is interpolated, never `v-html` (RK60). `MergeRequestDiscussionSetting.vue` is Settings → "Discussion details" (`DISCUSSION_DETAILS_OPTIONS` through `ChoiceButtons`, `setDiscussionDetails` on the settings seam, the hint under it); the compare and the range root put it into `SettingsView`'s slot, and the merge window, which has no merge-request page, has no such section.
+ 
+ Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid (`rechecked`, `mergeRequests/`) among its own load's rows only — `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap, `null` once a failed first load cleared them) is that load, else the load's own buffer (empty unless it is a refresh, read only by a refresh's swap) — so any other is dropped, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
+ 
+diff --git a/frontend/src/ui/MergeRequestDiscussions.vue b/frontend/src/ui/MergeRequestDiscussions.vue
+index a2e07c0..1d6bfa0 100644
+--- a/frontend/src/ui/MergeRequestDiscussions.vue
++++ b/frontend/src/ui/MergeRequestDiscussions.vue
+@@ -1,5 +1,5 @@
+ <script setup lang="ts">
+-import { computed, useTemplateRef, watch } from "vue";
++import { computed, useTemplateRef } from "vue";
+ import MessageSquare from "~icons/lucide/message-square";
+ 
+ import type { MergeRequestRow, WebPage } from "../ipc";
+@@ -14,10 +14,10 @@ import {
+   turnSummaryText,
+   turnText,
+ } from "../mergeRequests";
+-import type { DiscussionLoad } from "./mergeRequestDiscussions";
++import { useRowDiscussions, type DiscussionLoad } from "./mergeRequestDiscussions";
+ import MergeRequestPicture from "./MergeRequestPicture.vue";
+ import { useMergeRequests } from "./mergeRequestsStore";
+-import { discussionsRefusedText, discussionsText, DISCUSSIONS_LOADING } from "./mergeRequestsText";
++import { discussionsText, DISCUSSIONS_LOADING, glabRefusalText } from "./mergeRequestsText";
+ import { problemText } from "./problemText";
+ import { vTooltip } from "./tooltip";
+ import { useHoverBox } from "./useHoverBox";
+@@ -26,7 +26,8 @@ type Header = { readonly text: string; readonly failed: boolean };
+ 
+ const props = defineProps<{ row: MergeRequestRow; now: number }>();
+ 
+-const { discussions, discussionDetails, askDiscussions, me, openPage } = useMergeRequests();
++const mergeRequests = useMergeRequests();
++const { discussionDetails, me, openPage } = mergeRequests;
+ const area = useTemplateRef<HTMLSpanElement>("area");
+ const opener = useTemplateRef<HTMLButtonElement>("opener");
+ const box = useTemplateRef<HTMLDivElement>("box");
+@@ -35,11 +36,15 @@ const { open, placement, on } = useHoverBox({
+   opener: () => opener.value,
+   box,
+ });
++const load = useRowDiscussions(
++  mergeRequests,
++  () => props.row.iid,
++  () => open.value,
++);
+ 
+ const count = computed(() => props.row.openDiscussions);
+ const label = computed(() => discussionsText(count.value));
+ const boxed = computed(() => discussionDetails.value !== "off" && count.value > 0);
+-const load = computed(() => discussions.value.get(props.row.iid));
+ const header = computed(() => headerOf(load.value));
+ const lines = computed(() =>
+   load.value?.kind === "read"
+@@ -57,12 +62,6 @@ const lines = computed(() =>
+     : [],
+ );
+ 
+-watch(open, (isOpen) => {
+-  if (isOpen) {
+-    askDiscussions(props.row.iid);
+-  }
+-});
+-
+ function headerOf(shown: DiscussionLoad | undefined): Header {
+   if (shown === undefined) {
+     return { text: DISCUSSIONS_LOADING, failed: false };
+@@ -73,7 +72,7 @@ function headerOf(shown: DiscussionLoad | undefined): Header {
+     case "read":
+       return { text: turnSummaryText(turnCounts(shown.discussions, me.value)), failed: false };
+     case "refused":
+-      return { text: discussionsRefusedText(shown.answer), failed: true };
++      return { text: glabRefusalText(shown.answer), failed: true };
+     case "failed":
+       return {
+         text: problemText(
+diff --git a/frontend/src/ui/mergeRequestDiscussions.test.ts b/frontend/src/ui/mergeRequestDiscussions.test.ts
+index 76b2b2f..8e51da3 100644
+--- a/frontend/src/ui/mergeRequestDiscussions.test.ts
++++ b/frontend/src/ui/mergeRequestDiscussions.test.ts
+@@ -1,5 +1,5 @@
+ import { afterEach, beforeAll, expect, test, vi } from "vitest";
+-import { nextTick, shallowRef, type ShallowRef } from "vue";
++import { effectScope, nextTick, shallowRef, type ShallowRef } from "vue";
+ 
+ import {
+   createFixtureCompareSource,
+@@ -16,6 +16,7 @@ import {
+ } from "../ipc";
+ import {
+   createDiscussions,
++  useRowDiscussions,
+   type DiscussionLoad,
+   type DiscussionQueue,
+ } from "./mergeRequestDiscussions";
+@@ -226,6 +227,52 @@ test("lazy_never_asks_unhovered_rows", async () => {
+   expect(live.queue.discussions.value.size).toBe(0);
+ });
+ 
++test("an_open_box_asks_again_when_a_refresh_swap_drops_its_entry_and_a_closed_one_waits", async () => {
++  const live = rig("lazy");
++  const open = shallowRef(false);
++  const closed = shallowRef(false);
++  const scope = effectScope();
++  const boxes = scope.run(() => ({
++    shown: useRowDiscussions(
++      live.queue,
++      () => iid(639),
++      () => open.value,
++    ),
++    other: useRowDiscussions(
++      live.queue,
++      () => iid(638),
++      () => closed.value,
++    ),
++  }));
++  if (boxes === undefined) {
++    throw new Error("the scope ran nothing");
++  }
++  await nextTick();
++  expect(live.calls).toEqual([]);
++
++  open.value = true;
++  closed.value = true;
++  await nextTick();
++  await answered(live, 0);
++  await answered(live, 1);
++  expect([boxes.shown.value, boxes.other.value]).toEqual([read(), read()]);
++
++  closed.value = false;
++  await nextTick();
++  live.queue.replaced(ROWS);
++  await nextTick();
++  expect(boxes.shown.value).toEqual(LOADING);
++  expect(boxes.other.value).toBeUndefined();
++  expect(live.calls.map((call) => call.iids)).toEqual([[639], [638], [639]]);
++
++  await answered(live, 2);
++  expect(live.calls).toHaveLength(3);
++  closed.value = true;
++  await nextTick();
++  expect(callAt(live, 3).iids).toEqual([638]);
++  scope.stop();
++});
++
+ test("off_asks_nothing_and_drops_an_answer_in_flight", async () => {
+   const live = rig();
+   live.rows.value = ROWS;
+diff --git a/frontend/src/ui/mergeRequestDiscussions.ts b/frontend/src/ui/mergeRequestDiscussions.ts
+index 50909dc..7d180fa 100644
+--- a/frontend/src/ui/mergeRequestDiscussions.ts
++++ b/frontend/src/ui/mergeRequestDiscussions.ts
+@@ -197,6 +197,21 @@ export function discussionsOf(queue: DiscussionQueue): Discussions {
+   };
+ }
+ 
++/** A count's box: its row's entry, asked whenever the box opens or loses the entry while open. */
++export function useRowDiscussions(
++  discussions: Discussions,
++  iid: () => MergeRequestIid,
++  open: () => boolean,
++): ComputedRef<DiscussionLoad | undefined> {
++  const load = computed(() => discussions.discussions.value.get(iid()));
++  watch([open, () => load.value === undefined], ([isOpen]) => {
++    if (isOpen) {
++      discussions.askDiscussions(iid());
++    }
++  });
++  return load;
++}
++
+ export function createDiscussions(deps: {
+   readonly source: MergeRequestSource;
+   readonly mode: () => DiscussionDetails;
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index 82d2b9c..b9b8519 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -490,6 +490,36 @@ test("a_failed_first_load_drops_the_details_so_the_next_load_asks_its_rows_again
+   expect(live.slice.discussions.value.get(iid(open[0] ?? 0))).toEqual({ kind: "loading" });
+ });
+ 
++test("switching_to_full_asks_one_round_and_only_a_show_after_30_s_reloads_and_asks_it_again", async () => {
++  const live = rig();
++  live.mode.value = "off";
++  await loaded(live);
++  live.slice.close();
++  const open = ROWS.filter((row) => row.openDiscussions > 0);
++  live.mode.value = "full";
++  await nextTick();
++  expect(live.discussionCalls.map((call) => call.iids)).toEqual([iids(open)]);
++  live.discussionCalls[0]?.answer({
++    ok: true,
++    value: open.map((row) => ({ iid: row.iid, answer: { kind: "open", discussions: [] } })),
++  });
++  await settled();
++
++  vi.setSystemTime(T0 + RECHECK_PAUSE_MS - 1);
++  live.slice.show();
++  await settled();
++  expect([live.loads.length, live.discussionCalls.length]).toEqual([1, 1]);
++
++  live.slice.close();
++  vi.setSystemTime(T0 + RECHECK_PAUSE_MS);
++  live.slice.show();
++  loadAt(live, 1).send({ me: "sam", rows: ROWS });
++  expect(live.discussionCalls).toHaveLength(1);
++  loadAt(live, 1).end(LOADED);
++  await settled();
++  expect(live.discussionCalls.map((call) => call.iids)).toEqual([iids(open), iids(open)]);
++});
++
+ test("the_slice_holds_only_the_public_part_of_the_discussion_queue", () => {
+   const live = rig();
+   expect("listed" in live.slice).toBe(false);
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index 8c91c50..0aaf1a2 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -30,7 +30,7 @@ import {
+   DISCUSSION_DETAILS_HINT,
+   DISCUSSION_DETAILS_OPTIONS,
+   DISCUSSIONS_LOADING,
+-  discussionsRefusedText,
++  glabRefusalText,
+   discussionsText,
+   dueDateLabel,
+   jobTitle,
+@@ -105,7 +105,7 @@ test.each<[Exclude<DiscussionsAnswer, { kind: "open" }>, string]>([
+ ])(
+   "a refused discussions answer %j reads %j, the list's words (catches the two drifting apart)",
+   (answer, words) => {
+-    expect(discussionsRefusedText(answer)).toBe(words);
++    expect(glabRefusalText(answer)).toBe(words);
+   },
+ );
+ 
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index c6740d5..f3e9430 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -1,7 +1,6 @@
+ import type {
+   ContinueMergeReply,
+   DiscussionDetails,
+-  DiscussionsAnswer,
+   ListEnd,
+   MergeRequestIid,
+   OpenReply,
+@@ -61,9 +60,12 @@ export const DISCUSSION_DETAILS_HINT =
+   "On the merge-request page: every listed merge request's open discussions, right after the list; one merge " +
+   "request's, when you first hover its count; or none.";
+ 
+-export function discussionsRefusedText(
+-  answer: Exclude<DiscussionsAnswer, { readonly kind: "open" }>,
+-): string {
++type GlabRefusal =
++  | { readonly kind: "glabMissing" }
++  | { readonly kind: "notLoggedIn"; readonly detail: string }
++  | { readonly kind: "failed"; readonly message: string };
++
++export function glabRefusalText(answer: GlabRefusal): string {
+   switch (answer.kind) {
+     case "glabMissing":
+       return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
+@@ -75,7 +77,7 @@ export function discussionsRefusedText(
+ }
+ 
+ export function listFailureText(end: ListEnd): string | null {
+-  return end.kind === "loaded" || end.kind === "cut" ? null : discussionsRefusedText(end);
++  return end.kind === "loaded" || end.kind === "cut" ? null : glabRefusalText(end);
+ }
+ 
+ export function mergeRequestReference(iid: MergeRequestIid): string {
+@@ -131,7 +133,7 @@ export function rerequestReplyText(
+       return "This merge request is no longer open.";
+     case "glabMissing":
+     case "notLoggedIn":
+-      return discussionsRefusedText(reply);
++      return glabRefusalText(reply);
+     case "refused":
+     case "failed":
+       return reply.message;

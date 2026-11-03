@@ -197,6 +197,21 @@ export function discussionsOf(queue: DiscussionQueue): Discussions {
   };
 }
 
+/** A count's box: its row's entry, asked whenever the box opens or loses the entry while open. */
+export function useRowDiscussions(
+  discussions: Discussions,
+  iid: () => MergeRequestIid,
+  open: () => boolean,
+): ComputedRef<DiscussionLoad | undefined> {
+  const load = computed(() => discussions.discussions.value.get(iid()));
+  watch([open, () => load.value === undefined], ([isOpen]) => {
+    if (isOpen) {
+      discussions.askDiscussions(iid());
+    }
+  });
+  return load;
+}
+
 export function createDiscussions(deps: {
   readonly source: MergeRequestSource;
   readonly mode: () => DiscussionDetails;

@@ -490,6 +490,36 @@ test("a_failed_first_load_drops_the_details_so_the_next_load_asks_its_rows_again
   expect(live.slice.discussions.value.get(iid(open[0] ?? 0))).toEqual({ kind: "loading" });
 });
 
+test("switching_to_full_asks_one_round_and_only_a_show_after_30_s_reloads_and_asks_it_again", async () => {
+  const live = rig();
+  live.mode.value = "off";
+  await loaded(live);
+  live.slice.close();
+  const open = ROWS.filter((row) => row.openDiscussions > 0);
+  live.mode.value = "full";
+  await nextTick();
+  expect(live.discussionCalls.map((call) => call.iids)).toEqual([iids(open)]);
+  live.discussionCalls[0]?.answer({
+    ok: true,
+    value: open.map((row) => ({ iid: row.iid, answer: { kind: "open", discussions: [] } })),
+  });
+  await settled();
+
+  vi.setSystemTime(T0 + RECHECK_PAUSE_MS - 1);
+  live.slice.show();
+  await settled();
+  expect([live.loads.length, live.discussionCalls.length]).toEqual([1, 1]);
+
+  live.slice.close();
+  vi.setSystemTime(T0 + RECHECK_PAUSE_MS);
+  live.slice.show();
+  loadAt(live, 1).send({ me: "sam", rows: ROWS });
+  expect(live.discussionCalls).toHaveLength(1);
+  loadAt(live, 1).end(LOADED);
+  await settled();
+  expect(live.discussionCalls.map((call) => call.iids)).toEqual([iids(open), iids(open)]);
+});
+
 test("the_slice_holds_only_the_public_part_of_the_discussion_queue", () => {
   const live = rig();
   expect("listed" in live.slice).toBe(false);
