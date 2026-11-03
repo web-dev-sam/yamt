@@ -71,7 +71,24 @@ export {
 export { labelsShown, moreText } from "./internal/labels";
 export { summaryText } from "./internal/summary";
 export { searched } from "./internal/search";
-export { createdAgo } from "./internal/relativeTime";
+export { agoText, createdAgo } from "./internal/relativeTime";
+export {
+  DISCUSSIONS_LABEL,
+  UNKNOWN_AUTHOR,
+  discussionTurns,
+  noteAuthorName,
+  noteExcerpt,
+  placeText,
+  turnCounts,
+  turnSummaryText,
+  turnText,
+  type DiscussionNote,
+  type DiscussionPlace,
+  type OpenDiscussion,
+  type Turn,
+  type TurnCounts,
+  type TurnLine,
+} from "./internal/discussions";
 export { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "./internal/ciBox";
 export { filtersFrom, storedFilters, type StoredFilters } from "./internal/stored";
 export { sizeParts, sizeTitle } from "./internal/size";

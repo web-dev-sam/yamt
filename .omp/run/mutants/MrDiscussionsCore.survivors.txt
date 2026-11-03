@@ -1,0 +1,6 @@
+just mutants HEAD: discussions.ts 76 killed / 6 survived / 2 no-cov; relativeTime.ts 17 killed / 14 survived (all on unchanged lines 7-15: UNITS/FORMAT)
+discussions.ts:20 DISCUSSIONS_LABEL "" — gate-covered: module-level const not re-evaluated under vitest (justfile:153, #732); asserted by the_turn_words_are_not_swapped
+discussions.ts:21 UNKNOWN_AUTHOR "" — gate-covered: module-level const (#732); asserted by an_unknown_author_is_someone
+discussions.ts:26 TURN_RANK {} — gate-covered: module-level const (#732); the order tests would fail (NaN comparator)
+discussions.ts:28-30 TURN_TEXTS {} / "" ×2 — gate-covered: module-level const (#732); asserted by the_turn_words_are_not_swapped
+discussions.ts:77 default exhaustive branch (NoCoverage ×2) — equivalent: unreachable, `place` is `never` there

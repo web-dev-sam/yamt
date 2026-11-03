@@ -14,10 +14,12 @@ const UNITS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[] = [
 ];
 const FORMAT = new Intl.RelativeTimeFormat("en", { numeric: "always" });
 
-export function createdAgo(createdAt: number, now: number): string {
-  const age = now - createdAt;
+export function agoText(time: number, now: number): string {
+  const age = now - time;
   const unit = UNITS.find(([, size]) => age >= size);
-  return unit === undefined
-    ? "created just now"
-    : `created ${FORMAT.format(-Math.floor(age / unit[1]), unit[0])}`;
+  return unit === undefined ? "just now" : FORMAT.format(-Math.floor(age / unit[1]), unit[0]);
+}
+
+export function createdAgo(createdAt: number, now: number): string {
+  return `created ${agoText(createdAt, now)}`;
 }

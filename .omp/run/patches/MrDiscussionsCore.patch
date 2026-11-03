@@ -1,0 +1,394 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index d0dd52b..5cd4d9c 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -4,7 +4,7 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ 
+ `readiness` also has `mergesCleanly`, yamt's own merge of GitLab's two commits found no conflict: "No conflicts (checked locally). GitLab has not checked the rest yet", icon `circle-dashed-check`, never `ready`'s words or icon. `rechecked` puts a checked row's readiness on the row with its iid, every other row and field kept.
+ 
+-`internal/`: `filters` (the filter types, `passes`, `stateOf`, `clicked` and the other edits, `filterLabel` "Assignee: not Me, anna"), `choices`, `order`, `summary`, `relativeTime`, `ciBox`, `stored`, `size` (`sizeParts` `{ added "+120", removed "−40", files "6 files" }` with U+2212, the row colours them green, red, text colour; `sizeTitle`), `readiness` (`readinessText`, "Has conflicts. Also blocked: " and the reasons joined by "; ", GitLab's own word quoted for `other`; `readinessIcon`), `rowAction` (the row's Resolve or Continue, first match wins: Continue on the merging row whatever its readiness, disabled while its window is open; no button unless conflicts; a fork, then another unfinished merge, disable Resolve; then running), `dueDate`, `calendar`, `jobLog`, `sgr`, `ansiColours`, `jobLogSearch`. Every file but `sgr` (tested through `jobLogView`) has its `*.test.ts` (node), each test named for the bug it catches.
++`internal/`: `filters` (the filter types, `passes`, `stateOf`, `clicked` and the other edits, `filterLabel` "Assignee: not Me, anna"), `choices`, `order`, `summary`, `relativeTime` (`agoText` "just now" under a minute, else the largest whole unit "3 hours ago"; `createdAgo` "created …" on it), `ciBox`, `stored`, `size` (`sizeParts` `{ added "+120", removed "−40", files "6 files" }` with U+2212, the row colours them green, red, text colour; `sizeTitle`), `readiness` (`readinessText`, "Has conflicts. Also blocked: " and the reasons joined by "; ", GitLab's own word quoted for `other`; `readinessIcon`), `rowAction` (the row's Resolve or Continue, first match wins: Continue on the merging row whatever its readiness, disabled while its window is open; no button unless conflicts; a fork, then another unfinished merge, disable Resolve; then running), `dueDate`, `calendar`, `jobLog`, `sgr`, `ansiColours`, `jobLogSearch`, `discussions`. Every file but `sgr` (tested through `jobLogView`) has its `*.test.ts` (node), each test named for the bug it catches.
+ 
+ `dueDate`: `CalendarDay` (month 1–12) made by `calendarDayFrom` from `"YYYY-MM-DD"` naming a real day, written back by `calendarDayText` (the stored form); `typedDay` reads what the user types, day first only (`3.11.2026`, `03.11.2026`, `03/11/2026`, `03-11-2026` with one separator throughout, or eight digits `03112026`; a four-digit year; a day that does not exist is refused, `11/3/2026` is 11 March); `compareDays` gives the whole days from one day to another (negative when the first is earlier); `localDay` is the local calendar day of a time; `daysLeft` is `compareDays` from `localDay` of now (both days at UTC midnight, so midnight, month ends and daylight-saving days count once); `daysLeftText` "Due today", "1 day left", "n days left", "1 day overdue", "n days overdue"; `dueDateText` is every shown date, `DD.MM.YYYY` with leading zeros ("03.11.2026"), no locale; `dateTimeText` is every shown time, that local date and the 24-hour local time ("30.10.2026, 15:04", the row's created-at hover).
+ 
+@@ -16,4 +16,6 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ 
+ `search` (request #2150): `searched(rows, text)` keeps a row whose title (as shown, "Draft: " included) contains the trimmed text in any case, or whose iid is a number the text names — a run of digits with no letter or digit beside it (`!1234`, `#1234`, a `…/merge_requests/1234` address, `0042` is 42; `v2`, `abc123`, `12ab`, `1e3` name nothing); blank text returns `rows` itself. Only loaded rows: it never asks GitLab.
+ 
++Discussions (request `docs/slices/request-mr-discussions.md` rules 2, 3, 5, design `docs/slices/briefs/mr-discussions-design.md` §1.3, §1.4, §1.8, plan §2 #163–#164): `OpenDiscussion` (a `DiscussionPlace` and its `last` comment, a `DiscussionNote`) is structural, so the window's domain type passes in unchanged. The turn rule: the viewer's turn when the last comment's author is not the viewer, an unknown author included; "waiting" when the viewer wrote it. The viewer is a username or null (nobody: every discussion is the viewer's turn); the window passes its `me`, review mode its reviewer. `discussionTurns` orders the viewer's turn first, then the waiting ones, newest last comment first within each, equal times in GitLab's order; `turnCounts` counts both. Words: `DISCUSSIONS_LABEL` "Open discussions", `turnText` "Your turn" / "Waiting for an answer", `turnSummaryText` "2 of 5 wait for you", "1 of 5 waits for you", "No open discussions" when there are none, `placeText` "Overview", `path:line` or the path alone, `noteAuthorName` the display name or `UNKNOWN_AUTHOR` "Someone", `agoText`. `noteExcerpt`: the body trimmed, its first three lines (`\n` or `\r\n`), at most 280 code points; when anything was left out it is cut there, end-trimmed, plus "…". Plain text: markup and capitals stay as typed.
++
+ Job log (request `docs/slices/request-ci-job-log.md` rules 4–6, design `docs/slices/briefs/ci-job-log-design.md` §1.2, §1.7–1.9, plan §2 #159): `jobLogView(raw)` turns the raw `/trace` text into `LogLine`s of styled `LogRun`s as GitLab's job page shows it (`lib/gitlab/ci/ansi2json/converter.rb`, `parser.rb`, `style.rb`, `line.rb`; bold from `ansi2html.rb`), in one scan: a break is `\r*\n`; the 32-character timestamp prefix is stripped from every line when the first line has it, and a line whose prefix ends in `+` continues the one before (only the `\n` goes, a `\r` before it then clears); `section_start`/`section_end` markers vanish and end a line that has text; a lone `\r` clears the line; only `ESC[…m` (SGR) is applied, by GitLab's exact-text code table (`sgr.ts` `penAfter`: `01` is nothing, `38;5;n` an indexed colour, `38;2;…` no truecolor, its numbers read as codes); every other escape, and C0 controls but tab, vanish; an escape cut off at a line's end drops the rest; 30–37 show bright while bold; the style carries across lines; a line without text is not shown; neighbouring text in equal styles is one run. Run text is text, never markup (RK57). `text` is the shown lines joined by `"\n"`: what the page's `search/` matcher runs over; `hitPlaces` maps its `{ line, from, to }` hits onto runs (a `from` at a run's end starts the next run, a `to` there ends in that run; a hit outside the view is left out). `basicColour` turns a 256-colour index into one of the 16 `AnsiColour`s, 16–255 the nearest on xterm's default palette (the triples classify, never paint: the page maps `AnsiColour` to the `--color-ansi-*` tokens). `jobLogSearch`: `firstHit` the last match, `steppedHit` wraps both ways, `hitCountText` "3 of 17", `NO_RESULTS`; for the page's highlights only the lines near the view count: `firstLineBelow(count, edge, y)` the first line whose growing `edge` is past `y` (binary search), `placesOnLines(places, first, end)` the places on lines `first` to `end` exclusive (binary search on the line order `hitPlaces` gives).
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+index fe2439e..5d308e7 100644
+--- a/frontend/src/mergeRequests/index.ts
++++ b/frontend/src/mergeRequests/index.ts
+@@ -71,7 +71,24 @@ export {
+ export { labelsShown, moreText } from "./internal/labels";
+ export { summaryText } from "./internal/summary";
+ export { searched } from "./internal/search";
+-export { createdAgo } from "./internal/relativeTime";
++export { agoText, createdAgo } from "./internal/relativeTime";
++export {
++  DISCUSSIONS_LABEL,
++  UNKNOWN_AUTHOR,
++  discussionTurns,
++  noteAuthorName,
++  noteExcerpt,
++  placeText,
++  turnCounts,
++  turnSummaryText,
++  turnText,
++  type DiscussionNote,
++  type DiscussionPlace,
++  type OpenDiscussion,
++  type Turn,
++  type TurnCounts,
++  type TurnLine,
++} from "./internal/discussions";
+ export { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "./internal/ciBox";
+ export { filtersFrom, storedFilters, type StoredFilters } from "./internal/stored";
+ export { sizeParts, sizeTitle } from "./internal/size";
+diff --git a/frontend/src/mergeRequests/internal/discussions.test.ts b/frontend/src/mergeRequests/internal/discussions.test.ts
+new file mode 100644
+index 0000000..2d9ab09
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/discussions.test.ts
+@@ -0,0 +1,148 @@
++import { expect, test } from "vitest";
++
++import {
++  DISCUSSIONS_LABEL,
++  UNKNOWN_AUTHOR,
++  discussionTurns,
++  noteAuthorName,
++  noteExcerpt,
++  placeText,
++  turnCounts,
++  turnSummaryText,
++  turnText,
++  type DiscussionPlace,
++  type OpenDiscussion,
++  type Person,
++} from "../index";
++
++const SAM: Person = { username: "sam", name: "Sam Lee" };
++const ANNA: Person = { username: "anna", name: "Anna Berg" };
++const OVERVIEW: DiscussionPlace = { kind: "overview" };
++
++function discussion(
++  id: string,
++  author: Person | null,
++  createdAt: number,
++): OpenDiscussion & { id: string } {
++  return { id, place: OVERVIEW, last: { author, createdAt, text: id } };
++}
++
++const BY_SAM = discussion("by-sam", SAM, 10);
++const BY_ANNA = discussion("by-anna", ANNA, 20);
++const BY_NOBODY = discussion("by-nobody", null, 30);
++const MIXED = [BY_SAM, BY_ANNA, BY_NOBODY];
++
++function turns(
++  open: readonly (OpenDiscussion & { id: string })[],
++  viewer: string | null,
++): string[] {
++  return discussionTurns(open, viewer).map((line) => `${line.discussion.id} ${line.turn}`);
++}
++
++test("the_viewers_own_last_comment_is_waiting_any_other_is_the_viewers_turn", () => {
++  expect(turns(MIXED, "sam")).toEqual(["by-nobody viewer", "by-anna viewer", "by-sam waiting"]);
++});
++
++test("a_reviewer_other_than_me_gets_the_turns_from_their_side", () => {
++  expect(turns(MIXED, "anna")).toEqual(["by-nobody viewer", "by-sam viewer", "by-anna waiting"]);
++});
++
++test("a_null_viewer_has_every_turn", () => {
++  expect(turns(MIXED, null)).toEqual(["by-nobody viewer", "by-anna viewer", "by-sam viewer"]);
++  expect(turnCounts(MIXED, null)).toEqual({ viewersTurn: 3, waiting: 0 });
++});
++
++test("the_viewers_turn_comes_first_then_newest_first_within_each", () => {
++  const open = [
++    discussion("mine-old", SAM, 1),
++    discussion("theirs-old", ANNA, 2),
++    discussion("mine-new", SAM, 50),
++    discussion("theirs-new", ANNA, 40),
++    discussion("theirs-mid", null, 3),
++  ];
++  expect(turns(open, "sam")).toEqual([
++    "theirs-new viewer",
++    "theirs-mid viewer",
++    "theirs-old viewer",
++    "mine-new waiting",
++    "mine-old waiting",
++  ]);
++});
++
++test("equal_times_keep_gitlabs_order", () => {
++  const open = [
++    discussion("first", ANNA, 5),
++    discussion("mine", SAM, 5),
++    discussion("second", null, 5),
++    discussion("third", ANNA, 5),
++  ];
++  expect(turns(open, "sam")).toEqual([
++    "first viewer",
++    "second viewer",
++    "third viewer",
++    "mine waiting",
++  ]);
++  expect(turns([...open].reverse(), "sam")).toEqual([
++    "third viewer",
++    "second viewer",
++    "first viewer",
++    "mine waiting",
++  ]);
++});
++
++test("the_counts_add_up_to_the_open_discussions", () => {
++  const open = [...MIXED, discussion("again-sam", SAM, 40)];
++  expect(turnCounts(open, "sam")).toEqual({ viewersTurn: 2, waiting: 2 });
++  expect(turnCounts(open, "anna")).toEqual({ viewersTurn: 3, waiting: 1 });
++  expect(turnCounts([], "sam")).toEqual({ viewersTurn: 0, waiting: 0 });
++});
++
++test.each([
++  [{ viewersTurn: 2, waiting: 3 }, "2 of 5 wait for you"],
++  [{ viewersTurn: 1, waiting: 4 }, "1 of 5 waits for you"],
++  [{ viewersTurn: 1, waiting: 0 }, "1 of 1 waits for you"],
++  [{ viewersTurn: 0, waiting: 3 }, "0 of 3 wait for you"],
++  [{ viewersTurn: 0, waiting: 0 }, "No open discussions"],
++])("the_summary_counts_words_singular_and_plural: %o reads %s", (counts, text) => {
++  expect(turnSummaryText(counts)).toBe(text);
++});
++
++test("the_turn_words_are_not_swapped", () => {
++  expect(turnText("viewer")).toBe("Your turn");
++  expect(turnText("waiting")).toBe("Waiting for an answer");
++  expect(DISCUSSIONS_LABEL).toBe("Open discussions");
++});
++
++test("a_file_place_reads_path_and_line_or_path_alone", () => {
++  expect(placeText({ kind: "overview" })).toBe("Overview");
++  expect(placeText({ kind: "file", path: "src/board/card.ts", line: 4 })).toBe(
++    "src/board/card.ts:4",
++  );
++  expect(placeText({ kind: "file", path: "src/board/card.ts", line: null })).toBe(
++    "src/board/card.ts",
++  );
++});
++
++test("the_excerpt_keeps_three_lines_and_cuts_with_an_ellipsis", () => {
++  expect(noteExcerpt("one\ntwo\nthree")).toBe("one\ntwo\nthree");
++  expect(noteExcerpt("one\ntwo\nthree \nfour")).toBe("one\ntwo\nthree…");
++  expect(noteExcerpt("one\r\ntwo\r\nthree\r\nfour")).toBe("one\ntwo\nthree…");
++  expect(noteExcerpt("one\r\ntwo")).toBe("one\ntwo");
++  expect(noteExcerpt("\n\n  \nfirst\nsecond\n\n")).toBe("first\nsecond");
++  expect(noteExcerpt(`${"a".repeat(280)}`)).toBe("a".repeat(280));
++  expect(noteExcerpt(`${"a".repeat(299)}b`)).toBe(`${"a".repeat(280)}…`);
++  expect(noteExcerpt(`${"a".repeat(279)} b`)).toBe(`${"a".repeat(279)}…`);
++  expect(noteExcerpt(`${"a".repeat(279)}😀😀`)).toBe(`${"a".repeat(279)}😀…`);
++  expect(noteExcerpt(`${"😀".repeat(280)}`)).toBe("😀".repeat(280));
++});
++
++test("markup_and_capitals_stay_as_typed", () => {
++  expect(noteExcerpt("**x** <b>X</b> &amp; LOUD")).toBe("**x** <b>X</b> &amp; LOUD");
++});
++
++test("an_unknown_author_is_someone", () => {
++  expect(noteAuthorName(null)).toBe("Someone");
++  expect(UNKNOWN_AUTHOR).toBe("Someone");
++  expect(noteAuthorName(ANNA)).toBe("Anna Berg");
++  expect(noteAuthorName({ username: "kim", name: " " })).toBe("kim");
++});
+diff --git a/frontend/src/mergeRequests/internal/discussions.ts b/frontend/src/mergeRequests/internal/discussions.ts
+new file mode 100644
+index 0000000..904d980
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/discussions.ts
+@@ -0,0 +1,97 @@
++import type { Person } from "./filters";
++import { displayName } from "./people";
++
++export type DiscussionPlace =
++  | { readonly kind: "overview" }
++  | { readonly kind: "file"; readonly path: string; readonly line: number | null };
++export type DiscussionNote = {
++  readonly author: Person | null;
++  readonly createdAt: number;
++  readonly text: string;
++};
++export type OpenDiscussion = { readonly place: DiscussionPlace; readonly last: DiscussionNote };
++
++/** "viewer": the last comment is not the viewer's (an unknown author too), so it is the viewer's turn; "waiting":
++ *  the viewer wrote it and waits for an answer (request rule 3). */
++export type Turn = "viewer" | "waiting";
++export type TurnLine<D extends OpenDiscussion> = { readonly discussion: D; readonly turn: Turn };
++export type TurnCounts = { readonly viewersTurn: number; readonly waiting: number };
++
++export const DISCUSSIONS_LABEL = "Open discussions";
++export const UNKNOWN_AUTHOR = "Someone";
++
++const EXCERPT_LINES = 3;
++const EXCERPT_CHARACTERS = 280;
++
++const TURN_RANK: Readonly<Record<Turn, number>> = { viewer: 0, waiting: 1 };
++
++const TURN_TEXTS: Readonly<Record<Turn, string>> = {
++  viewer: "Your turn",
++  waiting: "Waiting for an answer",
++};
++
++function turnOf(last: DiscussionNote, viewer: string | null): Turn {
++  return last.author !== null && last.author.username === viewer ? "waiting" : "viewer";
++}
++
++/** Each discussion with its turn for `viewer` (a username; null: nobody, so every one is the viewer's turn): the
++ *  viewer's turn first, then the rest; within each, the newest last comment first; equal times keep `open`'s order. */
++export function discussionTurns<D extends OpenDiscussion>(
++  open: readonly D[],
++  viewer: string | null,
++): readonly TurnLine<D>[] {
++  return open
++    .map((discussion) => ({ discussion, turn: turnOf(discussion.last, viewer) }))
++    .toSorted((a, b) => {
++      const turns = TURN_RANK[a.turn] - TURN_RANK[b.turn];
++      return turns === 0 ? b.discussion.last.createdAt - a.discussion.last.createdAt : turns;
++    });
++}
++
++/** How many are `viewer`'s turn and how many wait on others (review mode's order uses both). */
++export function turnCounts(open: readonly OpenDiscussion[], viewer: string | null): TurnCounts {
++  const viewersTurn = open.filter(
++    (discussion) => turnOf(discussion.last, viewer) === "viewer",
++  ).length;
++  return { viewersTurn, waiting: open.length - viewersTurn };
++}
++
++export function turnText(turn: Turn): string {
++  return TURN_TEXTS[turn];
++}
++
++export function turnSummaryText({ viewersTurn, waiting }: TurnCounts): string {
++  const total = viewersTurn + waiting;
++  if (total === 0) {
++    return "No open discussions";
++  }
++  return `${viewersTurn} of ${total} ${viewersTurn === 1 ? "waits" : "wait"} for you`;
++}
++
++export function placeText(place: DiscussionPlace): string {
++  switch (place.kind) {
++    case "overview":
++      return "Overview";
++    case "file":
++      return place.line === null ? place.path : `${place.path}:${place.line}`;
++    default: {
++      const _exhaustive: never = place;
++      return _exhaustive;
++    }
++  }
++}
++
++export function noteAuthorName(author: Person | null): string {
++  return author === null ? UNKNOWN_AUTHOR : displayName(author);
++}
++
++/** The text trimmed, its first 3 lines (any of \n, \r\n), at most 280 characters (code points, never half a
++ *  surrogate pair); when anything was left out, cut there, end-trimmed, plus "…". Plain text, never markup. */
++export function noteExcerpt(text: string): string {
++  const lines = text.trim().split(/\r?\n/u);
++  const kept = Array.from(lines.slice(0, EXCERPT_LINES).join("\n"));
++  if (lines.length <= EXCERPT_LINES && kept.length <= EXCERPT_CHARACTERS) {
++    return kept.join("");
++  }
++  return `${kept.slice(0, EXCERPT_CHARACTERS).join("").trimEnd()}…`;
++}
+diff --git a/frontend/src/mergeRequests/internal/relativeTime.test.ts b/frontend/src/mergeRequests/internal/relativeTime.test.ts
+index 0156439..477b12c 100644
+--- a/frontend/src/mergeRequests/internal/relativeTime.test.ts
++++ b/frontend/src/mergeRequests/internal/relativeTime.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { createdAgo } from "../index";
++import { agoText, createdAgo } from "../index";
+ 
+ const NOW = Date.parse("2026-10-30T12:00:00Z");
+ const SECOND = 1000;
+@@ -9,26 +9,32 @@ const HOUR = 60 * MINUTE;
+ const DAY = 24 * HOUR;
+ 
+ test.each([
+-  ["0 s", 0, "created just now"],
+-  ["59 s", 59 * SECOND, "created just now"],
+-  ["1 min", MINUTE, "created 1 minute ago"],
+-  ["119 s", 2 * MINUTE - 1, "created 1 minute ago"],
+-  ["2 min", 2 * MINUTE, "created 2 minutes ago"],
+-  ["59 min", HOUR - 1, "created 59 minutes ago"],
+-  ["1 h", HOUR, "created 1 hour ago"],
+-  ["23 h", 23 * HOUR, "created 23 hours ago"],
+-  ["1 d", DAY, "created 1 day ago"],
+-  ["6 d", 6 * DAY, "created 6 days ago"],
+-  ["7 d", 7 * DAY, "created 1 week ago"],
+-  ["29 d", 29 * DAY, "created 4 weeks ago"],
+-  ["30 d", 30 * DAY, "created 1 month ago"],
+-  ["364 d", 364 * DAY, "created 12 months ago"],
+-  ["365 d", 365 * DAY, "created 1 year ago"],
+-  ["800 d", 800 * DAY, "created 2 years ago"],
+-])("%s old reads %s", (_age, age, text) => {
+-  expect(createdAgo(NOW - age, NOW)).toBe(text);
++  ["0 s", 0, "just now"],
++  ["59 s", 59 * SECOND, "just now"],
++  ["1 min", MINUTE, "1 minute ago"],
++  ["119 s", 2 * MINUTE - 1, "1 minute ago"],
++  ["2 min", 2 * MINUTE, "2 minutes ago"],
++  ["59 min", HOUR - 1, "59 minutes ago"],
++  ["1 h", HOUR, "1 hour ago"],
++  ["23 h", 23 * HOUR, "23 hours ago"],
++  ["1 d", DAY, "1 day ago"],
++  ["6 d", 6 * DAY, "6 days ago"],
++  ["7 d", 7 * DAY, "1 week ago"],
++  ["29 d", 29 * DAY, "4 weeks ago"],
++  ["30 d", 30 * DAY, "1 month ago"],
++  ["364 d", 364 * DAY, "12 months ago"],
++  ["365 d", 365 * DAY, "1 year ago"],
++  ["800 d", 800 * DAY, "2 years ago"],
++])("ago_text_uses_the_largest_whole_unit_and_just_now: %s old reads %s", (_age, age, text) => {
++  expect(agoText(NOW - age, NOW)).toBe(text);
+ });
+ 
+-test("a time ahead of the clock reads as just now", () => {
+-  expect(createdAgo(NOW + HOUR, NOW)).toBe("created just now");
++test("ago_text_uses_the_largest_whole_unit_and_just_now: a time ahead of the clock is just now", () => {
++  expect(agoText(NOW + HOUR, NOW)).toBe("just now");
++});
++
++test("created_ago_keeps_its_words", () => {
++  expect(createdAgo(NOW - 30 * SECOND, NOW)).toBe("created just now");
++  expect(createdAgo(NOW - 3 * HOUR, NOW)).toBe("created 3 hours ago");
++  expect(createdAgo(NOW - 800 * DAY, NOW)).toBe("created 2 years ago");
+ });
+diff --git a/frontend/src/mergeRequests/internal/relativeTime.ts b/frontend/src/mergeRequests/internal/relativeTime.ts
+index c8e6c08..fc8624d 100644
+--- a/frontend/src/mergeRequests/internal/relativeTime.ts
++++ b/frontend/src/mergeRequests/internal/relativeTime.ts
+@@ -14,10 +14,12 @@ const UNITS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[] = [
+ ];
+ const FORMAT = new Intl.RelativeTimeFormat("en", { numeric: "always" });
+ 
+-export function createdAgo(createdAt: number, now: number): string {
+-  const age = now - createdAt;
++export function agoText(time: number, now: number): string {
++  const age = now - time;
+   const unit = UNITS.find(([, size]) => age >= size);
+-  return unit === undefined
+-    ? "created just now"
+-    : `created ${FORMAT.format(-Math.floor(age / unit[1]), unit[0])}`;
++  return unit === undefined ? "just now" : FORMAT.format(-Math.floor(age / unit[1]), unit[0]);
++}
++
++export function createdAgo(createdAt: number, now: number): string {
++  return `created ${agoText(createdAt, now)}`;
+ }
