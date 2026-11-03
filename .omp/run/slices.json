@@ -1,14 +1,1 @@
-{
-  "CiJobLogPageR2": {
-    "owned": [
-      "frontend/src/ui/CiStatusBox.vue",
-      "frontend/src/ui/CiStatusJobLog.vue",
-      "frontend/src/ui/mergeRequestLogLook.ts",
-      "frontend/src/ui/mergeRequestLogLook.test.ts",
-      "frontend/src/mergeRequests/internal/jobLogSearch.ts",
-      "frontend/src/mergeRequests/internal/jobLogSearch.test.ts",
-      "frontend/src/mergeRequests/index.ts",
-      "frontend/src/ui/AGENTS.md"
-    ]
-  }
-}
+{}
