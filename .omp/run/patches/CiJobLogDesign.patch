@@ -1,0 +1,1224 @@
+diff --git a/docs/slices/briefs/ci-job-log-core.md b/docs/slices/briefs/ci-job-log-core.md
+new file mode 100644
+index 0000000..cbb1648
+--- /dev/null
++++ b/docs/slices/briefs/ci-job-log-core.md
+@@ -0,0 +1,147 @@
++# Slice ci-job-log-core — a GitLab job log as styled lines, matches placed on runs, the search's steps
++
++Feature: CI job log (request `docs/slices/request-ci-job-log.md` rules 4–6 and the "colours, search" parts of the
++acceptance; design `docs/slices/briefs/ci-job-log-design.md` option A, §1.2, §1.7–1.9, §2.2; proposed plan §2 #159;
++proposed RK57). Framework-free, pure, tested (PM3: `mergeRequests/` imports no other `src/` module; no DOM, no
++timers, no storage, `mergeRequests/AGENTS.md`). Runs beside `ci-job-log-rust`.
++
++## Target
++
++Owned: `frontend/src/mergeRequests/**` (new `internal/jobLog.ts`, `internal/ansiColours.ts`,
++`internal/jobLogSearch.ts` and their tests; `index.ts`; `AGENTS.md`).
++
++Read-only: everything else. `search/` is the page's matcher (`matcherOf`, `search/index.ts:1`); this slice only
++receives its hits as `LogHit`. The callers (`ui/mergeRequestJobLogs.ts`, `ui/CiStatusJobLog.vue`,
++`ui/mergeRequestLogLook.ts`) are `ci-job-log-state`'s and `ci-job-log-page`'s. `docs/**` is the docs keeper's.
++
++Non-goals: folding sections, timestamps shown, durations (request non-goals); regex or match-case search; truecolor;
++blink, inverse, fonts (GitLab applies none); any colour value (the palette slice's tokens; the page maps
++`AnsiColour` to classes).
++
++## Contract
++
++Fixed; existing exports stay. All types `readonly`; `index.ts` exports exactly these new names.
++
++```ts
++// internal/jobLog.ts
++export type AnsiColour =
++  | "black" | "red" | "green" | "yellow" | "blue" | "magenta" | "cyan" | "white"
++  | "brightBlack" | "brightRed" | "brightGreen" | "brightYellow"
++  | "brightBlue" | "brightMagenta" | "brightCyan" | "brightWhite";
++export type LogStyle = {
++  readonly foreground: AnsiColour | null; // null: the box's own text colour
++  readonly background: AnsiColour | null; // null: the box's own background
++  readonly bold: boolean;
++  readonly italic: boolean;
++  readonly underline: boolean;
++  readonly struck: boolean;
++};
++export type LogRun = { readonly text: string; readonly style: LogStyle }; // text never ""
++export type LogLine = { readonly runs: readonly LogRun[] }; // at least one run
++export type JobLogView = {
++  readonly lines: readonly LogLine[];
++  /** Every line's runs' texts joined, the lines joined by "\n": what the search runs over (rule 8: what is shown). */
++  readonly text: string;
++};
++/** The log as GitLab's job page shows it (rules below). Total: any string gives a view, "" none of its lines. */
++export function jobLogView(raw: string): JobLogView;
++
++export type LogHit = { readonly line: number; readonly from: number; readonly to: number }; // UTF-16, from < to
++export type RunPoint = { readonly run: number; readonly offset: number };
++export type HitPlace = { readonly line: number; readonly start: RunPoint; readonly end: RunPoint };
++/** Where each hit of `view.text` starts and ends among its line's runs, in order. A `from` at a run's end starts in
++ *  the next run (offset 0); a `to` at a run's end ends in that run (offset = its length); a hit outside the view is
++ *  left out. */
++export function hitPlaces(view: JobLogView, hits: readonly LogHit[]): readonly HitPlace[];
++
++// internal/ansiColours.ts
++/** A 256-colour index as one of the 16: 0–7 the basic, 8–15 the bright ones; 16–231 (xterm's cube, levels 0, 95, 135,
++ *  175, 215, 255) and 232–255 (grays 8 + 10·k) the nearest of the 16 by squared RGB distance on xterm's default
++ *  palette (0,0,0) (205,0,0) (0,205,0) (205,205,0) (0,0,238) (205,0,205) (0,205,205) (229,229,229) (127,127,127)
++ *  (255,0,0) (0,255,0) (255,255,0) (92,92,255) (255,0,255) (0,255,255) (255,255,255), a tie to the lower index;
++ *  anything else `null`. The triples are numbers that classify, never a colour painted (palette fence, design §1.8). */
++export function basicColour(index: number): AnsiColour | null;
++
++// internal/jobLogSearch.ts
++export const NO_RESULTS = "No results";
++/** The first current match: the last one in the log (rule 6); null when there is none. */
++export function firstHit(count: number): number | null;
++/** Enter (forward) / Shift+Enter (backwards), wrapping at both ends; `count` ≥ 1, `current` in [0, count). */
++export function steppedHit(current: number, count: number, backwards: boolean): number;
++/** "3 of 17" for current 2 of 17 (`count` ≥ 1). */
++export function hitCountText(current: number, count: number): string;
++```
++
++**`jobLogView`'s rules** (design §1.2, §1.9; GitLab `lib/gitlab/ci/ansi2json/converter.rb`, `parser.rb`,
++`style.rb`, `line.rb`, and `ansi2html.rb` for bold):
++
++1. **Lines.** Physical lines end at `\n`; a trailing `\n` makes no extra line. A line break is `\r*\n` (the `\r`s
++   before it belong to the break).
++2. **Timestamps.** When the first physical line starts with `^\d{4}-[01]\d-[0-3]\dT[0-2]\d:[0-5]\d:[0-5]\d\.\d{6}Z
++   [0-9a-f]{2}[EO][+ ]` (32 characters), every physical line starting with that pattern loses those 32 characters;
++   otherwise none does (a later line that looks like one keeps it). A physical line whose **next** line has the prefix
++   with `+` in its 32nd character continues into it: only the `\n` between them goes (any `\r` before it stays, so it
++   then clears, rule 5), and the next line's text after its prefix follows on the same line.
++3. **Section markers** `section_(start|end):\d+:[A-Za-z0-9_.-]+` + an optional `[k=v, k=v]` (`\w+=\w+`, `, ` or `,`
++   between) + `\r\e[0K` are dropped. A start or an end ends the current line when it has text; what follows starts a
++   new line (so a section's header shows as a plain line).
++4. **Escapes.** `\e` + one character of `@`–`_` + the shortest run of characters up to one of `@`–`~` is one escape:
++   applied when it is `\e[` … `m` (SGR, rule 6), dropped otherwise (`\e[0K`, cursor moves, `\e]0;t…`). An `\e` with no
++   such end before the line's end drops the rest of the line.
++5. **Characters.** A lone `\r` clears the text gathered for the current line (the style stays): a progress bar shows
++   its last state. Other C0 controls but tab (U+0000–U+001F) and U+007F are dropped. Everything else is text in the
++   current style, never markup (`<b>` is three characters).
++6. **SGR.** The parameters are the text between `\e[` and `m` split at `;`, trailing empty ones dropped (Ruby's
++   `split`); none at all resets. Read left to right, each by its exact text (`01`, `+1`, `031` do nothing):
++   `0` reset; `1` bold; `3` italic; `4` underline; `8` nothing visible (conceal is shown, design §2.4); `9` struck;
++   `21` `22` bold off; `23` italic off; `24` underline off; `28` nothing; `29` struck off; `30`–`37` foreground basic;
++   `39` and `99` foreground default; `40`–`47` background basic; `49` and `109` background default; `90`–`97`
++   foreground bright; `100`–`107` background bright; `38` / `48`: when at least two parameters follow and the next is
++   exactly `5`, both are consumed and the second (`Number.parseInt(p, 10)`, NaN as 0, as Ruby's `to_i`) when 0–255
++   sets the foreground / background by `basicColour`; otherwise `38`/`48` consume nothing (so `38;2;255;0;0` reads
++   `2`, `255`, `0` — a reset — `0`: GitLab's "no truecolor"). Anything else is ignored.
++7. **Shown colours.** A foreground set by `30`–`37` shows as its bright variant while bold (ansi2html `:274-278`,
++   rule 4); a bright or 256-colour one never changes with bold; backgrounds never do.
++8. **Style across lines.** The style carries from line to line until changed.
++9. **Lines without text are not shown** (the job page drops them: `line.rb` `empty?`, `converter.rb`
++   `flush_current_line`): a blank line, a line of markers or escapes only, a line cleared by `\r` with nothing after.
++10. **Runs.** Neighbouring text in equal styles is one run; no empty run; a line has at least one run.
++
++## Change
++
++1. `internal/ansiColours.ts` and its test.
++2. `internal/jobLog.ts`: `jobLogView` as one scan over the text with the rules above, `hitPlaces`; tests. Name what you
++   can after GitLab's names (`section`, `timestamp`, `SGR`); no comment restating code (`skill://comment-policy`).
++3. `internal/jobLogSearch.ts` and its test.
++4. `index.ts` exports; `AGENTS.md`: a paragraph for the log (the rules' sources, `text` is what search runs over,
++   `hitPlaces`' boundary rule, `basicColour`).
++
++## Acceptance
++
++- Vitest (`pnpm -C frontend test -- src/mergeRequests`), each named for the bug it catches, at least:
++  - `ansiColours.test.ts`: `the_first_sixteen_are_themselves` (0–15), `a_256_colour_is_its_nearest_basic_one` (16
++    black, 21 blue, 28 green, 46 brightGreen, 124 red, 196 brightRed, 208 yellow, 226 brightYellow, 232 black, 244
++    brightBlack, 250 white, 255 white), `anything_else_is_no_colour` (−1, 256, 1.5).
++  - `jobLog.test.ts`: `timestamps_are_stripped_and_plus_lines_join`,
++    `a_log_whose_first_line_has_no_timestamp_keeps_text_that_looks_like_one`,
++    `section_markers_vanish_and_their_header_is_a_plain_line`, `a_section_marker_ends_a_line_that_has_text`,
++    `a_lone_carriage_return_clears_the_line_and_crlf_is_a_break`, `a_joined_line_keeps_the_carriage_return_before_its_join`,
++    `only_sgr_styles_and_every_other_escape_vanishes`, `an_escape_cut_off_at_the_line_end_drops_the_rest`,
++    `codes_follow_gitlabs_exact_table` (`01`, `22`, `39`, `49`, `99`, `109`, `21`, unknown `5`),
++    `bold_shows_basic_foregrounds_bright_but_not_indexed_or_bright_ones`, `a_256_colour_goes_through_basic_colour`
++    (`38;5;208`, `48;5;196`, `38;5` alone, `38;5;300`), `truecolor_is_ignored_and_its_numbers_read_as_codes`,
++    `the_style_carries_across_lines`, `empty_lines_are_not_shown`, `control_characters_but_tab_vanish`,
++    `markup_in_a_log_stays_text` (RK57: `<script>x</script>` and `&amp;` are run text as written),
++    `the_text_is_the_lines_joined_by_line_breaks` (over every test input of the file),
++    `equal_styles_merge_into_one_run_and_no_run_is_empty`,
++    `hit_places_at_run_boundaries` (a hit ending at a run's end, one starting there, one across three runs, one
++    outside the view).
++  - `jobLogSearch.test.ts`: `the_first_current_match_is_the_last`, `steps_wrap_both_ways`, `the_count_reads_one_based`.
++  - A whole-log test: a 500 KB input built in the test (9,000 coloured lines with timestamps) gives 9,000 lines in
++    under 300 ms in node (`performance.now()`; record the number) — the parser is linear.
++- `pnpm -C frontend lint`, `typecheck` (clean: nothing uses the new exports yet), `test`: summary lines.
++- `just mutants HEAD` in your workspace (SP11).
++
++## Skills
++
++`skill://ts-conventions`, `skill://comment-policy`, `skill://risk-register` (proposed RK57), `skill://verification`.
+diff --git a/docs/slices/briefs/ci-job-log-design.md b/docs/slices/briefs/ci-job-log-design.md
+new file mode 100644
+index 0000000..66d2baf
+--- /dev/null
++++ b/docs/slices/briefs/ci-job-log-design.md
+@@ -0,0 +1,350 @@
++# CI job log in the merge-request page — design
++
++Request: `docs/slices/request-ci-job-log.md` (rules 1–9, owner answers #2154 press not hold, #2155 text per job name;
++this design refines only details a rule names). Facts: `.omp/run/notes/PlanScoutCiLogFacts.md` (used as given; its
++UNKNOWNs are closed in §1). Decisions that bind: plan §2 #128 (the page), #133/#137 (offered pages only, no CSP change),
++#127 (one `search/` matcher), #154 (`useHoverBox`), #135 (the CI box closes on scroll); risks RK41, RK53. Citations
++are to this working tree (base `2e898a4f`); GitLab sources are `gitlab-org/gitlab` master as read on 2026-11-03.
++
++## 1. The request's "to be measured", closed
++
++### 1.1 The job id
++
++- `webPath` is `project_job_path(object.project, object)` (`app/graphql/types/ci/job_type.rb:290-292`): the job's
++  **own** project and `Ci::Build#id`. The REST route finds the same row: `find_build!(params[:job_id])`
++  (`lib/api/ci/jobs.rb`, `get ':id/jobs/:job_id/trace'`). So the digits after `/-/jobs/` are the REST `job_id`, and
++  `WebPage::job` already refuses anything else (`web_page.rs:23-29`, `is_number` `:123-125`). No `id` in the list
++  query (no complexity cost, `query.rs:59-61` unchanged).
++- **New finding — forks.** `webPath`'s project is the job's own: a fork merge request's pipeline runs in the fork, so
++  `projects/:fullpath/jobs/<n>/trace` (the target project, `project.rs:9-10`) answers 404 for it. The route therefore
++  names the project from the page itself: `<origin><sub-path>/<group/project>/-/jobs/<n>` → `projects/<group%2Fproject>/
++  jobs/<n>/trace`. The sub-path GitLab may be installed under is `Project.web_path` minus `/<full_path>`
++  (`project.rs:12-20,57-62`), dropped from the front when present. glab passes an escaped path as is: its own example
++  `glab api projects/gitlab-com%2Fwww-gitlab-com/issues` (`gitlab-org/cli` `internal/commands/api/api.go` v1.80.2).
++- A trigger job (`Ci::Bridge`) has no `webPath` (`job_type.rb:291`), so no page and no log — already `page: null`.
++
++### 1.2 The timestamp prefix in the raw trace
++
++- The runner writes it into the stored log; `Stream#raw` returns `stream.read` unchanged, and the readers that need
++  plain lines strip it themselves (`extract_coverage`: `line.slice!(0, TIMESTAMP_HEADER_LENGTH) if strip_timestamp`)
++  (`lib/gitlab/ci/trace/stream.rb`). So `/trace` keeps it whenever the job ran with timestamps: on by default since
++  GitLab 18.9, off with `FF_TIMESTAMPS: false` (docs `ci/jobs/job_logs` l. 168-209).
++- Shape (`stream.rb:10-13`): `\d{4}-[01]\d-[0-3]\dT[0-2]\d:[0-5]\d:[0-5]\d\.\d{6}Z [0-9a-f]{2}[EO][+ ]`, exactly 32
++  characters; `+` in column 32 marks a line continuing the previous one. GitLab decides "has timestamps" once, from
++  the first line (`ansi2json/converter.rb` `handle_line`). A cut tail starts at a line start (§1.3), so its first line
++  carries the prefix too.
++- The Rust slice's step 1 reads one real failed job's trace head on gitlab.com (read-only) and pastes it
++  `[INFERENCE until then: gitlab.com runners send the prefix]`; the parser handles both.
++
++### 1.3 Memory, byte ranges, the cut
++
++- **No byte range.** The API never reads a `Range` header: Rails answers `build.trace.raw` whole, or hands an archived
++  log to Workhorse whole (`send_archived_trace_via_workhorse!`, `jobs.rb`). Master has `byte_offset`/`byte_limit`
++  parameters (`byte_limit` ≤ `Stream::LIMIT_SIZE`), but the API docs list only `id` and `job_id` (docs `api/jobs`
++  "Retrieve a log file for a job"), an older GitLab ignores them, and a tail needs the size first. Not used.
++- **Reading whole is bounded in practice.** gitlab-runner's `output_limit` defaults to 4096 KB (runner docs
++  "advanced configuration"); GitLab's own maximum is 100 MB (docs `administration/cicd/limits` "Maximum file size for
++  job logs"). `Glab::run` holds stdout (`glab.rs:22-33,89-92`): a 4 MB log costs 4 MB for a moment; a 100 MB one most
++  likely ends at `GLAB_TIMEOUT` 20 s (`glab.rs:10`) as "glab timed out", which the box shows (rule 9). After the cut
++  only ≤ 500 KB is kept. A streaming tail reader in `gitio` would serve one caller for a rare case (vision 5).
++- **The cut is GitLab's.** `LIMIT_SIZE = 500.kilobytes` (512,000 bytes); `limit` seeks to the last 512,000 bytes and
++  `readline`s, dropping the line it lands in even when it lands on a line start, only when the log is larger
++  (`if last_bytes < size`) (`stream.rb` `limit`); the job page does exactly this (`app/models/ci/build_trace.rb`:
++  `stream.limit`). Rust cuts the bytes the same way, then decodes them lossily (U+FFFD), so the window never sees
++  half a UTF-8 sequence (the cut is after a `\n` byte).
++- **Empty and missing logs.** Master answers `body trace || ''` for a job without a log (200, empty); the docs name
++  404 for "Job not found or no log file". Both mean "no log" to the user. glab prints `glab: <message> (HTTP 404)`
++  on an HTTP error and exits 1 (`tests/glab/README.md:55-58`, `crates/gitio/tests/glab.rs:133-134`): a failure whose
++  line ends in `(HTTP 404)` is `NoLog`.
++
++### 1.4 Where the colours are parsed, and what crosses the IPC
++
++The raw cut text crosses as a `String` with a `cut` flag; the framework-free core parses it in TypeScript. Reasons:
++the owner reads TypeScript (vision 1); the fixture page (`?mr=list`) then runs the same parser on raw fixture logs, so
++the WebKit check exercises the real code (vision 2: one parser); the payload is the log itself (≤ 500 KB plus JSON
++escapes), smaller than per-run JSON objects. Rust stays: offered check, route, fetch, cut, cache. The alternative
++(Rust parses into styled lines) is option C.
++
++### 1.5 Rendering cost and visible-only rendering
++
++- Shape: ≤ 512,000 bytes ≈ 9–10k lines; most lines are one or two runs → ≈ 20–30k elements, rendered once per
++  opened log. The page already renders up to 500 rows (`MAX_MERGE_REQUESTS`, `lib.rs:45`) of some 40 elements each in
++  WebKit `[INFERENCE: the same order of DOM size works today]`. No virtualisation (variable wrapped heights, opening at
++  the end, and copy-all of a selection would all need their own code, vision 5).
++- Highlights do **not** re-render lines: the CSS Custom Highlight API (`CSS.highlights`, `Highlight`, `::highlight()`)
++  paints `Range`s over the static text nodes. A broad query ("e": tens of thousands of matches) then costs one regex
++  pass and one `Range` per match, no DOM change, and a selection the user made survives typing. `[INFERENCE: WebKit
++  ships the API since Safari 17.2; WebKitGTK 2.54 (plan §2 #99) has it]` — the page slice's first step checks
++  `typeof Highlight === "function"` in the WebKit fixture; if false, the slice stops and the orchestrator switches to
++  option B.
++- The page slice measures in WebKit (fixture, a ≤ 500 KB cut log): Shift-to-last-line-painted ≤ 1.5 s and a one-letter
++  query to highlights painted ≤ 250 ms; either over budget is a finding for the design, not a narrowed acceptance.
++
++### 1.6 Joining `useHoverBox`; reading the Shift press
++
++- **Inside rule, one copy.** The log box is a DOM child of the CI box's `area` span (`CiStatusBox.vue:62-70`),
++  `position: fixed` like the CI box (`:81-88`). Pointer enter/leave, `focusin`/`focusout` and the scroll filter all ask
++  `area.contains` (`useHoverBox.ts:47-49,56-68,100-111`), so pointer or focus in the log box holds both boxes and a
++  scroll inside does not close them, with no change to the rule. A click outside moves focus out (focusout with
++  `relatedTarget` outside or null) while the pointer is outside → both close; a scroll outside closes the CI box
++  (`:121-125`) and the CI box's close closes the log.
++- **Escape order.** The log box handles Escape (closes itself, focuses its job, `preventDefault`); the event bubbles to
++  the area, whose `keyPressed` (`useHoverBox.ts:70-76`) today closes on any Escape. One line changes: it ignores an
++  Escape already `defaultPrevented`, as `MergeRequestsView.vue:86-90` and `ServerLogView.vue:85-90` already do. The
++  second Escape (focus on the job button, inside the area) closes the CI box as today.
++- **The press is a tap.** A keydown edge would open a log on Shift+Tab (keyboard users moving back through the jobs)
++  and on Shift+click, then pull focus into the field. A Shift "press" is therefore Shift down then up with no other
++  key and no pointer press between — what the acceptance calls "press and release Shift". It comes from the one
++  Shift rule: `useShiftHeld.ts`'s `shiftHeldAfter` (`:14-27`) becomes `shiftAfter` over a small state
++  (`up | held { alone }` plus a tap count) on `keyHold.ts`'s one listener set (`:17-55`), made generic over its
++  state; `useShiftHeld()` keeps returning the held boolean for the filters, `useShiftTaps()` adds the count. The
++  X11 quirk stays handled by key names (`:18-21`). `altHold.ts` passes its boolean rule unchanged.
++- **Which job, and when not.** Over a job = the pointer is over its `<li>` (the wrapper, since WebKit sends no pointer
++  events to a disabled button, `ui/AGENTS.md` "Hover"); else the job button with focus. Nothing opens when the CI box
++  is closed, the job has no page, or focus is in a text field: `isTypingTarget` (`ui/rangeKeys.ts:26-42`, reused, not
++  copied; PM10 forbids only the window roots, `windowFence.ts:10-17,70-84`). After opening, focus is in the search
++  field, so Shift over another job types a capital (rule 1); switching by pointer first moves focus out of the field
++  (a click in the log text — the scroller is focusable — or Escape). That consequence is in §6.
++
++### 1.7 The search matcher
++
++`search/`'s `matcherOf({ text, matchCase: false })` (`search/internal/match.ts:55-61`, exported by `search/index.ts:1`):
++the text escaped, `giu`, hits per line in UTF-16 columns (`:20-50`) — rule 6's "plain text, case-insensitive" as the
++window-wide search already defines it (plan §2 #127). The page calls it (ui may import `search/index.ts`); the core
++(`mergeRequests/` imports no `src/` module, PM3) takes the hits as plain `{ line, from, to }` and maps them onto runs.
++The core's `searched` (`mergeRequests/internal/search.ts:9-19`) is a `toLowerCase().includes` filter with no positions
++(and `toLowerCase` can change a string's length), so it is not reused.
++
++### 1.8 Colour tokens
++
++- **16 tokens per theme**, `--color-ansi-{black,red,green,yellow,blue,magenta,cyan,white}` and
++  `--color-ansi-bright-…`, in `style.css`'s `@theme` (yamt Dark) and every `themes/*.css` block (the themes fence
++  requires every `--color-*` token in each block, `frontend/scripts/themes.ts:161-174`, and a source comment per line
++  in the imported themes, `:186-196`). Tailwind makes `text-ansi-red` / `bg-ansi-red` from them.
++- **Values from each editor's own terminal palette**, as #102 sourced the rest: VS Code `terminal.ansi*` (theme JSON
++  or the registered defaults), WebStorm `CONSOLE_*_OUTPUT` keys, Zed `terminal.ansi.*` (`one.json`), Atom (no
++  terminal: "gap", the One syntax hues of `colors.less`); yamt Dark/Light after WebStorm Islands (their headers).
++- **Readable in every theme, with a detector.** Each foreground token must reach 4.5:1 (WCAG relative luminance)
++  against its block's `--color-panel` — VS Code's own rule for its terminal ("increasing or reducing the luminance of
++  the text's foreground color until a 4.5:1 contrast ratio is met", docs `terminal/appearance` "Minimum contrast
++  ratio", the default). A value the editor ships below it is adjusted by that rule and its comment says so. The rule
++  goes into `scripts/themes.ts` with its failing-path test (vision 3).
++- **The 256 colours.** 0–15 are the 16 tokens; 16–255 (xterm's cube and grays) show as the **nearest of the 16** on
++  xterm's default palette. Fixed xterm values cannot be readable on both dark and light panels, and a literal colour
++  in a `.ts`/`.vue` file is refused by the palette fence (`frontend/scripts/palette.ts:17-19`). The reference triples
++  are numbers used only to classify, never painted. Visible consequence (orange 208, `(255,135,0)`, shows as the
++  theme's yellow, nearest `(205,205,0)`) is in §6.
++
++### 1.9 GitLab's job page versus `ansi2html.rb`
++
++The job page renders `Ci::BuildTrace` → `Gitlab::Ci::Ansi2json` (`app/models/ci/build_trace.rb`), not `ansi2html.rb`.
++Where they differ, rule 4's first clause ("as GitLab's job page renders them") decides, except where rule 4 names a
++detail:
++
++| detail | `ansi2html.rb` | `ansi2json` (the job page) | yamt |
++| --- | --- | --- | --- |
++| lone `\r` | written as a character | clears the current line (`scan_token(scanner, "\r")` → `clear!`) | clears the line: a progress bar shows its last state |
++| section marker | dropped in place | dropped; a start or end ends a non-empty current line (`flush_current_line(false)`) | as the job page |
++| bold foreground | the light variant (`fg-l-*`, `:274-278`) | no such rule (`ansi2json/style.rb`) | light variant: rule 4 names it; only 30–37 colours (as `ansi2html`: its regex skips `xterm-*`) |
++| `109` | background default | foreground default (`on_109` sets `fg`) | background default (the code's meaning) |
++| codes | `on_<code>` methods: exact text, so `01` is nothing | the same table | the same exact-text table |
++| `38;2;r;g;b` | `38` consumes nothing; `2`, `r`, `g`, `b` read as codes | the same | the same (rule 4: no truecolor) |
++| conceal (8) | class `term-conceal` | the same | shown as plain text (a hidden match could not be seen; decided in §2.4) |
++| a line without text | `<br/>` (blank lines shown) | not emitted (`line.rb` `empty?`; `converter.rb` `flush_current_line` pushes non-empty lines only) | not shown, as the job page |
++
++Both: only `ESC [ … m` is applied; every other escape (`ESC ([@-_])(.*?)([@-~])`) is dropped; an escape cut off at a
++line end ends the line's scan; timestamps stripped at line start, `+` lines joined; the style carries across lines.
++yamt also drops other C0 control characters but tab (rule 4: "other control sequences … are not shown").
++
++### 1.10 Remembered text
++
++`storedRecord(key, warnEvent, storage)` (`ui/windowStorage.ts:51-68`) is a JSON map with `entryAt`/`set`/`remove`;
++keyed by the job's name it is exactly rule 7: `yamt.mergeRequests.jobSearches = { [jobName]: text }`, an empty text
++removed. Rule 7 says "per CI job name … for every merge request": one map for every repository (no repository key,
++unlike #134 and #156). Two windows writing at once: the last write wins (#134).
++
++## 2. What every option shares
++
++### 2.1 Rust (`yamt-merge-requests`, `src-tauri`)
++
++```rust
++/// GitLab's job page shows at most this tail of a log (`Gitlab::Ci::Trace::Stream::LIMIT_SIZE`, 500 KiB).
++pub const MAX_LOG_BYTES: usize = 500 * 1024;
++
++/// A failed job's log as the window shows it.
++pub struct JobLog { pub text: String /* colour codes kept; non-UTF-8 bytes as U+FFFD */, pub cut: bool }
++
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum JobLogReply {
++    Log { log: JobLog },
++    NotOffered,                       // no list of this window sent that job page (or it is no job page)
++    NoLog,                            // GitLab answered an empty log or 404
++    GlabMissing,
++    NotLoggedIn { detail: String },
++    Failed { message: String },       // glab's last line, "glab timed out", or yamt's words
++}
++
++pub fn read_job_log(repository: &GitLabRepository, glab: Option<&Glab>, page: &WebPage) -> JobLogReply;
++// src-tauri: MergeRequestState gains `job_logs: JobLogs` (Mutex<BTreeMap<WebPage, JobLog>>: the run's logs, a
++// failure never kept); command `read_job_log(page: WebPage) -> Result<JobLogReply, IpcError>`.
++```
++
++### 2.2 The window's core (`frontend/src/mergeRequests/`)
++
++```ts
++type AnsiColour = "black" | "red" | … | "white" | "brightBlack" | … | "brightWhite";   // 16
++type LogStyle = { foreground: AnsiColour | null; background: AnsiColour | null; bold; italic; underline; struck };
++type LogRun = { text: string; style: LogStyle };          // text never empty
++type LogLine = { runs: readonly LogRun[] };
++type JobLogView = { lines: readonly LogLine[]; text: string };   // text = the lines' texts joined by "\n"
++jobLogView(raw: string): JobLogView;
++hitPlaces(view, hits: readonly { line; from; to }[]): readonly HitPlace[];   // where each hit starts and ends in runs
++firstHit(count) / steppedHit(current, count, backwards) / hitCountText(current, count)
++```
++
++### 2.3 The page
++
++- State (`ui/mergeRequestJobLogs.ts`, spread into the slice like `mergeRequestRerequests.ts`): the one shown log of the
++  window — `{ job: { name, page }, load: loading | shown { view, cut } | refused { reply } | failed { cause } } | null`
++  — the source call with a stale-reply guard (identity of the asked entry), and the remembered texts.
++- `CiStatusBox.vue`: tracks the pointed and focused job, reads `useShiftTaps()`, renders `CiStatusJobLog.vue` beside the
++  CI box when the shown job is one of its own, closes it when the CI box closes, focuses the job after Escape.
++- `CiStatusJobLog.vue`: header (job name, search field, count), body (cut notice with "Open the whole log on GitLab",
++  then the lines), its Escape/Enter/Shift+Enter keys, `useFollowEnd` for the end (ui/AGENTS.md: a new follower uses
++  it), `useMenuPlacement` left of the CI box (`menuPosition` clamps, `menuPosition.ts:7-12`).
++
++### 2.4 Details decided here (orchestrator level, proposed row #161; the owner may veto)
++
++- Box 56rem wide × 36rem high, each at most the window less 2rem; its right edge on the CI box's left edge, its top
++  on the CI box's top, then clamped; header `bg-panel-inline`, lines on `bg-panel` (the editor background the terminal
++  palettes are made for), `font-mono`, `whitespace-pre-wrap`, `[overflow-wrap:anywhere]`, text selectable.
++- Words: hover "Open the log of <name> on GitLab. Shift: show the log here"; box "Log of <name>"; "Loading the
++  log…"; field "Search the log"; "3 of 17", "No results"; cut line "Earlier lines are on GitLab." with the button
++  "Open the whole log on GitLab"; replies: no log "GitLab has no log for this job.", not offered "This job's log was
++  not listed by GitLab, so yamt did not read it.", glab missing / not logged in as the list's sentences ending "then
++  press Shift over the job again.", failed "Could not read the log: <message>"; an IPC failure as `problemText` with
++  the step `jobLog` ("Could not read the job's log: …"), in the box.
++- Shift over the job already shown does nothing while it loads or shows; a refused or failed load asks again (their
++  words say "press Shift over the job again"). A failed fetch is not kept (Rust), so the next press asks GitLab again.
++- Matches: `--color-search-match` (as `SearchResults.vue`); the current one `--color-primary` on `--color-on-primary`.
++  The current match is scrolled to the middle of the box by `scrollTop` only (never `scrollIntoView`, which can move
++  ancestors; `useFollowEnd.ts:10-11`).
++- Conceal (SGR 8) shows its text; 256 colours as the nearest of 16 (§1.8); text per job name across repositories (§1.10).
++
++## 3. Options
++
++### Option A — raw tail over the IPC, the core parses, static lines with CSS highlights (recommended)
++
++- **Structures.** §2 as written; the page keeps the rendered lines static and sets two `Highlight`s
++  (`job-log-match`, `job-log-current`) from `hitPlaces`.
++- **Files.** Rust: `crates/merge-requests/src/{lib.rs, job_log.rs (new), web_page.rs}`, `tests/job_log.rs` (new);
++  `src-tauri/src/merge_requests.rs`, `merge_requests/job_logs.rs` (new), `merge_requests/tests/job_log.rs` (new),
++  `commands.rs`; `scripts/fake-glab/glab`, `tests/glab/ci-job-log/` (new), `tests/glab/README.md`,
++  `scripts/gitlab-playground.sh`. Core: `mergeRequests/internal/{jobLog,ansiColours,jobLogSearch}.ts` (new) and tests,
++  `index.ts`, `AGENTS.md`. Palette: `style.css`, the nine `themes/*.css`, `scripts/themes.ts` (+ test). State:
++  `ui/mergeRequestJobLogs.ts` (new), `ui/mergeRequests.ts`, `ipc/{MergeRequestSource,tauriMergeRequests,
++  fixtureMergeRequests,mergeRequestDomain,index}.ts`, `ipc/fixtureMergeRequestLogs.ts` (new). Page:
++  `ui/CiStatusBox.vue`, `ui/CiStatusJobLog.vue` (new), `ui/mergeRequestLogLook.ts` (new), `ui/mergeRequestsText.ts`,
++  `ui/problem.ts`, `ui/problemText.ts`, `ui/useHoverBox.ts`, `ui/useShiftHeld.ts`, `ui/keyHold.ts`, `ui/altHold.ts`,
++  `scripts/app-session/keys.ts` (a lone `Shift` key for the smoke runs).
++- **Risks.** WebKitGTK without the Highlight API (checked first; fallback B). A 100 MB log times out (shown, rule 9).
++  The fork route needs read access to the fork's jobs (else 403/404, shown). Highlight ranges need one text node per
++  run (the template renders `{{ run.text }}` alone in its span; a test pins the core's run ↔ text mapping).
++- **Tests.** Rust: cut rule (at, over, landing on a line start, no line break, invalid UTF-8), route (same project,
++  fork, sub-path, a merge-request page), 404/empty → no log, glab missing / logged out, offered-only before any glab,
++  one fetch per run, failures not kept. Core: every row of §1.9's table, timestamps and `+` joins, sections, `\r`,
++  SGR table, 256 → 16, markup stays text, `hitPlaces` at run boundaries, wrapping steps. Palette: the contrast rule
++  and its failing path. State: stale replies, same-job press, remembered text set/forget. Page: Shift tap rule (Shift+Tab,
++  Shift+click, capitals, repeat, blur), Escape order; WebKit fixture and real app.
++- **Visions.** 1 (parser in TypeScript), 2 (one parser for fixture and app, one matcher, one Shift rule, one inside
++  rule, one palette), 3 (offered check in Rust, contrast detector, themes fence), 5 (no dependency, no gitio change).
++
++### Option B — as A, but matches as `<mark>` runs re-rendered per query
++
++- **Structures.** The core splits runs at hits (`markedLine(line, hits, current) → segments`); each line memoised
++  (`v-memo` on its hit list); no Highlight API.
++- **Files.** As A; the core gains the splitter (`internal/jobLogMarks.ts`), the page renders `<mark>` segments and
++  loses the `Range` loop.
++- **Risks.** A broad query re-renders most of ~10k lines and inserts tens of thousands of elements per keystroke
++  `[INFERENCE: hundreds of ms to seconds in WebKitGTK]`; re-rendering drops a text selection while typing.
++- **Tests.** As A, plus the splitter.
++- **Visions.** 1 (`<mark>` as `SearchResults.vue:211` does) against rule 6's typing feel. The fallback if 1.5's check fails.
++
++### Option C — Rust parses colours; styled lines cross the IPC
++
++- **Structures.** `JobLog { lines: Vec<LogLine { runs: Vec<LogRun { text, style: LogStyle } > }>, cut }` with Rust enums
++  for colours; the window renders as A.
++- **Files.** As A, with the parser in `crates/merge-requests/src/job_log/ansi.rs`; the fixture needs pre-parsed lines
++  (or a second parser in TypeScript for raw fixture logs).
++- **Risks.** The owner reads the colour rules in Rust (vision 1); per-run JSON is several times the text; the fixture
++  page would test generated data, not the parser (or two parsers, vision 2).
++- **Visions.** 4 (Rust enums) against 1 and 2.
++
++## 4. Recommendation
++
++**Option A.** The log crosses once, as text, only for a job a list offered; the colour rules are TypeScript the owner
++reads and the WebKit fixture runs; highlights never touch the DOM, so 500 KB stays cheap to search; Shift, the inside
++rule and the matcher each stay single. Cost: five implementer runs — Rust (~15 files, ~1,000 lines with the scenario),
++core (~7 files, ~800 lines), palette (~12 files, ~350 lines, sourced values), state (~14 files, ~700 lines), page (~20
++files, ~1,000 lines) — in three waves, plus the verifier. No CSP change, no dependency, no `gitio` change.
++
++### Proposed plan §2 rows (DR5: the orchestrator records them; numbers as free at commit time)
++
++| # | **Decision** | Rejected alternatives & why | Vision |
++| --- | --- | --- | --- |
++| 158 | **A failed CI job's log is read through the app, for an offered job page only** (owner #2154–#2155; request `docs/slices/request-ci-job-log.md` rules 8–9; design `briefs/ci-job-log-design.md` option A; amends #133's "one case" with a read of the same offered pages). `read_job_log(page)`: not in `pages` or not a `/-/jobs/<n>` page → `NotOffered` before any glab; else glab, login, project; `glab api projects/<the page's own project path, / as %2F>/jobs/<n>/trace` (`webPath` = `project_job_path(job.project, job)`: the number is the REST id, the project the job's own, a fork's for a fork's pipeline); the body read whole, then GitLab's `Stream#limit`: over 512,000 bytes the last 512,000 from after the next `\n`, `cut`; lossy UTF-8; empty or HTTP 404 → `NoLog`; a `Log` kept per page for the run in `MergeRequestState.job_logs`, failures never | GraphQL `CiJobTrace.htmlSummary` (≤ 100 lines, HTML); a `Range` header (the API never reads one); `byte_offset`/`byte_limit` (undocumented, master only, needs the size); a streaming tail in `gitio` (one caller; runner logs default ≤ 4 MB); `projects/:fullpath` (a fork's jobs are not the target's) | 3, 4, 5 |
++| 159 | **The window turns the raw log into styled lines with GitLab's job-page rules** (`mergeRequests/` `jobLogView`): `Ansi2json`'s tokens (timestamp prefix stripped, `+` lines joined; section markers dropped, a start or end ending a non-empty line; lone `\r` clears the line; only `ESC[…m` applied, by GitLab's exact `on_<code>` table; no truecolor; a line without text not shown), `ansi2html`'s bold → light for 30–37; 256 colours as the nearest of the 16 on xterm's palette; conceal shown; C0 controls but tab dropped; text only, never markup. 16 tokens `--color-ansi-*` per theme from each editor's terminal palette, ≥ 4.5:1 against `--color-panel` (VS Code's minimum contrast ratio), enforced in `scripts/themes.ts` | parsing in Rust (option C: the owner reads TypeScript; the fixture would test another parser); fixed xterm colours for 16–255 (unreadable on light panels; literals refused by the palette fence); GitLab's HTML | 1, 2, 3 |
++| 160 | **The log box** (rules 1–7): opened by a Shift tap — down and up with no other key and no pointer press between (`useShiftHeld.ts` `shiftAfter` on `keyHold.ts`'s one listener set, `useShiftTaps`) — over a failed job's row or on its focused button, the CI box open, focus not in a text field (`isTypingTarget`); a DOM child of the CI box's hover area, so `useHoverBox`'s one inside rule holds both; an Escape handled inside is not the hover box's (`defaultPrevented`); left of the CI box, tops level, clamped; static lines; matches through the CSS Custom Highlight API from `search/` `matcherOf` (case-insensitive), the first current the last; the field's text per job name in `yamt.mergeRequests.jobSearches` (`{ [name]: text }`, every repository), empty removes | a keydown edge (Shift+Tab and Shift+click would open a log); a second Shift listener; `<mark>` re-rendering (option B: DOM churn on broad queries); a teleported box with its own inside rule; per-repository texts (rule 7 says per name) | 1, 2, 4 |
++| 161 | **Defaults decided with the job-log design** (orchestrator, OR13; the owner may veto): §2.4 of the design (sizes, words, colours of matches, same-job press, failures not kept, conceal shown, 256 → nearest of 16, texts across repositories) | — | 1 |
++
++### Risks for the register (`skill://risk-register`, next free id RK57)
++
++| id | risk | owner | proving test |
++| --- | --- | --- | --- |
++| RK57 | the app reads a log for a page no list offered (or a merge request's page), or the window interprets log text as markup | `yamt-merge-requests` `read_job_log` (job page check) + `src-tauri` `merge_requests/job_logs.rs` (`pages` before any glab) + core `jobLogView` (text runs only) + `CiStatusJobLog.vue` (text interpolation, no `v-html`) | `a_job_no_list_offered_gets_no_log_and_runs_no_glab`, `a_merge_request_page_is_not_a_job_and_runs_no_glab`, `markup_in_a_log_stays_text`, WebKit fixture step "markup line" |
++| RK58 | a log colour unreadable in a theme | `style.css`, `themes/*.css`, `scripts/themes.ts` (`ansi-contrast`) | `every_ansi_colour_reads_against_its_panel` and its failing path |
++| RK59 | a Shift that is part of a chord (Shift+Tab, Shift+click, a capital) opens a log, or a capital typed in the log's field switches it | `ui/useShiftHeld.ts` `shiftAfter` + `CiStatusBox.vue` (`isTypingTarget`) | `a_shift_with_another_key_or_a_pointer_press_between_is_no_tap`, WebKit fixture step "capitals" |
++
++### Shared edits for the orchestrator (no slice owns them)
++
++- `just bindings` after `ci-job-log-rust` lands, before `ci-job-log-state` starts (`JobLog`, `JobLogReply`,
++  `commands.readJobLog`). No frontend file uses them before the state slice, so the typecheck stays green.
++- The docs keeper (`skill://orchestrate` §6): plan rows #158–#161; architecture §3.9 (`job_log.rs`, `MAX_LOG_BYTES`,
++  `JobLogReply`), §3.5 (`MergeRequestState.job_logs`), §4 and `skill://ipc-contract` (`read_job_log`;
++  `MergeRequestSource.readJobLog`; PM6 `map-check`), §5.1 state rows (the run's logs: `src-tauri`
++  `merge_requests/job_logs.rs`; the shown log and the remembered texts: `ui/mergeRequestJobLogs.ts`; Shift taps:
++  `ui/useShiftHeld.ts`), §5.4 (the log box, the Shift tap; amend the "Held" paragraph, architecture.md:1745-1750);
++  `skill://project-map/tree.md` rows for every new file (`mergeRequests/internal/jobLog.ts`, `ansiColours.ts`,
++  `jobLogSearch.ts`, `ui/CiStatusJobLog.vue`, `ui/mergeRequestJobLogs.ts`, `ui/mergeRequestLogLook.ts`,
++  `ipc/fixtureMergeRequestLogs.ts`) and `state.md` rows for the three states above; RK57–RK59; the
++  `deviations_from_brief` lines no slice could write (`ipc/AGENTS.md` is the state slice's, `ui/AGENTS.md` the page
++  slice's, which also writes the state slice's `ui/` lines); CHANGELOG "Added" (the log box, Shift, search,
++  remembered text) and "Changed" (a job's hover names Shift).
++- No CSP change (`tauri.conf.json:14`): the log arrives through IPC.
++
++## 5. Slice graph
++
++| wave | brief | owner | needs | beside |
++| --- | --- | --- | --- | --- |
++| 1 | `ci-job-log-rust.md` | rust-impl | — | core |
++| 1 | `ci-job-log-core.md` | web-impl | — | rust |
++| 2 | `ci-job-log-state.md` | web-impl | rust (+ `just bindings`), core | palette |
++| 2 | `ci-job-log-palette.md` | web-impl | — (may run in wave 1 when three implementers fit) | state |
++| 3 | `ci-job-log-page.md` (wires the window) | web-impl | state, palette (and so rust, core) | — |
++| 4 | `ci-job-log-verify.md` | verifier | page committed (smoke); docs keeper done (final) | docs keeper |
++
++Why not the request's graph (one page slice owning every `ui/CiStatus*`, `useHoverBox.ts` and `ipc/*MergeRequest*`
++file): with the Shift tap (`useShiftHeld.ts`, `keyHold.ts`, `altHold.ts`), the problem step, the fixture logs, the
++slice module and the theme palette it would be about 45 files, far above the implementer budget, and the palette is
++sourced data with its own detector (as #102 was). So the state and IPC layer (no `.vue`) is its own slice, the palette
++is its own small slice, and the page slice owns the components, hover, keys and words.
++
++## 6. Open questions for the owner
++
++None blocks a slice; each below is decided as written (row #161) and the owner may veto:
++
++1. Rule 1 keeps Shift for capitals while the cursor is in the log's search field, so with the pointer resting on
++   another job, typing "Error" never switches logs — but switching by pointer then needs one click into the log text
++   (or Escape) before Shift. Keyboard users press Escape, move to the job, and press Shift.
++2. A 256-colour code shows as the nearest of the theme's 16 terminal colours (an orange shows as the theme's yellow),
++   so every colour stays readable in light themes; GitLab's dark page shows the exact shade.
+diff --git a/docs/slices/briefs/ci-job-log-page.md b/docs/slices/briefs/ci-job-log-page.md
+new file mode 100644
+index 0000000..3b4d844
+--- /dev/null
++++ b/docs/slices/briefs/ci-job-log-page.md
+@@ -0,0 +1,174 @@
++# Slice ci-job-log-page — Shift over a failed job shows its log beside the CI box, searchable
++
++Feature: CI job log (request `docs/slices/request-ci-job-log.md` rules 1–7 and the WebKit-fixture acceptance; design
++`docs/slices/briefs/ci-job-log-design.md` option A, §1.5–1.7, §2.3–2.4; proposed plan §2 #160, #161; proposed RK59).
++Needs `ci-job-log-state` (the slice's `jobLog`, `showJobLog`, `closeJobLog`, `jobSearch`, `setJobSearch`; the fixture's
++logs) and `ci-job-log-palette` (the `text-ansi-*`/`bg-ansi-*` classes) landed, and so `ci-job-log-core`. Wires the
++window: last implementer slice.
++
++## Target
++
++Owned: `frontend/src/ui/CiStatusBox.vue`, `frontend/src/ui/CiStatusJobLog.vue` (new),
++`frontend/src/ui/mergeRequestLogLook.ts` (new), `frontend/src/ui/mergeRequestLogLook.test.ts` (new),
++`frontend/src/ui/mergeRequestsText.ts`, `frontend/src/ui/mergeRequestsText.test.ts`, `frontend/src/ui/problem.ts`,
++`frontend/src/ui/problemText.ts`, `frontend/src/ui/problemText.test.ts`, `frontend/src/ui/useHoverBox.ts`,
++`frontend/src/ui/useHoverBox.test.ts`, `frontend/src/ui/useShiftHeld.ts`, `frontend/src/ui/useShiftHeld.test.ts`,
++`frontend/src/ui/keyHold.ts`, `frontend/src/ui/keyHold.test.ts`, `frontend/src/ui/altHold.ts`,
++`frontend/src/ui/altHold.test.ts`, `frontend/scripts/app-session/keys.ts`, `frontend/scripts/app-session/keys.test.ts`,
++`frontend/src/ui/AGENTS.md`.
++
++Read-only: everything else — the state (`ui/mergeRequests.ts`, `ui/mergeRequestJobLogs.ts`, `ipc/**` and its
++fixtures: use them as contracted), `mergeRequests/**` and `search/**` (use their exports), `ui/rangeKeys.ts`
++(`isTypingTarget`), `ui/useMenuPlacement.ts`, `ui/menuPosition.ts`, `ui/useFollowEnd.ts`, `ui/tooltip.ts`,
++`ui/MergeRequestRow.vue` (its `openJob` already opens the page), `ui/MergeRequestFilter.vue` (uses `useShiftHeld()`,
++whose type stays), `ui/mergeRequestTitles.test.ts` (the no-`title` detector: must stay green), `style.css` and
++`themes/**` (the palette slice's), `docs/**`.
++
++Non-goals: folding, timestamps, durations; regex or match-case search; a log outside the merge-request page; a second
++Shift listener; any `editor/` code; a virtualised list (design §1.5: rendered whole, measured below).
++
++## Contract
++
++Existing and fixed by the earlier slices: `useMergeRequests()` gives `jobLog`, `showJobLog(job)`, `closeJobLog()`,
++`jobSearch(name)`, `setJobSearch(name, text)` (`ui/mergeRequestJobLogs.ts`, brief `ci-job-log-state.md`); the core's
++`JobLogView`, `LogStyle`, `AnsiColour`, `hitPlaces`, `firstHit`, `steppedHit`, `hitCountText`, `NO_RESULTS`
++(`ci-job-log-core.md`); `search/` `matcherOf`.
++
++New here:
++
++```ts
++// ui/keyHold.ts — one listener set, its state now any type (altHold keeps its boolean)
++export type KeyHoldEvent =
++  | { readonly kind: "keydown"; readonly key: string; readonly repeat: boolean }
++  | { readonly kind: "keyup"; readonly key: string; readonly altKey: boolean; readonly shiftKey: boolean }
++  | { readonly kind: "pointer"; readonly altKey: boolean; readonly shiftKey: boolean; readonly pressed: boolean } // pressed: pointerdown
++  | { readonly kind: "left" };
++export type KeyHold<S> = {
++  readonly start: S;
++  after(state: S, event: KeyHoldEvent): S;
++  /** Whether pointer events are listened to (only while a key is held, as now). */
++  holding(state: S): boolean;
++};
++export function useKeyHold<S>(hold: KeyHold<S>, pointerEvents: readonly string[]): Readonly<ShallowRef<S>>;
++
++// ui/useShiftHeld.ts — replaces shiftHeldAfter
++export type ShiftState =
++  | { readonly kind: "up"; readonly taps: number }
++  | { readonly kind: "held"; readonly alone: boolean; readonly taps: number };
++export function shiftAfter(state: ShiftState, event: ShiftEvent): ShiftState;
++export function useShiftHeld(): Readonly<Ref<boolean>>; // unchanged meaning: from Shift's keydown to its keyup
++/** Counts Shift taps: Shift down then up with no other key and no pointer press between. */
++export function useShiftTaps(): Readonly<Ref<number>>;
++
++// ui/mergeRequestLogLook.ts
++/** The classes of a run: full class names from static tables (Tailwind sees them), "" for the plain style. */
++export function runClasses(style: LogStyle): string;
++```
++
++`shiftAfter` rules (`ShiftEvent.pointer` gains `pressed`): keydown `Shift` from `up` → `held { alone: true }`, while
++`held` unchanged (repeats); keydown of another key while `held` → `alone: false`; keyup `Shift` while `held` → `up`,
++`taps + 1` when `alone`; a pointer event while `held` without `shiftKey` → `up` (no tap, as now); with `pressed` →
++`alone: false`; `left` → `up`, taps kept; anything while `up` but Shift's keydown → unchanged. `taps` never decreases.
++Both composables read one `createSharedComposable` state (one listener set per window, ui/AGENTS.md:51). The X11 note
++(`useShiftHeld.ts:18-19`) stays.
++
++`runClasses`: foreground `text-ansi-red` … `text-ansi-bright-white`, background `bg-ansi-…` (Record<AnsiColour,
++string> each, 16 entries), `font-bold`, `italic`, `underline`, `line-through`, both lines as
++`[text-decoration-line:underline_line-through]` (two utilities set the same property: one would win).
++
++`ui/problem.ts`: `MergeRequestStep` gains `"jobLog"`; `problemText.ts`: `jobLog: "Could not read the job's log"`.
++
++`ui/mergeRequestsText.ts` (design §2.4 words, exact):
++
++- `jobTitle(name, page)`: a page → `Open the log of ${name} on GitLab. Shift: show the log here`; null unchanged.
++- `jobLogTitle(name)` → `Log of ${name}`; `JOB_LOG_LOADING = "Loading the log…"`; `JOB_LOG_SEARCH = "Search the log"`;
++  `JOB_LOG_CUT = "Earlier lines are on GitLab."`; `JOB_LOG_WHOLE = "Open the whole log on GitLab"`.
++- `jobLogRefusalText(reply)`, exhaustive over the non-`log` replies: `noLog` "GitLab has no log for this job.";
++  `notOffered` "This job's log was not listed by GitLab, so yamt did not read it."; `glabMissing`
++  `${GLAB_MISSING_TEXT} — install glab, then press Shift over the job again.`; `notLoggedIn`
++  `${glabNotLoggedInText(detail)} — run glab auth login in a terminal, then press Shift over the job again.` (as
++  `:49-55`); `failed` `Could not read the log: ${message}`.
++
++**`CiStatusBox.vue`**:
++
++- Tracks the pointed job (`pointerenter`/`pointerleave` on each `<li>`) and the focused one (`focus`/`blur` on its
++  button); the job a tap asks for is the pointed one, else the focused one.
++- `watch(useShiftTaps(), …)`: inside the watcher, nothing unless the CI box is `open`, the job has a page, and
++  `!isTypingTarget(document.activeElement)` (`ui/rangeKeys.ts:26`); then `showJobLog({ name, page })`. Never watch
++  `open && held`: a Shift already held as the box opens would count.
++- Renders `<CiStatusJobLog :key="shown.job.page" :shown :anchor @close @open-job>` as a DOM child of the `area` span
++  (after the box `div`, so `useHoverBox`'s one inside rule covers both, design §1.6) while `open` and the shown job's
++  page is one of this box's jobs; `anchor` = the box's `useElementBounding` `{ left, top }`.
++- When `open` turns false with its job shown → `closeJobLog()`. The log's `close` → `closeJobLog()`, then focus that
++  job's button (a second Escape then closes the CI box). `openJob` re-emits as the job click does.
++- The job button gets `aria-keyshortcuts="Shift"`. No `title` attribute anywhere (`mergeRequestTitles.test.ts`).
++
++**`useHoverBox.ts`**: `keyPressed` ignores an Escape whose `defaultPrevented` is already true.
++
++**`CiStatusJobLog.vue`** (props `{ shown: ShownJobLog; anchor: { left: number; top: number } }`, emits `{ close: [];
++openJob: [page: WebPage] }`):
++
++- `fixed`, `w-[min(56rem,calc(100vw-2rem))] h-[min(36rem,calc(100vh-2rem))]`, `useMenuPlacement(box, () => ({ x:
++  anchor.left − box width, y: anchor.top }))` (clamped by `menuPosition.ts:7-12`); `role="dialog"`,
++  `aria-label` = `jobLogTitle(name)`; border and shadow as the CI box.
++- Header (`bg-panel-inline`): the title, the field (`type="text"`, `aria-label` and placeholder `JOB_LOG_SEARCH`), the
++  count (`aria-live="polite"`): `hitCountText` or `NO_RESULTS` (nothing for an empty field).
++- Body (`bg-panel`, `font-mono`, `whitespace-pre-wrap`, `[overflow-wrap:anywhere]`, `overflow-y-auto`,
++  `tabindex="0"`): `loading` → `JOB_LOG_LOADING`; `refused` → `jobLogRefusalText`; `failed` → `problemText({
++  action: "mergeRequests", step: "jobLog", cause }, platform)`; `shown` → when `cut`, a first line `JOB_LOG_CUT` and a
++  button `JOB_LOG_WHOLE` emitting `openJob(page)`; then one `div` per `LogLine` whose only children are one `span`
++  per run with `runClasses(run.style)` and the run's text (text, never `v-html`: RK57). `useFollowEnd(scroller,
++  () => lines)` starts it at the end.
++- On mount: the field gets `jobSearch(name)`, focus and `select()`. On input: `setJobSearch(name, text)`; matches
++  `matcherOf({ text, matchCase: false })?.hits(view.text, Infinity)` → `hitPlaces` → one `Range` per place
++  (`lines.children[line].children[run].firstChild`, offsets) → `CSS.highlights.set("job-log-match", new
++  Highlight(...))` and `"job-log-current"` with the current one; the current starts at `firstHit` (the last) and is
++  centred with `scrollTop` only (never `scrollIntoView`, `useFollowEnd.ts:10-11`); no hit → no scroll. Enter /
++  Shift+Enter in the field → `steppedHit`, centred. Both highlights deleted on unmount.
++- Escape anywhere in the log → `preventDefault()`, `emit("close")`.
++- A non-scoped `<style>`: `::highlight(job-log-match) { background-color: var(--color-search-match) }`,
++  `::highlight(job-log-current) { background-color: var(--color-primary); color: var(--color-on-primary) }`.
++
++**`scripts/app-session/keys.ts`**: `press Shift` alone parses (a named key `Shift`: WebDriver `\uE008`, xdotool
++`Shift_L`) so the smoke runs can tap Shift; `Shift+a` and the other chords unchanged.
++
++## Change
++
++1. `keyHold.ts` generic, `altHold.ts` passing its rule, `useShiftHeld.ts` `shiftAfter`/`useShiftTaps`; their tests.
++2. `useHoverBox.ts` and its test; `problem.ts`/`problemText.ts` and test; `mergeRequestsText.ts` and test;
++   `mergeRequestLogLook.ts` and test; `keys.ts` and test.
++3. `CiStatusJobLog.vue`; `CiStatusBox.vue`.
++4. `ui/AGENTS.md`: the log box (Shift tap, inside rule, Escape order, highlights, remembered text), amend the "Held"
++   lines (ui/AGENTS.md:51) for `shiftAfter`/`useShiftTaps`, and the state slice's `deviations_from_brief` `ui/` lines.
++
++## Acceptance
++
++- Step 0, before any `.vue` work, in the fixture app (`just app-session start-fixture --name cl --diff --mr list
++  --size 1600x1000`): `just app-session read --name cl "typeof Highlight === 'function' && 'highlights' in CSS"` →
++  `true`. If not: stop, report it; the orchestrator switches to option B.
++- Vitest, each named for the bug it catches, at least: `shiftAfter`: `a_lone_shift_press_and_release_is_a_tap`,
++  `shift_with_another_key_is_no_tap` (Shift+E), `shift_with_a_pointer_press_is_no_tap` (Shift+click),
++  `a_held_repeat_keeps_the_tap`, `leaving_the_window_ends_the_hold_without_a_tap`,
++  `a_pointer_without_shift_ends_the_hold_without_a_tap`, the existing held/not-held cases moved to `shiftAfter`;
++  `useShiftTaps`: `held_and_taps_share_one_listener_set`; `keyHold`: `the_state_is_the_rules_own_type`,
++  `pointer_events_are_heard_only_while_holding`, `a_pointerdown_is_pressed`; `altHold` tests unchanged and green;
++  `useHoverBox`: `an_escape_handled_inside_leaves_the_box_open`; `runClasses`: `every_colour_has_its_class_both_ways`,
++  `underline_and_strike_together_keep_both_lines`, `the_plain_style_has_no_class`; texts: every new word and each
++  refusal (exhaustive); `problemText`: the `jobLog` row; `keys`: `a_lone_shift_is_a_key_both_ways`.
++- `pnpm -C frontend lint`, `typecheck`, `test` (including `mergeRequestTitles.test.ts`, palette and themes fences),
++  `just arch-check` (PM10), `just map-check`: summary lines.
++- WebKit smoke on the fixture (`skill://verification` recipe; `hover`, `press Shift --x11`, `type --x11`, `read`,
++  `shot`): the CI box of the first failed row open, `hover` over `lint:docs`, `press Shift --x11` → the log left of
++  the CI box, coloured, at its end, focus in the field; `type --x11 Error` with the pointer over `test:unit` → the
++  same log, count "N of M"; Escape, Escape → both closed. Two `shot`s with the log open: yamt Dark, and yamt Light
++  (Settings → Theme → the yamt row's light button; `start-fixture` has no `--settings`, `args.ts:26-29`).
++- Timings in WebKit (record both): Shift to the long `test:unit` log's last line painted ≤ 1.5 s (`read` an async
++  expression that awaits two `requestAnimationFrame`s after the `mergeRequests.job_log_shown` event, or the state's
++  `ms` plus the paint); a one-letter query on it to highlights painted ≤ 250 ms. Over budget: report the numbers as a
++  design finding (design §1.5); do not virtualise or narrow the acceptance.
++- `just mutants HEAD` in your workspace (SP11).
++
++## Skills
++
++`skill://vue-conventions`, `skill://ts-conventions`, `skill://comment-policy`, `skill://risk-register` (proposed RK57,
++RK59), `skill://verification`.
+diff --git a/docs/slices/briefs/ci-job-log-palette.md b/docs/slices/briefs/ci-job-log-palette.md
+new file mode 100644
+index 0000000..1fd5e8c
+--- /dev/null
++++ b/docs/slices/briefs/ci-job-log-palette.md
+@@ -0,0 +1,90 @@
++# Slice ci-job-log-palette — the 16 terminal colours in every theme, readable by rule
++
++Feature: CI job log (request `docs/slices/request-ci-job-log.md` rule 4 "Colours stay readable in every yamt theme,
++dark and light" and the acceptance's "dark and light themes"; design `docs/slices/briefs/ci-job-log-design.md` option
++A, §1.8; proposed plan §2 #159; proposed RK58). Sourced data like the themes of plan §2 #102, plus its detector.
++Needs nothing; runs beside `ci-job-log-state` (or in wave 1 when three implementers fit).
++
++## Target
++
++Owned: `frontend/src/style.css` (only the new `--color-ansi-*` lines inside `@theme static`),
++`frontend/src/themes/*.css` (only the new `--color-ansi-*` lines in each block, and a header line naming new sources),
++`frontend/scripts/themes.ts`, `frontend/scripts/themes.test.ts`.
++
++Read-only: everything else — every other token and comment in the theme files, `frontend/scripts/palette.ts` (its
++token rules already cover new `--color-*` names), `.omp/run/notes/ThemeColours*.md`, the installed editors the
++themes cite (their headers: VS Code under `/usr/share/code/resources/app/…`, WebStorm jars under
++`~/.local/share/JetBrains/WebStorm-262.10968.77/`, Zed `zed-industries/zed@v1.25.3`, Atom `atom/atom@v1.60.0`),
++`docs/**` (the docs keeper's).
++
++Non-goals: using the tokens (the page slice maps the core's `AnsiColour` to `text-ansi-*`/`bg-ansi-*`); any token but
++these 16; changing another token's value; 256-colour values (the core maps them onto these 16).
++
++## Contract
++
++Fixed. Sixteen tokens in `style.css`'s `@theme static` (yamt Dark) and in every `:root[data-theme="…"]` block of
++`frontend/src/themes/*.css` (the themes fence then requires them everywhere, `scripts/themes.ts:161-174`), each value
++`#rrggbb` (six lower-case hex digits, no alpha), in this order after the `--color-search-match`/`--color-diff-wave`
++group:
++
++```css
++--color-ansi-black; --color-ansi-red; --color-ansi-green; --color-ansi-yellow;
++--color-ansi-blue; --color-ansi-magenta; --color-ansi-cyan; --color-ansi-white;
++--color-ansi-bright-black; --color-ansi-bright-red; --color-ansi-bright-green; --color-ansi-bright-yellow;
++--color-ansi-bright-blue; --color-ansi-bright-magenta; --color-ansi-bright-cyan; --color-ansi-bright-white;
++```
++
++Tailwind v4 makes `text-ansi-red`, `bg-ansi-bright-red`, … from them (the page slice uses exactly those 32 names).
++
++**Values**, each from the theme's own editor, its source in the line's comment as the file's other lines do (an
++imported theme's line without one is refused, `themes.ts:186-196`):
++
++- `webstorm-dark` / `webstorm-light`: the scheme's console colours (`CONSOLE_BLACK_OUTPUT` … and their bright keys,
++  read in `IslandScheme{Dark,Light}.xml` and the parent scheme in `DefaultColorSchemesManager.xml`, names as found).
++- `vscode-dark` / `vscode-light`: `terminal.ansiBlack` … `terminal.ansiBrightWhite` from the theme chain the header
++  names, else the registered defaults in the bundle (`workbench.desktop.main.js`, cited `js:N@c`).
++- `zed-dark` / `zed-light`: `terminal.ansi.black` … `terminal.ansi.bright_white` in `assets/themes/one/one.json`.
++- `atom-dark` / `atom-light`: Atom has no terminal — "gap": the One syntax hues of `colors.less` (`@hue-1` cyan,
++  `@hue-2` blue, `@hue-3` purple as magenta, `@hue-4` green, `@hue-5` red, `@hue-6-2` yellow; the `@mono-*` greys for
++  black/white and the bright greys; `@hue-5-2`/`@hue-6` where they name a brighter variant), each line saying which.
++- yamt Dark (`style.css`) and yamt Light (`themes/light.css`): yamt's own themes (#57, "after WebStorm Islands"):
++  WebStorm Islands Dark's and Light's console colours (no source comment required, `YAMT_THEMES`, but name them).
++
++**Readable by rule** (VS Code's own for its terminal: "increasing or reducing the luminance of the text's foreground
++color until a 4.5:1 contrast ratio is met", the default; docs `code.visualstudio.com/docs/terminal/appearance`
++"Minimum contrast ratio"): every one of the 16 must reach **4.5:1** against its block's `--color-panel` (WCAG 2
++contrast: channel `c/255`, linear `c ≤ 0.04045 ? c/12.92 : ((c + 0.055)/1.055)^2.4`, `L = 0.2126 R + 0.7152 G +
++0.0722 B`, ratio `(L_light + 0.05)/(L_dark + 0.05)`). A source value below it is moved the way VS Code's terminal
++moves it — xterm.js `ensureContrastRatio` (read it in the installed VS Code bundle or `xtermjs/xterm.js`
++`src/common/Color.ts` and cite where): lighter on a dark panel, darker on a light one, in its steps, until 4.5:1 —
++and the comment keeps the source value: `/* SD CONSOLE_BLACK_OUTPUT #000000, raised to 4.5:1 over --color-panel
++(VS Code minimumContrastRatio) */`.
++
++**Detector** (`scripts/themes.ts`, vision 3): `ThemeViolation.rule` gains `"ansi-contrast"`; `ALLOWED_VALUES` gains `{
++name: /^--color-ansi-/, value: /^#[0-9a-f]{6}$/ }` (anything else is `bad-value`); a block whose `--color-ansi-*`
++value is below 4.5:1 against the same block's `--color-panel` (itself `#rrggbb`) reports `{ rule: "ansi-contrast",
++file, line, match: "--color-ansi-black: #000000 1.1:1" }` (ratio to one decimal, rounded down).
++
++## Change
++
++1. Read the four editors' terminal palettes (as the theme headers name the files); write a scratch table (theme ×
++   16: source value, ratio, final value) in your scratch folder, not in the repository.
++2. The 16 lines in `style.css` and in each of the nine theme files, with their comments; a header line per theme
++   for any new source file.
++3. `scripts/themes.ts`: the value rule and `ansi-contrast`; `themes.test.ts`: the failing paths.
++
++## Acceptance
++
++- Vitest (`pnpm -C frontend test -- scripts/themes scripts/palette`): the existing "the real source tree has no …
++  violations" tests stay green with the new lines (themes and palette); new
++  `an_ansi_colour_below_4_5_to_1_against_its_panel_is_reported` (a sample block: black `#000000` on `#17161c` →
++  `ansi-contrast` with file, line and "1.1:1"), `an_ansi_colour_with_alpha_or_three_digits_is_a_bad_value`,
++  `the_contrast_uses_the_same_blocks_panel` (a light block's white `#ffffff` on `#ffffff` reported, the dark block's
++  passing white not).
++- The scratch table pasted (every theme, every token: source value, ratio before, final value, ratio after ≥ 4.5).
++- `pnpm -C frontend lint`, `typecheck`, `test`: summary lines; `just map-check` unchanged (no new file).
++- `just mutants HEAD` in your workspace (SP11; `scripts/themes.ts` is in its scope).
++
++## Skills
++
++`skill://ts-conventions`, `skill://comment-policy`, `skill://risk-register` (proposed RK58), `skill://verification`.
+diff --git a/docs/slices/briefs/ci-job-log-rust.md b/docs/slices/briefs/ci-job-log-rust.md
+new file mode 100644
+index 0000000..fd45b4c
+--- /dev/null
++++ b/docs/slices/briefs/ci-job-log-rust.md
+@@ -0,0 +1,176 @@
++# Slice ci-job-log-rust — a failed job's log, offered pages only, GitLab's 500 KB tail, kept for the run
++
++Feature: CI job log (request `docs/slices/request-ci-job-log.md` rules 8–9 and the Rust acceptance; design
++`docs/slices/briefs/ci-job-log-design.md` option A, §1.1–1.3, §2.1; proposed plan §2 #158; RK41, RK53, proposed RK57).
++Runs beside `ci-job-log-core`. After it lands the orchestrator runs `just bindings`.
++
++## Target
++
++Owned: `crates/merge-requests/**`; `src-tauri/src/merge_requests.rs`, `src-tauri/src/merge_requests/**`;
++`src-tauri/src/commands.rs` (the command list only); `scripts/fake-glab/glab`; `tests/glab/ci-job-log/**` (new);
++`tests/glab/README.md`; `scripts/gitlab-playground.sh`.
++
++Read-only: everything else — `frontend/**` (the generated `frontend/src/ipc/bindings.ts` is the orchestrator's `just
++bindings`, PM4), `crates/gitio/**` (`Glab::get` as it is: whole stdout, `Err` = glab's last stderr line,
++`glab.rs:101-104,131-139`), every `Cargo.toml` (no new dependency), other scenarios under `tests/glab/`,
++`src-tauri/tauri.conf.json` (no CSP change), `docs/**` (the docs keeper's: put the lines in `deviations_from_brief`).
++
++Non-goals: logs of running, pending or passed jobs; following a running log; retrying; artifacts (request non-goals);
++a `Range` header or `byte_offset`/`byte_limit` (design §1.3); a streaming reader in `gitio`; keeping failures; a
++GraphQL `id` in the list query; the window's code.
++
++## Contract
++
++Fixed (add-only beyond this). In `yamt-merge-requests`, new module `job_log.rs`, re-exported from `lib.rs`
++(`pub use job_log::{JobLog, JobLogReply, MAX_LOG_BYTES, read_job_log};`); IPC types `Clone, Debug, PartialEq, Eq,
++Serialize, Type` with `#[serde(rename_all = "camelCase")]`, documented as their neighbours are:
++
++```rust
++/// The most of a log the window shows: GitLab's job page shows the same tail (`Gitlab::Ci::Trace::Stream::LIMIT_SIZE`,
++/// 500 KiB).
++pub const MAX_LOG_BYTES: usize = 500 * 1024;
++
++/// A failed job's log as the window shows it.
++pub struct JobLog {
++    /// The log as GitLab stores it, colour codes and all; bytes that are not UTF-8 read as U+FFFD.
++    pub text: String,
++    /// Whether earlier lines were left out: the log was longer than `MAX_LOG_BYTES`.
++    pub cut: bool,
++}
++
++/// How asking for a failed job's log ended.
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum JobLogReply {
++    /// GitLab's log of the job.
++    Log { log: JobLog },
++    /// This window's list never offered that job page (or the page is no job's), so nothing was asked.
++    NotOffered,
++    /// GitLab has no log for the job: an empty answer or HTTP 404.
++    NoLog,
++    /// glab is not found on PATH.
++    GlabMissing,
++    /// `glab auth status` failed.
++    NotLoggedIn { /** glab's first line, which names the instance. */ detail: String },
++    /// glab failed, timed out or answered something unexpected, in glab's or yamt's words.
++    Failed { /** What went wrong. */ message: String },
++}
++
++/// `page`'s log, read through glab in the repository's root: no glab → `GlabMissing`; not a `…/-/jobs/<digits>` page
++/// → `NotOffered` (before any glab run); `logged_in_project` → `NotLoggedIn`/`Failed`; `glab api <trace_route>`
++/// (`Glab::get`): `Ok` empty → `NoLog`, `Ok(bytes)` → `Log { tail(bytes) }`, `Err(line)` ending in "(HTTP 404)" →
++/// `NoLog`, any other `Err` → `Failed { message: line }`. One `tracing::info!` per call naming the page, the outcome's
++/// kind, the bytes read and `cut` — never the log's text.
++pub fn read_job_log(repository: &GitLabRepository, glab: Option<&Glab>, page: &WebPage) -> JobLogReply;
++
++/// GitLab's `Stream#limit`: at most `MAX_LOG_BYTES` → the whole log, `cut: false`; more → from just after the first
++/// `\n` at or after `len − MAX_LOG_BYTES` to the end (the line the cut lands in is dropped even when the cut lands on
++/// a line start; no `\n` there → empty text), `cut: true`. Then `String::from_utf8_lossy`.
++pub(crate) fn tail(bytes: &[u8]) -> JobLog;
++
++/// `projects/<the job's project path with "/" as "%2F">/jobs/<n>/trace` for the page `<origin><path>/-/jobs/<n>`:
++/// `<path>` without the sub-path GitLab is installed under (`project.web_path` minus `/<project.full_path>`) when it
++/// starts with it, then without its leading `/`. `None` when `page` is no job page or its origin is not
++/// `project.web_origin`. A fork's pipeline names the fork (design §1.1).
++pub(crate) fn trace_route(project: &Project, page: &WebPage) -> Option<String>;
++```
++
++`src-tauri` (`merge_requests.rs`, new `merge_requests/job_logs.rs`):
++
++```rust
++/// The run's logs: the latest `Log` per page; a failure is never kept, so the next ask reads GitLab again.
++#[derive(Default)]
++pub(super) struct JobLogs(Mutex<BTreeMap<WebPage, JobLog>>);   // MergeRequestState gains `job_logs: JobLogs`
++
++/// Not in `pages` → `NotOffered` (a `tracing::warn!` naming the page, as `open_page`) without glab; a kept log →
++/// `Log` without glab; no GitLab project → `Failed { NO_PROJECT }`; else `read_job_log`, and a `Log` is kept. Never
++/// holds `job_logs` while glab runs, never together with `pages`.
++pub(super) fn job_log_reply(state: &MergeRequestState, glab: Option<&Glab>, page: &WebPage) -> JobLogReply;
++
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn read_job_log<R: Runtime>(window: WebviewWindow<R>, page: WebPage)
++    -> Result<JobLogReply, IpcError>;   // blocking_reply(move || Ok(job_log_reply(&window.state(), Glab::find().as_ref(), &page))), as rerequest_review
++```
++
++Registered in `commands.rs` `collect_commands!` beside `merge_requests::rerequest_review::<tauri::Wry>`. The window
++calls it `commands.readJobLog(page)`.
++
++**Fake glab** (`scripts/fake-glab/glab`): a route `"GET projects/"*"/jobs/"*"/trace"` (before the default) → a
++`trace` function: `n` = the endpoint's segment between `/jobs/` and `/trace`; after `$scenario/traces/<n>.log.sleep`
++seconds (when present) it logs `answered: <endpoint>`, then prints `$scenario/traces/<n>.log` with `cat` (bytes as
++they are, an empty file prints nothing), exit 0; no such file → `answer '404 Not Found' '{"message":"404 Not
++Found"}'`. Every other route unchanged. `tests/glab/README.md`: the two new rows (`traces/<n>.log`, `.sleep`) and the
++scenario.
++
++**Scenario `tests/glab/ci-job-log/`** (`.gitattributes` keeps every byte, `* -text`): logged in;
++`merge-requests/`'s project (`taskboard/taskboard` on `https://gitlab.example`); user `sam`; one list page, the last,
++with every field today's list query reads (copy the shape of `mr-row-details/graphql-page-1.json`); no `diffHeadSha`
++(the local check runs no git):
++
++- !71 failed pipeline: `phpunit` (`/taskboard/taskboard/-/jobs/302`), `lint` allowed to fail (`…/303`), `e2e`
++  (`…/304`), `docs` (`…/305`), and a trigger job `deploy` with `webPath: null`.
++- !70 failed pipeline: `phpunit` (`…/312`) — the same job name on another merge request.
++- !69 from a fork (`sourceProjectId` 2): `phpunit` at `/sam/taskboard/-/jobs/310`.
++- `traces/302.log`: a short realistic runner log with the timestamp prefix on every line (`2026-11-03T09:00:00.123456Z
++  00O ` shape, design §1.2) and one `+` continuation line; `\e[0K` before section markers
++  `\e[0Ksection_start:<ts>:prepare_script[collapsed=true]\r\e[0K` + a header and the matching `section_end`; a
++  progress line rewritten with lone `\r`s; `\e[32;1m`, `\e[1;31m`, `\e[3m`, `\e[4m`, `\e[38;5;208m`, `\e[41m`,
++  `\e[0;m`, `\e[38;2;255;0;0m`; a line holding `<b>not bold</b> & <script>x</script>`; ending with a PHPUnit-like
++  failure (`FAILURES!`, `Tests: 12, Assertions: 30, Failures: 2.`).
++- `traces/303.log`: more than 512,000 bytes (about 520 KB of numbered lines, colour codes on some), its first line
++  distinct so a test sees it gone, ending in a failure line.
++- `traces/305.log`: empty. No `304.log` (→ 404). `traces/310.log`: a short fork log. `traces/312.log`: a short
++  coloured log with "fail" in it.
++
++**Playground** (`scripts/gitlab-playground.sh`): a sixth branch `feature/failing-ci` from `main` whose one commit (fixed
++author and date, as the script's other commits) adds `.gitlab-ci.yml` with two jobs that fail: `phpunit` (a
++collapsed section via `printf '\e[0Ksection_start:%d:%s[collapsed=true]\r\e[0K%s\n'`, a `\r` progress line, bold
++red, italic, underline, a 256-colour word, a red background, `exit 1`) and `long-log` (about 600 KB of numbered
++coloured lines, `exit 1`); merge request "Failing CI". Header comment and `--reset` updated. This slice never runs it
++against GitLab (the owner does).
++
++## Change
++
++1. Measure first, read-only, with the logged-in glab in `../glab-yamt-playground` (as `briefs/mr-diff-stats.md`
++   did): `glab api "projects/gitlab-org%2Fcli/jobs?scope[]=failed&per_page=1"` → one failed job's `id` and
++   `web_url` (check `web_url` ends in `/-/jobs/<id>`); `glab api projects/gitlab-org%2Fcli/jobs/<id>/trace | head -c 400
++   | od -c | head -40` (paste: the timestamp prefix or its absence, `section_start`, `\033[`); `time glab api
++   projects/gitlab-org%2Fcli/jobs/<id>/trace | wc -c`; the same with `-H 'Range: bytes=-1000'` piped to `wc -c` (a
++   whole size confirms design §1.3). Write nothing to GitLab.
++2. `job_log.rs`: the types, `read_job_log`, `tail`, `trace_route`; unit tests.
++3. `lib.rs` re-exports; `web_page.rs` may gain a crate-only accessor for a job page's parts (one place parses
++   `/-/jobs/<n>`: `WebPage::job` and `trace_route` share it).
++4. `tests/job_log.rs` with the fake glab (`tests/fake_glab/mod.rs` as `rerequest.rs` uses it).
++5. `src-tauri`: `merge_requests/job_logs.rs` (`JobLogs`, `job_log_reply`), the field in `MergeRequestState` and
++   `manage`, the command; `commands.rs`; `merge_requests/tests/job_log.rs`.
++6. Fake glab route, the scenario, `README.md`; the playground branch; the crate's `AGENTS.md` (the log: route, cut,
++   no keeping in the crate).
++
++## Acceptance
++
++- Tests (`cargo nextest run -p yamt-merge-requests` with the hermetic prefix as `just test`, and `-p yamt-app
++  merge_requests`), each named for the bug it catches, at least:
++  - `job_log.rs`: `a_log_of_exactly_500_kib_is_whole`, `a_longer_log_keeps_its_tail_from_the_next_line_start`,
++    `a_cut_drops_the_line_it_lands_in_even_a_whole_one`, `a_cut_tail_without_a_line_break_is_empty_and_cut`,
++    `bytes_that_are_not_utf8_read_as_replacement_characters`, `the_trace_route_names_the_jobs_own_project` (same
++    project, a fork, a GitLab under `/gitlab`, a page without the sub-path, a merge-request page → `None`, another
++    origin → `None`), `a_404_is_no_log_and_other_failures_keep_glabs_words`.
++  - `tests/job_log.rs` (scenario `ci-job-log`): `an_offered_jobs_log_comes_byte_for_byte_with_its_colour_codes` (302:
++    `text` equal to the file, `cut` false), `a_log_over_500_kib_is_cut_at_a_line_start_and_flagged` (303: ends equal,
++    starts after a `\n`, ≤ 512,000 bytes, `cut` true), `a_jobs_log_is_asked_by_its_own_projects_path` (310: the fake
++    log's `argv:` names `projects/sam%2Ftaskboard/jobs/310/trace`), `a_missing_trace_is_no_log` (304),
++    `an_empty_trace_is_no_log` (305), `glab_missing_is_glab_missing`, `logged_out_is_not_logged_in` (scenario
++    `logged-out`), `a_merge_request_page_is_not_a_job_and_runs_no_glab` (no `argv:` line).
++  - `src-tauri` `merge_requests/tests/job_log.rs`: `a_job_no_list_offered_gets_no_log_and_runs_no_glab` (RK57),
++    `a_second_request_for_the_same_job_runs_no_glab` (after a list: two asks, one `…/trace` call and no second
++    `auth status` in the fake log), `a_failure_is_not_kept_and_the_next_request_asks_again` (304 twice → two calls),
++    `read_job_log_replies_on_paths_glab` (as the re-request's `through_glab` test).
++- `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`, `just arch-check`: summary lines.
++- Step 1 pasted (job id = web_url number, the head bytes, the size and time, the `Range` result).
++- `bash -n scripts/gitlab-playground.sh` and `sh -n scripts/fake-glab/glab`: no output.
++- `just mutants HEAD` in your workspace (SP11).
++
++## Skills
++
++`skill://rust-conventions`, `skill://ipc-contract`, `skill://risk-register` (RK41, RK53; proposed RK57),
++`skill://verification`.
+diff --git a/docs/slices/briefs/ci-job-log-state.md b/docs/slices/briefs/ci-job-log-state.md
+new file mode 100644
+index 0000000..a04a16e
+--- /dev/null
++++ b/docs/slices/briefs/ci-job-log-state.md
+@@ -0,0 +1,152 @@
++# Slice ci-job-log-state — the window's one shown log, its source call, the remembered search texts, the fixture's logs
++
++Feature: CI job log (request `docs/slices/request-ci-job-log.md` rules 2, 3, 7, 9; design
++`docs/slices/briefs/ci-job-log-design.md` option A, §1.10, §2.1–2.4; proposed plan §2 #158, #160). Needs
++`ci-job-log-rust` landed and `just bindings` run (`Generated.JobLog`, `Generated.JobLogReply`, `commands.readJobLog`)
++and `ci-job-log-core` landed (`jobLogView`, `JobLogView`). Runs beside `ci-job-log-palette`.
++
++## Target
++
++Owned: `frontend/src/ui/mergeRequestJobLogs.ts` (new), `frontend/src/ui/mergeRequestJobLogs.test.ts` (new),
++`frontend/src/ui/mergeRequests.ts`, `frontend/src/ui/mergeRequests.test.ts`, `frontend/src/ipc/MergeRequestSource.ts`,
++`frontend/src/ipc/mergeRequestDomain.ts`, `frontend/src/ipc/index.ts`, `frontend/src/ipc/tauriMergeRequests.ts`,
++`frontend/src/ipc/tauriMergeRequests.test.ts`, `frontend/src/ipc/fixtureMergeRequests.ts`,
++`frontend/src/ipc/fixtureMergeRequests.test.ts`, `frontend/src/ipc/fixtureMergeRequestData.ts` (export `ORIGIN` only),
++`frontend/src/ipc/fixtureMergeRequestLogs.ts` (new), `frontend/src/ipc/fixtureMergeRequestLogs.test.ts` (new),
++`frontend/src/ipc/AGENTS.md`.
++
++Read-only: everything else — `frontend/src/ipc/bindings.ts` (generated, PM4), `frontend/src/mergeRequests/**` (the
++core's; use its exports), every `.vue` file, `ui/mergeRequestsText.ts`, `ui/problem.ts`, `ui/problemText.ts`,
++`ui/useShiftHeld.ts`, `ui/keyHold.ts`, `ui/useHoverBox.ts` (the page slice's), `ui/windowStorage.ts` (reuse
++`storedRecord`), `ui/mergeRequestRerequests.ts` (the pattern), `frontend/scripts/**` (the palette fence must pass on
++the fixture's logs), `ui/AGENTS.md` and `docs/**` (put `ui/` lines in `deviations_from_brief`; the page slice writes
++them). After this slice `pnpm -C frontend typecheck` is clean (nothing in the page uses the new names yet).
++
++Non-goals: any rendering, Shift, search matching (the page's); the stored texts' UI; a log kept in the window across
++jobs (Rust keeps logs for the run, #158: re-asking a log is one IPC call and no glab run); reporting a failure to the
++problems bar (the box shows it, design §2.3).
++
++## Contract
++
++**Source** (`ipc/MergeRequestSource.ts`, beside `rerequestReview`):
++
++```ts
++/** A failed job's log, read only when this window's list offered `page` (plan §2 #158). */
++readJobLog(page: WebPage): Promise<SourceResult<JobLogReply>>;
++```
++
++`ipc/mergeRequestDomain.ts`: `export type JobLogReply = Readonly<Generated.JobLogReply>;` (no conversion: `text` is
++the raw log, `cut` a boolean; `index.ts` exports it). `tauriMergeRequests.ts`: `async readJobLog(page) { return
++toResult(await commands.readJobLog(page)); }`.
++
++**State** (`ui/mergeRequestJobLogs.ts`; `MergeRequests` becomes `RowActions & Rerequests & JobLogs & Shown & {…}`,
++spread in `createMergeRequests` as `...createJobLogs({ source: deps.source, storage: deps.storage })`, as
++`createRerequests`):
++
++```ts
++export type LoggedJob = { readonly name: string; readonly page: WebPage };
++export type JobLogLoad =
++  | { readonly kind: "loading" }
++  | { readonly kind: "shown"; readonly view: JobLogView; readonly cut: boolean }
++  | { readonly kind: "refused"; readonly reply: Exclude<JobLogReply, { readonly kind: "log" }> }
++  | { readonly kind: "failed"; readonly cause: ProblemCause };
++export type ShownJobLog = { readonly job: LoggedJob; readonly load: JobLogLoad };
++export type JobLogs = {
++  /** The window's one log box: null when none is open. */
++  readonly jobLog: Readonly<ShallowRef<ShownJobLog | null>>;
++  /** Shows `job`'s log: the same page while loading or shown changes nothing; else loading, then the reply. */
++  showJobLog(job: LoggedJob): Promise<void>;
++  closeJobLog(): void;
++  /** The search text remembered for a job of this name ("" when none). */
++  jobSearch(name: string): string;
++  /** Remembers `text` for every job of this name, in every repository; "" forgets it. */
++  setJobSearch(name: string, text: string): void;
++};
++export function createJobLogs(deps: {
++  readonly source: MergeRequestSource;
++  readonly storage?: StorageLike;
++}): JobLogs;
++```
++
++Rules:
++
++1. `showJobLog(job)`: when `jobLog.value?.job.page === job.page` and its load is `loading` or `shown`, return (the
++   page's "Shift over the shown job does nothing"); a `refused` or `failed` one is asked again (their words say
++   "press Shift over the job again", and Rust keeps no failure, #158). Otherwise write a **new** entry `{ job, load:
++   loading }`, `attempt(() => source.readJobLog(job.page))` (`ui/problem.ts`), and write the outcome only when
++   `jobLog.value` is still that same entry object (identity: a reply for a job no longer shown, or after
++   `closeJobLog`, is dropped).
++2. Outcomes: `log` → `shown { view: jobLogView(reply.log.text), cut: reply.log.cut }` (parsed once here, so a
++   remount of the box never parses again); any other reply → `refused { reply }`; a source failure → `failed { cause
++   }`, nothing reported (the page shows `problemText` with the page slice's `jobLog` step).
++3. One `log.info("mergeRequests.job_log_shown", { page, kind, lines, cut, ms })` per settled ask (`kind` the load's,
++   `lines`/`cut` only for `shown`, `ms` from the ask to the parsed view): never the log's text (RK57). `log` from
++   `../ipc` as `ui/aiClose.ts:1`.
++4. Texts: `storedRecord("yamt.mergeRequests.jobSearches", "mergeRequests.job_searches_storage_failed", storage)`
++   (`ui/windowStorage.ts:51-68`); `jobSearch` reads `entryAt(name)`, a non-string as `""`; `setJobSearch` with `""`
++   calls `remove(name)`, else `set(name, text)`. No repository key (rule 7, design §1.10).
++
++**Fixture** (`ipc/fixtureMergeRequestLogs.ts`, `createFixtureMergeRequests` gains `readJobLog` calling it after
++`pause(LOG_PAUSE_MS)`, `LOG_PAUSE_MS = 400`, and `log.info("mergeRequests.fixture_job_log", { page })`):
++
++```ts
++/** The fixture's answer for a job page: a job page of the fixture's list gets a log or a scripted refusal; any other
++ *  page `notOffered` (as Rust, #158). */
++export function fixtureJobLog(page: WebPage): JobLogReply;
++```
++
++- A page `${ORIGIN}/-/jobs/<n>` with `n ≥ 9000` and `n % 10 === 0` (every `lint:docs`, `fixtureMergeRequestData.ts:137`)
++  → `log`, `cut: false`, a short raw log (40–80 lines) built with escapes in code (`"\u001b[31m"`), containing: GitLab
++  timestamp prefixes on every line (`2026-10-30T09:00:01.123456Z 00O `, one `00O+` continuation line), a
++  `section_start:…:prepare_script[collapsed=true]\r\u001b[0K` header and its `section_end`, a progress line using
++  `\r`, `\r\n` line ends, basic and bright colours, bold, a `38;5;208` and a `48;5;196` run, a truecolor
++  `38;2;255;0;0` run, an OSC title `\u001b]0;title\u0007`, a line `<b>not bold</b> &amp; <script>x</script>`, blank
++  lines, and the words `Error` and `error` on several lines (the search's case-insensitivity shows).
++- `n % 10 === 1` (every `test:unit`) → `log`, `cut: true`, a long log: about 9,000 lines, at most 512,000 UTF-8 bytes,
++  built once on first use and kept; coloured lines with timestamps, `FAIL`/`PASS` words, its last line `ERROR: Job
++  failed: exit code 1`. Its first line is a whole line (Rust drops the line a cut lands in).
++- Scripted refusals by job number, chosen among the failed rows other than the first (read
++  `fixtureMergeRequestData.ts` `pipeline`/`PIPELINES` for which indexes fail; the job is `9000 + 10·index`): one row's
++  `lint:docs` → `noLog`, its `test:unit` → `failed { message: "glab timed out" }`; another row's `lint:docs` →
++  `notLoggedIn { detail: LOGGED_OUT_DETAIL }`, its `test:unit` → `glabMissing`. Name these iids as exported
++  constants (`NO_LOG_IID`, `LOGGED_OUT_LOG_IID`) so the verify brief reads them in the test.
++- No string in the file may contain `#` followed by 3, 4, 6 or 8 hex digits (the palette fence,
++  `frontend/scripts/palette.ts:17-19`).
++
++## Change
++
++1. Source, domain alias, export, tauri method and test; fixture method, `ORIGIN` export.
++2. `fixtureMergeRequestLogs.ts` and its test.
++3. `mergeRequestJobLogs.ts` and its test; spread into `mergeRequests.ts`; `mergeRequests.test.ts`' full
++   `MergeRequestSource` literal (`:147`) gains `readJobLog`, plus one test that the slice exposes the job-log calls.
++4. `ipc/AGENTS.md`: `readJobLog`, the fixture's logs and refusals, `LOG_PAUSE_MS`.
++
++## Acceptance
++
++- Vitest (`pnpm -C frontend test -- src/ui/mergeRequest src/ipc`), each named for the bug it catches, at least:
++  - `mergeRequestJobLogs.test.ts`: `a_job_shows_loading_then_its_parsed_log`, `a_reply_for_a_job_no_longer_shown_is_dropped`
++    (ask A, ask B, A answers → B still loading; then B answers → B shown), `a_reply_after_close_is_dropped`,
++    `the_same_job_while_loading_or_shown_asks_nothing`, `a_refused_or_failed_job_is_asked_again`,
++    `every_reply_but_a_log_is_kept_as_refused`, `a_source_failure_is_shown_not_reported`,
++    `the_log_is_parsed_once_per_ask` (the view's identity across reads),
++    `a_search_text_is_remembered_per_job_name_for_every_repository` (two slices on one `StorageLike`, the stored JSON
++    is `{ "test:unit": "fail" }`), `an_empty_search_text_forgets_the_name`, `a_stored_non_string_reads_as_empty`,
++    `the_log_event_never_carries_the_text`.
++  - `fixtureMergeRequestLogs.test.ts`: `every_listed_lint_job_has_its_short_coloured_log` (through `jobLogView`:
++    coloured runs, no timestamp text, the markup line as written), `every_listed_unit_job_has_the_long_cut_log`
++    (`cut`, UTF-8 bytes ≤ 512,000, ≥ 8,000 view lines), `the_scripted_rows_refuse_as_named` (the four replies by the
++    exported iids' job pages), `a_page_that_is_no_listed_job_is_not_offered` (a merge-request page, job 9002, another
++    origin).
++  - `tauriMergeRequests.test.ts`: `readJobLog_calls_the_command_with_the_page_and_returns_its_reply`; `readJobLog`
++    added to the "a %s failure comes back unchanged" table.
++  - `fixtureMergeRequests.test.ts`: `a_job_log_is_logged_and_paused` (fake timers: nothing before 400 ms, the
++    `mergeRequests.fixture_job_log` line).
++- `pnpm -C frontend lint`, `typecheck` (clean), `test` (the palette and themes fence tests stay green on the new
++  fixture file): summary lines.
++- `just map-check` (PM6: new IPC method on the map) and `just arch-check`: summary lines.
++- `just mutants HEAD` in your workspace (SP11).
++
++## Skills
++
++`skill://ts-conventions`, `skill://ipc-contract`, `skill://comment-policy`, `skill://risk-register` (proposed RK57),
++`skill://verification`.
+diff --git a/docs/slices/briefs/ci-job-log-verify.md b/docs/slices/briefs/ci-job-log-verify.md
+new file mode 100644
+index 0000000..e3b56d1
+--- /dev/null
++++ b/docs/slices/briefs/ci-job-log-verify.md
+@@ -0,0 +1,93 @@
++# Slice ci-job-log-verify — the gate, the WebKit fixture and the real app for the CI job log
++
++Design: `docs/slices/briefs/ci-job-log-design.md` option A. Request acceptance: `docs/slices/request-ci-job-log.md`
++"Acceptance" (`:70-80`). Proposed plan §2 #158–#161; proposed RK57–RK59. Recipes: `skill://verification`; windows
++only on a private display, screenshots only from the session or the private display.
++
++## Target
++
++**Owned:** none (read-only commands; your scratch folder only).
++
++**Read-only:** the whole tree.
++
++**Needs:** `ci-job-log-rust` (with `just bindings` applied), `-core`, `-palette`, `-state` and `-page` committed.
++**Smoke pass** (steps B–C, no `just check`) as soon as `-page` is committed, beside its reviewers. **Final pass** once
++the docs keeper has named every new file in the project map (`just map-check`, PM6) and `read_job_log` /
++`MergeRequestSource.readJobLog` in architecture and ipc-contract: `just check` once, then B–C.
++
++**Non-goals:** the owner's GitLab playground check (below, for the orchestrator to hand on); fixing anything;
++`just mutants`.
++
++## Contract
++
++Fixture `?mr=list` as `ci-job-log-state` built it: every failed row's `lint:docs` (job `9000 + 10·index`) has the short
++coloured log, every `test:unit` (`+1`) the long cut one, `test:e2e` no page; the refusal rows are the iids exported by
++`frontend/src/ipc/fixtureMergeRequestLogs.ts` (`NO_LOG_IID`: `lint:docs` no log, `test:unit` "glab timed out";
++`LOGGED_OUT_LOG_IID`: `lint:docs` not logged in, `test:unit` glab missing); replies after 400 ms; the fixture logs
++`mergeRequests.fixture_job_log` and `mergeRequests.fixture_page`. Scenario `tests/glab/ci-job-log/` as `ci-job-log-rust`
++recorded it: !71 `phpunit` 302 (coloured), `lint` 303 (over 500 KB), `e2e` 304 (no trace), `docs` 305 (empty),
++`deploy` (no page); !70 `phpunit` 312; !69 (fork) `phpunit` 310. Words (`ui/mergeRequestsText.ts`): "Open the log of
++<name> on GitLab. Shift: show the log here", "Log of <name>", "Loading the log…", "Search the log", "N of M", "No
++results", "Earlier lines are on GitLab.", "Open the whole log on GitLab", "GitLab has no log for this job.", "This
++job's log was not listed by GitLab, so yamt did not read it.", "… then press Shift over the job again.", "Could not
++read the log: <message>".
++
++## Change (the steps)
++
++**A. Gate (final pass only).** `just check` → pass, or the failing recipe and its first 30 lines.
++
++**B. WebKit fixture.** `just app-session start-fixture --name cl --diff --mr list --size 1600x1000`; open the merge
++requests page; `hover`, `press … --x11`, `type --x11`, `click`, `scroll`, `read <js>`, `shot`, `stop`.
++
++1. Hover the first failed row's CI icon, then its `lint:docs` job: the tip reads "Open the log of lint:docs on GitLab.
++   Shift: show the log here"; the job button has `aria-keyshortcuts="Shift"`.
++2. `press Shift --x11`: "Loading the log…", then the log box left of the CI box (`read` both boxes'
++   `getBoundingClientRect()`: the log's right edge = the CI box's left edge, tops equal, unless clamped), scrolled to
++   its end (`scrollTop + clientHeight ≥ scrollHeight − 1`), focus in "Search the log"; coloured runs (`read` the
++   computed `color` of a red run ≠ the box's text colour); no timestamp text and no `section_start` text in
++   `innerText`; the progress line shows its last state only; `<b>not bold</b> &amp; <script>x</script>` shows as
++   written (no `b` or `script` element in the box).
++3. With the pointer moved over `test:unit` (`hover`), `type --x11 Error`: the same log stays (no second
++   `mergeRequests.fixture_job_log` line), the count reads "N of M" with N = M (the last match current), case-insensitive
++   (matches on both `Error` and `error` lines).
++4. Enter steps forward and wraps from M to 1; Shift+Enter backwards and wraps from 1 to M; the current match is centred
++   (its rect's middle within 1 line of the scroller's middle, unless at an end). Type `zzzq`: "No results", the scroll
++   position unchanged.
++5. Escape: the log closes, focus on `lint:docs`'s button, the CI box still open; Escape again: the CI box closes.
++6. Remembered text: open `test:unit`'s log on the first failed row, type `fail`; close; open `test:unit` on another
++   failed row: the field holds `fail`, selected, its matches highlighted. Reload the page (`read "location.reload()"`,
++   then reopen): still `fail`. Empty the field, close, reopen: empty; `read "localStorage.getItem('yamt.mergeRequests.jobSearches')"`
++   has no `test:unit` key.
++7. Switching: with `lint:docs`'s log open and focus in the field, hover `test:unit`, `press Shift --x11`: nothing new
++   (open question 1). Click into the log text, hover `test:unit` again, `press Shift --x11`: `test:unit`'s log. It
++   shows "Earlier lines are on GitLab." at its top; "Open the whole log on GitLab" logs `mergeRequests.fixture_page`
++   with its page.
++8. The refusal rows: each of the four sentences in the box; Shift again over a refused job asks again (a second
++   `fixture_job_log` line); `test:e2e` (no page): Shift does nothing.
++9. Click outside both boxes: both close. Reopen; a scroll inside the log keeps both open; a list scroll (`scroll` the
++   list) closes both.
++10. Timings: Shift to the long log's last line painted (≤ 1.5 s) and a one-letter query to highlights painted
++    (≤ 250 ms), each measured three times with `read` of an async expression awaiting two `requestAnimationFrame`s.
++    `shot` with a log open and a search shown in yamt Dark and yamt Light (Settings → Theme).
++
++**C. Real app.** `scripts/local-conflicts-repo.sh <scratch>/cl`; `cargo tauri build --debug --no-bundle`;
++`just app-session start-app --name cl --diff --dir <scratch>/cl --glab ci-job-log`; open the merge requests page.
++
++1. !71 `phpunit` (302): Shift → the coloured log, at its end, focus in the field; search `fail` → highlights and count.
++2. !70 `phpunit` (312): the field holds `fail`, its matches highlighted.
++3. !71 `lint` (303): the cut notice, the button opens the job page (`<scratch>/cl/glab/opened.log` names it).
++4. !71 `e2e` (304) and `docs` (305): "GitLab has no log for this job."; `deploy`: Shift does nothing.
++5. !69 `phpunit` (310): its log; the fake glab log has an `argv:` line with `projects/sam%2Ftaskboard/jobs/310/trace`.
++6. Reopen 302: no second `…/jobs/302/trace` line in the fake glab log.
++7. No `trace` call for a job the page never asked; the app log has one `job_log` line per ask and never the log's
++   text. `shot` in dark and light.
++
++## Acceptance
++
++Each step: pass/fail with the observed words, `read` results, timings, app-log and fake-glab log lines pasted
++verbatim; screenshots' paths.
++
++Owner check (hand on, not run): on the GitLab playground, run `scripts/gitlab-playground.sh` (it adds the "Failing CI"
++merge request on `feature/failing-ci`; its pipeline needs a runner `[INFERENCE]`), open the page in the real app and
++press Shift over `phpunit` and `long-log`: the lines, colours, collapsed section header and the cut notice match
++GitLab's job page for the same job (except 256 colours, which show as the nearest theme colour, open question 2).
