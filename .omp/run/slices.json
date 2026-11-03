@@ -1,5 +1,25 @@
 {
-  "MrPeopleDesign": {
-    "owned": ["docs/slices/briefs/mr-people-*.md"]
+  "MrPeopleRust": {
+    "owned": [
+      "crates/merge-requests/**",
+      "src-tauri/src/merge_requests.rs",
+      "src-tauri/src/merge_requests/**",
+      "src-tauri/src/commands.rs",
+      "scripts/fake-glab/glab",
+      "tests/glab/mr-people/**",
+      "tests/glab/README.md"
+    ]
+  },
+  "MrPeopleCore": {
+    "owned": [
+      "frontend/src/mergeRequests/internal/suggestions.ts",
+      "frontend/src/mergeRequests/internal/suggestions.test.ts",
+      "frontend/src/mergeRequests/internal/filters.ts",
+      "frontend/src/mergeRequests/internal/choices.ts",
+      "frontend/src/mergeRequests/internal/choices.test.ts",
+      "frontend/src/mergeRequests/internal/filters.test.ts",
+      "frontend/src/mergeRequests/index.ts",
+      "frontend/src/mergeRequests/AGENTS.md"
+    ]
   }
 }

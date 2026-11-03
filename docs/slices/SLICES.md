@@ -11,16 +11,21 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 Request `docs/slices/request-mr-people.md` (rules 1–8, acceptance, non-goals, reopens); facts
 `.omp/run/notes/PlanScoutMrPeopleFacts.md`. Owner's answers: anyone in the project, found by typing (#2244); removing
 at once, behind a menu click so it cannot happen by accident (#2245). Reopens plan #153 and RK54 ("nothing adds a
-reviewer"). No product question open.
+reviewer"). Design `briefs/mr-people-design.md` option A: `search_people` through `autocompleteUsers` 250 ms after the
+last key, `change_people` one `APPEND`/`REMOVE` per change, Free case from GitLab's answer, pictures offered before the
+reply, a queue per merge request. Designer's questions decided by the orchestrator (OR13, owner may veto): no
+search fallback for GitLab before 16.3; Free keeps the "did not add" sentence (rule 6). Open: a row leaving the
+filters after a change (asked). Order: 2 ∥ 2b, `just bindings`, 3, 4, 5.
 
-| row | slice                                                                                  | owner                 | status  | evidence |
-| --- | -------------------------------------------------------------------------------------- | --------------------- | ------- | -------- |
-| 1   | design: search field, writes and answers, Free case, pictures, box hover rules, briefs | designer              | running |          |
-| 2   | rust: search and add/remove commands, pictures offered, fake glab, RK54 test           | rust-impl             | todo    |          |
-| 3   | state: ipc source + fixtures, the window's add/remove asks, texts                      | web-impl              | todo    |          |
-| 4   | page: add button, search list, per-person menu, hover rules; wires the window          | web-impl              | todo    |          |
-| 5   | docs keeper; verify: smoke after 4, final `just check`, WebKit, real app               | docs-keeper, verifier | todo    |          |
-| 6   | owner check on the GitLab playground: add and remove a reviewer and an assignee        | human                 | todo    |          |
+| row | slice                                                                                  | owner                 | status  | evidence                                                                                             |
+| --- | -------------------------------------------------------------------------------------- | --------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| 1   | design: search field, writes and answers, Free case, pictures, box hover rules, briefs | designer              | done    | `MrPeopleDesign`: option A, five briefs (rust, core, state, page, verify). Notes `MrPeopleDesign.md` |
+| 2   | rust (`briefs/mr-people-rust.md`): search, change, pictures, fake glab, RK54 test      | rust-impl             | running |                                                                                                      |
+| 2b  | core (`briefs/mr-people-core.md`): suggestions, shared count rule                      | web-impl              | running |                                                                                                      |
+| 3   | state: ipc source + fixtures, the window's add/remove asks, texts                      | web-impl              | todo    |                                                                                                      |
+| 4   | page: add button, search list, per-person menu, hover rules; wires the window          | web-impl              | todo    |                                                                                                      |
+| 5   | docs keeper; verify: smoke after 4, final `just check`, WebKit, real app               | docs-keeper, verifier | todo    |                                                                                                      |
+| 6   | owner check on the GitLab playground: add and remove a reviewer and an assignee        | human                 | todo    |                                                                                                      |
 
 ## Release 0.6.7 (session 48, owner: "release the next patch")
 
