@@ -1,0 +1,439 @@
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+index 127a611..35b728d 100644
+--- a/crates/merge-requests/AGENTS.md
++++ b/crates/merge-requests/AGENTS.md
+@@ -6,4 +6,4 @@ Each row's open discussions (plan §2 #162, #163; request `docs/slices/request-m
+ 
+ People on a merge request (plan §2 #153 amended, #169; request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, §1.1–1.5): `people_search.rs` (the IPC type `PeopleSearchReply` `found { people }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`; the shell's `FoundPeople { reply, pictures }`; `search_people`: glab missing → `GlabMissing`, `logged_in_project`, one `Glab::get` of `people_search_args` — `api graphql -f query=<PeopleSearch> -f fullPath=<path> -f search=<text>`, the text a raw `-f` field (glab 1.126.0 searched `@sam` as text on gitlab.com, 2026-11-03) — asking `project.autocompleteUsers(search:)` as GitLab's own merge-request dropdown does (everyone with access, invited groups included, at most 20, by name; 13 of 250 on gitlab-org/gitlab, about 1 s); glab's failure or a GraphQL error (an older GitLab's missing field included) → `Failed`, `project: null` → `Failed` (page.rs `NO_PROJECT`), `autocompleteUsers: null` → `Found` with nobody; people through `People`, their uploaded pictures one per username; one `info` line: the outcome's kind and the count, never the text or a name), `people_change.rs` (the IPC types `PeopleGroup` `assignees`/`reviewers`, `PeopleAction` `add`/`remove`, `PeopleChange` (`group`, `action`, `username`; sent by the window), `MergeRequestPeople` (`assignees`, `reviewers`), `PeopleChangeReply` `changed { people }`/`unchanged { people }`/`glabMissing`/`notLoggedIn { detail }`/`refused { message }`/`failed { message }`; the shell's `ChangedPeople { reply, pictures }`; `change_people`: glab missing → `GlabMissing`, `logged_in_project`, then exactly one `Glab::post` of `people_change_body` with `GRAPHQL_BODY_ARGS`, nothing read before it (rule 8) — the group's `mergeRequestSetAssignees`/`mergeRequestSetReviewers`, aliased `changed`, with `usernames: [<one>]` and `mode` `APPEND` for add, `REMOVE` for remove, never `REPLACE`, the username only a variable; both mutations answer both lists with the list query's fields; glab's failure or GitLab's top-level error → `Failed`, no payload or no `mergeRequest` → `Failed` (`NO_MERGE_REQUEST`), the payload's first `errors` entry → `Refused`; else GitLab's answered group decides (usernames compared with `eq_ignore_ascii_case`): an add listed or a remove not listed → `Changed`, otherwise `Unchanged` (GitLab Free's one assignee and one reviewer, no permission, an unknown user), both with the two lists as answered; unknown review states warned of; uploaded pictures of everyone in both lists, one per username; one `info` line: iid, group, action and the outcome's kind, never a username). The shell offers each reply's pictures before the reply reaches the window (`src-tauri/src/merge_requests/people.rs`, RK53). Tests: `people_search.rs` and `people_change/tests.rs` (inline answers: order and pictures, null project and null list, glab's and GitLab's words, the `changed`/`unchanged` table for both groups and actions, ASCII case, refused against failed, no payload or merge request, pictures once, each outcome's logged kind), `tests/people.rs` (`mr-people/`: the search argv exact and nothing written, nobody found, glab's failure; posts 1–8 through `answered_posts`: the exact `APPEND` body, a reviewer's state, two `REMOVE`s and nothing else asked, GitLab Free's dropped add and a remove not made `Unchanged`, a mutation error `Refused`, a top-level error `Failed`; a run of eight changes writes only one `APPEND` or `REMOVE` of one username each, never `REPLACE`, `-X` or REST ids (RK54); glab missing or logged out before any query).
+ 
+-A merge request's description (plan §2 #171–#174; request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, §1.1–§1.6): `description.rs` (the IPC types `DescriptionReply` `read { description }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, `Description { blocks }`, `DescriptionBlock` `paragraph`/`heading { level: HeadingLevel h1–h6 }`/`code { language, text }`/`list { numbering: ListNumbering bullets|numbers { start }, items: DescriptionItem { task: TaskBox none|open|done|inapplicable, blocks } }`/`quote`/`rule`/`table { head, body: DescriptionRow { cells: DescriptionCell { header, align: CellAlign start|center|end, inlines } } }`/`details { open, summary, blocks }`, `DescriptionInline` `text`/`emphasis`/`strong`/`strike`/`code`/`link { link: DescriptionLink }`/`image { image: DescriptionImage, caption }`/`lineBreak`; the shell's `ReadDescription { reply, pages, uploads }`; `read_description`: glab missing → `GlabMissing`, `logged_in_project`, `fetch_description` — the one request, `request-mr-links.md` reuses it: one `Glab::get` of `description_args` (`MergeRequestDescription { project { mergeRequest(iid) { descriptionHtml } } }`, 10 of 250 logged in, 1.0 s, measured 2026-11-04), glab's line or GitLab's first error → `failed` in those words, `project: null` → `NO_PROJECT`, `mergeRequest: null` → `NO_MERGE_REQUEST`, `descriptionHtml: null` → "" — then `described` against `WebPage::merge_request` (None off https); one `info` line with iid, outcome, blocks, pages, uploads and web images, never text or an address). **The walk** (`description/html.rs` `described`, `MAX_NESTING` 32): `dom_query` parses the fragment; `Walk::children` is the one place rule 6 is kept — it drops comments, the `LEFT_OUT` elements with all their text (`script`, `style`, `template`, `noscript`, `iframe`, `frame`, `frameset`, `object`, `embed`, `applet`, `video`, `audio`, `source`, `track`, `canvas`, `svg`, `math`, `link`, `meta`, `base`, `head`, `title`, `button`, `select`, `textarea`, `option`, `input`) and every element deeper than 32 (one `warn` per read); block elements `p`, `h1`–`h6`, `pre`, `ul`, `ol`, `blockquote`, `hr`, `table`, `details`, `div` end the inline run before them, which becomes a paragraph unless it is only white space; inline elements `em`/`i`, `strong`/`b`, `del`/`s`/`strike`, `code`, `a`, `img`, `br`; every other element gives its content in place (`span`, `gl-emoji`, `copy-code`, `section`, `form` …); `li`, `thead`/`tbody`/`tfoot`, `tr`, `th`/`td` and `summary` count only inside their parents; a link without `href`, inside another link or left with nothing but white space gives its content only, and its images follow it (`lifted`), so a link never holds an image; an image's address is `data-src` (GitLab's lazy images) else `src`, its caption alt, else title, else the address as written; pages and uploads are collected once each in document order. `description/element.rs` reads what one element says: the code language (`data-canonical-lang`, else `lang`, empty → none; the `<pre>`'s text with one final `\n` removed), `<ol start>` (else 1), the heading level, the task box (the item's first content, or its first paragraph's, an `input.task-list-item-checkbox`: `data-inapplicable` → inapplicable, `checked` → done, else open) and the cell alignment (exactly `text-align: center`/`right`, else start). **Addresses** (`description/address.rs`: the IPC types `DescriptionLink` `page { page }`/`refused { address }`, `DescriptionImage` `uploaded { key }`/`web { address }`/`refused` and `UploadKey`, and the shell's `OfferedUpload { key, address }`, re-exported from `description.rs`; the only maker of `UploadKey` and, beside `avatar_source`, of `PictureAddress`): `WebPage::linked` (an `http`/`https` `url::Url` as `url` serialises it: no space, quote, `<`, `>` or control character), `link_of` (`Url::options().base_url(base).parse(href)`; http/https → `page`, else `refused { address: href }`), `image_of` (an empty address or anything but https → `refused`; https on `base`'s origin with the path `[<segments>]/-/project/<digits>/uploads/<32 lowercase hex>/<file>` or `<the merge request's project web path>/uploads/<secret>/<file>`, `<file>` one segment of `[A-Za-z0-9._~%+-]`, not `..` → `uploaded { key: "upload~<secret>" }` with the route `projects/<digits, or the web path with "/" as "%2F">/uploads/<secret>/<file>` and the address without query or fragment; any other https → `web { address }`). **Uploads** (`picture.rs`): `PictureAddress` holds an avatar or an upload (route and web address), `as_str` the https address; `fetch_picture` asks an upload by `glab api <route>`, then, only when glab's line ends `(HTTP 403)` or `(HTTP 404)` (`page.rs` `FORBIDDEN`, `NOT_FOUND`), by `glab api <web address>` (both answered gitlab-org/gitlab !200000's screenshots, 62–158 KB PNGs, on 2026-11-04); a 3xx glab did not follow (`glab: HTTP 3xx`) fails on either route and never tries the other: glab 1.126.0 follows a GET's redirect itself, and gitlab.com answered both routes 200 with no redirect (`glab api --include`, 2026-11-04); an upload may be up to `MAX_UPLOAD_BYTES` 10 MiB, an avatar still 1 MiB. The list query asks `description` after `title` (172 of 250 logged in, +2), and `page.rs` folds it to `MergeRequestRow.hasDescription` (more than white space); the text goes nowhere else. Tests: `description/tests.rs` over the measured GitLab shapes and the planted answer of the scenario `mr-description`, `picture/tests.rs` for both routes and the two limits, `tests/description.rs` over the fake glab (`tests/glab/README.md`; !53 a redirect on either route refused).
++A merge request's description (plan §2 #171–#174; request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, §1.1–§1.6): `description.rs` (the IPC types `DescriptionReply` `read { description }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, `Description { blocks }`, `DescriptionBlock` `paragraph`/`heading { level: HeadingLevel h1–h6 }`/`code { language, text }`/`list { numbering: ListNumbering bullets|numbers { start }, items: DescriptionItem { task: TaskBox none|open|done|inapplicable, blocks } }`/`quote`/`rule`/`table { head, body: DescriptionRow { cells: DescriptionCell { header, align: CellAlign start|center|end, inlines } } }`/`details { open, summary, blocks }`, `DescriptionInline` `text`/`emphasis`/`strong`/`strike`/`code`/`link { link: DescriptionLink }`/`image { image: DescriptionImage, caption }`/`lineBreak`; the shell's `ReadDescription { reply, pages, uploads }`; `read_description`: glab missing → `GlabMissing`, `logged_in_project`, `fetch_description` — the one request, `request-mr-links.md` reuses it: one `Glab::get` of `description_args` (`MergeRequestDescription { project { mergeRequest(iid) { descriptionHtml } } }`, 10 of 250 logged in, 1.0 s, measured 2026-11-04), glab's line or GitLab's first error → `failed` in those words, `project: null` → `NO_PROJECT`, `mergeRequest: null` → `NO_MERGE_REQUEST`, `descriptionHtml: null` → "" — then `described` against `WebPage::merge_request` (None off https); one `info` line with iid, outcome, blocks, pages, uploads and web images, never text or an address). **The walk** (`description/html.rs` `described`, `MAX_NESTING` 32): `dom_query` parses the fragment; `Walk::children` is the one place rule 6 is kept — it drops comments, the `LEFT_OUT` elements with all their text (`script`, `style`, `template`, `noscript`, `iframe`, `frame`, `frameset`, `object`, `embed`, `applet`, `video`, `audio`, `source`, `track`, `canvas`, `svg`, `math`, `link`, `meta`, `base`, `head`, `title`, `button`, `select`, `textarea`, `option`, `input`) and every element deeper than 32 (one `warn` per read); block elements `p`, `h1`–`h6`, `pre`, `ul`, `ol`, `blockquote`, `hr`, `table`, `details`, `div` end the inline run before them, which becomes a paragraph unless it is only white space; inline elements `em`/`i`, `strong`/`b`, `del`/`s`/`strike`, `code`, `a`, `img`, `br`; every other element gives its content in place (`span`, `gl-emoji`, `copy-code`, `section`, `form` …); `li`, `thead`/`tbody`/`tfoot`, `tr`, `th`/`td` and `summary` count only inside their parents; a link without `href`, inside another link or left with nothing but white space gives its content only, and its images follow it (`lifted`), so a link never holds an image; an image's address is `data-src` (GitLab's lazy images) else `src`, its caption alt, else title, else the address as written; pages and uploads are collected once each in document order. `description/element.rs` reads what one element says: the code language (`data-canonical-lang`, else `lang`, empty → none; the `<pre>`'s text with one final `\n` removed), `<ol start>` (else 1), the heading level, the task box (the item's first content, or its first paragraph's, an `input.task-list-item-checkbox`: `data-inapplicable` → inapplicable, `checked` → done, else open) and the cell alignment (exactly `text-align: center`/`right`, else start). **Addresses** (`description/address.rs`: the IPC types `DescriptionLink` `page { page }`/`refused { address }`, `DescriptionImage` `uploaded { key }`/`web { address }`/`refused` and `UploadKey`, and the shell's `OfferedUpload { key, address }`, re-exported from `description.rs`; the only maker of `UploadKey` and, beside `avatar_source`, of `PictureAddress`; `UploadKey::is_key` is the shell's test of a key, `upload~` and the 32 lowercase hex secret): `WebPage::linked` (an `http`/`https` `url::Url` as `url` serialises it: no space, quote, `<`, `>` or control character), `link_of` (`Url::options().base_url(base).parse(href)`; http/https → `page`, else `refused { address: href }`), `image_of` (an empty address or anything but https → `refused`; https on `base`'s origin, only when that origin is exactly `https://gitlab.com`, with the path `/-/project/<digits>/uploads/<32 lowercase hex>/<file>` or `<the merge request's project web path>/uploads/<secret>/<file>`, `<file>` one segment of `[A-Za-z0-9._~%+-]`, not `..` → `uploaded { key: "upload~<secret>" }` with the route `projects/<digits, or the web path with "/" as "%2F">/uploads/<secret>/<file>` and the address without query or fragment; any other https → `web { address }`, an upload on a self-managed GitLab included: gitlab.com was measured to answer both upload routes itself (200, no redirect, 2026-11-04), while a self-managed GitLab may redirect an upload to object storage and glab would carry the login there (RK53), so the webview loads it without a login and it counts as a web image). **Uploads** (`picture.rs`): `PictureAddress` holds an avatar or an upload (route and web address), `as_str` the https address; `fetch_picture` asks an upload by `glab api <route>`, then, only when glab's line ends `(HTTP 403)` or `(HTTP 404)` (`page.rs` `FORBIDDEN`, `NOT_FOUND`), by `glab api <web address>` (both answered gitlab-org/gitlab !200000's screenshots, 62–158 KB PNGs, on 2026-11-04); a 3xx glab did not follow (`glab: HTTP 3xx`) fails on either route and never tries the other: glab 1.126.0 follows a GET's redirect itself, and gitlab.com answered both routes 200 with no redirect (`glab api --include`, 2026-11-04); an upload may be up to `MAX_UPLOAD_BYTES` 10 MiB, an avatar still 1 MiB. The list query asks `description` after `title` (172 of 250 logged in, +2), and `page.rs` folds it to `MergeRequestRow.hasDescription` (more than white space); the text goes nowhere else. Tests: `description/tests.rs` over the measured GitLab shapes and the planted answer of the scenario `mr-description` (its project on gitlab.com), `picture/tests.rs` for both routes and the two limits, `tests/description.rs` over the fake glab (`tests/glab/README.md`; !53 a redirect on either route refused; `mr-description/self-managed` uploads on a self-managed GitLab never fetched).
+diff --git a/crates/merge-requests/src/description/address.rs b/crates/merge-requests/src/description/address.rs
+index a0c7ec3..3321600 100644
+--- a/crates/merge-requests/src/description/address.rs
++++ b/crates/merge-requests/src/description/address.rs
+@@ -2,17 +2,16 @@ use serde::Serialize;
+ use specta::Type;
+ use url::Url;
+ 
+-use crate::web_page::{
+-    ESCAPED_SLASH, MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_number, is_web_path,
+-};
++use crate::web_page::{ESCAPED_SLASH, MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_number};
+ use crate::{PictureAddress, WebPage};
+ 
+ const HTTP_SCHEME: &str = "http";
+ const HTTPS_SCHEME: &str = "https";
+ const UPLOADS_SEGMENT: &str = "/uploads/";
+-const PROJECT_SEGMENT: &str = "/-/project/";
++const PROJECT_PREFIX: &str = "/-/project/";
+ const SECRET_HEX_DIGITS: usize = 32;
+ const UPLOAD_KEY_PREFIX: &str = "upload~";
++const LOGIN_FETCHED_ORIGIN: &str = "https://gitlab.com";
+ 
+ /// `upload~<the upload's 32 hex digit secret>`; `~` is in no username, so it never names an avatar. Only
+ /// `description/address.rs` makes one.
+@@ -26,6 +25,12 @@ impl UploadKey {
+     pub fn as_str(&self) -> &str {
+         &self.0
+     }
++
++    /// Whether `name` is an upload's key: `upload~` and a 32 lowercase hex digit secret.
++    #[must_use]
++    pub fn is_key(name: &str) -> bool {
++        name.strip_prefix(UPLOAD_KEY_PREFIX).is_some_and(is_secret)
++    }
+ }
+ 
+ /// Where a link leads.
+@@ -95,8 +100,8 @@ pub(crate) fn link_of(base: Option<&Url>, href: &str) -> DescriptionLink {
+     }
+ }
+ 
+-/// The image and, for an upload, what to offer: an https upload on `base`'s origin → `Uploaded`; any other https
+-/// address → `Web`; anything else, or no address → `Refused`.
++/// The image and, for an upload, what to offer: an https upload on `base`'s origin, gitlab.com → `Uploaded`; any
++/// other https address → `Web`; anything else, or no address → `Refused`.
+ pub(crate) fn image_of(base: Option<&Url>, src: &str) -> (DescriptionImage, Option<OfferedUpload>) {
+     if src.trim().is_empty() {
+         return (DescriptionImage::Refused, None);
+@@ -113,10 +118,14 @@ pub(crate) fn image_of(base: Option<&Url>, src: &str) -> (DescriptionImage, Opti
+     (DescriptionImage::Web { address }, None)
+ }
+ 
+-/// An upload on `base`'s origin: the path `[<segments>]/-/project/<digits>/uploads/<secret>/<file>` or `<the
+-/// project's web path>/uploads/<secret>/<file>`, its query and fragment dropped.
++/// An upload on `base`'s origin when that is gitlab.com: the path `/-/project/<digits>/uploads/<secret>/<file>` or
++/// `<the project's web path>/uploads/<secret>/<file>`, its query and fragment dropped.
+ fn upload_of(base: &Url, url: &Url) -> Option<OfferedUpload> {
+-    if url.origin() != base.origin() {
++    // Only gitlab.com was measured to answer both upload routes itself, 200 with no redirect (`glab api --include`
++    // on !200000's upload, 2026-11-04); a self-managed GitLab may redirect to object storage, and glab would carry
++    // the login there (RK53). Elsewhere the webview loads the upload without a login.
++    let is_gitlab_com = base.origin().ascii_serialization() == LOGIN_FETCHED_ORIGIN;
++    if !is_gitlab_com || url.origin() != base.origin() {
+         return None;
+     }
+     let (before, upload) = url.path().rsplit_once(UPLOADS_SEGMENT)?;
+@@ -135,12 +144,11 @@ fn upload_of(base: &Url, url: &Url) -> Option<OfferedUpload> {
+     })
+ }
+ 
+-/// The project in an upload's path before `/uploads/`, as the uploads API names it: `[<segments>]/-/project/<id>` →
+-/// the id; the merge request's project web path (`base` before `/-/merge_requests/`) → that path, "/" as "%2F".
++/// The project in an upload's path before `/uploads/`, as the uploads API names it: `/-/project/<id>` → the id; the
++/// merge request's project web path (`base` before `/-/merge_requests/`) → that path, "/" as "%2F".
+ fn project_of(base: &Url, before: &str) -> Option<String> {
+-    if let Some((root, id)) = before.rsplit_once(PROJECT_SEGMENT) {
+-        let is_root = root.is_empty() || is_web_path(root);
+-        return (is_root && is_number(id)).then(|| id.to_owned());
++    if let Some(id) = before.strip_prefix(PROJECT_PREFIX) {
++        return is_number(id).then(|| id.to_owned());
+     }
+     let (project, _) = base.path().rsplit_once(MERGE_REQUESTS_SEGMENT)?;
+     let path = project.strip_prefix('/')?;
+diff --git a/crates/merge-requests/src/description/tests.rs b/crates/merge-requests/src/description/tests.rs
+index a2cab21..7ec9611 100644
+--- a/crates/merge-requests/src/description/tests.rs
++++ b/crates/merge-requests/src/description/tests.rs
+@@ -8,10 +8,11 @@ use super::html::{MAX_NESTING, described};
+ use super::*;
+ use crate::PictureAddress;
+ 
+-const BASE: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/52";
+-const MERGE_REQUESTS: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/";
++const BASE: &str = "https://gitlab.com/taskboard/taskboard/-/merge_requests/52";
++const MERGE_REQUESTS: &str = "https://gitlab.com/taskboard/taskboard/-/merge_requests/";
+ const SUB_PATH_BASE: &str = "https://gitlab.example/gitlab/taskboard/taskboard/-/merge_requests/52";
+-const ORIGIN: &str = "https://gitlab.example";
++const SELF_MANAGED_BASE: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/52";
++const ORIGIN: &str = "https://gitlab.com";
+ const HEX_A: &str = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
+ const HEX_B: &str = "f9e8d7c6b5a4938271605f4e3d2c1b0a";
+ const RICH: &str =
+@@ -180,7 +181,7 @@ fn every_element_of_rule_3_becomes_its_block_or_inline() {
+             wrapped("emphasis", "e"), wrapped("emphasis", "i"), wrapped("strong", "s"), wrapped("strong", "b"),
+             wrapped("strike", "d"), wrapped("strike", "s"), wrapped("strike", "k"),
+             { "kind": "code", "text": "c" }, { "kind": "lineBreak" },
+-            { "kind": "link", "link": { "kind": "page", "page": "https://gitlab.example/x" },
++            { "kind": "link", "link": { "kind": "page", "page": "https://gitlab.com/x" },
+               "inlines": [{ "kind": "text", "text": "a" }] },
+             { "kind": "image", "image": { "kind": "web", "address": "https://images.example/cat.png" },
+               "caption": "cat" },
+@@ -614,21 +615,21 @@ fn a_relative_link_resolves_on_the_merge_requests_gitlab_page() {
+     let base = base();
+     let sub_path = Url::parse(SUB_PATH_BASE).unwrap();
+     let cases = [
+-        (&base, "/x", "https://gitlab.example/x"),
++        (&base, "/x", "https://gitlab.com/x"),
+         (
+             &base,
+             "x",
+-            "https://gitlab.example/taskboard/taskboard/-/merge_requests/x",
++            "https://gitlab.com/taskboard/taskboard/-/merge_requests/x",
+         ),
+         (
+             &base,
+             "#frag",
+-            "https://gitlab.example/taskboard/taskboard/-/merge_requests/52#frag",
++            "https://gitlab.com/taskboard/taskboard/-/merge_requests/52#frag",
+         ),
+         (
+             &base,
+             "/taskboard/taskboard/-/issues/12",
+-            "https://gitlab.example/taskboard/taskboard/-/issues/12",
++            "https://gitlab.com/taskboard/taskboard/-/issues/12",
+         ),
+         (
+             &sub_path,
+@@ -715,7 +716,6 @@ fn without_an_https_origin_a_relative_link_is_refused() {
+ #[test]
+ fn an_upload_on_the_projects_origin_is_uploaded_in_both_path_forms() {
+     let base = base();
+-    let sub_path = Url::parse(SUB_PATH_BASE).unwrap();
+     let by_id = format!("{ORIGIN}/-/project/7/uploads/{HEX_A}/shot.png");
+     let cases = [
+         (
+@@ -732,13 +732,6 @@ fn an_upload_on_the_projects_origin_is_uploaded_in_both_path_forms() {
+             format!("projects/7/uploads/{HEX_A}/shot.png"),
+             by_id.clone(),
+         ),
+-        (
+-            &sub_path,
+-            format!("/gitlab/-/project/7/uploads/{HEX_A}/shot.png"),
+-            HEX_A,
+-            format!("projects/7/uploads/{HEX_A}/shot.png"),
+-            format!("{ORIGIN}/gitlab/-/project/7/uploads/{HEX_A}/shot.png"),
+-        ),
+         (
+             &base,
+             format!("/taskboard/taskboard/uploads/{HEX_B}/old a+b~c%20d.png"),
+@@ -760,6 +753,7 @@ fn an_upload_on_the_projects_origin_is_uploaded_in_both_path_forms() {
+ fn an_upload_shaped_address_that_breaks_a_rule_is_a_web_image() {
+     let base = base();
+     let on_origin_but_no_upload = [
++        format!("/gitlab/-/project/7/uploads/{HEX_A}/a.png"),
+         format!("/-/project/x7/uploads/{HEX_A}/a.png"),
+         format!("/-/project//uploads/{HEX_A}/a.png"),
+         format!("/-/project/7/uploads/{}/a.png", HEX_A.to_uppercase()),
+@@ -789,17 +783,47 @@ fn an_upload_path_on_another_host_is_another_sites_image() {
+     let base = base();
+     for src in [
+         format!("https://evil.example/-/project/7/uploads/{HEX_A}/x.png"),
+-        format!("https://gitlab.example:8443/-/project/7/uploads/{HEX_A}/x.png"),
++        format!("https://gitlab.com:8443/-/project/7/uploads/{HEX_A}/x.png"),
+         format!("https://evil.example/taskboard/taskboard/uploads/{HEX_A}/x.png"),
+     ] {
+         assert_eq!(image_of(Some(&base), &src), (web(&src), None), "{src}");
+     }
+ }
+ 
++#[test]
++fn an_upload_on_a_self_managed_origin_is_a_web_image_with_its_absolute_address() {
++    let self_managed = Url::parse(SELF_MANAGED_BASE).unwrap();
++    let sub_path = Url::parse(SUB_PATH_BASE).unwrap();
++    let cases = [
++        (
++            &self_managed,
++            format!("/-/project/7/uploads/{HEX_A}/shot.png"),
++            format!("https://gitlab.example/-/project/7/uploads/{HEX_A}/shot.png"),
++        ),
++        (
++            &self_managed,
++            format!("/taskboard/taskboard/uploads/{HEX_B}/old.png"),
++            format!("https://gitlab.example/taskboard/taskboard/uploads/{HEX_B}/old.png"),
++        ),
++        (
++            &sub_path,
++            format!("/gitlab/-/project/7/uploads/{HEX_A}/shot.png"),
++            format!("https://gitlab.example/gitlab/-/project/7/uploads/{HEX_A}/shot.png"),
++        ),
++    ];
++    for (base, src, address) in cases {
++        assert_eq!(image_of(Some(base), &src), (web(&address), None), "{src}");
++    }
++    let html = format!("<p><img src=\"/-/project/7/uploads/{HEX_A}/shot.png\" alt=\"shot\"></p>");
++    let read = described(&html, Some(&WebPage(SELF_MANAGED_BASE.to_owned())));
++    assert_eq!(read.uploads, Vec::<OfferedUpload>::new());
++    assert_eq!(read.web_images, 1);
++}
++
+ #[test]
+ fn http_data_and_file_images_are_refused() {
+     let base = base();
+-    let http_upload = format!("http://gitlab.example/-/project/7/uploads/{HEX_A}/x.png");
++    let http_upload = format!("http://gitlab.com/-/project/7/uploads/{HEX_A}/x.png");
+     let refused_srcs = [
+         "http://plain.example/p.png",
+         http_upload.as_str(),
+@@ -835,6 +859,23 @@ fn an_upload_key_is_never_a_username() {
+     );
+ }
+ 
++#[test]
++fn an_upload_key_is_upload_tilde_and_32_lowercase_hex_digits() {
++    assert!(UploadKey::is_key(&format!("upload~{HEX_A}")));
++    let not_keys = [
++        format!("upload~{}", &HEX_A[1..]),
++        format!("upload~{HEX_A}0"),
++        format!("upload~{}", HEX_A.to_uppercase()),
++        HEX_A.to_owned(),
++        format!("upload{HEX_A}"),
++        "anna".to_owned(),
++        "upload~".to_owned(),
++    ];
++    for name in not_keys {
++        assert!(!UploadKey::is_key(&name), "{name}");
++    }
++}
++
+ #[test]
+ fn pages_and_uploads_are_collected_once_each_in_order() {
+     let a = format!("/-/project/7/uploads/{HEX_A}/a.png");
+@@ -849,8 +890,8 @@ fn pages_and_uploads_are_collected_once_each_in_order() {
+ 
+     let pages = [
+         "https://docs.example/a",
+-        "https://gitlab.example/b",
+-        "https://gitlab.example/c",
++        "https://gitlab.com/b",
++        "https://gitlab.com/c",
+     ];
+     let expected: Vec<WebPage> = pages
+         .iter()
+diff --git a/crates/merge-requests/src/picture/tests.rs b/crates/merge-requests/src/picture/tests.rs
+index f2e63a7..54c542b 100644
+--- a/crates/merge-requests/src/picture/tests.rs
++++ b/crates/merge-requests/src/picture/tests.rs
+@@ -210,8 +210,7 @@ fn an_upload_up_to_10_mib_is_taken_and_larger_is_refused() {
+ 
+ #[test]
+ fn an_upload_is_asked_through_the_uploads_api_route() {
+-    let base =
+-        Url::parse("https://gitlab.example/taskboard/taskboard/-/merge_requests/52").unwrap();
++    let base = Url::parse("https://gitlab.com/taskboard/taskboard/-/merge_requests/52").unwrap();
+     let secret = "0123456789abcdef0123456789abcdef";
+     let by_id = format!("/-/project/7/uploads/{secret}/shot.png");
+     let by_path = format!("/taskboard/taskboard/uploads/{secret}/old%20shot.png?w=1");
+@@ -227,7 +226,7 @@ fn an_upload_is_asked_through_the_uploads_api_route() {
+         let (calls, picture) = asked(&address_of(&by_path), vec![refused(code), Ok(png.clone())]);
+         let expected = [
+             format!("api projects/taskboard%2Ftaskboard/uploads/{secret}/old%20shot.png"),
+-            format!("api {ORIGIN}/taskboard/taskboard/uploads/{secret}/old%20shot.png"),
++            format!("api https://gitlab.com/taskboard/taskboard/uploads/{secret}/old%20shot.png"),
+         ];
+         assert_eq!(calls, expected);
+         assert_eq!(picture.unwrap().bytes, png);
+diff --git a/crates/merge-requests/tests/description.rs b/crates/merge-requests/tests/description.rs
+index 47a3c58..f912b27 100644
+--- a/crates/merge-requests/tests/description.rs
++++ b/crates/merge-requests/tests/description.rs
+@@ -16,9 +16,10 @@ use yamt_merge_requests::{
+ 
+ use fake_glab::{Fake, in_this_repository};
+ 
+-const GITLAB_REMOTE: &str = "https://gitlab.example/taskboard/taskboard.git";
++const GITLAB_REMOTE: &str = "https://gitlab.com/taskboard/taskboard.git";
+ const SCENARIO: &str = "mr-description";
+-const PROJECT: &str = "https://gitlab.example/taskboard/taskboard";
++const SELF_MANAGED_SCENARIO: &str = "mr-description/self-managed";
++const PROJECT: &str = "https://gitlab.com/taskboard/taskboard";
+ const HEX_A: &str = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
+ const HEX_B: &str = "f9e8d7c6b5a4938271605f4e3d2c1b0a";
+ const HEX_C: &str = "1111aaaa2222bbbb3333cccc4444dddd";
+@@ -27,7 +28,7 @@ const HEX_REDIRECTED_ON_WEB: &str = "6666aaaa7777bbbb8888cccc9999dddd";
+ const DESCRIPTION_QUERY: &str = "query=query MergeRequestDescription($fullPath: ID!, $iid: String!) { \
+      project(fullPath: $fullPath) { mergeRequest(iid: $iid) { descriptionHtml } } }";
+ 
+-/// A repository whose `origin` is on gitlab.example, and its `GitLabRepository`.
++/// A repository whose `origin` is on gitlab.com, and its `GitLabRepository`.
+ fn gitlab_repo() -> (TempDir, GitLabRepository) {
+     let repo = TempDir::new().unwrap();
+     git_ok(repo.path(), &["init", "-q"]).unwrap();
+@@ -61,7 +62,7 @@ fn pages_of_52() -> [String; 7] {
+         "https://docs.example/x".to_owned(),
+         "http://plain.example/".to_owned(),
+         format!("{PROJECT}/-/issues/12"),
+-        "https://gitlab.example/anna".to_owned(),
++        "https://gitlab.com/anna".to_owned(),
+         format!("{PROJECT}/-/commit/9c1ba3f2e4b5a6c7d8e9f0a1b2c3d4e5f6a7b8c9"),
+         format!("{PROJECT}/-/merge_requests?label_name=frontend"),
+         format!("{PROJECT}/-/merge_requests/52#section"),
+@@ -95,7 +96,7 @@ fn a_description_comes_back_with_its_pages_and_uploads() {
+         .map(|offered| format!("{} {}", offered.key.as_str(), offered.address.as_str()))
+         .collect();
+     let upload = |secret: &str, file: &str| {
+-        format!("upload~{secret} https://gitlab.example/-/project/7/uploads/{secret}/{file}")
++        format!("upload~{secret} https://gitlab.com/-/project/7/uploads/{secret}/{file}")
+     };
+     let expected_uploads = [
+         upload(HEX_A, "shot.png"),
+@@ -143,7 +144,7 @@ fn an_upload_the_api_does_not_know_is_fetched_on_its_web_path() {
+     let argv = fake.logged("argv: ");
+     let asked = [
+         format!("argv: api projects/7/uploads/{HEX_B}/old.png"),
+-        format!("argv: api https://gitlab.example/-/project/7/uploads/{HEX_B}/old.png"),
++        format!("argv: api https://gitlab.com/-/project/7/uploads/{HEX_B}/old.png"),
+     ];
+     assert_eq!(argv[argv.len() - 2..], asked);
+ }
+@@ -160,7 +161,7 @@ fn an_upload_missing_on_both_routes_is_an_error() {
+     let answered = fake.logged("answered: ");
+     let both = [
+         format!("answered: projects/7/uploads/{HEX_C}/gone.png"),
+-        format!("answered: https://gitlab.example/-/project/7/uploads/{HEX_C}/gone.png"),
++        format!("answered: https://gitlab.com/-/project/7/uploads/{HEX_C}/gone.png"),
+     ];
+     assert_eq!(answered, both);
+ }
+@@ -184,7 +185,7 @@ fn a_redirect_on_either_route_is_refused_and_never_retried() {
+         format!("answered: projects/7/uploads/{HEX_REDIRECTED_BY_API}/moved.png"),
+         format!("answered: projects/7/uploads/{HEX_REDIRECTED_ON_WEB}/moved.png"),
+         format!(
+-            "answered: https://gitlab.example/-/project/7/uploads/{HEX_REDIRECTED_ON_WEB}/moved.png"
++            "answered: https://gitlab.com/-/project/7/uploads/{HEX_REDIRECTED_ON_WEB}/moved.png"
+         ),
+     ];
+     assert_eq!(answered, asked);
+@@ -211,6 +212,36 @@ fn another_sites_image_never_reaches_glab() {
+     }
+ }
+ 
++#[test]
++fn an_upload_on_a_self_managed_server_is_a_web_image_never_fetched_with_the_login() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SELF_MANAGED_SCENARIO);
++
++    let read = read(&fake, &repository, 52);
++    for offered in &read.uploads {
++        let _ = fetch_picture(&fake.glab, repository.root(), &offered.address);
++    }
++
++    assert!(read.uploads.is_empty(), "{:?}", read.uploads);
++    let web = |address: String| json!({ "kind": "web", "address": address });
++    let images = [
++        web(format!(
++            "https://gitlab.example/-/project/7/uploads/{HEX_A}/shot.png"
++        )),
++        web(format!(
++            "https://gitlab.example/taskboard/taskboard/uploads/{HEX_B}/old.png"
++        )),
++    ];
++    let inlines = &sent(&read.reply)["description"]["blocks"][0]["inlines"];
++    assert_eq!(
++        [&inlines[0]["image"], &inlines[1]["image"]],
++        images.each_ref()
++    );
++    let argv = fake.logged("argv: ");
++    let fetched = argv.iter().find(|line| line.contains("/uploads/"));
++    assert_eq!(fetched, None, "{argv:#?}");
++}
++
+ #[test]
+ fn an_empty_description_has_no_blocks() {
+     let (_repo, repository) = gitlab_repo();
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index f9f61f6..b873cde 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -221,7 +221,8 @@ answered: <address or endpoint>            (a picture or a job's log, after its
+   still ben, dmitri, erik. `pictures/uploads/-/system/user/avatar/1/avatar.png` and `/2/avatar.png` are
+   `mr-row-details/`'s PNGs, `/7/avatar.png` erik's small PNG.
+ - `mr-description/` — a merge request's description and its uploads (`crates/merge-requests/tests/description.rs`):
+-  logged in; `mr-row-details/`'s project (id 7, `https://gitlab.example/taskboard/taskboard`); user `sam`; one page,
++  logged in; `mr-row-details/`'s project on gitlab.com (id 7, `https://gitlab.com/taskboard/taskboard`: uploads are
++  fetched with the login only there); user `sam`; one page,
+   the last (`queryComplexity` 172 of 250, as gitlab.com scored the list query with `description` logged in on
+   2026-11-04), each node with a `description`: !52–!48 a short text, !47 `"  \n "`, !46 `null`; no `diffHeadSha`.
+   `graphql-description-52.json` is GitLab's rendering in its own shapes (measured on gitlab-org/gitlab !200000,
+@@ -244,6 +245,9 @@ answered: <address or endpoint>            (a picture or a job's log, after its
+   `graphql-description-48.json` holds `mergeRequest: null`. `graphql-description-53.json` names two uploads, each
+   answering `302 Found` on one route (`.status`) and holding a PNG on its web path: `2222cccc3333dddd4444eeee5555ffff`
+   on the uploads API, `6666aaaa7777bbbb8888cccc9999dddd` (no API file, so 404 first) on its web path.
++  `self-managed/` is a scenario of its own: the project on `https://gitlab.example/taskboard/taskboard` and
++  `graphql-description-52.json` naming `/-/project/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png` and
++  `/taskboard/taskboard/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png`, which it serves on no route.
+ 
+ ## Fake browser opener
+ 
+diff --git a/tests/glab/mr-description/project.json b/tests/glab/mr-description/project.json
+index d591a82..de14b15 100644
+--- a/tests/glab/mr-description/project.json
++++ b/tests/glab/mr-description/project.json
+@@ -1 +1 @@
+-{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example/taskboard/taskboard"}
++{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.com/taskboard/taskboard"}
+diff --git a/tests/glab/mr-description/self-managed/graphql-description-52.json b/tests/glab/mr-description/self-managed/graphql-description-52.json
+new file mode 100644
+index 0000000..7cfbfe7
+--- /dev/null
++++ b/tests/glab/mr-description/self-managed/graphql-description-52.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":{"descriptionHtml":"<p><img src=\"/-/project/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png\" alt=\"shot\"><img src=\"/taskboard/taskboard/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png\" alt=\"old\"></p>"}}}}
+diff --git a/tests/glab/mr-description/self-managed/project.json b/tests/glab/mr-description/self-managed/project.json
+new file mode 100644
+index 0000000..d591a82
+--- /dev/null
++++ b/tests/glab/mr-description/self-managed/project.json
+@@ -0,0 +1 @@
++{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example/taskboard/taskboard"}

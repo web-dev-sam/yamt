@@ -221,7 +221,8 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   still ben, dmitri, erik. `pictures/uploads/-/system/user/avatar/1/avatar.png` and `/2/avatar.png` are
   `mr-row-details/`'s PNGs, `/7/avatar.png` erik's small PNG.
 - `mr-description/` — a merge request's description and its uploads (`crates/merge-requests/tests/description.rs`):
-  logged in; `mr-row-details/`'s project (id 7, `https://gitlab.example/taskboard/taskboard`); user `sam`; one page,
+  logged in; `mr-row-details/`'s project on gitlab.com (id 7, `https://gitlab.com/taskboard/taskboard`: uploads are
+  fetched with the login only there); user `sam`; one page,
   the last (`queryComplexity` 172 of 250, as gitlab.com scored the list query with `description` logged in on
   2026-11-04), each node with a `description`: !52–!48 a short text, !47 `"  \n "`, !46 `null`; no `diffHeadSha`.
   `graphql-description-52.json` is GitLab's rendering in its own shapes (measured on gitlab-org/gitlab !200000,
@@ -244,6 +245,9 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   `graphql-description-48.json` holds `mergeRequest: null`. `graphql-description-53.json` names two uploads, each
   answering `302 Found` on one route (`.status`) and holding a PNG on its web path: `2222cccc3333dddd4444eeee5555ffff`
   on the uploads API, `6666aaaa7777bbbb8888cccc9999dddd` (no API file, so 404 first) on its web path.
+  `self-managed/` is a scenario of its own: the project on `https://gitlab.example/taskboard/taskboard` and
+  `graphql-description-52.json` naming `/-/project/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png` and
+  `/taskboard/taskboard/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png`, which it serves on no route.
 
 ## Fake browser opener
 

@@ -16,9 +16,10 @@ use yamt_merge_requests::{
 
 use fake_glab::{Fake, in_this_repository};
 
-const GITLAB_REMOTE: &str = "https://gitlab.example/taskboard/taskboard.git";
+const GITLAB_REMOTE: &str = "https://gitlab.com/taskboard/taskboard.git";
 const SCENARIO: &str = "mr-description";
-const PROJECT: &str = "https://gitlab.example/taskboard/taskboard";
+const SELF_MANAGED_SCENARIO: &str = "mr-description/self-managed";
+const PROJECT: &str = "https://gitlab.com/taskboard/taskboard";
 const HEX_A: &str = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
 const HEX_B: &str = "f9e8d7c6b5a4938271605f4e3d2c1b0a";
 const HEX_C: &str = "1111aaaa2222bbbb3333cccc4444dddd";
@@ -27,7 +28,7 @@ const HEX_REDIRECTED_ON_WEB: &str = "6666aaaa7777bbbb8888cccc9999dddd";
 const DESCRIPTION_QUERY: &str = "query=query MergeRequestDescription($fullPath: ID!, $iid: String!) { \
      project(fullPath: $fullPath) { mergeRequest(iid: $iid) { descriptionHtml } } }";
 
-/// A repository whose `origin` is on gitlab.example, and its `GitLabRepository`.
+/// A repository whose `origin` is on gitlab.com, and its `GitLabRepository`.
 fn gitlab_repo() -> (TempDir, GitLabRepository) {
     let repo = TempDir::new().unwrap();
     git_ok(repo.path(), &["init", "-q"]).unwrap();
@@ -61,7 +62,7 @@ fn pages_of_52() -> [String; 7] {
         "https://docs.example/x".to_owned(),
         "http://plain.example/".to_owned(),
         format!("{PROJECT}/-/issues/12"),
-        "https://gitlab.example/anna".to_owned(),
+        "https://gitlab.com/anna".to_owned(),
         format!("{PROJECT}/-/commit/9c1ba3f2e4b5a6c7d8e9f0a1b2c3d4e5f6a7b8c9"),
         format!("{PROJECT}/-/merge_requests?label_name=frontend"),
         format!("{PROJECT}/-/merge_requests/52#section"),
@@ -95,7 +96,7 @@ fn a_description_comes_back_with_its_pages_and_uploads() {
         .map(|offered| format!("{} {}", offered.key.as_str(), offered.address.as_str()))
         .collect();
     let upload = |secret: &str, file: &str| {
-        format!("upload~{secret} https://gitlab.example/-/project/7/uploads/{secret}/{file}")
+        format!("upload~{secret} https://gitlab.com/-/project/7/uploads/{secret}/{file}")
     };
     let expected_uploads = [
         upload(HEX_A, "shot.png"),
@@ -143,7 +144,7 @@ fn an_upload_the_api_does_not_know_is_fetched_on_its_web_path() {
     let argv = fake.logged("argv: ");
     let asked = [
         format!("argv: api projects/7/uploads/{HEX_B}/old.png"),
-        format!("argv: api https://gitlab.example/-/project/7/uploads/{HEX_B}/old.png"),
+        format!("argv: api https://gitlab.com/-/project/7/uploads/{HEX_B}/old.png"),
     ];
     assert_eq!(argv[argv.len() - 2..], asked);
 }
@@ -160,7 +161,7 @@ fn an_upload_missing_on_both_routes_is_an_error() {
     let answered = fake.logged("answered: ");
     let both = [
         format!("answered: projects/7/uploads/{HEX_C}/gone.png"),
-        format!("answered: https://gitlab.example/-/project/7/uploads/{HEX_C}/gone.png"),
+        format!("answered: https://gitlab.com/-/project/7/uploads/{HEX_C}/gone.png"),
     ];
     assert_eq!(answered, both);
 }
@@ -184,7 +185,7 @@ fn a_redirect_on_either_route_is_refused_and_never_retried() {
         format!("answered: projects/7/uploads/{HEX_REDIRECTED_BY_API}/moved.png"),
         format!("answered: projects/7/uploads/{HEX_REDIRECTED_ON_WEB}/moved.png"),
         format!(
-            "answered: https://gitlab.example/-/project/7/uploads/{HEX_REDIRECTED_ON_WEB}/moved.png"
+            "answered: https://gitlab.com/-/project/7/uploads/{HEX_REDIRECTED_ON_WEB}/moved.png"
         ),
     ];
     assert_eq!(answered, asked);
@@ -209,6 +210,36 @@ fn another_sites_image_never_reaches_glab() {
         let named = argv.iter().find(|line| line.contains(site));
         assert_eq!(named, None, "{site}");
     }
+}
+
+#[test]
+fn an_upload_on_a_self_managed_server_is_a_web_image_never_fetched_with_the_login() {
+    let (_repo, repository) = gitlab_repo();
+    let fake = Fake::new(SELF_MANAGED_SCENARIO);
+
+    let read = read(&fake, &repository, 52);
+    for offered in &read.uploads {
+        let _ = fetch_picture(&fake.glab, repository.root(), &offered.address);
+    }
+
+    assert!(read.uploads.is_empty(), "{:?}", read.uploads);
+    let web = |address: String| json!({ "kind": "web", "address": address });
+    let images = [
+        web(format!(
+            "https://gitlab.example/-/project/7/uploads/{HEX_A}/shot.png"
+        )),
+        web(format!(
+            "https://gitlab.example/taskboard/taskboard/uploads/{HEX_B}/old.png"
+        )),
+    ];
+    let inlines = &sent(&read.reply)["description"]["blocks"][0]["inlines"];
+    assert_eq!(
+        [&inlines[0]["image"], &inlines[1]["image"]],
+        images.each_ref()
+    );
+    let argv = fake.logged("argv: ");
+    let fetched = argv.iter().find(|line| line.contains("/uploads/"));
+    assert_eq!(fetched, None, "{argv:#?}");
 }
 
 #[test]

@@ -8,10 +8,11 @@ use super::html::{MAX_NESTING, described};
 use super::*;
 use crate::PictureAddress;
 
-const BASE: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/52";
-const MERGE_REQUESTS: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/";
+const BASE: &str = "https://gitlab.com/taskboard/taskboard/-/merge_requests/52";
+const MERGE_REQUESTS: &str = "https://gitlab.com/taskboard/taskboard/-/merge_requests/";
 const SUB_PATH_BASE: &str = "https://gitlab.example/gitlab/taskboard/taskboard/-/merge_requests/52";
-const ORIGIN: &str = "https://gitlab.example";
+const SELF_MANAGED_BASE: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/52";
+const ORIGIN: &str = "https://gitlab.com";
 const HEX_A: &str = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
 const HEX_B: &str = "f9e8d7c6b5a4938271605f4e3d2c1b0a";
 const RICH: &str =
@@ -180,7 +181,7 @@ fn every_element_of_rule_3_becomes_its_block_or_inline() {
             wrapped("emphasis", "e"), wrapped("emphasis", "i"), wrapped("strong", "s"), wrapped("strong", "b"),
             wrapped("strike", "d"), wrapped("strike", "s"), wrapped("strike", "k"),
             { "kind": "code", "text": "c" }, { "kind": "lineBreak" },
-            { "kind": "link", "link": { "kind": "page", "page": "https://gitlab.example/x" },
+            { "kind": "link", "link": { "kind": "page", "page": "https://gitlab.com/x" },
               "inlines": [{ "kind": "text", "text": "a" }] },
             { "kind": "image", "image": { "kind": "web", "address": "https://images.example/cat.png" },
               "caption": "cat" },
@@ -614,21 +615,21 @@ fn a_relative_link_resolves_on_the_merge_requests_gitlab_page() {
     let base = base();
     let sub_path = Url::parse(SUB_PATH_BASE).unwrap();
     let cases = [
-        (&base, "/x", "https://gitlab.example/x"),
+        (&base, "/x", "https://gitlab.com/x"),
         (
             &base,
             "x",
-            "https://gitlab.example/taskboard/taskboard/-/merge_requests/x",
+            "https://gitlab.com/taskboard/taskboard/-/merge_requests/x",
         ),
         (
             &base,
             "#frag",
-            "https://gitlab.example/taskboard/taskboard/-/merge_requests/52#frag",
+            "https://gitlab.com/taskboard/taskboard/-/merge_requests/52#frag",
         ),
         (
             &base,
             "/taskboard/taskboard/-/issues/12",
-            "https://gitlab.example/taskboard/taskboard/-/issues/12",
+            "https://gitlab.com/taskboard/taskboard/-/issues/12",
         ),
         (
             &sub_path,
@@ -715,7 +716,6 @@ fn without_an_https_origin_a_relative_link_is_refused() {
 #[test]
 fn an_upload_on_the_projects_origin_is_uploaded_in_both_path_forms() {
     let base = base();
-    let sub_path = Url::parse(SUB_PATH_BASE).unwrap();
     let by_id = format!("{ORIGIN}/-/project/7/uploads/{HEX_A}/shot.png");
     let cases = [
         (
@@ -731,13 +731,6 @@ fn an_upload_on_the_projects_origin_is_uploaded_in_both_path_forms() {
             HEX_A,
             format!("projects/7/uploads/{HEX_A}/shot.png"),
             by_id.clone(),
-        ),
-        (
-            &sub_path,
-            format!("/gitlab/-/project/7/uploads/{HEX_A}/shot.png"),
-            HEX_A,
-            format!("projects/7/uploads/{HEX_A}/shot.png"),
-            format!("{ORIGIN}/gitlab/-/project/7/uploads/{HEX_A}/shot.png"),
         ),
         (
             &base,
@@ -760,6 +753,7 @@ fn an_upload_on_the_projects_origin_is_uploaded_in_both_path_forms() {
 fn an_upload_shaped_address_that_breaks_a_rule_is_a_web_image() {
     let base = base();
     let on_origin_but_no_upload = [
+        format!("/gitlab/-/project/7/uploads/{HEX_A}/a.png"),
         format!("/-/project/x7/uploads/{HEX_A}/a.png"),
         format!("/-/project//uploads/{HEX_A}/a.png"),
         format!("/-/project/7/uploads/{}/a.png", HEX_A.to_uppercase()),
@@ -789,7 +783,7 @@ fn an_upload_path_on_another_host_is_another_sites_image() {
     let base = base();
     for src in [
         format!("https://evil.example/-/project/7/uploads/{HEX_A}/x.png"),
-        format!("https://gitlab.example:8443/-/project/7/uploads/{HEX_A}/x.png"),
+        format!("https://gitlab.com:8443/-/project/7/uploads/{HEX_A}/x.png"),
         format!("https://evil.example/taskboard/taskboard/uploads/{HEX_A}/x.png"),
     ] {
         assert_eq!(image_of(Some(&base), &src), (web(&src), None), "{src}");
@@ -797,9 +791,39 @@ fn an_upload_path_on_another_host_is_another_sites_image() {
 }
 
 #[test]
+fn an_upload_on_a_self_managed_origin_is_a_web_image_with_its_absolute_address() {
+    let self_managed = Url::parse(SELF_MANAGED_BASE).unwrap();
+    let sub_path = Url::parse(SUB_PATH_BASE).unwrap();
+    let cases = [
+        (
+            &self_managed,
+            format!("/-/project/7/uploads/{HEX_A}/shot.png"),
+            format!("https://gitlab.example/-/project/7/uploads/{HEX_A}/shot.png"),
+        ),
+        (
+            &self_managed,
+            format!("/taskboard/taskboard/uploads/{HEX_B}/old.png"),
+            format!("https://gitlab.example/taskboard/taskboard/uploads/{HEX_B}/old.png"),
+        ),
+        (
+            &sub_path,
+            format!("/gitlab/-/project/7/uploads/{HEX_A}/shot.png"),
+            format!("https://gitlab.example/gitlab/-/project/7/uploads/{HEX_A}/shot.png"),
+        ),
+    ];
+    for (base, src, address) in cases {
+        assert_eq!(image_of(Some(base), &src), (web(&address), None), "{src}");
+    }
+    let html = format!("<p><img src=\"/-/project/7/uploads/{HEX_A}/shot.png\" alt=\"shot\"></p>");
+    let read = described(&html, Some(&WebPage(SELF_MANAGED_BASE.to_owned())));
+    assert_eq!(read.uploads, Vec::<OfferedUpload>::new());
+    assert_eq!(read.web_images, 1);
+}
+
+#[test]
 fn http_data_and_file_images_are_refused() {
     let base = base();
-    let http_upload = format!("http://gitlab.example/-/project/7/uploads/{HEX_A}/x.png");
+    let http_upload = format!("http://gitlab.com/-/project/7/uploads/{HEX_A}/x.png");
     let refused_srcs = [
         "http://plain.example/p.png",
         http_upload.as_str(),
@@ -836,6 +860,23 @@ fn an_upload_key_is_never_a_username() {
 }
 
 #[test]
+fn an_upload_key_is_upload_tilde_and_32_lowercase_hex_digits() {
+    assert!(UploadKey::is_key(&format!("upload~{HEX_A}")));
+    let not_keys = [
+        format!("upload~{}", &HEX_A[1..]),
+        format!("upload~{HEX_A}0"),
+        format!("upload~{}", HEX_A.to_uppercase()),
+        HEX_A.to_owned(),
+        format!("upload{HEX_A}"),
+        "anna".to_owned(),
+        "upload~".to_owned(),
+    ];
+    for name in not_keys {
+        assert!(!UploadKey::is_key(&name), "{name}");
+    }
+}
+
+#[test]
 fn pages_and_uploads_are_collected_once_each_in_order() {
     let a = format!("/-/project/7/uploads/{HEX_A}/a.png");
     let b = format!("/-/project/7/uploads/{HEX_B}/b.png");
@@ -849,8 +890,8 @@ fn pages_and_uploads_are_collected_once_each_in_order() {
 
     let pages = [
         "https://docs.example/a",
-        "https://gitlab.example/b",
-        "https://gitlab.example/c",
+        "https://gitlab.com/b",
+        "https://gitlab.com/c",
     ];
     let expected: Vec<WebPage> = pages
         .iter()

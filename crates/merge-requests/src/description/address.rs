@@ -2,17 +2,16 @@ use serde::Serialize;
 use specta::Type;
 use url::Url;
 
-use crate::web_page::{
-    ESCAPED_SLASH, MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_number, is_web_path,
-};
+use crate::web_page::{ESCAPED_SLASH, MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_number};
 use crate::{PictureAddress, WebPage};
 
 const HTTP_SCHEME: &str = "http";
 const HTTPS_SCHEME: &str = "https";
 const UPLOADS_SEGMENT: &str = "/uploads/";
-const PROJECT_SEGMENT: &str = "/-/project/";
+const PROJECT_PREFIX: &str = "/-/project/";
 const SECRET_HEX_DIGITS: usize = 32;
 const UPLOAD_KEY_PREFIX: &str = "upload~";
+const LOGIN_FETCHED_ORIGIN: &str = "https://gitlab.com";
 
 /// `upload~<the upload's 32 hex digit secret>`; `~` is in no username, so it never names an avatar. Only
 /// `description/address.rs` makes one.
@@ -25,6 +24,12 @@ impl UploadKey {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Whether `name` is an upload's key: `upload~` and a 32 lowercase hex digit secret.
+    #[must_use]
+    pub fn is_key(name: &str) -> bool {
+        name.strip_prefix(UPLOAD_KEY_PREFIX).is_some_and(is_secret)
     }
 }
 
@@ -95,8 +100,8 @@ pub(crate) fn link_of(base: Option<&Url>, href: &str) -> DescriptionLink {
     }
 }
 
-/// The image and, for an upload, what to offer: an https upload on `base`'s origin → `Uploaded`; any other https
-/// address → `Web`; anything else, or no address → `Refused`.
+/// The image and, for an upload, what to offer: an https upload on `base`'s origin, gitlab.com → `Uploaded`; any
+/// other https address → `Web`; anything else, or no address → `Refused`.
 pub(crate) fn image_of(base: Option<&Url>, src: &str) -> (DescriptionImage, Option<OfferedUpload>) {
     if src.trim().is_empty() {
         return (DescriptionImage::Refused, None);
@@ -113,10 +118,14 @@ pub(crate) fn image_of(base: Option<&Url>, src: &str) -> (DescriptionImage, Opti
     (DescriptionImage::Web { address }, None)
 }
 
-/// An upload on `base`'s origin: the path `[<segments>]/-/project/<digits>/uploads/<secret>/<file>` or `<the
-/// project's web path>/uploads/<secret>/<file>`, its query and fragment dropped.
+/// An upload on `base`'s origin when that is gitlab.com: the path `/-/project/<digits>/uploads/<secret>/<file>` or
+/// `<the project's web path>/uploads/<secret>/<file>`, its query and fragment dropped.
 fn upload_of(base: &Url, url: &Url) -> Option<OfferedUpload> {
-    if url.origin() != base.origin() {
+    // Only gitlab.com was measured to answer both upload routes itself, 200 with no redirect (`glab api --include`
+    // on !200000's upload, 2026-11-04); a self-managed GitLab may redirect to object storage, and glab would carry
+    // the login there (RK53). Elsewhere the webview loads the upload without a login.
+    let is_gitlab_com = base.origin().ascii_serialization() == LOGIN_FETCHED_ORIGIN;
+    if !is_gitlab_com || url.origin() != base.origin() {
         return None;
     }
     let (before, upload) = url.path().rsplit_once(UPLOADS_SEGMENT)?;
@@ -135,12 +144,11 @@ fn upload_of(base: &Url, url: &Url) -> Option<OfferedUpload> {
     })
 }
 
-/// The project in an upload's path before `/uploads/`, as the uploads API names it: `[<segments>]/-/project/<id>` →
-/// the id; the merge request's project web path (`base` before `/-/merge_requests/`) → that path, "/" as "%2F".
+/// The project in an upload's path before `/uploads/`, as the uploads API names it: `/-/project/<id>` → the id; the
+/// merge request's project web path (`base` before `/-/merge_requests/`) → that path, "/" as "%2F".
 fn project_of(base: &Url, before: &str) -> Option<String> {
-    if let Some((root, id)) = before.rsplit_once(PROJECT_SEGMENT) {
-        let is_root = root.is_empty() || is_web_path(root);
-        return (is_root && is_number(id)).then(|| id.to_owned());
+    if let Some(id) = before.strip_prefix(PROJECT_PREFIX) {
+        return is_number(id).then(|| id.to_owned());
     }
     let (project, _) = base.path().rsplit_once(MERGE_REQUESTS_SEGMENT)?;
     let path = project.strip_prefix('/')?;

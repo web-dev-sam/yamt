@@ -210,8 +210,7 @@ fn an_upload_up_to_10_mib_is_taken_and_larger_is_refused() {
 
 #[test]
 fn an_upload_is_asked_through_the_uploads_api_route() {
-    let base =
-        Url::parse("https://gitlab.example/taskboard/taskboard/-/merge_requests/52").unwrap();
+    let base = Url::parse("https://gitlab.com/taskboard/taskboard/-/merge_requests/52").unwrap();
     let secret = "0123456789abcdef0123456789abcdef";
     let by_id = format!("/-/project/7/uploads/{secret}/shot.png");
     let by_path = format!("/taskboard/taskboard/uploads/{secret}/old%20shot.png?w=1");
@@ -227,7 +226,7 @@ fn an_upload_is_asked_through_the_uploads_api_route() {
         let (calls, picture) = asked(&address_of(&by_path), vec![refused(code), Ok(png.clone())]);
         let expected = [
             format!("api projects/taskboard%2Ftaskboard/uploads/{secret}/old%20shot.png"),
-            format!("api {ORIGIN}/taskboard/taskboard/uploads/{secret}/old%20shot.png"),
+            format!("api https://gitlab.com/taskboard/taskboard/uploads/{secret}/old%20shot.png"),
         ];
         assert_eq!(calls, expected);
         assert_eq!(picture.unwrap().bytes, png);
