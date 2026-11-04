@@ -2027,7 +2027,9 @@ name `SHOW_DESCRIPTION` "Show description", `data-description-opener="<iid>"`) o
 the list while `description` is set, keyed by the iid (a replace mounts a new panel: focus, scroll top), passes it
 `asking` (a question is open), and calls `closeDescription` when it unmounts. The panel is a non-modal `role="dialog"`,
 about `min(64rem, 100vw − 4rem)` wide and up to `85vh`, centred, its content scrolling inside; it takes focus on mount;
-Escape (a window `keydown` listener in the capture phase, skipped while `asking`) and its close button call
+Escape (a window `keydown` listener in the bubble phase, only for an Escape nothing took (`defaultPrevented`), skipped
+while `asking`; MergeRequestsView's own window listener runs first, closes an open filter menu, and otherwise leaves
+Escape to the panel while a description is shown) and its close button call
 `closeDescription` and return focus to the row's opener when still listed; a press outside it closes it
 (`onClickOutside`, ignoring `[data-description-opener]` and `[data-refreshes-list]` — Refresh and the list failure's
 Retry —, so a refresh leaves it as loaded); a page scroll leaves it. Its header is the title as opened; its body
