@@ -1,30 +1,20 @@
 {
-  "MrThreadsBox": {
+  "MrThreadsDocs": {
     "owned": [
-      "frontend/src/mergeRequests/**",
-      "frontend/src/ui/MergeRequestDiscussions.vue",
-      "frontend/src/ui/MergeRequestDiscussions.test.ts",
-      "frontend/src/ui/useHoverBox.ts",
-      "frontend/src/ui/useHoverBox.test.ts",
-      "frontend/src/ui/mergeRequestsShown.ts",
-      "frontend/src/ui/mergeRequestsText.ts",
-      "frontend/src/ui/mergeRequestsText.test.ts",
+      "docs/architecture.md",
+      "docs/plan.md",
+      "docs/slices/request-mr-discussions.md",
+      "docs/slices/request-mr-description.md",
+      ".omp/skills/project-map/**",
+      ".omp/skills/ipc-contract/SKILL.md",
+      ".omp/skills/risk-register/SKILL.md",
+      "CHANGELOG.md",
+      "crates/gitio/AGENTS.md",
+      "crates/merge-requests/AGENTS.md",
+      "src-tauri/AGENTS.md",
       "frontend/src/ui/AGENTS.md",
-      "frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ui/mergeRequests.test.ts",
-      "frontend/src/ui/MergeRequestDiscussionsBox.test.ts"
-    ]
-  },
-  "MrThreadsPanelR2": {
-    "owned": [
-      "frontend/src/ui/rangeKeys.ts",
-      "frontend/src/ui/rangeKeys.test.ts",
-      "frontend/src/ui/boxKeys.ts",
-      "frontend/src/ui/boxKeys.test.ts",
-      "frontend/src/ui/RangeThreadBox.vue",
-      "frontend/src/ui/RangeMessageEditor.vue",
-      "frontend/src/ui/MergeRequestReplyField.vue"
+      "frontend/src/ipc/AGENTS.md",
+      "frontend/src/mergeRequests/AGENTS.md"
     ]
   }
 }
