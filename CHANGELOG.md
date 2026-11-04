@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Merge-request discussion threads: in a row's discussions box, a Shift tap over a discussion opens its whole thread
+  beside the box, each comment as GitLab renders it, with your pending review comments. From there you can reply, add
+  a review comment, resolve or unresolve the thread and submit your review, with a Write / Preview switch (GitLab's
+  own preview). The box gains a reload button; a thread you resolve stays marked "Resolved" until the box closes.
+- Images in descriptions and comments keep the size GitLab gives them, never wider than the panel.
+
+### Changed
+
+- Whose turn a discussion is now reads every comment and GitLab's mentions: "Your turn", "Author's turn", "<name>'s
+  turn", "Waiting for an answer" or "Open", and review mode's order counts a discussion waiting on the author.
+
 ## [0.6.8] - 2026-11-04
 
 ### Added

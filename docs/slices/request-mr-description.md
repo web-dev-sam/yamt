@@ -88,6 +88,10 @@ Editing the description or ticking its task boxes; comments and discussions in t
 playing videos or audio; the description in review mode's own controls beyond the shared row; caching descriptions
 across opens.
 
+Reopened by `request-mr-threads.md` (plan §2 #184): rule 5's "fits the panel's width at most" keeps the size GitLab
+gives an image (a width in pixels or percent, a height in pixels, or both), capped at the panel's width with its
+proportions; a percentage height is ignored, as on GitLab.
+
 ## Reopens (DR4: the owner's changed requirement)
 
 - Plan §2 #112 "images … never loaded; links shown as text … never navigable; raw HTML literal", for this panel.

@@ -14,6 +14,9 @@ Runs in wave 4, after `mr-threads-crate`. After it the orchestrator runs `just b
 
 **Owned:**
 
+(Built as `merge_requests/discussion_thread.rs` and `tests/discussion_thread.rs`, fix #2352; `thread.rs` below is the
+planned name.)
+
 - `src-tauri/src/merge_requests.rs`
 - `src-tauri/src/merge_requests/thread.rs` (new)
 - `src-tauri/src/merge_requests/tests.rs`, `src-tauri/src/merge_requests/tests/thread.rs` (new),

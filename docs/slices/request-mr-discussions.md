@@ -76,6 +76,10 @@ answered by the author shows "Your turn" to the reviewer.
 Replying to, resolving or reacting to a discussion from yamt; resolved discussions; changing what the count counts;
 showing whole threads; notifications.
 
+Reopened by `request-mr-threads.md` (plan §2 #179, #180): rule 3's turn is decided over every person comment and
+GitLab's mentions, no longer by the last comment alone; rules 2 and 5 hold for the box, while the thread panel shows
+every comment as GitLab renders it; the non-goals' replying, resolving and whole threads are now allowed.
+
 ## Owner's answers
 
 - (#2198) Review mode's perspective and order are in `request-mr-review-mode.md`.

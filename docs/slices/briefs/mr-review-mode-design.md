@@ -207,6 +207,13 @@ by the unchanged fake (`scripts/fake-glab/glab:124-136`: `graphql-discussions-<i
   - Me's order covers soonest first (!618 before the older-created !633), the equal-day tie (!633 before !623), a
     due row without the reviewer's turn sorting with the rest (!622), and fewest waiting (!608 last).
   - Anna's order covers waiting for another reviewer (!632, !617 last).
+  - Under the turn rule of `request-mr-threads.md` (plan §2 #179, B5: the rest ordered by fewest waiting on the
+    author), `ipc/fixtureMergeRequestDiscussions.test.ts` `the_review_orders_the_smoke_expects` pins the review
+    orders Me !622 !618 !633 !638 !603 !623 !608, Anna Berg !622 !630 !612 !602 !632 !617, Anna Berg with Draft All
+    !622 !630 !627 !612 !606 !602 !632 !617, and Chiara Rossi unsorted (!615 failed); the normal orders are the
+    table's. Soonest first is !622 !618 !633; a due row without the reviewer's turn sorting with the rest is !623 for
+    Me and !602 for Anna; fewest waiting on the author last is !608 for Me and !632 !617 for Anna. No row covers the
+    equal-day tie: !623 is no longer Me's turn, so it does not tie with !633.
 
 - **Real app, `tests/glab/mr-review-mode/`** (user sam; reviewers sam, anna, ben): see the page brief's table. The
   expected review orders are Me !94 !91 !96 !93, Anna !96 !97 !92, and Ben unsorted (!90 absent from the answer).
