@@ -4683,6 +4683,7 @@ dependencies = [
 name = "yamt-gitio"
 version = "0.6.8"
 dependencies = [
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",

@@ -1,1 +1,3 @@
-{}
+{
+  "MrThreadsDesign": { "owned": ["docs/slices/briefs/mr-threads-*.md"] }
+}

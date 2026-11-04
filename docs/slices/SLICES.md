@@ -6,6 +6,32 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Threads beside the box (session 50; owner #2329–#2333: "Your turn" only when it is, the whole thread, answering, sized images)
+
+Request `docs/slices/request-mr-threads.md` (parts A–D, acceptance, non-goals, reopens); base `69ab62d0`; facts
+`.omp/run/notes/PlanScoutMrThreadFacts.md`. Owner's answer #2333: drafts submitted from yamt (C9). Design
+`briefs/mr-threads-design.md` option A: one discussions read (notes up to 200, `bodyHtml`, mentions from GitLab's
+user links) serves the box, a row's reload and the thread; the TS core holds the one turn rule; four REST writes and
+the Markdown preview through one `gitio` HTTP reader; comments through the description's reducer; proposed plan
+#179–#185, RK71–RK73 and amendments (docs keeper). Design §4's 13 defaults decided by the orchestrator (OR13, row
+#185, owner may veto). No product question open. Shared edit done: `serde_json` in `yamt-gitio`. Order: fixtures ∥
+http, images, crate, app, `just bindings` with state-ipc, state-ui, panel, box (wires the window), docs ∥ smoke, final.
+
+| row | slice                                                                                           | owner                 | status | evidence                                                            |
+| --- | ----------------------------------------------------------------------------------------------- | --------------------- | ------ | ------------------------------------------------------------------- |
+| 1   | design                                                                                          | designer              | done   | `MrThreadsDesign`: option A, ten briefs. Notes `MrThreadsDesign.md` |
+| 2   | fixtures (`briefs/mr-threads-fixtures.md`): fake glab routes and scenarios                      | rust-impl             | todo   |                                                                     |
+| 3   | http (`briefs/mr-threads-http.md`): `gitio` `HttpAnswer`, `Glab::send`; `yamt-review` on it     | rust-impl             | todo   |                                                                     |
+| 4   | images (`briefs/mr-threads-images.md`): image sizes in the description reducer                  | rust-impl             | todo   |                                                                     |
+| 5   | crate (`briefs/mr-threads-crate.md`): turn data, mentions, thread read, drafts, writes, preview | rust-impl             | todo   |                                                                     |
+| 6   | app (`briefs/mr-threads-app.md`): five commands, offers; then `just bindings`                   | rust-impl             | todo   |                                                                     |
+| 7   | state-ipc (`briefs/mr-threads-state-ipc.md`): source, domain, fixtures                          | web-impl              | todo   |                                                                     |
+| 8   | state-ui (`briefs/mr-threads-state-ui.md`): reload, marks, thread state, texts, sends           | web-impl              | todo   |                                                                     |
+| 9   | panel (`briefs/mr-threads-panel.md`): thread panel, field, Write/Preview, buttons, image size   | web-impl              | todo   |                                                                     |
+| 10  | box (`briefs/mr-threads-box.md`): core turn rule, box words, refresh, Shift; wires the window   | web-impl              | todo   |                                                                     |
+| 11  | docs keeper; verify (`briefs/mr-threads-verify.md`): smoke after 10, final                      | docs-keeper, verifier | todo   |                                                                     |
+| 12  | owner check on the GitLab playground                                                            | human                 | todo   |                                                                     |
+
 ## Release 0.6.8 (session 49, owner: "release the next patch version, commit my css fix before")
 
 0.6.8 = 0.6.7 plus people on a merge request, the description panel, linked epics/issues/commits (sections below;
@@ -234,8 +260,7 @@ the people work (it edits only its briefs); its implementers wait for the people
 5. `request-mr-links.md`: done (section above, session 49); owner check handed over.
 
 6. `request-mr-threads.md` (session 50, owner #2329–#2333): sized description images, "Your turn" only when it is,
-   the whole thread in a Shift panel with reply/draft/submit/resolve, one-row reload. Planned, not started; no
-   product question open.
+   the whole thread in a Shift panel with reply/draft/submit/resolve, one-row reload. Running (section above).
 
 ## Open product questions
 
