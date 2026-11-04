@@ -1,0 +1,1396 @@
+diff --git a/frontend/src/ui/MergeRequestDescriptionImage.vue b/frontend/src/ui/MergeRequestDescriptionImage.vue
+index 09dc677..764f96b 100644
+--- a/frontend/src/ui/MergeRequestDescriptionImage.vue
++++ b/frontend/src/ui/MergeRequestDescriptionImage.vue
+@@ -1,14 +1,19 @@
+ <script setup lang="ts">
+-import { computed, shallowRef, watch } from "vue";
++import { computed, shallowRef, useTemplateRef, watch } from "vue";
+ 
+-import type { DescriptionImage } from "../ipc";
++import type { DescriptionImage, DescriptionInline } from "../ipc";
+ import { IMAGE_STAND_IN } from "./mergeRequestDescriptionText";
++import { imageStyle, type NaturalSize } from "./mergeRequestImageSize";
+ import { useMergeRequests } from "./mergeRequestsStore";
+ 
+-const props = defineProps<{ image: DescriptionImage; caption: string }>();
++type ImageSize = Extract<DescriptionInline, { kind: "image" }>["size"];
++
++const props = defineProps<{ image: DescriptionImage; caption: string; size: ImageSize }>();
+ 
+ const { imageAddress } = useMergeRequests();
++const picture = useTemplateRef<HTMLImageElement>("picture");
+ const failed = shallowRef(false);
++const natural = shallowRef<NaturalSize | null>(null);
+ 
+ const address = computed(() => imageAddress(props.image));
+ const standIn = computed(() => {
+@@ -17,22 +22,34 @@ const standIn = computed(() => {
+   }
+   return props.image.kind === "web" ? props.image.address : IMAGE_STAND_IN;
+ });
++const style = computed(() => imageStyle(props.size, natural.value));
+ 
+ watch(address, () => {
+   failed.value = false;
++  natural.value = null;
+ });
++
++function loaded(): void {
++  const element = picture.value;
++  if (element !== null) {
++    natural.value = { width: element.naturalWidth, height: element.naturalHeight };
++  }
++}
+ </script>
+ 
+ <template>
+   <span v-if="address === null || failed" class="text-fg-muted">{{ standIn }}</span>
+   <img
+     v-else
++    ref="picture"
+     :src="address"
+     :alt="caption"
+     referrerpolicy="no-referrer"
+     loading="lazy"
+     draggable="false"
+-    class="inline h-auto max-w-full"
++    class="inline"
++    :style="style"
++    @load="loaded"
+     @error="failed = true"
+   />
+ </template>
+diff --git a/frontend/src/ui/MergeRequestDescriptionInlines.vue b/frontend/src/ui/MergeRequestDescriptionInlines.vue
+index 94d62c9..46dfd2d 100644
+--- a/frontend/src/ui/MergeRequestDescriptionInlines.vue
++++ b/frontend/src/ui/MergeRequestDescriptionInlines.vue
+@@ -52,6 +52,7 @@ function linkPressed(link: DescriptionLink): void {
+       v-else-if="inline.kind === 'image'"
+       :image="inline.image"
+       :caption="inline.caption"
++      :size="inline.size"
+     />
+     <br v-else />
+   </template>
+diff --git a/frontend/src/ui/MergeRequestReplyField.vue b/frontend/src/ui/MergeRequestReplyField.vue
+new file mode 100644
+index 0000000..c13a75b
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestReplyField.vue
+@@ -0,0 +1,206 @@
++<script setup lang="ts">
++import { computed, nextTick, onMounted, useTemplateRef, watch } from "vue";
++
++import type { DescriptionBlock } from "../ipc";
++import MergeRequestDescriptionBlocks from "./MergeRequestDescriptionBlocks.vue";
++import type { Preview } from "./mergeRequestPreview";
++import { useMergeRequests } from "./mergeRequestsStore";
++import type { Thread } from "./mergeRequestThread";
++import {
++  ADD_COMMENT,
++  ADD_REVIEW,
++  commentingReason,
++  MAY_NOT_RESOLVE,
++  NOTHING_TO_PREVIEW,
++  PREVIEW,
++  previewFailureText,
++  REPLY_PLACEHOLDER,
++  RESOLVE_THREAD,
++  THREAD_LOADING,
++  UNRESOLVE_THREAD,
++  WRITE,
++  writeFailureText,
++} from "./mergeRequestThreadText";
++import { vTooltip } from "./tooltip";
++
++type Shown =
++  | { readonly kind: "blocks"; readonly blocks: readonly DescriptionBlock[] }
++  | { readonly kind: "note"; readonly text: string }
++  | { readonly kind: "refusal"; readonly text: string };
++type Button = { readonly disabled: boolean; readonly reason: string | null };
++
++const props = defineProps<{ thread: Thread }>();
++
++const MIN_LINES = 3;
++const MAX_LINES = 12;
++const BUTTON =
++  "rounded border border-control-border px-3 py-0.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted";
++
++const { replyTexts, setReplyText, showPreview, showWrite, sendReply, setResolved } =
++  useMergeRequests();
++const field = useTemplateRef<HTMLTextAreaElement>("field");
++
++const text = computed({
++  get: () => replyTexts.value.get(props.thread.shown.discussion) ?? "",
++  set: (typed: string) => {
++    setReplyText(props.thread.shown.discussion, typed);
++  },
++});
++const writing = computed(() => props.thread.preview.kind === "writing");
++const shownPreview = computed(() => previewOf(props.thread.preview));
++const loaded = computed(() => (props.thread.load.kind === "read" ? props.thread.load : null));
++const ready = computed(
++  () =>
++    loaded.value !== null && !loaded.value.refreshing && props.thread.sending.kind !== "sending",
++);
++const add = computed((): Button => {
++  const reason = loaded.value === null ? null : commentingReason(loaded.value.thread.commenting);
++  return { disabled: !ready.value || text.value.trim() === "" || reason !== null, reason };
++});
++const resolve = computed((): Button & { readonly label: string; readonly to: boolean } => {
++  const thread = loaded.value?.thread ?? null;
++  const reason = thread === null || thread.mayResolve ? null : MAY_NOT_RESOLVE;
++  const resolved = thread?.resolved ?? false;
++  return {
++    disabled: !ready.value || reason !== null,
++    reason,
++    label: resolved ? UNRESOLVE_THREAD : RESOLVE_THREAD,
++    to: !resolved,
++  };
++});
++const failure = computed(() => {
++  const { sending } = props.thread;
++  return sending.kind === "failed"
++    ? writeFailureText(sending.what, sending.failure, navigator.platform)
++    : null;
++});
++
++watch([text, writing], fit, { flush: "post" });
++
++onMounted(fit);
++
++function previewOf(preview: Preview): Shown | null {
++  switch (preview.kind) {
++    case "writing":
++      return null;
++    case "loading":
++      return { kind: "note", text: THREAD_LOADING };
++    case "empty":
++      return { kind: "note", text: NOTHING_TO_PREVIEW };
++    case "read":
++      return preview.preview.blocks.length === 0
++        ? { kind: "note", text: NOTHING_TO_PREVIEW }
++        : { kind: "blocks", blocks: preview.preview.blocks };
++    case "refused":
++    case "failed":
++      return { kind: "refusal", text: previewFailureText(preview, navigator.platform) };
++    default: {
++      const _exhaustive: never = preview;
++      return _exhaustive;
++    }
++  }
++}
++
++function pixels(value: string): number {
++  return Number.parseFloat(value);
++}
++
++function fit(): void {
++  const element = field.value;
++  if (element === null || !writing.value) {
++    return;
++  }
++  const style = getComputedStyle(element);
++  const line = pixels(style.lineHeight);
++  const padding = pixels(style.paddingTop) + pixels(style.paddingBottom);
++  const border = pixels(style.borderTopWidth) + pixels(style.borderBottomWidth);
++  element.style.height = "auto";
++  const content = Math.min(
++    Math.max(element.scrollHeight - padding, MIN_LINES * line),
++    MAX_LINES * line,
++  );
++  element.style.height = `${content + padding + border}px`;
++}
++
++async function backToWrite(): Promise<void> {
++  showWrite();
++  await nextTick();
++  field.value?.focus();
++}
++
++function send(kind: "comment" | "draft"): void {
++  if (!add.value.disabled) {
++    void sendReply(kind);
++  }
++}
++
++function toggleResolved(): void {
++  void setResolved(resolve.value.to);
++}
++</script>
++
++<template>
++  <div class="flex shrink-0 flex-col gap-2 border-t border-separator px-3 py-2">
++    <div class="flex gap-1">
++      <button
++        type="button"
++        :aria-pressed="writing"
++        class="rounded px-2 py-0.5 hover:bg-hover aria-pressed:bg-row-selected"
++        @click="backToWrite"
++      >
++        {{ WRITE }}
++      </button>
++      <button
++        type="button"
++        :aria-pressed="!writing"
++        class="rounded px-2 py-0.5 hover:bg-hover aria-pressed:bg-row-selected"
++        @click="showPreview"
++      >
++        {{ PREVIEW }}
++      </button>
++    </div>
++    <textarea
++      v-show="writing"
++      ref="field"
++      v-model="text"
++      :placeholder="REPLY_PLACEHOLDER"
++      :aria-label="REPLY_PLACEHOLDER"
++      class="w-full resize-none overflow-y-auto rounded border border-control-border bg-panel px-2 py-1 leading-5 outline-none focus:border-primary"
++      @keydown.ctrl.enter.exact.prevent="send('comment')"
++    ></textarea>
++    <div
++      v-if="shownPreview !== null"
++      class="max-h-60 min-h-[4.5rem] overflow-y-auto rounded border border-control-border px-2 py-1 [overflow-wrap:anywhere]"
++    >
++      <MergeRequestDescriptionBlocks
++        v-if="shownPreview.kind === 'blocks'"
++        :blocks="shownPreview.blocks"
++      />
++      <p v-else-if="shownPreview.kind === 'note'" class="text-fg-muted">{{ shownPreview.text }}</p>
++      <p v-else role="alert" class="text-problem-error">{{ shownPreview.text }}</p>
++    </div>
++    <div class="flex items-center gap-2">
++      <span v-tooltip="add.reason" class="flex">
++        <button type="button" :disabled="add.disabled" :class="BUTTON" @click="send('draft')">
++          {{ ADD_REVIEW }}
++        </button>
++      </span>
++      <span v-tooltip="add.reason" class="flex">
++        <button
++          type="button"
++          :disabled="add.disabled"
++          class="rounded border border-primary bg-primary px-3 py-0.5 text-on-primary hover:brightness-110 disabled:pointer-events-none disabled:border-control-border disabled:bg-transparent disabled:text-fg-muted"
++          @click="send('comment')"
++        >
++          {{ ADD_COMMENT }}
++        </button>
++      </span>
++      <span v-tooltip="resolve.reason" class="ml-auto flex">
++        <button type="button" :disabled="resolve.disabled" :class="BUTTON" @click="toggleResolved">
++          {{ resolve.label }}
++        </button>
++      </span>
++    </div>
++    <p v-if="failure !== null" role="alert" class="text-problem-error">{{ failure }}</p>
++  </div>
++</template>
+diff --git a/frontend/src/ui/MergeRequestThread.vue b/frontend/src/ui/MergeRequestThread.vue
+new file mode 100644
+index 0000000..e7934b3
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestThread.vue
+@@ -0,0 +1,195 @@
++<script setup lang="ts">
++import { useElementSize } from "@vueuse/core";
++import { computed, onMounted, useTemplateRef } from "vue";
++import Check from "~icons/lucide/check";
++import ExternalLink from "~icons/lucide/external-link";
++import X from "~icons/lucide/x";
++
++import type { DiscussionThread, MergeRequestIid } from "../ipc";
++import { RETRY } from "./aiText";
++import MergeRequestReplyField from "./MergeRequestReplyField.vue";
++import { useMergeRequests } from "./mergeRequestsStore";
++import type { ThreadLoad } from "./mergeRequestThread";
++import MergeRequestThreadComment from "./MergeRequestThreadComment.vue";
++import {
++  CLOSE_THREAD,
++  OPEN_ON_GITLAB,
++  PENDING,
++  pendingText,
++  RESOLVED,
++  SUBMIT_REVIEW,
++  submitTip,
++  THREAD_LOADING,
++  threadLabel,
++  threadRefusalText,
++} from "./mergeRequestThreadText";
++import { problemText } from "./problemText";
++import { vTooltip } from "./tooltip";
++import { useMenuPlacement } from "./useMenuPlacement";
++
++type Content =
++  | { readonly kind: "thread"; readonly thread: DiscussionThread }
++  | { readonly kind: "note"; readonly text: string }
++  | { readonly kind: "refusal"; readonly text: string };
++
++const props = defineProps<{
++  iid: MergeRequestIid;
++  /** The merge request's author's username (null: unknown): the crown. */
++  author: string | null;
++  /** The box's words for the row: where it is and whose turn (the core's rule, via the box). */
++  place: string;
++  turn: string;
++  /** The box's left and top: the panel's right edge meets the left, tops aligned (as CiStatusJobLog). */
++  anchor: { readonly left: number; readonly top: number };
++  /** The page's clock, as the box gets it: "3 hours ago". */
++  now: number;
++}>();
++const emit = defineEmits<{ close: [] }>();
++
++const { thread, retryThread, submitReview, openPage } = useMergeRequests();
++const panel = useTemplateRef<HTMLDivElement>("panel");
++const panelSize = useElementSize(panel, undefined, { box: "border-box" });
++const placement = useMenuPlacement(panel, () => ({
++  x: props.anchor.left - panelSize.width.value,
++  y: props.anchor.top,
++}));
++
++const shown = computed(() => (thread.value?.shown.iid === props.iid ? thread.value : null));
++const content = computed(() => (shown.value === null ? null : contentOf(shown.value.load)));
++const read = computed(() => (content.value?.kind === "thread" ? content.value.thread : null));
++const label = computed(() => threadLabel(props.place));
++const page = computed(() => read.value?.comments[0]?.page ?? null);
++const submit = computed(() => {
++  const pending = read.value?.pending ?? 0;
++  return pending > 0 ? { tip: submitTip(pending), count: pendingText(pending) } : null;
++});
++const refreshing = computed(() => shown.value?.load.kind === "read" && shown.value.load.refreshing);
++const sending = computed(() => shown.value?.sending.kind === "sending");
++
++onMounted(() => {
++  panel.value?.focus();
++});
++
++function contentOf(load: ThreadLoad): Content {
++  switch (load.kind) {
++    case "loading":
++      return { kind: "note", text: THREAD_LOADING };
++    case "read":
++      return { kind: "thread", thread: load.thread };
++    case "refused":
++      return { kind: "refusal", text: threadRefusalText(load.reply, navigator.platform) };
++    case "failed":
++      return {
++        kind: "refusal",
++        text: problemText(
++          { action: "mergeRequests", step: "thread", cause: load.cause },
++          navigator.platform,
++        ),
++      };
++    default: {
++      const _exhaustive: never = load;
++      return _exhaustive;
++    }
++  }
++}
++
++async function openThread(): Promise<void> {
++  if (page.value !== null) {
++    await openPage("discussion", page.value);
++  }
++}
++
++function keyPressed(event: KeyboardEvent): void {
++  if (event.key !== "Escape" || event.defaultPrevented) {
++    return;
++  }
++  event.preventDefault();
++  emit("close");
++}
++</script>
++
++<template>
++  <div
++    v-if="shown !== null"
++    ref="panel"
++    role="dialog"
++    :aria-label="label"
++    tabindex="-1"
++    class="fixed z-10 flex h-[min(48rem,calc(100vh-2rem))] w-[min(40rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border border-control-border bg-panel-inline text-fg shadow-lg outline-none"
++    :style="placement"
++    @keydown="keyPressed"
++  >
++    <header class="flex shrink-0 items-center gap-2 border-b border-separator px-3 py-2">
++      <span class="min-w-0 truncate font-semibold">{{ place }}</span>
++      <span v-if="read?.resolved" class="flex shrink-0 items-center gap-1 text-fg-muted">
++        <Check class="size-4" aria-hidden="true" />{{ RESOLVED }}
++      </span>
++      <span v-else class="shrink-0 text-fg-muted">{{ turn }}</span>
++      <button
++        v-tooltip="OPEN_ON_GITLAB"
++        type="button"
++        :aria-label="OPEN_ON_GITLAB"
++        :disabled="page === null"
++        class="ml-auto shrink-0 rounded p-1 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
++        @click="openThread"
++      >
++        <ExternalLink class="size-4" aria-hidden="true" />
++      </button>
++      <button
++        v-if="submit !== null"
++        v-tooltip="submit.tip"
++        type="button"
++        :disabled="sending"
++        class="flex shrink-0 items-center gap-1.5 rounded border border-control-border px-2 py-0.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
++        @click="submitReview"
++      >
++        {{ SUBMIT_REVIEW }}<span class="text-fg-muted">{{ submit.count }}</span>
++      </button>
++      <button
++        v-tooltip="CLOSE_THREAD"
++        type="button"
++        :aria-label="CLOSE_THREAD"
++        class="shrink-0 cursor-pointer rounded p-1 hover:bg-hover"
++        @click="emit('close')"
++      >
++        <X class="size-4" aria-hidden="true" />
++      </button>
++    </header>
++    <div
++      class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-3 py-2"
++      :aria-busy="refreshing"
++    >
++      <template v-if="content?.kind === 'thread'">
++        <MergeRequestThreadComment
++          v-for="(comment, index) in content.thread.comments"
++          :key="index"
++          :comment="comment"
++          :author="author"
++          :now="now"
++        />
++        <article
++          v-for="(draft, index) in content.thread.drafts"
++          :key="`draft-${index}`"
++          class="flex flex-col gap-1"
++        >
++          <span class="w-max rounded border border-control-border px-1.5 text-fg-muted">{{
++            PENDING
++          }}</span>
++          <p class="[overflow-wrap:anywhere] whitespace-pre-wrap">{{ draft.text }}</p>
++        </article>
++      </template>
++      <p v-else-if="content?.kind === 'note'" class="text-fg-muted">{{ content.text }}</p>
++      <p v-else role="alert" class="flex items-center gap-3">
++        <span class="text-problem-error">{{ content?.text }}</span>
++        <button
++          type="button"
++          class="shrink-0 cursor-pointer rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++          @click="retryThread"
++        >
++          {{ RETRY }}
++        </button>
++      </p>
++    </div>
++    <MergeRequestReplyField :thread="shown" />
++  </div>
++</template>
+diff --git a/frontend/src/ui/MergeRequestThreadComment.vue b/frontend/src/ui/MergeRequestThreadComment.vue
+new file mode 100644
+index 0000000..e48f660
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestThreadComment.vue
+@@ -0,0 +1,54 @@
++<script setup lang="ts">
++import { computed } from "vue";
++import Crown from "~icons/lucide/crown";
++
++import type { DiscussionThread } from "../ipc";
++import { agoText, dateTimeText, noteAuthorName } from "../mergeRequests";
++import MergeRequestDescriptionBlocks from "./MergeRequestDescriptionBlocks.vue";
++import MergeRequestPicture from "./MergeRequestPicture.vue";
++import { AUTHOR, editedText } from "./mergeRequestThreadText";
++import { vTooltip } from "./tooltip";
++
++type Comment = DiscussionThread["comments"][number];
++
++const props = defineProps<{
++  comment: Comment;
++  /** The merge request's author's username (null: unknown). */
++  author: string | null;
++  now: number;
++}>();
++
++const username = computed(() => props.comment.author?.username ?? null);
++const name = computed(() => noteAuthorName(props.comment.author));
++const isAuthor = computed(() => username.value !== null && username.value === props.author);
++const written = computed(() => ({
++  ago: agoText(props.comment.createdAt, props.now),
++  at: dateTimeText(props.comment.createdAt),
++}));
++const edited = computed(() => {
++  const edit = props.comment.edited;
++  return edit === null
++    ? null
++    : { text: editedText(edit, username.value, props.now), at: dateTimeText(edit.at) };
++});
++</script>
++
++<template>
++  <article class="flex flex-col gap-1">
++    <header class="flex flex-wrap items-center gap-x-2">
++      <MergeRequestPicture :person="comment.author" size="box" aria-hidden="true" />
++      <span class="font-semibold">{{ name }}</span>
++      <span v-if="isAuthor" v-tooltip="AUTHOR" role="img" :aria-label="AUTHOR" class="flex">
++        <Crown class="size-4 text-fg-muted" aria-hidden="true" />
++      </span>
++      <span v-if="username !== null" class="text-fg-muted">@{{ username }}</span>
++      <span v-tooltip="written.at" class="text-fg-muted">{{ written.ago }}</span>
++      <span v-if="edited !== null" v-tooltip="edited.at" class="text-fg-muted">{{
++        edited.text
++      }}</span>
++    </header>
++    <div class="min-w-0 [overflow-wrap:anywhere]">
++      <MergeRequestDescriptionBlocks :blocks="comment.body.blocks" />
++    </div>
++  </article>
++</template>
+diff --git a/frontend/src/ui/MergeRequestThreadPanel.test.ts b/frontend/src/ui/MergeRequestThreadPanel.test.ts
+new file mode 100644
+index 0000000..d646c7d
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestThreadPanel.test.ts
+@@ -0,0 +1,359 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { createSSRApp, h, shallowRef } from "vue";
++import { renderToString } from "vue/server-renderer";
++
++import {
++  createFixtureCompareSource,
++  isDiscussionId,
++  isMergeRequestIid,
++  log,
++  type DiscussionDetails,
++  type DiscussionId,
++  type MergeRequestIid,
++  type MergeRequestSource,
++} from "../ipc";
++import { dateTimeText } from "../mergeRequests";
++import type { MergeRequests } from "./mergeRequests";
++import { windowMergeRequests } from "./mergeRequestsStore";
++import MergeRequestThread from "./MergeRequestThread.vue";
++import type { Problem } from "./problem";
++import type { Screen } from "./screen";
++
++const shownCode = vi.hoisted(() => new Array<{ language: string | null; text: string }>());
++
++vi.mock("./tooltip", () => ({
++  vTooltip: {
++    getSSRProps: ({ value }: { value: string | null }) => ({ "data-tooltip": value }),
++  },
++}));
++vi.mock("./useMarkdown", () => ({
++  useMarkdownCode: (_: unknown, code: () => { language: string | null; text: string }) => {
++    shownCode.push(code());
++  },
++}));
++
++const NOW = Date.parse("2026-11-04T12:00:00Z");
++const THREAD_MS = 400;
++const WRITE_MS = 300;
++const DAY_MS = 86_400_000;
++const THREADS = 637;
++const LOCKED = 636;
++const RETRY = ">Retry</button>";
++
++let slice: MergeRequests;
++
++beforeEach(() => {
++  const document = new EventTarget();
++  vi.stubGlobal("document", document);
++  vi.stubGlobal("window", Object.assign(new EventTarget(), { document }));
++  vi.useFakeTimers();
++  vi.setSystemTime(NOW);
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++  slice = windowOver(createFixtureCompareSource(log, "?mr=list", {}));
++});
++
++afterEach(() => {
++  shownCode.length = 0;
++  vi.useRealTimers();
++  vi.unstubAllGlobals();
++  vi.restoreAllMocks();
++});
++
++function windowOver(source: MergeRequestSource): MergeRequests {
++  return windowMergeRequests(source, {
++    screen: shallowRef<Screen>({ kind: "mergeRequests" }),
++    problem: shallowRef<Problem | null>(null),
++    settings: shallowRef<{ readonly discussionDetails: DiscussionDetails }>({
++      discussionDetails: "full",
++    }),
++  });
++}
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is not an iid`);
++  }
++  return value;
++}
++
++function d(serial: number): DiscussionId {
++  const id = String(serial).padStart(40, "0");
++  if (!isDiscussionId(id)) {
++    throw new Error(`${id} is not a discussion id`);
++  }
++  return id;
++}
++
++async function shown(number: number, serial: number): Promise<void> {
++  slice.showThread(iid(number), d(serial));
++  await vi.advanceTimersByTimeAsync(THREAD_MS);
++}
++
++async function panel(number = THREADS): Promise<string> {
++  const props = {
++    iid: iid(number),
++    author: "dmitri",
++    place: "Overview",
++    turn: "Your turn",
++    anchor: { left: 800, top: 40 },
++    now: NOW,
++  };
++  const html = await renderToString(createSSRApp({ render: () => h(MergeRequestThread, props) }));
++  return html.replaceAll(/<!--[[\]]?-->/gu, "");
++}
++
++function tagOf(html: string, text: string): string {
++  const at = html.indexOf(`>${text}<`);
++  return html.slice(html.lastIndexOf("<", at), at + 1);
++}
++
++function articles(html: string): string[] {
++  return html.split("<article").slice(1);
++}
++
++function buttons(html: string): string[] {
++  return [...html.matchAll(/<button [^>]*>([^<]*)</gu)].map(
++    ([tag, words]) => `${words?.trim() ?? ""}${/\sdisabled[\s>]/u.test(tag) ? " (disabled)" : ""}`,
++  );
++}
++
++test("the_comment_header_shows_picture_name_username_crown_and_ago", async () => {
++  await shown(THREADS, 1);
++  const [anna, sam, dmitri, last] = articles(await panel());
++
++  expect(anna).toContain('<span class="font-semibold">Anna Berg</span>');
++  expect(anna).toContain('<span class="text-fg-muted">@anna</span>');
++  expect(anna).toContain(
++    `<span class="text-fg-muted" data-tooltip="${dateTimeText(NOW - 2 * DAY_MS)}">2 days ago</span>`,
++  );
++  expect(anna).toContain('<span class="relative inline-flex shrink-0 overflow-hidden rounded-full');
++  expect(anna).not.toContain("Edited");
++  expect(sam).toMatch(/>· Edited .+ ago by Dmitri Volkov<\/span>/u);
++  expect(dmitri).toContain('role="img" aria-label="Author" class="flex" data-tooltip="Author"');
++  expect(dmitri).toContain(">@dmitri<");
++  expect(last).toMatch(/>· Edited .+ ago<\/span>/u);
++  expect(last).not.toContain(" by ");
++  expect(
++    [anna, sam, dmitri, last].map((comment) => comment?.includes('aria-label="Author"')),
++  ).toEqual([false, false, true, false]);
++});
++
++test("a_comment_renders_gitlabs_blocks", async () => {
++  await shown(THREADS, 1);
++  const html = await panel();
++
++  expect(html).toContain('<table class="markdown-table">');
++  expect(shownCode.length).toBeGreaterThan(0);
++  expect(html).toContain('<a role="link" tabindex="0" class="cursor-pointer text-syntax-link');
++  expect(html).toContain(
++    'alt="both options" referrerpolicy="no-referrer" loading="lazy" draggable="false" class="inline" style="width:160px;aspect-ratio:160 / 80;height:auto;max-width:100%;"',
++  );
++  expect(html).toContain('alt="the sketch"');
++  expect(html).toContain('style="width:50%;height:auto;max-width:100%;"');
++  expect(html).not.toContain("<script");
++  expect(html).not.toContain(" href=");
++  expect(html).not.toMatch(/ on[a-z]+=/u);
++});
++
++test("the_drafts_show_pending_at_the_end", async () => {
++  await shown(THREADS, 1);
++  const all = articles(await panel());
++  const draft = all.at(-1) ?? "";
++
++  expect(all).toHaveLength(5);
++  expect(draft).toContain(">Pending</span>");
++  expect(draft).toContain('<p class="[overflow-wrap:anywhere] whitespace-pre-wrap">');
++  expect(draft).toContain("I&#39;ll take the second option.</p>");
++  expect(draft).not.toContain("rounded-full");
++});
++
++test("submit_review_shows_the_pending_count_and_its_tip", async () => {
++  await shown(THREADS, 1);
++  const html = await panel();
++
++  expect(html).toContain('data-tooltip="Publish your 2 pending comments on this merge request"');
++  expect(html).toContain('Submit review<span class="text-fg-muted">2 pending</span>');
++
++  await shown(LOCKED, 15);
++  expect(await panel(LOCKED)).not.toContain("Submit review");
++});
++
++test("the_field_has_its_placeholder_and_no_toolbar", async () => {
++  await shown(THREADS, 1);
++  slice.setReplyText(d(1), "Kept text");
++  const html = await panel();
++
++  expect(html).toContain('placeholder="Write a reply… (Markdown)"');
++  expect(html).toContain(">Kept text</textarea>");
++  expect(buttons(html)).toEqual([
++    "",
++    "Submit review",
++    "",
++    "Write",
++    "Preview",
++    "Add review",
++    "Add comment",
++    "Resolve thread",
++  ]);
++  expect(html).toContain('<button type="button" aria-pressed="true"');
++  expect(html).not.toContain('role="toolbar"');
++  expect(html).toContain('role="dialog" aria-label="Thread: Overview" tabindex="-1"');
++});
++
++test("preview_shows_loading_then_blocks_and_nothing_for_empty", async () => {
++  await shown(THREADS, 1);
++  slice.setReplyText(d(1), "**Preview** of @anna");
++  slice.showPreview();
++  const loading = await panel();
++  expect(loading).toContain('<p class="text-fg-muted">Loading…</p>');
++  expect(loading).toContain('style="display:none;"');
++
++  await vi.advanceTimersByTimeAsync(WRITE_MS);
++  const read = await panel();
++  expect(read).toContain("<strong>Preview</strong>");
++  expect(read).toContain(">@anna</a>");
++
++  slice.showWrite();
++  const back = await panel();
++  expect(back).toContain(">**Preview** of @anna</textarea>");
++  expect(back).not.toContain("display:none");
++  expect(back).not.toContain("<strong>Preview</strong>");
++
++  slice.setReplyText(d(1), "   ");
++  slice.showPreview();
++  expect(await panel()).toContain('<p class="text-fg-muted">Nothing to preview.</p>');
++
++  slice.setReplyText(d(1), "fail here");
++  slice.showPreview();
++  await vi.advanceTimersByTimeAsync(WRITE_MS);
++  expect(await panel()).toContain(
++    '<p role="alert" class="text-problem-error">Could not preview: glab timed out</p>',
++  );
++});
++
++test("the_buttons_row_has_add_review_add_comment_and_resolve_at_the_right", async () => {
++  await shown(THREADS, 1);
++  expect(buttons(await panel()).slice(-3)).toEqual([
++    "Add review (disabled)",
++    "Add comment (disabled)",
++    "Resolve thread",
++  ]);
++  slice.setReplyText(d(1), "Agreed.");
++  const typed = await panel();
++  expect(buttons(typed).slice(-3)).toEqual(["Add review", "Add comment", "Resolve thread"]);
++  expect(typed).toContain('<span class="ml-auto flex"><button');
++
++  void slice.sendReply("comment");
++  expect(buttons(await panel()).slice(-3)).toEqual([
++    "Add review (disabled)",
++    "Add comment (disabled)",
++    "Resolve thread (disabled)",
++  ]);
++  await vi.advanceTimersByTimeAsync(WRITE_MS + THREAD_MS);
++
++  await shown(LOCKED, 14);
++  slice.setReplyText(d(14), "Why?");
++  const locked = await panel(LOCKED);
++  expect(buttons(locked).slice(-3)).toEqual([
++    "Add review (disabled)",
++    "Add comment (disabled)",
++    "Resolve thread (disabled)",
++  ]);
++  const reason = "Comments on this merge request are locked to project members.";
++  expect(locked.split(`<span class="flex" data-tooltip="${reason}">`)).toHaveLength(3);
++  expect(locked).toContain(
++    '<span class="ml-auto flex" data-tooltip="You may not resolve this thread.">',
++  );
++});
++
++test("a_failed_send_says_why_under_the_row", async () => {
++  await shown(THREADS, 2);
++  slice.setReplyText(d(2), "refuse this");
++  const drafting = slice.sendReply("draft");
++  await vi.advanceTimersByTimeAsync(WRITE_MS);
++  await drafting;
++  const refused = await panel();
++  expect(refused).toContain(
++    '<p role="alert" class="text-problem-error">Could not add the review comment: 403 Forbidden</p>',
++  );
++  expect(refused).toContain(">refuse this</textarea>");
++
++  slice.setReplyText(d(2), "fail now");
++  const failing = slice.sendReply("comment");
++  await vi.advanceTimersByTimeAsync(WRITE_MS);
++  await failing;
++  expect(await panel()).toContain("Could not add the comment: glab timed out</p>");
++
++  await vi.advanceTimersByTimeAsync(THREAD_MS);
++  await shown(LOCKED, 15);
++  const resolving = slice.setResolved(true);
++  await vi.advanceTimersByTimeAsync(WRITE_MS);
++  await resolving;
++  expect(await panel(LOCKED)).toContain("Could not resolve the thread: 403 Forbidden</p>");
++});
++
++test("resolved_reads_resolved_and_unresolve", async () => {
++  await shown(THREADS, 1);
++  const open = await panel();
++  expect(open).toContain('<span class="shrink-0 text-fg-muted">Your turn</span>');
++  expect(open).not.toContain(">Resolved");
++
++  const resolving = slice.setResolved(true);
++  await vi.advanceTimersByTimeAsync(WRITE_MS + THREAD_MS);
++  await resolving;
++  const resolved = await panel();
++  expect(resolved).toMatch(
++    /<span class="flex shrink-0 items-center gap-1 text-fg-muted"><svg[^>]*>.*<\/svg>Resolved<\/span>/u,
++  );
++  expect(resolved).not.toContain("Your turn");
++  expect(buttons(resolved).at(-1)).toBe("Unresolve thread");
++});
++
++test("loading_failure_and_not_found_read_one_sentence_with_retry", async () => {
++  slice.showThread(iid(THREADS), d(1));
++  const loading = await panel();
++  expect(tagOf(loading, "Loading…")).toBe('<p class="text-fg-muted">');
++  expect(loading).not.toContain(RETRY);
++  await vi.advanceTimersByTimeAsync(THREAD_MS);
++
++  await shown(THREADS, 99);
++  const gone = await panel();
++  expect(gone).toContain(
++    '<span class="text-problem-error">This discussion is no longer on GitLab.</span>',
++  );
++  expect(gone).toContain(RETRY);
++
++  const fixture = createFixtureCompareSource(log, "?mr=list", {});
++  const answers = [
++    { ok: true, value: { kind: "glabMissing" } },
++    { ok: true, value: { kind: "failed", message: "glab timed out" } },
++    { ok: false, failure: { kind: "WorkerStopped" } },
++  ] as const;
++  for (const [index, answer] of answers.entries()) {
++    slice = windowOver({ ...fixture, readDiscussionThread: () => Promise.resolve(answer) });
++    await shown(THREADS, index + 1);
++    const html = await panel();
++    expect(html).toContain(RETRY);
++    expect(html).toContain(
++      [
++        "glab is not installed (not found on PATH) — install glab, then Retry.</span>",
++        "Could not read the thread: glab timed out</span>",
++        "Could not read the thread: yamt&#39;s worker stopped; try again.</span>",
++      ][index],
++    );
++  }
++});
++
++test("a_refreshing_thread_keeps_its_comments_and_another_requests_thread_renders_nothing", async () => {
++  await shown(THREADS, 1);
++  slice.setReplyText(d(1), "Agreed.");
++  const sending = slice.sendReply("comment");
++  await vi.advanceTimersByTimeAsync(WRITE_MS);
++  await sending;
++  const refreshing = await panel();
++  expect(refreshing).toContain('aria-busy="true"');
++  expect(articles(refreshing)).toHaveLength(5);
++  expect(buttons(refreshing).at(-1)).toBe("Resolve thread (disabled)");
++
++  expect(await panel(LOCKED)).toBe("");
++});
+diff --git a/frontend/src/ui/mergeRequestImageSize.test.ts b/frontend/src/ui/mergeRequestImageSize.test.ts
+new file mode 100644
+index 0000000..23b3010
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestImageSize.test.ts
+@@ -0,0 +1,108 @@
++import { expect, test } from "vitest";
++
++import { imageStyle } from "./mergeRequestImageSize";
++
++const PICTURE = { width: 48, height: 24 };
++const UNMEASURED = { width: 0, height: 0 };
++
++function pixels(value: number): { readonly kind: "pixels"; readonly value: number } {
++  return { kind: "pixels", value };
++}
++
++function percent(value: number): { readonly kind: "percent"; readonly value: number } {
++  return { kind: "percent", value };
++}
++
++test("an image without a size keeps its own size under the cap", () => {
++  expect(imageStyle(null, null)).toEqual({ height: "auto", maxWidth: "100%" });
++  expect(imageStyle(null, PICTURE)).toEqual({ height: "auto", maxWidth: "100%" });
++});
++
++test("a_width_keeps_the_pictures_proportions_and_the_cap", () => {
++  const style = { width: "120px", height: "auto", maxWidth: "100%" };
++  expect(imageStyle({ kind: "width", width: pixels(120) }, null)).toEqual(style);
++  expect(imageStyle({ kind: "width", width: pixels(120) }, PICTURE)).toEqual(style);
++});
++
++test("a_percent_width_is_of_the_column_and_never_over_100", () => {
++  expect(imageStyle({ kind: "width", width: percent(40) }, null)).toEqual({
++    width: "40%",
++    height: "auto",
++    maxWidth: "100%",
++  });
++  expect(imageStyle({ kind: "width", width: percent(100) }, null)).toMatchObject({
++    width: "100%",
++  });
++  expect(imageStyle({ kind: "width", width: percent(250) }, null)).toMatchObject({
++    width: "100%",
++  });
++});
++
++test("a_height_alone_scales_the_width_once_loaded", () => {
++  const size = { kind: "height", height: pixels(60) } as const;
++  expect(imageStyle(size, null)).toEqual({ height: "60px" });
++  expect(imageStyle(size, PICTURE)).toEqual({ width: "120px", height: "auto", maxWidth: "100%" });
++  expect(imageStyle(size, { width: 30, height: 40 })).toEqual({
++    width: "45px",
++    height: "auto",
++    maxWidth: "100%",
++  });
++  expect(imageStyle(size, UNMEASURED)).toEqual({ height: "60px" });
++});
++
++test("both_keep_their_ratio", () => {
++  const style = { width: "160px", aspectRatio: "160 / 80", height: "auto", maxWidth: "100%" };
++  const size = { kind: "both", width: pixels(160), height: pixels(80) } as const;
++  expect(imageStyle(size, null)).toEqual(style);
++  expect(imageStyle(size, PICTURE)).toEqual(style);
++
++  const wide = { kind: "both", width: percent(150), height: pixels(80) } as const;
++  expect(imageStyle(wide, null)).toEqual({ width: "100%", height: "auto", maxWidth: "100%" });
++  expect(imageStyle(wide, PICTURE)).toEqual({
++    width: "100%",
++    aspectRatio: "48 / 24",
++    height: "auto",
++    maxWidth: "100%",
++  });
++  expect(imageStyle({ ...wide, width: percent(30) }, UNMEASURED)).toEqual({
++    width: "30%",
++    height: "auto",
++    maxWidth: "100%",
++  });
++});
++
++test("a_percent_height_is_ignored", () => {
++  expect(imageStyle({ kind: "height", height: percent(50) }, PICTURE)).toEqual({
++    height: "auto",
++    maxWidth: "100%",
++  });
++  expect(imageStyle({ kind: "both", width: pixels(90), height: percent(50) }, PICTURE)).toEqual({
++    width: "90px",
++    height: "auto",
++    maxWidth: "100%",
++  });
++  expect(imageStyle({ kind: "both", width: percent(20), height: percent(50) }, null)).toEqual({
++    width: "20%",
++    height: "auto",
++    maxWidth: "100%",
++  });
++});
++
++test("a_size_wider_than_the_column_shrinks_with_its_proportions", () => {
++  expect(imageStyle({ kind: "width", width: pixels(4000) }, PICTURE)).toEqual({
++    width: "4000px",
++    height: "auto",
++    maxWidth: "100%",
++  });
++  expect(imageStyle({ kind: "both", width: pixels(4000), height: pixels(2000) }, null)).toEqual({
++    width: "4000px",
++    aspectRatio: "4000 / 2000",
++    height: "auto",
++    maxWidth: "100%",
++  });
++  expect(imageStyle({ kind: "height", height: pixels(3000) }, PICTURE)).toEqual({
++    width: "6000px",
++    height: "auto",
++    maxWidth: "100%",
++  });
++});
+diff --git a/frontend/src/ui/mergeRequestImageSize.ts b/frontend/src/ui/mergeRequestImageSize.ts
+new file mode 100644
+index 0000000..bde3e12
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestImageSize.ts
+@@ -0,0 +1,61 @@
++import type { DescriptionInline } from "../ipc";
++
++type ImageSize = NonNullable<Extract<DescriptionInline, { kind: "image" }>["size"]>;
++type ImageLength = Extract<ImageSize, { kind: "width" }>["width"];
++type ImageStyle = Readonly<Record<string, string>>;
++
++export type NaturalSize = { readonly width: number; readonly height: number };
++
++const WHOLE_PERCENT = 100;
++const OWN_SIZE: ImageStyle = { height: "auto", maxWidth: "100%" };
++
++function lengthText(length: ImageLength): string {
++  return length.kind === "pixels"
++    ? `${length.value}px`
++    : `${Math.min(length.value, WHOLE_PERCENT)}%`;
++}
++
++function widthStyle(width: ImageLength): ImageStyle {
++  return { width: lengthText(width), ...OWN_SIZE };
++}
++
++function heightStyle(height: number, natural: NaturalSize | null): ImageStyle {
++  if (natural === null || natural.height === 0) {
++    return { height: `${height}px` };
++  }
++  return { width: `${(height * natural.width) / natural.height}px`, ...OWN_SIZE };
++}
++
++function naturalRatio(natural: NaturalSize | null): ImageStyle {
++  return natural === null || natural.height === 0
++    ? {}
++    : { aspectRatio: `${natural.width} / ${natural.height}` };
++}
++
++function bothStyle(width: ImageLength, height: number, natural: NaturalSize | null): ImageStyle {
++  const ratio =
++    width.kind === "pixels" ? { aspectRatio: `${width.value} / ${height}` } : naturalRatio(natural);
++  return { width: lengthText(width), ...ratio, ...OWN_SIZE };
++}
++
++/** CSS for an image of `size` (null: its own size, today's `max-w-full h-auto`); `natural` once it loaded. A height
++ *  in % is ignored, as on GitLab's page: it computes to auto in a column of auto height (CSS 2.1 §10.5). */
++export function imageStyle(size: ImageSize | null, natural: NaturalSize | null): ImageStyle {
++  if (size === null) {
++    return OWN_SIZE;
++  }
++  switch (size.kind) {
++    case "width":
++      return widthStyle(size.width);
++    case "height":
++      return size.height.kind === "pixels" ? heightStyle(size.height.value, natural) : OWN_SIZE;
++    case "both":
++      return size.height.kind === "pixels"
++        ? bothStyle(size.width, size.height.value, natural)
++        : widthStyle(size.width);
++    default: {
++      const _exhaustive: never = size;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/mergeRequestThreadText.test.ts b/frontend/src/ui/mergeRequestThreadText.test.ts
+new file mode 100644
+index 0000000..218c981
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestThreadText.test.ts
+@@ -0,0 +1,159 @@
++import { expect, test } from "vitest";
++
++import {
++  ADD_COMMENT,
++  ADD_REVIEW,
++  AUTHOR,
++  CLOSE_THREAD,
++  commentingReason,
++  editedText,
++  MAY_NOT_RESOLVE,
++  NOTHING_TO_PREVIEW,
++  OPEN_ON_GITLAB,
++  PENDING,
++  pendingText,
++  PREVIEW,
++  previewFailureText,
++  REPLY_PLACEHOLDER,
++  RESOLVE_THREAD,
++  RESOLVED,
++  SUBMIT_REVIEW,
++  submitTip,
++  THREAD_GONE,
++  THREAD_LOADING,
++  threadLabel,
++  threadRefusalText,
++  UNRESOLVE_THREAD,
++  WRITE,
++  writeFailureText,
++} from "./mergeRequestThreadText";
++
++const LINUX = "Linux x86_64";
++const NOW = Date.parse("2026-11-04T12:00:00Z");
++const DAY_MS = 86_400_000;
++const STOPPED = { kind: "ipc", cause: { kind: "WorkerStopped" } } as const;
++const DMITRI = { username: "dmitri", name: "Dmitri Volkov", picture: null };
++
++test("the panel's fixed words", () => {
++  expect([
++    THREAD_LOADING,
++    THREAD_GONE,
++    RESOLVED,
++    OPEN_ON_GITLAB,
++    SUBMIT_REVIEW,
++    CLOSE_THREAD,
++    AUTHOR,
++    PENDING,
++    WRITE,
++    PREVIEW,
++    REPLY_PLACEHOLDER,
++    NOTHING_TO_PREVIEW,
++    ADD_REVIEW,
++    ADD_COMMENT,
++    RESOLVE_THREAD,
++    UNRESOLVE_THREAD,
++    MAY_NOT_RESOLVE,
++  ]).toEqual([
++    "Loading…",
++    "This discussion is no longer on GitLab.",
++    "Resolved",
++    "Open on GitLab",
++    "Submit review",
++    "Close",
++    "Author",
++    "Pending",
++    "Write",
++    "Preview",
++    "Write a reply… (Markdown)",
++    "Nothing to preview.",
++    "Add review",
++    "Add comment",
++    "Resolve thread",
++    "Unresolve thread",
++    "You may not resolve this thread.",
++  ]);
++  expect(threadLabel("src/app.ts:12")).toBe("Thread: src/app.ts:12");
++});
++
++test("pendingText and submitTip count the drafts, singular and plural", () => {
++  expect(pendingText(3)).toBe("3 pending");
++  expect(pendingText(1)).toBe("1 pending");
++  expect(submitTip(3)).toBe("Publish your 3 pending comments on this merge request");
++  expect(submitTip(2)).toBe("Publish your 2 pending comments on this merge request");
++  expect(submitTip(1)).toBe("Publish your pending comment on this merge request");
++});
++
++test("editedText names the editor only when it is not the comment's author", () => {
++  const edit = { at: NOW - 3 * DAY_MS, by: DMITRI };
++  expect(editedText(edit, "sam", NOW)).toBe("· Edited 3 days ago by Dmitri Volkov");
++  expect(editedText(edit, null, NOW)).toBe("· Edited 3 days ago by Dmitri Volkov");
++  expect(editedText(edit, "dmitri", NOW)).toBe("· Edited 3 days ago");
++  expect(editedText({ at: NOW, by: { ...DMITRI, name: " " } }, "sam", NOW)).toBe(
++    "· Edited just now by dmitri",
++  );
++});
++
++test("commentingReason words why the add buttons are disabled", () => {
++  expect(commentingReason("allowed")).toBeNull();
++  expect(commentingReason("locked")).toBe(
++    "Comments on this merge request are locked to project members.",
++  );
++  expect(commentingReason("notAllowed")).toBe("You may not comment on this merge request.");
++});
++
++test("threadRefusalText: gone, glab's words with Retry, or GitLab's message", () => {
++  expect(threadRefusalText({ kind: "notFound" }, LINUX)).toBe(
++    "This discussion is no longer on GitLab.",
++  );
++  expect(threadRefusalText({ kind: "glabMissing" }, LINUX)).toBe(
++    "glab is not installed (not found on PATH) — install glab, then Retry.",
++  );
++  expect(threadRefusalText({ kind: "notLoggedIn", detail: "gitlab.com" }, LINUX)).toBe(
++    "glab is not logged in: gitlab.com — run glab auth login in a terminal, then Retry.",
++  );
++  expect(threadRefusalText({ kind: "failed", message: "glab timed out" }, LINUX)).toBe(
++    "Could not read the thread: glab timed out",
++  );
++});
++
++test.each([
++  ["comment", "Could not add the comment"],
++  ["draft", "Could not add the review comment"],
++  ["resolve", "Could not resolve the thread"],
++  ["unresolve", "Could not unresolve the thread"],
++  ["submit", "Could not submit the review"],
++] as const)("a failed %s says %s and why", (what, words) => {
++  expect(writeFailureText(what, { kind: "refused", reason: "403 Forbidden" }, LINUX)).toBe(
++    `${words}: 403 Forbidden`,
++  );
++  expect(writeFailureText(what, { kind: "failed", message: "glab timed out" }, LINUX)).toBe(
++    `${words}: glab timed out`,
++  );
++  expect(writeFailureText(what, { kind: "glabMissing" }, LINUX)).toBe(
++    `${words}: glab is not installed (not found on PATH)`,
++  );
++  expect(writeFailureText(what, { kind: "notLoggedIn", detail: "gitlab.com" }, LINUX)).toBe(
++    `${words}: glab is not logged in: gitlab.com`,
++  );
++  expect(writeFailureText(what, STOPPED, LINUX)).toBe(
++    `${words}: yamt's worker stopped; try again.`,
++  );
++});
++
++test("previewFailureText: Could not preview, with glab's words or the cause", () => {
++  expect(
++    previewFailureText({ kind: "refused", reply: { kind: "failed", message: "timed out" } }, LINUX),
++  ).toBe("Could not preview: timed out");
++  expect(previewFailureText({ kind: "refused", reply: { kind: "glabMissing" } }, LINUX)).toBe(
++    "Could not preview: glab is not installed (not found on PATH)",
++  );
++  expect(
++    previewFailureText(
++      { kind: "refused", reply: { kind: "notLoggedIn", detail: "gitlab.com" } },
++      LINUX,
++    ),
++  ).toBe("Could not preview: glab is not logged in: gitlab.com");
++  expect(previewFailureText({ kind: "failed", cause: { kind: "WorkerStopped" } }, LINUX)).toBe(
++    "Could not preview: yamt's worker stopped; try again.",
++  );
++});
+diff --git a/frontend/src/ui/mergeRequestThreadText.ts b/frontend/src/ui/mergeRequestThreadText.ts
+new file mode 100644
+index 0000000..9a92856
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestThreadText.ts
+@@ -0,0 +1,131 @@
++import type { DiscussionThread, DiscussionThreadReply } from "../ipc";
++import { agoText, displayName } from "../mergeRequests";
++import { GLAB_MISSING_TEXT, glabNotLoggedInText, glabRetryText } from "./glab";
++import type { Preview } from "./mergeRequestPreview";
++import type { WriteFailure, WriteKind } from "./mergeRequestThread";
++import type { MergeRequestStep, ProblemCause } from "./problem";
++import { problemText } from "./problemText";
++
++type NoteEdit = NonNullable<DiscussionThread["comments"][number]["edited"]>;
++type GlabRefusal =
++  | { readonly kind: "glabMissing" }
++  | { readonly kind: "notLoggedIn"; readonly detail: string }
++  | { readonly kind: "failed"; readonly message: string };
++
++export const THREAD_LOADING = "Loading…";
++export const THREAD_GONE = "This discussion is no longer on GitLab.";
++export const RESOLVED = "Resolved";
++export const OPEN_ON_GITLAB = "Open on GitLab";
++export const SUBMIT_REVIEW = "Submit review";
++export const CLOSE_THREAD = "Close";
++export const AUTHOR = "Author";
++export const PENDING = "Pending";
++export const WRITE = "Write";
++export const PREVIEW = "Preview";
++export const REPLY_PLACEHOLDER = "Write a reply… (Markdown)";
++export const NOTHING_TO_PREVIEW = "Nothing to preview.";
++export const ADD_REVIEW = "Add review";
++export const ADD_COMMENT = "Add comment";
++export const RESOLVE_THREAD = "Resolve thread";
++export const UNRESOLVE_THREAD = "Unresolve thread";
++export const MAY_NOT_RESOLVE = "You may not resolve this thread.";
++
++const COMMENTING_REASONS: Readonly<Record<DiscussionThread["commenting"], string | null>> = {
++  allowed: null,
++  locked: "Comments on this merge request are locked to project members.",
++  notAllowed: "You may not comment on this merge request.",
++};
++
++const WRITE_STEPS: Readonly<Record<WriteKind, MergeRequestStep>> = {
++  comment: "reply",
++  draft: "draft",
++  resolve: "resolveThread",
++  unresolve: "unresolveThread",
++  submit: "submitReview",
++};
++
++export function threadLabel(place: string): string {
++  return `Thread: ${place}`;
++}
++
++export function pendingText(count: number): string {
++  return `${count} pending`;
++}
++
++export function submitTip(count: number): string {
++  return count === 1
++    ? "Publish your pending comment on this merge request"
++    : `Publish your ${count} pending comments on this merge request`;
++}
++
++/** "· Edited 3 days ago", with " by <name>" when someone other than the comment's author edited it. */
++export function editedText(edit: NoteEdit, authorUsername: string | null, now: number): string {
++  const edited = `· Edited ${agoText(edit.at, now)}`;
++  return edit.by.username === authorUsername ? edited : `${edited} by ${displayName(edit.by)}`;
++}
++
++/** Why the add buttons are disabled; null when the viewer may comment. */
++export function commentingReason(commenting: DiscussionThread["commenting"]): string | null {
++  return COMMENTING_REASONS[commenting];
++}
++
++function glabWords(refusal: GlabRefusal): string {
++  switch (refusal.kind) {
++    case "glabMissing":
++      return GLAB_MISSING_TEXT;
++    case "notLoggedIn":
++      return glabNotLoggedInText(refusal.detail);
++    case "failed":
++      return refusal.message;
++    default: {
++      const _exhaustive: never = refusal;
++      return _exhaustive;
++    }
++  }
++}
++
++function attemptText(step: MergeRequestStep, cause: ProblemCause, platform: string): string {
++  return problemText({ action: "mergeRequests", step, cause }, platform);
++}
++
++/** One sentence; the panel puts Retry (aiText.ts RETRY) after it. */
++export function threadRefusalText(
++  reply: Exclude<DiscussionThreadReply, { readonly kind: "read" }>,
++  platform: string,
++): string {
++  switch (reply.kind) {
++    case "notFound":
++      return THREAD_GONE;
++    case "glabMissing":
++    case "notLoggedIn":
++      return glabRetryText(reply);
++    case "failed":
++      return attemptText("thread", { kind: "Unexpected", message: reply.message }, platform);
++    default: {
++      const _exhaustive: never = reply;
++      return _exhaustive;
++    }
++  }
++}
++
++export function writeFailureText(what: WriteKind, failure: WriteFailure, platform: string): string {
++  const cause: ProblemCause =
++    failure.kind === "ipc"
++      ? failure.cause
++      : {
++          kind: "Unexpected",
++          message: failure.kind === "refused" ? failure.reason : glabWords(failure),
++        };
++  return attemptText(WRITE_STEPS[what], cause, platform);
++}
++
++export function previewFailureText(
++  preview: Extract<Preview, { readonly kind: "refused" | "failed" }>,
++  platform: string,
++): string {
++  const cause: ProblemCause =
++    preview.kind === "failed"
++      ? preview.cause
++      : { kind: "Unexpected", message: glabWords(preview.reply) };
++  return attemptText("preview", cause, platform);
++}

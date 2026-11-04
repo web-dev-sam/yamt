@@ -1,0 +1,4 @@
+just mutants HEAD — 2 TS files, 125 mutants: 119 killed, 0 survived, 6 no coverage, 0 errors (.vue not mutated)
+mergeRequestImageSize.ts:56 default never branch (NoCoverage ×2) — equivalent: unreachable by type (TS3 exhaustive default)
+mergeRequestThreadText.ts:80 glabWords default never branch (NoCoverage ×2) — equivalent: unreachable by type
+mergeRequestThreadText.ts:104 threadRefusalText default never branch (NoCoverage ×2) — equivalent: unreachable by type

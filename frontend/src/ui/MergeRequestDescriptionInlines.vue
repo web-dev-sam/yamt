@@ -52,6 +52,7 @@ function linkPressed(link: DescriptionLink): void {
       v-else-if="inline.kind === 'image'"
       :image="inline.image"
       :caption="inline.caption"
+      :size="inline.size"
     />
     <br v-else />
   </template>
