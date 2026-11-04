@@ -1,6 +1,6 @@
 # Request — the author's name in the turn words, a marked discussions button, no Escape out of the list, review mode's order
 
-Asked by the owner on 2026-11-04 (#2423–#2426); details by the orchestrator as owner (OR13), marked "(orchestrator)",
+Asked by the owner on 2026-11-04 (#2425–#2428); details by the orchestrator as owner (OR13), marked "(orchestrator)",
 the owner may veto. Base: main `f93d0020`. Window: the merge-request page's pure core
 (`frontend/src/mergeRequests/internal/discussions.ts` `turnText`/`turnCounts`, `reviewOrder.ts` `reviewOrdered`/
 `reviewSortedText`), the discussions button and box (`frontend/src/ui/MergeRequestDiscussions.vue`), the page
@@ -19,13 +19,13 @@ the owner may veto. Base: main `f93d0020`. Window: the merge-request page's pure
 >   discussions - biggest to smallest, then amount of review mode reviewers discussions on the MR in total (in visible
 >   number, smallest first (means the reviewer hasnt looked into it yet))
 
-## Part A — the author's name (#2423)
+## Part A — the author's name (#2425)
 
 - **A1.** A discussion that is the merge request author's turn reads "<author's name>'s turn" ("Dmitri Volkov's
   turn"), the name as the row shows its author (`displayName`), in the box's lines and the thread panel's header.
 - **A2.** (orchestrator) A row whose author GitLab does not give keeps "Author's turn".
 
-## Part B — the discussions button marked (#2424)
+## Part B — the discussions button marked (#2426)
 
 - **B1.** A row's discussions button (icon and count) is drawn as the purple turn words are (`text-primary
   font-semibold`, `MergeRequestDiscussions.vue:306`) when at least one of its open discussions is the turn of the one
@@ -35,14 +35,14 @@ the owner may veto. Base: main `f93d0020`. Window: the merge-request page's pure
 - **B3.** (orchestrator) Only rows whose discussions have been read can be marked: with "Load fully" (the default)
   every row once loaded; with "Load lazily" a row after its box was opened; with "Off" none.
 
-## Part C — Escape never leaves the list (#2425)
+## Part C — Escape never leaves the list (#2427)
 
 - **C1.** Escape never closes the merge-request page, wherever the focus is and whatever was open before. The page
   closes only by Back (a click, or Enter/Space on the focused button) and as today by showing a file or a tab.
 - **C2.** Every other Escape stays: it closes an open filter menu, a box, a field, the thread panel, the description,
   a job log, a question, as today.
 
-## Part D — review mode's order (#2426)
+## Part D — review mode's order (#2428)
 
 For the reviewer review mode speaks for, the shown rows sort by, in this order:
 

@@ -6,6 +6,10 @@ the four parts share `MergeRequestDiscussions.vue`, the core's turn counts and `
 would make two owners of each. Visions: the turn rule and its words live once in the core (plan #163, #179); one
 writer per state (§0). **This slice wires the window**: its commit starts the smoke pass.
 
+Starts once `mr-fast-preview-panel`'s last round is committed: that slice also edits `MergeRequestDiscussions.vue`
+(its reload button calls `refreshDiscussions`), `MergeRequestDiscussionsBox.test.ts` and `ui/AGENTS.md`; keep its
+changes. Line numbers below are of `f93d0020`; re-read before editing.
+
 ## Target
 
 **Owned:**

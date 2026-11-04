@@ -17,6 +17,23 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 | 2   | final run 0.6.9 before tagging (`briefs/release-0.6.9-verify.md`)                                            | verifier     | done        | `Release069Verify` at `9d6cd91e`: `just check`, readmer, licences, `yamt_0.6.9_amd64.deb` Version `0.6.9`, `yamt 0.6.9`, release binary on `mr-threads` (turn words, thread panel, preview, one comment POST, no CSP error) pass. Note `Release069Verify.md` |
 | 3   | push `main`, ci green on all four jobs, tag `v0.6.9`, publish                                                | human        | handed over |                                                                                                                                                                                                                                                              |
 
+## Review fixes on the merge-request page (session 52; owner #2425–#2428)
+
+Request `docs/slices/request-mr-review-fixes.md` (A: the author's name in "Author's turn"; B: the discussions button
+purple when one discussion waits for the viewer; C: Escape never closes the page; D: review mode's order — soonest
+due, most waiting for the reviewer, fewest the reviewer wrote in); base `f93d0020`. Frontend only, no IPC. One
+implementer slice (the four parts share `MergeRequestDiscussions.vue`, the core's turn counts and `ui/AGENTS.md`).
+Fast-preview row 5 (panel, owner #2423) also owns `MergeRequestDiscussions.vue`, `MergeRequestDiscussionsBox.test.ts`
+and `ui/AGENTS.md`: row 1 starts only after that slice's last round is committed, never beside it. Open for the
+owner: Q1 (D3's count: discussions the reviewer wrote in, or all open ones).
+Order: slice, smoke ∥ both reviews, docs keeper, final.
+
+| row | slice                                                                                                                             | owner                 | status  | evidence |
+| --- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ------- | -------- |
+| 1   | fixes (`briefs/mr-review-fixes.md`): words, mark, Escape, order; wires the window                                                 | web-impl              | planned |          |
+| 2   | docs keeper (plan #189, #128/#163/#165/#179/#183/#185 amended); verify (`briefs/mr-review-fixes-verify.md`): smoke after 1, final | docs-keeper, verifier | todo    |          |
+| 3   | owner check on the GitLab playground                                                                                              | human                 | todo    |          |
+
 ## Fast comment preview (session 51; owner #2419–#2422: "why does the preview need to load for about a second?")
 
 Request `docs/slices/request-mr-fast-preview.md` (parts A–B, acceptance, non-goals, reopens); base `49b7912c`.
