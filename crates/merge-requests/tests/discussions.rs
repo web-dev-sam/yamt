@@ -6,15 +6,16 @@ mod fake_glab;
 
 use yamt_conflict_repo::{TempDir, git_ok};
 use yamt_merge_requests::{
-    DiscussionNote, DiscussionPlace, DiscussionsAnswer, GitLabRepository, MergeRequestIid,
-    OfferedPicture, OpenDiscussion, ReadDiscussions, RowDiscussions, WebPage, gitlab_repository,
-    read_discussions,
+    DiscussionNote, DiscussionPlace, DiscussionsAnswer, GitLabRepository, Mention, MergeRequestIid,
+    OfferedPicture, OpenDiscussion, ReadDiscussions, RowDiscussions, TurnComment, WebPage,
+    gitlab_repository, read_discussions,
 };
 
 use fake_glab::Fake;
 
 const GITLAB_REMOTE: &str = "https://gitlab.example/taskboard/taskboard.git";
 const SCENARIO: &str = "mr-discussions";
+const THREADS_SCENARIO: &str = "mr-threads";
 const QUERY_START: &str = "argv: api graphql -f query=query MergeRequestDiscussions(";
 
 /// A repository whose `origin` is on gitlab.example, and its `GitLabRepository`.
@@ -59,6 +60,84 @@ fn author(note: &DiscussionNote) -> Option<&str> {
 
 fn page(note: &DiscussionNote) -> Option<&str> {
     note.page.as_ref().map(WebPage::as_str)
+}
+
+/// Discussion `dNN` of `mr-threads`: its id is `NN` behind zeros.
+fn discussion<'a>(open: &'a [OpenDiscussion], nn: &str) -> &'a OpenDiscussion {
+    let hex = format!("{nn:0>40}");
+    let found = open.iter().find(|open| open.id.as_str() == hex);
+    found.unwrap_or_else(|| panic!("no d{nn} in {open:?}"))
+}
+
+fn authors(earlier: &[TurnComment]) -> Vec<Option<&str>> {
+    earlier
+        .iter()
+        .map(|comment| {
+            comment
+                .author
+                .as_ref()
+                .map(|person| person.username.as_str())
+        })
+        .collect()
+}
+
+fn mentioned(mentions: &[Mention]) -> Vec<(&str, &str)> {
+    mentions
+        .iter()
+        .map(|mention| (mention.username.as_str(), mention.name.as_str()))
+        .collect()
+}
+
+#[test]
+fn a_listed_rows_turn_data_arrives_with_starter_comments_and_mentions() {
+    let fake = Fake::new(THREADS_SCENARIO);
+
+    let read = read(&fake, &[91, 90]);
+
+    assert_eq!(read.rows.len(), 2);
+    let open = open_of(&read.rows[1]);
+    assert_eq!(read.rows[1].iid, MergeRequestIid(90));
+    assert_eq!(open.len(), 13, "{open:?}");
+    let d01 = discussion(open, "01");
+    assert_eq!(
+        authors(&d01.earlier),
+        [Some("anna"), Some("sam"), Some("dmitri")]
+    );
+    assert_eq!(author(&d01.last), Some("anna"));
+    assert_eq!(mentioned(&d01.earlier[0].mentions), [("ben", "Ben Okafor")]);
+    assert_eq!(mentioned(&d01.earlier[2].mentions), []);
+    let board = DiscussionPlace::File {
+        path: "src/board.ts".to_owned(),
+        line: Some(12),
+    };
+    assert_eq!(d01.place, board);
+    let d04 = discussion(open, "04");
+    assert_eq!(mentioned(&d04.earlier[0].mentions), [("sam", "Sam Weller")]);
+    let d12 = discussion(open, "12");
+    assert_eq!(mentioned(&d12.earlier[0].mentions), []);
+    assert_eq!(mentioned(&d12.last.mentions), []);
+    let d13 = discussion(open, "13");
+    assert_eq!(mentioned(&d13.last.mentions), [("chiara", "Chiara Rossi")]);
+    let d10 = discussion(open, "10");
+    assert_eq!(authors(&d10.earlier), [None]);
+    assert_eq!(author(&d10.last), None);
+    assert_eq!(open_of(&read.rows[0]).len(), 3);
+}
+
+#[test]
+fn one_row_reloads_alone() {
+    let fake = Fake::new(THREADS_SCENARIO);
+
+    let read = read(&fake, &[90]);
+
+    assert_eq!(read.rows.len(), 1);
+    assert_eq!(open_of(&read.rows[0]).len(), 13);
+    let asked = queries(&fake);
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert!(
+        asked[0].ends_with(r#" -f fullPath=taskboard/taskboard -F iids=["90"] -F first=1"#),
+        "{asked:?}"
+    );
 }
 
 #[test]

@@ -1,0 +1,4 @@
+just mutants HEAD → Found 139 mutants; 139 tested in 12m: 3 missed, 97 caught, 39 unviable (first run: 9 missed; 6 killed by the two log-name tests)
+crates/merge-requests/src/markdown_preview.rs:122 replace log_read with () — wiring: log only; no crate test captures tracing, and the kind names are pinned by tests
+crates/merge-requests/src/discussion_thread/read.rs:248 replace log_read with () — wiring: log only, as above
+crates/merge-requests/src/discussion_thread/read.rs:102 replace += with *= in through_glab — wiring: `queries` feeds only the info line's count

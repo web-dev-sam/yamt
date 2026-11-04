@@ -150,10 +150,11 @@ fn the_branches_query_is_one_line_with_balanced_braces_and_its_argv_is_exact() {
 fn the_discussions_query_is_one_line_as_designed_and_its_argv_is_exact() {
     let query = "query=query MergeRequestDiscussions($fullPath: ID!, $iids: [String!], $first: Int!, \
          $discussionsAfter: String) { queryComplexity { score limit } project(fullPath: $fullPath) { \
-         mergeRequests(iids: $iids, first: $first) { nodes { iid discussions(first: 100, after: \
-         $discussionsAfter) { pageInfo { hasNextPage endCursor } nodes { resolvable resolved notes(last: 20) { \
-         pageInfo { hasPreviousPage } nodes { system author { username name avatarUrl } body createdAt url \
-         position { filePath newLine oldLine } } } } } } } } }";
+         mergeRequests(iids: $iids, first: $first) { nodes { iid discussionLocked userPermissions { createNote } \
+         discussions(first: 100, after: $discussionsAfter) { pageInfo { hasNextPage endCursor } nodes { id \
+         resolvable resolved userPermissions { resolveNote } notes(first: 200) { pageInfo { hasNextPage } nodes { \
+         system author { username name avatarUrl } body bodyHtml createdAt lastEditedAt lastEditedBy { username \
+         name avatarUrl } url position { filePath newLine oldLine } } } } } } } } }";
     assert_eq!(query.matches('{').count(), query.matches('}').count());
     let iids = [MergeRequestIid(82), MergeRequestIid(7)];
 

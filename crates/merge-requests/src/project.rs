@@ -5,8 +5,9 @@ use yamt_gitio::{AuthStatus, Glab};
 
 use crate::web_page::HTTPS;
 use crate::{
-    DescriptionReply, DiscussionsAnswer, JobLogReply, LinksReply, ListEnd, OpenReply,
-    PeopleChangeReply, PeopleSearchReply, RerequestReply, ResolveRefusal,
+    DescriptionReply, DiscussionThreadReply, DiscussionWriteReply, DiscussionsAnswer, JobLogReply,
+    LinksReply, ListEnd, MarkdownPreviewReply, OpenReply, PeopleChangeReply, PeopleSearchReply,
+    RerequestReply, ResolveRefusal,
 };
 
 /// glab fills `:fullpath` with the project of the folder's remotes (glab docs, `glab api`).
@@ -155,6 +156,33 @@ impl From<NoProject> for LinksReply {
         match refused {
             NoProject::NotLoggedIn { detail } => LinksReply::NotLoggedIn { detail },
             NoProject::Failed { message } => LinksReply::Failed { message },
+        }
+    }
+}
+
+impl From<NoProject> for DiscussionThreadReply {
+    fn from(refused: NoProject) -> DiscussionThreadReply {
+        match refused {
+            NoProject::NotLoggedIn { detail } => DiscussionThreadReply::NotLoggedIn { detail },
+            NoProject::Failed { message } => DiscussionThreadReply::Failed { message },
+        }
+    }
+}
+
+impl From<NoProject> for DiscussionWriteReply {
+    fn from(refused: NoProject) -> DiscussionWriteReply {
+        match refused {
+            NoProject::NotLoggedIn { detail } => DiscussionWriteReply::NotLoggedIn { detail },
+            NoProject::Failed { message } => DiscussionWriteReply::Failed { message },
+        }
+    }
+}
+
+impl From<NoProject> for MarkdownPreviewReply {
+    fn from(refused: NoProject) -> MarkdownPreviewReply {
+        match refused {
+            NoProject::NotLoggedIn { detail } => MarkdownPreviewReply::NotLoggedIn { detail },
+            NoProject::Failed { message } => MarkdownPreviewReply::Failed { message },
         }
     }
 }

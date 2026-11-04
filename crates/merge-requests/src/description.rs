@@ -17,7 +17,7 @@ use crate::{GitLabRepository, MergeRequestIid, WebPage};
 pub use address::{DescriptionImage, DescriptionLink, OfferedUpload, UploadKey};
 pub(crate) use html::Described;
 use html::described;
-pub use size::ImageSize;
+pub use size::{ImageLength, ImageSize};
 
 /// How reading a merge request's description ended.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]

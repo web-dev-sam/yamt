@@ -1,19 +1,22 @@
 //! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab,
 //! each row's conflicts checked by yamt's own merge of GitLab's two commits, each one's changes prepared for a window
 //! of their own, its page or a failed job's opened in the browser, a failed job's log read, each row's open
-//! discussions read with their last person's note, its assignees and reviewers added and removed, its description
-//! read as GitLab renders it, and the epics, issues and commits it links to looked up.
+//! discussions read with every person's note, a discussion's whole thread read and answered, a text previewed as
+//! GitLab renders it, its assignees and reviewers added and removed, its description read as GitLab renders it, and
+//! the epics, issues and commits it links to looked up.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 mod check;
 mod description;
 mod detect;
+mod discussion_thread;
 mod discussions;
 mod job_log;
 mod labels;
 mod links;
 mod list;
+mod markdown_preview;
 mod open;
 mod page;
 mod people;
@@ -37,13 +40,19 @@ use specta::Type;
 pub use check::{CheckSummary, ConflictCheck, MergedPairs, check_conflicts};
 pub use description::{
     CellAlign, Description, DescriptionBlock, DescriptionCell, DescriptionImage, DescriptionInline,
-    DescriptionItem, DescriptionLink, DescriptionReply, DescriptionRow, HeadingLevel,
-    ListNumbering, OfferedUpload, ReadDescription, TaskBox, UploadKey, read_description,
+    DescriptionItem, DescriptionLink, DescriptionReply, DescriptionRow, HeadingLevel, ImageLength,
+    ImageSize, ListNumbering, OfferedUpload, ReadDescription, TaskBox, UploadKey, read_description,
 };
 pub use detect::{GitLabRepository, gitlab_repository};
+pub use discussion_thread::{
+    Commenting, DiscussionComment, DiscussionThread, DiscussionThreadReply, DiscussionWriteReply,
+    NoteEdit, PendingDraft, ReadThread, ReplyKind, read_discussion_thread, reply_to_discussion,
+    resolve_discussion, submit_review,
+};
 pub use discussions::{
-    DISCUSSION_BATCH, DiscussionNote, DiscussionPlace, DiscussionsAnswer, OpenDiscussion,
-    ReadDiscussions, RowDiscussions, read_discussions, unread_discussions,
+    DISCUSSION_BATCH, DiscussionId, DiscussionNote, DiscussionPlace, DiscussionsAnswer, Mention,
+    OpenDiscussion, ReadDiscussions, RowDiscussions, TurnComment, read_discussions,
+    unread_discussions,
 };
 pub use job_log::{JobLog, JobLogReply, MAX_LOG_BYTES, read_job_log};
 pub use labels::{Label, LabelColors};
@@ -52,6 +61,7 @@ pub use links::{
     ShownEpic, ShownIssue, read_links,
 };
 pub use list::{Listed, ListedPage, OfferedPicture, list_merge_requests};
+pub use markdown_preview::{MarkdownPreviewReply, ReadPreview, preview_markdown};
 pub use open::prepare_open;
 pub use people::{Person, PersonPicture, ReviewState, Reviewer};
 pub use people_change::{

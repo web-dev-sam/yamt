@@ -1,80 +1,14 @@
 use serde_json::{Value, json};
 
+use super::sample::{
+    ORIGIN, answer, comment, discussion, hex, iids, mentioning, merge_request, on_file, open,
+    project, system_note, with_id,
+};
 use super::*;
 use crate::page::NO_PROJECT;
 use crate::picture::{AvatarSource, avatar_source};
 
-const ORIGIN: &str = "https://gitlab.example";
 const ANNA_S_AVATAR: &str = "/uploads/-/system/user/avatar/2/avatar.png";
-
-fn project() -> Project {
-    Project {
-        full_path: "taskboard/taskboard".to_owned(),
-        web_path: "/taskboard/taskboard".to_owned(),
-        web_origin: Some(ORIGIN.to_owned()),
-    }
-}
-
-fn iids(numbers: &[u32]) -> Vec<MergeRequestIid> {
-    numbers
-        .iter()
-        .map(|&number| MergeRequestIid(number))
-        .collect()
-}
-
-/// A person's note on the merge request itself, its body naming its author and `n`.
-fn comment(username: &str, n: u32) -> Value {
-    json!({
-        "system": false,
-        "author": { "username": username, "name": format!("{username} name"), "avatarUrl": null },
-        "body": format!("{username} {n}"),
-        "createdAt": format!("2026-11-03T10:00:0{n}Z"),
-        "url": format!("https://gitlab.example/taskboard/taskboard/-/merge_requests/1#note_{n}"),
-        "position": null,
-    })
-}
-
-fn system_note(n: u32) -> Value {
-    let mut note = comment("pusher", n);
-    note["system"] = json!(true);
-    note
-}
-
-fn on_file(mut note: Value, new_line: Option<u32>, old_line: Option<u32>) -> Value {
-    note["position"] =
-        json!({ "filePath": "src/card.ts", "newLine": new_line, "oldLine": old_line });
-    note
-}
-
-fn discussion(resolvable: bool, resolved: bool, notes: &[Value], earlier: bool) -> Value {
-    json!({
-        "resolvable": resolvable,
-        "resolved": resolved,
-        "notes": { "pageInfo": { "hasPreviousPage": earlier }, "nodes": notes },
-    })
-}
-
-fn open(notes: &[Value]) -> Value {
-    discussion(true, false, notes, false)
-}
-
-fn merge_request(iid: u32, discussions: &[Value], next: Option<&str>) -> Value {
-    json!({
-        "iid": iid.to_string(),
-        "discussions": {
-            "pageInfo": { "hasNextPage": next.is_some(), "endCursor": next },
-            "nodes": discussions,
-        },
-    })
-}
-
-fn answer(merge_requests: &[Value]) -> Vec<u8> {
-    let data = json!({
-        "queryComplexity": { "score": 58, "limit": 250 },
-        "project": { "mergeRequests": { "nodes": merge_requests } },
-    });
-    json!({ "data": data }).to_string().into_bytes()
-}
 
 /// The rows `answered` gives for `asked` when the batch's call answers `batch` and no later page is asked.
 fn rows_for(asked: &[u32], batch: &[Value]) -> Vec<RowDiscussions> {
@@ -142,11 +76,11 @@ fn a_system_note_between_replies_is_skipped() {
 #[test]
 fn resolved_and_unresolvable_discussions_are_left_out() {
     let discussions = [
-        discussion(true, true, &[comment("anna", 1)], false),
-        discussion(false, false, &[comment("ben", 2)], false),
-        discussion(false, false, &[system_note(3)], false),
+        discussion(true, true, &[comment("anna", 1)]),
+        discussion(false, false, &[comment("ben", 2)]),
+        discussion(false, false, &[system_note(3)]),
         open(&[comment("chiara", 4)]),
-        discussion(false, true, &[comment("dmitri", 5)], false),
+        discussion(false, true, &[comment("dmitri", 5)]),
     ];
 
     let open = open_of(&[merge_request(1, &discussions, None)]);
@@ -179,24 +113,125 @@ fn a_diff_place_takes_the_new_line_else_the_old() {
     assert_eq!(places, [&file(Some(4)), &file(Some(3)), &file(None)]);
 }
 
+fn usernames(mentions: &[Mention]) -> Vec<&str> {
+    mentions
+        .iter()
+        .map(|mention| mention.username.as_str())
+        .collect()
+}
+
+fn author(author: Option<&Person>) -> Option<&str> {
+    author.map(|person| person.username.as_str())
+}
+
 #[test]
-fn twenty_system_notes_with_earlier_ones_fail_the_row() {
-    let system_notes: Vec<Value> = (1..=20).map(system_note).collect();
-    let cut = discussion(true, false, &system_notes, true);
-    let whole = discussion(true, false, &system_notes, false);
+fn earlier_holds_every_person_note_before_the_last_oldest_first() {
+    let notes = [
+        mentioning(comment("anna", 1), &["ben"]),
+        system_note(2),
+        comment("ben", 3),
+        mentioning(comment("chiara", 4), &["anna", "sam"]),
+        mentioning(comment("anna", 5), &["sam"]),
+    ];
+    let alone = with_id(open(&[comment("dmitri", 6)]), 2);
+
+    let open = open_of(&[merge_request(1, &[open(&notes), alone], None)]);
+
+    let earlier = &open[0].earlier;
+    let authors: Vec<Option<&str>> = earlier.iter().map(|c| author(c.author.as_ref())).collect();
+    assert_eq!(authors, [Some("anna"), Some("ben"), Some("chiara")]);
+    assert_eq!(usernames(&earlier[0].mentions), ["ben"]);
+    assert_eq!(usernames(&earlier[1].mentions), Vec::<&str>::new());
+    assert_eq!(usernames(&earlier[2].mentions), ["anna", "sam"]);
+    assert_eq!(open[0].last.text, "anna 5");
+    assert_eq!(usernames(&open[0].last.mentions), ["sam"]);
+    assert_eq!(open[0].id.as_str(), hex(1));
+    assert_eq!(open[1].earlier, []);
+    assert_eq!(open[1].id.as_str(), hex(2));
+}
+
+#[test]
+fn system_notes_count_in_no_turn() {
+    let notes = [
+        mentioning(comment("anna", 1), &["ben"]),
+        mentioning(system_note(2), &["dmitri"]),
+    ];
+    let only_gitlab = with_id(open(&[system_note(3), system_note(4)]), 2);
+
+    let open = open_of(&[merge_request(1, &[open(&notes), only_gitlab], None)]);
+
+    assert_eq!(open.len(), 1, "{open:?}");
+    assert_eq!(open[0].earlier, []);
+    assert_eq!(author(open[0].last.author.as_ref()), Some("anna"));
+    assert_eq!(usernames(&open[0].last.mentions), ["ben"]);
+}
+
+#[test]
+fn the_place_is_the_first_person_notes() {
+    let on_line_4 = [
+        on_file(system_note(1), Some(1), None),
+        on_file(comment("anna", 2), Some(4), None),
+        on_file(comment("ben", 3), Some(7), None),
+    ];
+    let on_overview = [
+        comment("anna", 4),
+        on_file(comment("ben", 5), Some(7), None),
+    ];
+
+    let open = open_of(&[merge_request(
+        1,
+        &[open(&on_line_4), open(&on_overview)],
+        None,
+    )]);
+
+    let line_4 = DiscussionPlace::File {
+        path: "src/card.ts".to_owned(),
+        line: Some(4),
+    };
+    assert_eq!(open[0].place, line_4);
+    assert_eq!(open[1].place, DiscussionPlace::Overview);
+}
+
+#[test]
+fn a_discussion_over_200_notes_fails_its_row() {
+    let mut cut = open(&[comment("anna", 1)]);
+    cut["notes"]["pageInfo"]["hasNextPage"] = json!(true);
+    let mut resolved_cut = cut.clone();
+    resolved_cut["resolved"] = json!(true);
     let batch = [
         merge_request(1, &[open(&[comment("anna", 1)]), cut], None),
-        merge_request(2, &[whole, open(&[comment("ben", 2)])], None),
+        merge_request(2, &[resolved_cut, open(&[comment("ben", 2)])], None),
     ];
 
     let rows = rows_for(&[1, 2], &batch);
 
-    let message = "a discussion's last 20 notes are all GitLab's own; yamt reads no further";
+    let message = "a discussion has more than 200 notes; yamt reads no further";
     assert_eq!(rows[0].answer, failed(message));
     let DiscussionsAnswer::Open { discussions } = &rows[1].answer else {
         panic!("not open: {:?}", rows[1]);
     };
     assert_eq!(texts(discussions), ["ben 2"]);
+}
+
+#[test]
+fn an_open_discussion_with_an_id_yamt_cannot_read_fails_its_row() {
+    let mut odd = open(&[comment("anna", 1)]);
+    odd["id"] = json!("gid://gitlab/Discussion/42");
+    let mut resolved_odd = odd.clone();
+    resolved_odd["resolved"] = json!(true);
+    let batch = [
+        merge_request(1, &[odd], None),
+        merge_request(2, &[resolved_odd], None),
+    ];
+
+    let rows = rows_for(&[1, 2], &batch);
+
+    let message = "GitLab sent a discussion id yamt cannot read";
+    assert_eq!(rows[0].answer, failed(message));
+    let open = DiscussionsAnswer::Open {
+        discussions: Vec::new(),
+    };
+    assert_eq!(rows[1].answer, open);
 }
 
 #[test]
@@ -244,14 +279,14 @@ fn a_failed_batch_call_fails_each_row_with_glab_s_words() {
 }
 
 #[test]
-fn the_batch_is_the_first_twenty_distinct_iids_in_order() {
+fn the_batch_is_the_first_ten_distinct_iids_in_order() {
     let mut asked = vec![5, 3, 5];
     asked.extend(100..130);
 
     let cut = batch(&iids(&asked));
 
     let mut expected = vec![5, 3];
-    expected.extend(100..118);
+    expected.extend(100..108);
     assert_eq!(cut, iids(&expected));
     assert_eq!(batch(&iids(&[2, 2, 2])), iids(&[2]));
     let unread = unread_discussions(&iids(&asked), "no project");

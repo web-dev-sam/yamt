@@ -11,17 +11,29 @@ use crate::project::{Project, logged_in_project};
 use crate::query::discussions_args;
 use crate::{GitLabRepository, MergeRequestIid, OfferedPicture, Person, WebPage};
 
-use answer::{DiscussionNode, NoteNode, parsed_batch};
+pub(crate) use answer::{DiscussionNode, NoteNode, parsed_batch};
+pub use id::DiscussionId;
+pub use mentions::Mention;
+use turn::open_notes;
+pub(crate) use turn::{note_page, open_discussion, person_notes};
 
 mod answer;
+mod id;
+mod mentions;
+mod turn;
 
-/// Merge requests read in one glab call: 20 took 4.47 s on gitlab-org/gitlab, 100 took 22.22 s, past glab's 20 s
-/// deadline (orchestrator, measured 2026-11-03).
-pub const DISCUSSION_BATCH: usize = 20;
+#[cfg(test)]
+pub(crate) mod sample;
+
+/// Merge requests read in one glab call. Logged in on gitlab-org/gitlab (glab 1.126.0, 2026-11-04), the 20 open
+/// merge requests with the most comments of the 100 last updated took 31.7 s and GitLab answered "Timeout on
+/// MergeRequest.iid"; their first 10 took 23.5 s (score 64 of 250, 2.7 MB), their second 10 12.2 s. Over 10 s for
+/// 20, so 10 (`docs/slices/briefs/mr-threads-crate.md` step 1).
+pub const DISCUSSION_BATCH: usize = 10;
 /// GitLab's largest page of a connection without a page size of its own (`default_max_page_size`).
 pub(crate) const DISCUSSIONS_PER_PAGE: u32 = 100;
-/// The last notes read per discussion: GitLab scores `notes(last: 20)` as `notes(last: 1)`.
-pub(crate) const NOTES_READ: u32 = 20;
+/// The most notes read per discussion: `Discussion.notes`' `max_page_size` (facts §5).
+pub(crate) const NOTES_READ: u32 = 200;
 const MAX_DISCUSSION_PAGES: u32 = 10;
 const TOO_MANY_DISCUSSIONS: &str = "more than 1,000 discussions";
 const NO_CURSOR: &str = "GitLab says more discussions follow, but sent no cursor for them";
@@ -59,21 +71,35 @@ pub enum DiscussionsAnswer {
     },
 }
 
-/// An open discussion: where it is and its last note written by a person (system notes skipped).
+/// A discussion and what the turn rule needs of it: every note written by a person (system notes skipped).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenDiscussion {
-    /// Where the discussion is.
+    /// Its id.
+    pub id: DiscussionId,
+    /// Where it is: the first person note's `position` (GitLab's place of the discussion).
     pub place: DiscussionPlace,
-    /// Its last note written by a person.
+    /// Every person note before `last`, oldest first: `earlier[0]` (or `last` when empty) started the discussion.
+    pub earlier: Vec<TurnComment>,
+    /// Its last person note.
     pub last: DiscussionNote,
+}
+
+/// A person note before the last, as the turn rule reads it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnComment {
+    /// Who wrote it; `None` for a deleted user.
+    pub author: Option<Person>,
+    /// The users it mentions.
+    pub mentions: Vec<Mention>,
 }
 
 /// Where a discussion is.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum DiscussionPlace {
-    /// On the merge request itself: the last person's note has no `position`.
+    /// On the merge request itself: the first person's note has no `position`.
     Overview,
     /// On the diff: `filePath`, and `newLine`, else `oldLine` (both may be null).
     File {
@@ -96,6 +122,8 @@ pub struct DiscussionNote {
     pub text: String,
     /// Its page on GitLab; `None` when GitLab's `url` is not the one it builds for this note.
     pub page: Option<WebPage>,
+    /// The users it mentions.
+    pub mentions: Vec<Mention>,
 }
 
 /// What the shell gets: the rows answered, and the uploaded pictures of their authors (one per username).
@@ -108,7 +136,8 @@ pub struct ReadDiscussions {
 }
 
 /// Asks GitLab for the discussions of `iids` (all of them, or one merge request's after a cursor).
-type Fetch<'a> = dyn FnMut(&[MergeRequestIid], Option<&str>) -> Result<Vec<u8>, String> + 'a;
+pub(crate) type Fetch<'a> =
+    dyn FnMut(&[MergeRequestIid], Option<&str>) -> Result<Vec<u8>, String> + 'a;
 
 /// One call's rows and pictures, and what its log line counts besides them.
 struct Answered {
@@ -222,16 +251,16 @@ fn answered(asked: &[MergeRequestIid], project: &Project, fetch: &mut Fetch) -> 
     let mut people = People::new(project.web_origin.as_deref());
     let mut rows = Vec::new();
     for &iid in asked {
-        let notes = found
+        let open = found
             .remove(&iid)
             .ok_or_else(|| not_sent(iid))
-            .and_then(|discussions| every_discussion(iid, discussions, &mut counted))
-            .and_then(last_persons_notes);
-        let answer = match notes {
-            Ok(notes) => DiscussionsAnswer::Open {
-                discussions: notes
+            .and_then(|node| every_discussion(iid, node.discussions, &mut counted))
+            .and_then(open_notes);
+        let answer = match open {
+            Ok(open) => DiscussionsAnswer::Open {
+                discussions: open
                     .into_iter()
-                    .map(|note| open_discussion(note, iid, project, &mut people))
+                    .filter_map(|(id, notes)| open_discussion(id, notes, iid, project, &mut people))
                     .collect(),
             },
             Err(message) => DiscussionsAnswer::Failed { message },
@@ -246,12 +275,12 @@ fn answered(asked: &[MergeRequestIid], project: &Project, fetch: &mut Fetch) -> 
     }
 }
 
-fn not_sent(iid: MergeRequestIid) -> String {
+pub(crate) fn not_sent(iid: MergeRequestIid) -> String {
     format!("GitLab sent no merge request !{}", iid.0)
 }
 
 /// `first` and each later page of merge request `iid`'s discussions, at most `MAX_DISCUSSION_PAGES` pages.
-fn every_discussion(
+pub(crate) fn every_discussion(
     iid: MergeRequestIid,
     first: Connection<DiscussionNode>,
     fetch: &mut Fetch,
@@ -269,58 +298,11 @@ fn every_discussion(
             .merge_requests
             .remove(&iid)
             .ok_or_else(|| not_sent(iid))?;
-        discussions.extend(page.nodes);
-        page_info = page.page_info;
+        discussions.extend(page.discussions.nodes);
+        page_info = page.discussions.page_info;
         pages += 1;
     }
     Ok(discussions)
-}
-
-/// The last note written by a person of each open discussion, in GitLab's order; a discussion whose notes read are
-/// all GitLab's own fails when earlier notes exist, and is left out when none do (GitLab never makes it resolvable).
-fn last_persons_notes(discussions: Vec<DiscussionNode>) -> Result<Vec<NoteNode>, String> {
-    let mut notes = Vec::new();
-    for discussion in discussions {
-        if !discussion.resolvable || discussion.resolved {
-            continue;
-        }
-        let earlier = discussion.notes.page_info.has_previous_page;
-        let mut read = discussion.notes.nodes.into_iter().rev();
-        match read.find(|note| !note.system) {
-            Some(note) => notes.push(note),
-            None if earlier => {
-                return Err(format!(
-                    "a discussion's last {NOTES_READ} notes are all GitLab's own; yamt reads no further"
-                ));
-            }
-            None => {}
-        }
-    }
-    Ok(notes)
-}
-
-fn open_discussion(
-    note: NoteNode,
-    iid: MergeRequestIid,
-    project: &Project,
-    people: &mut People,
-) -> OpenDiscussion {
-    let place = match note.position {
-        None => DiscussionPlace::Overview,
-        Some(position) => DiscussionPlace::File {
-            path: position.file_path,
-            line: position.new_line.or(position.old_line),
-        },
-    };
-    let address = project.web_origin.as_deref().zip(note.url.as_deref());
-    let page = address.and_then(|(origin, url)| WebPage::note(origin, &project.web_path, iid, url));
-    let last = DiscussionNote {
-        author: note.author.map(|author| people.person(author)),
-        created_at: note.created_at,
-        text: note.body,
-        page,
-    };
-    OpenDiscussion { place, last }
 }
 
 /// Counts and GitLab's score only: never a name, a body or an address.

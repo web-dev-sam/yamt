@@ -5,6 +5,13 @@ use crate::links::lookup::Part;
 use crate::links::target::Namespace;
 use crate::{MAX_FAILED_JOBS, MergeRequestIid, PAGE_SIZE, PeopleAction, PeopleChange, PeopleGroup};
 
+pub(crate) use rest::{
+    draft_notes_args, draft_reply_args, draft_reply_body, markdown_args, markdown_body, reply_args,
+    reply_body, resolve_args, resolve_body, submit_review_args, submit_review_body,
+};
+
+mod rest;
+
 /// A merge request's state, target branch and the two commits of its diff, asked afresh on each open so a push
 /// since the list loaded counts.
 const DETAILS_QUERY: &str = "query MergeRequestDetails($fullPath: ID!, $iid: String!) { \
@@ -132,19 +139,23 @@ pub(crate) fn description_args(full_path: &str, iid: MergeRequestIid) -> Vec<Str
     merge_request_args(DESCRIPTION_QUERY, full_path, iid)
 }
 
-/// The open discussions of the merge requests `$iids`, each with its last notes, read by `read_discussions`
-/// (`docs/slices/briefs/mr-discussions-design.md` §1.1, §1.2): 58 of GitLab's limit of 250 for 20 merge requests,
-/// measured on gitlab.com on 2026-11-03. One line, so the fake glab logs each call on one line.
+/// Every discussion of the merge requests `$iids` with every note, GitLab's rendering of each and what the thread
+/// needs (edits, permissions), read by `read_discussions` and `read_discussion_thread`
+/// (`docs/slices/briefs/mr-threads-design.md` §1.2, §1.3): 88 of GitLab's limit of 200 for 20 merge requests logged
+/// out, measured; logged in, 64 of 250 for 10 busy merge requests of gitlab-org/gitlab in 23.5 s and 46 for one of
+/// the playground's in 0.9 s, measured on gitlab.com on 2026-11-04. One line, so the fake glab logs each call on one
+/// line.
 fn discussions_query() -> String {
     format!(
         "query MergeRequestDiscussions($fullPath: ID!, $iids: [String!], $first: Int!, $discussionsAfter: String) {{ \
          queryComplexity {{ score limit }} \
-         project(fullPath: $fullPath) {{ mergeRequests(iids: $iids, first: $first) {{ nodes {{ iid \
+         project(fullPath: $fullPath) {{ mergeRequests(iids: $iids, first: $first) {{ nodes {{ \
+         iid discussionLocked userPermissions {{ createNote }} \
          discussions(first: {DISCUSSIONS_PER_PAGE}, after: $discussionsAfter) {{ \
-         pageInfo {{ hasNextPage endCursor }} nodes {{ \
-         resolvable resolved \
-         notes(last: {NOTES_READ}) {{ pageInfo {{ hasPreviousPage }} nodes {{ \
-         system author {{ username name avatarUrl }} body createdAt url position {{ filePath newLine oldLine }} \
+         pageInfo {{ hasNextPage endCursor }} nodes {{ id resolvable resolved userPermissions {{ resolveNote }} \
+         notes(first: {NOTES_READ}) {{ pageInfo {{ hasNextPage }} nodes {{ \
+         system author {{ username name avatarUrl }} body bodyHtml createdAt lastEditedAt \
+         lastEditedBy {{ username name avatarUrl }} url position {{ filePath newLine oldLine }} \
          }} }} }} }} }} }} }} }}"
     )
 }

@@ -58,7 +58,7 @@ pub struct Reviewer {
 }
 
 /// A GitLab user as the queries ask for them; the `Person` it becomes.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct UserNode {
     username: String,
