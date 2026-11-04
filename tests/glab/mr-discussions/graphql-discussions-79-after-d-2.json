@@ -6,20 +6,27 @@
         "nodes": [
           {
             "iid": "79",
+            "discussionLocked": false,
+            "userPermissions": { "createNote": true },
             "discussions": {
               "pageInfo": { "hasNextPage": false, "endCursor": "d-3" },
               "nodes": [
                 {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000007903",
                   "resolvable": true,
                   "resolved": false,
+                  "userPermissions": { "resolveNote": true },
                   "notes": {
-                    "pageInfo": { "hasPreviousPage": false },
+                    "pageInfo": { "hasNextPage": false, "hasPreviousPage": false },
                     "nodes": [
                       {
                         "system": false,
                         "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
                         "body": "Search titles only, for now?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:28\" dir=\"auto\">Search titles only, for now?</p>",
                         "createdAt": "2026-10-31T10:20:00Z",
+                        "lastEditedAt": "2026-10-31T10:20:00Z",
+                        "lastEditedBy": null,
                         "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_303",
                         "position": { "filePath": "src/board/search.ts", "newLine": 3, "oldLine": 3 }
                       }

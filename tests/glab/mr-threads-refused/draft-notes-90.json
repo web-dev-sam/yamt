@@ -1,0 +1,24 @@
+[
+  {
+    "id": 501,
+    "author_id": 1,
+    "merge_request_id": 1090,
+    "resolve_discussion": false,
+    "discussion_id": "0000000000000000000000000000000000000001",
+    "note": "I'll take the second option.",
+    "commit_id": null,
+    "line_code": null,
+    "position": null
+  },
+  {
+    "id": 502,
+    "author_id": 1,
+    "merge_request_id": 1090,
+    "resolve_discussion": false,
+    "discussion_id": "0000000000000000000000000000000000000005",
+    "note": "In the board's settings, saved per board.",
+    "commit_id": null,
+    "line_code": null,
+    "position": null
+  }
+]

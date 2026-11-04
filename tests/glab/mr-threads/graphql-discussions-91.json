@@ -1,0 +1,144 @@
+{
+  "data": {
+    "queryComplexity": { "score": 46, "limit": 250 },
+    "project": {
+      "mergeRequests": {
+        "nodes": [
+          {
+            "iid": "91",
+            "discussionLocked": true,
+            "userPermissions": { "createNote": false },
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-91" },
+              "nodes": [
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000014",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": false },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Should archived boards be read-only?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:36\" dir=\"auto\">Should archived boards be read-only?</p>",
+                        "createdAt": "2026-11-03T10:00:00Z",
+                        "lastEditedAt": "2026-11-03T10:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/91#note_1001",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "Yes, locked from today.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:23\" dir=\"auto\">Yes, locked from today.</p>",
+                        "createdAt": "2026-11-03T10:30:00Z",
+                        "lastEditedAt": "2026-11-03T10:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/91#note_1002",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000015",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "Remember the import path.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:25\" dir=\"auto\">Remember the import path.</p>",
+                        "createdAt": "2026-11-03T11:00:00Z",
+                        "lastEditedAt": "2026-11-03T11:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/91#note_1003",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "And the export.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:15\" dir=\"auto\">And the export.</p>",
+                        "createdAt": "2026-11-03T11:10:00Z",
+                        "lastEditedAt": "2026-11-03T11:10:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/91#note_1004",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000016",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "The banner overlaps the title.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:30\" dir=\"auto\">The banner overlaps the title.</p>",
+                        "createdAt": "2026-11-03T12:00:00Z",
+                        "lastEditedAt": "2026-11-03T12:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/91#note_1005",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Also on a phone.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:16\" dir=\"auto\">Also on a phone.</p>",
+                        "createdAt": "2026-11-03T12:20:00Z",
+                        "lastEditedAt": "2026-11-03T12:20:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/91#note_1006",
+                        "position": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

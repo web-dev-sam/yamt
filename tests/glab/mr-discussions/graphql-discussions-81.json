@@ -6,14 +6,18 @@
         "nodes": [
           {
             "iid": "81",
+            "discussionLocked": false,
+            "userPermissions": { "createNote": true },
             "discussions": {
               "pageInfo": { "hasNextPage": false, "endCursor": "d-81" },
               "nodes": [
                 {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000008101",
                   "resolvable": true,
                   "resolved": false,
+                  "userPermissions": { "resolveNote": true },
                   "notes": {
-                    "pageInfo": { "hasPreviousPage": false },
+                    "pageInfo": { "hasNextPage": false, "hasPreviousPage": false },
                     "nodes": [
                       {
                         "system": false,
@@ -23,7 +27,10 @@
                           "avatarUrl": "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon"
                         },
                         "body": "Please **check** <b>THIS</b> & that\non a dark theme\n<script>alert(1)</script>",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-3:25\" dir=\"auto\">Please <strong data-sourcepos=\"1:8-1:16\">check</strong> <b>THIS</b> &amp; that\non a dark theme\n&lt;script&gt;alert(1)&lt;/script&gt;</p>",
                         "createdAt": "2026-11-02T10:00:00Z",
+                        "lastEditedAt": "2026-11-02T10:00:00Z",
+                        "lastEditedBy": null,
                         "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/81#note_201",
                         "position": null
                       }

@@ -1,0 +1,792 @@
+{
+  "data": {
+    "queryComplexity": { "score": 88, "limit": 250 },
+    "project": {
+      "mergeRequests": {
+        "nodes": [
+          {
+            "iid": "91",
+            "discussionLocked": true,
+            "userPermissions": { "createNote": false },
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-91" },
+              "nodes": [
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000014",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": false },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Should archived boards be read-only?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:36\" dir=\"auto\">Should archived boards be read-only?</p>",
+                        "createdAt": "2026-11-03T10:00:00Z",
+                        "lastEditedAt": "2026-11-03T10:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/91#note_1001",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "Yes, locked from today.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:23\" dir=\"auto\">Yes, locked from today.</p>",
+                        "createdAt": "2026-11-03T10:30:00Z",
+                        "lastEditedAt": "2026-11-03T10:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/91#note_1002",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000015",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "Remember the import path.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:25\" dir=\"auto\">Remember the import path.</p>",
+                        "createdAt": "2026-11-03T11:00:00Z",
+                        "lastEditedAt": "2026-11-03T11:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/91#note_1003",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "And the export.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:15\" dir=\"auto\">And the export.</p>",
+                        "createdAt": "2026-11-03T11:10:00Z",
+                        "lastEditedAt": "2026-11-03T11:10:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/91#note_1004",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000016",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "The banner overlaps the title.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:30\" dir=\"auto\">The banner overlaps the title.</p>",
+                        "createdAt": "2026-11-03T12:00:00Z",
+                        "lastEditedAt": "2026-11-03T12:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/91#note_1005",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Also on a phone.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:16\" dir=\"auto\">Also on a phone.</p>",
+                        "createdAt": "2026-11-03T12:20:00Z",
+                        "lastEditedAt": "2026-11-03T12:20:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/91#note_1006",
+                        "position": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "iid": "90",
+            "discussionLocked": false,
+            "userPermissions": { "createNote": true },
+            "discussions": {
+              "pageInfo": { "hasNextPage": false, "endCursor": "d-90" },
+              "nodes": [
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000001",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Two options for the board's **lane order**: keep `sortLanes()` or read it from [the docs](https://docs.example/board).\n\n```typescript\nconst lanes = sortLanes(board);\n```\n\n| Option | Cost |\n| ------ | ---- |\n| keep | none |\n| read | one call |\n\n@ben, what do you think?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:118\" dir=\"auto\">Two options for the board's <strong data-sourcepos=\"1:29-1:42\">lane order</strong>: keep <code data-sourcepos=\"1:50-1:62\">sortLanes()</code> or read it from <a data-sourcepos=\"1:80-1:117\" href=\"https://docs.example/board\" rel=\"nofollow noreferrer noopener\" target=\"_blank\">the docs</a>.</p>\n<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"3:1-5:3\" lang=\"typescript\" class=\"code highlight js-syntax-highlight language-typescript\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" lang=\"typescript\"><span class=\"kd\">const</span> <span class=\"nx\">lanes</span> <span class=\"o\">=</span> <span class=\"nf\">sortLanes</span><span class=\"p\">(</span><span class=\"nx\">board</span><span class=\"p\">);</span></span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>\n<table data-sourcepos=\"7:1-10:20\" dir=\"auto\">\n<thead>\n<tr data-sourcepos=\"7:1-7:17\">\n<th data-sourcepos=\"7:2-7:9\">Option</th>\n<th data-sourcepos=\"7:11-7:16\">Cost</th>\n</tr>\n</thead>\n<tbody>\n<tr data-sourcepos=\"9:1-9:17\">\n<td data-sourcepos=\"9:2-9:7\">keep</td>\n<td data-sourcepos=\"9:9-9:16\">none</td>\n</tr>\n<tr data-sourcepos=\"10:1-10:20\">\n<td data-sourcepos=\"10:2-10:7\">read</td>\n<td data-sourcepos=\"10:9-10:19\">one call</td>\n</tr>\n</tbody>\n</table>\n<p data-sourcepos=\"12:1-12:24\" dir=\"auto\"><a href=\"/ben\" data-reference-type=\"user\" data-user=\"3\" data-original=\"@ben\" title=\"Ben Okafor\" class=\"gfm gfm-project_member js-user-link\">@ben</a>, what do you think?</p>",
+                        "createdAt": "2026-11-01T09:00:00Z",
+                        "lastEditedAt": "2026-11-03T09:00:00Z",
+                        "lastEditedBy": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_901",
+                        "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
+                      },
+                      {
+                        "system": true,
+                        "author": {
+                          "username": "dmitri",
+                          "name": "Dmitri Volkov",
+                          "avatarUrl": "/uploads/-/system/user/avatar/5/avatar.png"
+                        },
+                        "body": "changed this line in [version 2 of the diff](/taskboard/taskboard/-/merge_requests/90/diffs?diff_id=2&start_sha=1732ffd14f9df9ea3b85433dc1fbacbc2260fe85#a1_12_12)",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:150\" dir=\"auto\">changed this line in <a href=\"/taskboard/taskboard/-/merge_requests/90/diffs?diff_id=2&amp;start_sha=1732ffd14f9df9ea3b85433dc1fbacbc2260fe85#a1_12_12\">version 2 of the diff</a></p>",
+                        "createdAt": "2026-11-01T10:00:00Z",
+                        "lastEditedAt": "2026-11-04T10:06:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_902",
+                        "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "Shorter:\n\n```suggestion:-0+0\nconst lanes = board.lanes.toSorted(byOrder);\n```\n\n![shot](/uploads/-/system/note/attachment/903/shot.png){width=60%}",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:8\" dir=\"auto\">Shorter:</p>\n<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"3:1-5:3\" data-canonical-lang=\"suggestion\" data-lang-params=\"-0+0\" class=\"code highlight js-syntax-highlight language-suggestion\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" lang=\"suggestion\">const lanes = board.lanes.toSorted(byOrder);</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>\n<p data-sourcepos=\"7:1-7:66\" dir=\"auto\"><a class=\"no-attachment-icon\" href=\"/uploads/-/system/note/attachment/903/shot.png\" target=\"_blank\" rel=\"noopener noreferrer\"><img data-sourcepos=\"7:1-7:66\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" alt=\"shot\" width=\"60%\" decoding=\"async\" class=\"lazy\" data-src=\"/uploads/-/system/note/attachment/903/shot.png\"></a></p>",
+                        "createdAt": "2026-11-01T11:00:00Z",
+                        "lastEditedAt": "2026-11-01T12:30:00Z",
+                        "lastEditedBy": {
+                          "username": "dmitri",
+                          "name": "Dmitri Volkov",
+                          "avatarUrl": "/uploads/-/system/user/avatar/5/avatar.png"
+                        },
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_903",
+                        "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "dmitri",
+                          "name": "Dmitri Volkov",
+                          "avatarUrl": "/uploads/-/system/user/avatar/5/avatar.png"
+                        },
+                        "body": "Here is the layout: ![arch](https://images.example/arch.png){height=80}\n\nAnd `@sam` reads it from the store.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:71\" dir=\"auto\">Here is the layout: <a class=\"no-attachment-icon\" href=\"https://images.example/arch.png\" target=\"_blank\" rel=\"nofollow noreferrer noopener\"><img data-sourcepos=\"1:21-1:71\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" alt=\"arch\" height=\"80\" decoding=\"async\" class=\"lazy\" data-src=\"https://images.example/arch.png\"></a></p>\n<p data-sourcepos=\"3:1-3:35\" dir=\"auto\">And <code data-sourcepos=\"3:5-3:10\">@sam</code> reads it from the store.</p>",
+                        "createdAt": "2026-11-02T08:00:00Z",
+                        "lastEditedAt": "2026-11-04T10:06:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_904",
+                        "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Fine by me.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:11\" dir=\"auto\">Fine by me.</p>",
+                        "createdAt": "2026-11-02T09:00:00Z",
+                        "lastEditedAt": "2026-11-04T10:06:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_905",
+                        "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "Thanks",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:6\" dir=\"auto\">Thanks</p>",
+                        "createdAt": "2026-11-04T10:00:00Z",
+                        "lastEditedAt": "2026-11-04T10:06:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_951",
+                        "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "I'll take the second option.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:28\" dir=\"auto\">I'll take the second option.</p>",
+                        "createdAt": "2026-11-04T10:07:00Z",
+                        "lastEditedAt": "2026-11-04T10:07:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_952",
+                        "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "Later",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:5\" dir=\"auto\">Later</p>",
+                        "createdAt": "2026-11-04T10:07:00Z",
+                        "lastEditedAt": "2026-11-04T10:07:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_953",
+                        "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000002",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Should the empty lane hide?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:27\" dir=\"auto\">Should the empty lane hide?</p>",
+                        "createdAt": "2026-11-02T10:00:00Z",
+                        "lastEditedAt": "2026-11-02T10:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_906",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "It hides once the last card moves out.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:38\" dir=\"auto\">It hides once the last card moves out.</p>",
+                        "createdAt": "2026-11-02T10:30:00Z",
+                        "lastEditedAt": "2026-11-02T10:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_907",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000003",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "The lane colours clash in the dark theme.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:41\" dir=\"auto\">The lane colours clash in the dark theme.</p>",
+                        "createdAt": "2026-11-02T11:00:00Z",
+                        "lastEditedAt": "2026-11-02T11:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_908",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Which ones?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:11\" dir=\"auto\">Which ones?</p>",
+                        "createdAt": "2026-11-02T11:30:00Z",
+                        "lastEditedAt": "2026-11-02T11:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_909",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000004",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "ben",
+                          "name": "Ben Okafor",
+                          "avatarUrl": "/uploads/-/system/user/avatar/3/avatar.png"
+                        },
+                        "body": "@sam, this removed check still guards the due date.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:52\" dir=\"auto\"><a href=\"/sam\" data-reference-type=\"user\" data-user=\"1\" data-original=\"@sam\" title=\"Sam Weller\" class=\"gfm gfm-project_member js-user-link\">@sam</a>, this removed check still guards the due date.</p>",
+                        "createdAt": "2026-11-02T12:00:00Z",
+                        "lastEditedAt": "2026-11-02T12:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_910",
+                        "position": { "filePath": "src/due.ts", "newLine": null, "oldLine": 4 }
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "chiara",
+                          "name": "Chiara Rossi",
+                          "avatarUrl": "/uploads/-/system/user/avatar/4/avatar.png"
+                        },
+                        "body": "It moved to `dueSoon()`.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:24\" dir=\"auto\">It moved to <code data-sourcepos=\"1:13-1:23\">dueSoon()</code>.</p>",
+                        "createdAt": "2026-11-02T12:30:00Z",
+                        "lastEditedAt": "2026-11-02T12:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_911",
+                        "position": { "filePath": "src/due.ts", "newLine": null, "oldLine": 4 }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000005",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "@sam, can the lane order be saved per user?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:43\" dir=\"auto\"><a href=\"/sam\" data-reference-type=\"user\" data-user=\"1\" data-original=\"@sam\" title=\"Sam Weller\" class=\"gfm gfm-project_member js-user-link\">@sam</a>, can the lane order be saved per user?</p>",
+                        "createdAt": "2026-11-02T13:00:00Z",
+                        "lastEditedAt": "2026-11-02T13:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_912",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "Per board for now.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:18\" dir=\"auto\">Per board for now.</p>",
+                        "createdAt": "2026-11-02T13:30:00Z",
+                        "lastEditedAt": "2026-11-02T13:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_913",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Per board works, but where is it stored?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:40\" dir=\"auto\">Per board works, but where is it stored?</p>",
+                        "createdAt": "2026-11-02T14:00:00Z",
+                        "lastEditedAt": "2026-11-02T14:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_914",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "sam",
+                          "name": "Sam Weller",
+                          "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
+                        },
+                        "body": "In the board's settings, saved per board.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:41\" dir=\"auto\">In the board's settings, saved per board.</p>",
+                        "createdAt": "2026-11-04T10:07:00Z",
+                        "lastEditedAt": "2026-11-04T10:07:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_954",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000006",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "chiara",
+                          "name": "Chiara Rossi",
+                          "avatarUrl": "/uploads/-/system/user/avatar/4/avatar.png"
+                        },
+                        "body": "The drag handle is hard to hit.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:31\" dir=\"auto\">The drag handle is hard to hit.</p>",
+                        "createdAt": "2026-11-02T15:00:00Z",
+                        "lastEditedAt": "2026-11-02T15:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_915",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "@ben, can you take this one?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:28\" dir=\"auto\"><a href=\"/ben\" data-reference-type=\"user\" data-user=\"3\" data-original=\"@ben\" title=\"Ben Okafor\" class=\"gfm gfm-project_member js-user-link\">@ben</a>, can you take this one?</p>",
+                        "createdAt": "2026-11-02T15:30:00Z",
+                        "lastEditedAt": "2026-11-02T15:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_916",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000007",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Does the order survive a reload?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:32\" dir=\"auto\">Does the order survive a reload?</p>",
+                        "createdAt": "2026-11-02T16:00:00Z",
+                        "lastEditedAt": "2026-11-02T16:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_917",
+                        "position": null
+                      },
+                      {
+                        "system": true,
+                        "author": {
+                          "username": "dmitri",
+                          "name": "Dmitri Volkov",
+                          "avatarUrl": "/uploads/-/system/user/avatar/5/avatar.png"
+                        },
+                        "body": "mentioned in commit 6ea97d8c",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:28\" dir=\"auto\">mentioned in commit <a href=\"/taskboard/taskboard/-/commit/6ea97d8c0d8d6c2a1b3e4f5a6b7c8d9e0f1a2b3c\" data-reference-type=\"commit\" data-original=\"6ea97d8c\" data-link=\"false\" data-link-reference=\"false\" data-project=\"7\" data-commit=\"6ea97d8c0d8d6c2a1b3e4f5a6b7c8d9e0f1a2b3c\" data-container=\"body\" data-placement=\"top\" title=\"Keep the lane order\" class=\"gfm gfm-commit has-tooltip\">6ea97d8c</a></p>",
+                        "createdAt": "2026-11-02T16:30:00Z",
+                        "lastEditedAt": "2026-11-02T16:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_918",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "It does now, thanks.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:20\" dir=\"auto\">It does now, thanks.</p>",
+                        "createdAt": "2026-11-02T17:00:00Z",
+                        "lastEditedAt": "2026-11-02T17:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_919",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000008",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "anna",
+                          "name": "Anna Berg",
+                          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                        },
+                        "body": "Why a map and not an array?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:27\" dir=\"auto\">Why a map and not an array?</p>",
+                        "createdAt": "2026-11-03T08:00:00Z",
+                        "lastEditedAt": "2026-11-03T08:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_920",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "dmitri",
+                          "name": "Dmitri Volkov",
+                          "avatarUrl": "/uploads/-/system/user/avatar/5/avatar.png"
+                        },
+                        "body": "Lookups by lane id.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:19\" dir=\"auto\">Lookups by lane id.</p>",
+                        "createdAt": "2026-11-03T08:30:00Z",
+                        "lastEditedAt": "2026-11-03T08:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_921",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000009",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "dmitri",
+                          "name": "Dmitri Volkov",
+                          "avatarUrl": "/uploads/-/system/user/avatar/5/avatar.png"
+                        },
+                        "body": "Note to self: drop the old sort after the release.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:50\" dir=\"auto\">Note to self: drop the old sort after the release.</p>",
+                        "createdAt": "2026-11-03T09:00:00Z",
+                        "lastEditedAt": "2026-11-03T09:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_922",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000010",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": null,
+                        "body": "Is the board limit still 20?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:28\" dir=\"auto\">Is the board limit still 20?</p>",
+                        "createdAt": "2026-11-03T09:30:00Z",
+                        "lastEditedAt": "2026-11-03T09:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_923",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": null,
+                        "body": "Yes.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:4\" dir=\"auto\">Yes.</p>",
+                        "createdAt": "2026-11-03T10:00:00Z",
+                        "lastEditedAt": "2026-11-03T10:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_924",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000011",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "chiara",
+                          "name": "Chiara Rossi",
+                          "avatarUrl": "/uploads/-/system/user/avatar/4/avatar.png"
+                        },
+                        "body": "The tests skip the empty board.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:31\" dir=\"auto\">The tests skip the empty board.</p>",
+                        "createdAt": "2026-11-03T10:30:00Z",
+                        "lastEditedAt": "2026-11-03T10:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_925",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "ben",
+                          "name": "Ben Okafor",
+                          "avatarUrl": "/uploads/-/system/user/avatar/3/avatar.png"
+                        },
+                        "body": "@dmitri, one more case here?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:28\" dir=\"auto\"><a href=\"/dmitri\" data-reference-type=\"user\" data-user=\"5\" data-original=\"@dmitri\" title=\"Dmitri Volkov\" class=\"gfm gfm-project_member js-user-link\">@dmitri</a>, one more case here?</p>",
+                        "createdAt": "2026-11-03T11:00:00Z",
+                        "lastEditedAt": "2026-11-03T11:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_926",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000012",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "ben",
+                          "name": "Ben Okafor",
+                          "avatarUrl": "/uploads/-/system/user/avatar/3/avatar.png"
+                        },
+                        "body": "Ready for another look?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:23\" dir=\"auto\">Ready for another look?</p>",
+                        "createdAt": "2026-11-03T11:30:00Z",
+                        "lastEditedAt": "2026-11-03T11:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_927",
+                        "position": null
+                      },
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "chiara",
+                          "name": "Chiara Rossi",
+                          "avatarUrl": "/uploads/-/system/user/avatar/4/avatar.png"
+                        },
+                        "body": "@all heads up: @taskboard ships this on Friday.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:47\" dir=\"auto\"><a href=\"/taskboard/taskboard\" data-reference-type=\"user\" data-project=\"7\" data-author=\"4\" data-original=\"@all\" title=\"All Project and Group Members\" class=\"gfm gfm-project_member js-user-link\">@all</a> heads up: <a href=\"/taskboard\" data-reference-type=\"user\" data-group=\"9\" data-original=\"@taskboard\" title=\"Taskboard\" class=\"gfm gfm-project_member js-user-link\">@taskboard</a> ships this on Friday.</p>",
+                        "createdAt": "2026-11-03T12:00:00Z",
+                        "lastEditedAt": "2026-11-03T12:00:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_928",
+                        "position": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000000013",
+                  "resolvable": true,
+                  "resolved": false,
+                  "userPermissions": { "resolveNote": true },
+                  "notes": {
+                    "pageInfo": { "hasNextPage": false },
+                    "nodes": [
+                      {
+                        "system": false,
+                        "author": {
+                          "username": "chiara",
+                          "name": "Chiara Rossi",
+                          "avatarUrl": "/uploads/-/system/user/avatar/4/avatar.png"
+                        },
+                        "body": "Reminder to myself, @chiara: check the export.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:46\" dir=\"auto\">Reminder to myself, <a href=\"/chiara\" data-reference-type=\"user\" data-user=\"4\" data-original=\"@chiara\" title=\"Chiara Rossi\" class=\"gfm gfm-project_member js-user-link\">@chiara</a>: check the export.</p>",
+                        "createdAt": "2026-11-03T12:30:00Z",
+                        "lastEditedAt": "2026-11-03T12:30:00Z",
+                        "lastEditedBy": null,
+                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_929",
+                        "position": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

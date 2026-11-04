@@ -101,9 +101,23 @@ field() {
 	printf '%s' "$fields" | sed -n "s/^$1=//p" | head -n 1
 }
 
+# $1 the answer's path without its extension, $2 its default status line. After the k-th post the answer is
+# $1.after-post-<k> instead, for the largest k whose .json exists, so a read after a write shows it; posts are never
+# redirected (post calls respond).
+reply() {
+	posts=$(text_or "${YAMT_FAKE_GLAB_STATE:-}" 0)
+	while [ "$posts" -gt 0 ]; do
+		if [ -f "$1.after-post-$posts.json" ]; then
+			respond "$1.after-post-$posts" "$2"
+		fi
+		posts=$((posts - 1))
+	done
+	respond "$1" "$2"
+}
+
 # $1 the answer's path without its extension, $2 its default status line: waits $1.sleep seconds, then fails before
 # any HTTP answer as $1.exit and $1.err say, or answers $1.json with the status line in $1.status (or $2).
-reply() {
+respond() {
 	if [ -f "$1.sleep" ]; then
 		sleep "$(cat "$1.sleep")"
 	fi
@@ -123,7 +137,18 @@ post() {
 	count=$(text_or "$state" 0)
 	number=$((count + 1))
 	printf '%s\n' "$number" >"$state"
-	reply "$scenario/post-$number" '201 Created'
+	respond "$scenario/post-$number" '201 Created'
+}
+
+# The viewer's drafts on one merge request, GET …/merge_requests/<iid>/draft_notes ("List all draft notes",
+# docs.gitlab.com/api/draft_notes): draft-notes-<iid>, else draft-notes.json.
+draft_notes() {
+	iid=${endpoint%/draft_notes}
+	iid=${iid##*/}
+	if [ -f "$scenario/draft-notes-$iid.json" ]; then
+		reply "$scenario/draft-notes-$iid" '200 OK'
+	fi
+	answer_file draft-notes.json
 }
 
 # A merge request's links lookup with a field query starting "query MergeRequestLinks": graphql-links-<iids0>, the
@@ -242,6 +267,15 @@ api() {
 		if [ -n "$input" ] || [ -n "$fields" ]; then method=POST; else method=GET; fi
 	fi
 	case "$method $endpoint" in
+	# "Publish all pending draft notes" (docs.gitlab.com/api/draft_notes).
+	"POST "*/draft_notes/bulk_publish) post ;;
+	# "Add note to existing merge request thread" (docs.gitlab.com/api/discussions).
+	"POST "*/discussions/*/notes) post ;;
+	# "Resolve a merge request thread" (docs.gitlab.com/api/discussions).
+	"PUT "*/discussions/*) post ;;
+	# "Render an arbitrary Markdown document" (docs.gitlab.com/api/markdown): writes nothing, so not counted.
+	"POST markdown") reply "$scenario/markdown" '201 Created' ;;
+	"GET "*/merge_requests/*/draft_notes) draft_notes ;;
 	"POST "*/draft_notes) post ;;
 	"POST graphql")
 		if [ "$input" = - ]; then post; else graphql; fi

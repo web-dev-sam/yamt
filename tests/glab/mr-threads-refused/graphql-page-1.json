@@ -1,0 +1,55 @@
+{
+  "data": {
+    "queryComplexity": { "score": 170, "limit": 250 },
+    "currentUser": { "username": "sam" },
+    "project": {
+      "mergeRequests": {
+        "pageInfo": { "hasNextPage": false, "endCursor": null },
+        "nodes": [
+          {
+            "iid": "90",
+            "title": "Lane order on the board",
+            "createdAt": "2026-11-01T08:00:00Z",
+            "draft": false,
+            "author": {
+              "username": "dmitri",
+              "name": "Dmitri Volkov",
+              "avatarUrl": "/uploads/-/system/user/avatar/5/avatar.png"
+            },
+            "labels": { "nodes": [] },
+            "assignees": { "nodes": [] },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "sam",
+                  "name": "Sam Weller",
+                  "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png",
+                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
+                },
+                {
+                  "username": "ben",
+                  "name": "Ben Okafor",
+                  "avatarUrl": "/uploads/-/system/user/avatar/3/avatar.png",
+                  "mergeRequestInteraction": { "approved": false, "reviewState": "UNREVIEWED" }
+                }
+              ]
+            },
+            "approvedBy": { "nodes": [] },
+            "userPermissions": { "updateMergeRequest": true },
+            "resolvableDiscussionsCount": 13,
+            "resolvedDiscussionsCount": 0,
+            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
+            "conflicts": false,
+            "diffStats": [],
+            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main",
+            "diffHeadSha": null,
+            "headPipeline": null
+          }
+        ]
+      }
+    }
+  }
+}

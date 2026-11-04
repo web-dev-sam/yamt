@@ -6,20 +6,27 @@
         "nodes": [
           {
             "iid": "97",
+            "discussionLocked": false,
+            "userPermissions": { "createNote": true },
             "discussions": {
               "pageInfo": { "hasNextPage": false, "endCursor": "d-97" },
               "nodes": [
                 {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000009701",
                   "resolvable": true,
                   "resolved": false,
+                  "userPermissions": { "resolveNote": true },
                   "notes": {
-                    "pageInfo": { "hasPreviousPage": false },
+                    "pageInfo": { "hasNextPage": false, "hasPreviousPage": false },
                     "nodes": [
                       {
                         "system": false,
                         "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
                         "body": "Should a reminder repeat?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:25\" dir=\"auto\">Should a reminder repeat?</p>",
                         "createdAt": "2026-11-03T10:00:00Z",
+                        "lastEditedAt": "2026-11-03T10:00:00Z",
+                        "lastEditedBy": null,
                         "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/97#note_971",
                         "position": null
                       }
@@ -31,20 +38,27 @@
           },
           {
             "iid": "96",
+            "discussionLocked": false,
+            "userPermissions": { "createNote": true },
             "discussions": {
               "pageInfo": { "hasNextPage": false, "endCursor": "d-96" },
               "nodes": [
                 {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000009601",
                   "resolvable": true,
                   "resolved": false,
+                  "userPermissions": { "resolveNote": true },
                   "notes": {
-                    "pageInfo": { "hasPreviousPage": false },
+                    "pageInfo": { "hasNextPage": false, "hasPreviousPage": false },
                     "nodes": [
                       {
                         "system": false,
                         "author": { "username": "ben", "name": "Ben Okafor", "avatarUrl": null },
                         "body": "The empty filter keeps every card here.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:39\" dir=\"auto\">The empty filter keeps every card here.</p>",
                         "createdAt": "2026-11-02T10:00:00Z",
+                        "lastEditedAt": "2026-11-02T10:00:00Z",
+                        "lastEditedBy": null,
                         "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/96#note_961",
                         "position": {
                           "filePath": "src/board/filters.ts",
@@ -56,16 +70,21 @@
                   }
                 },
                 {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000009602",
                   "resolvable": true,
                   "resolved": false,
+                  "userPermissions": { "resolveNote": true },
                   "notes": {
-                    "pageInfo": { "hasPreviousPage": false },
+                    "pageInfo": { "hasNextPage": false, "hasPreviousPage": false },
                     "nodes": [
                       {
                         "system": false,
                         "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
                         "body": "Could the filters be remembered per board?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:42\" dir=\"auto\">Could the filters be remembered per board?</p>",
                         "createdAt": "2026-11-02T11:00:00Z",
+                        "lastEditedAt": "2026-11-02T11:00:00Z",
+                        "lastEditedBy": null,
                         "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/96#note_962",
                         "position": null
                       }
@@ -77,20 +96,27 @@
           },
           {
             "iid": "95",
+            "discussionLocked": false,
+            "userPermissions": { "createNote": true },
             "discussions": {
               "pageInfo": { "hasNextPage": false, "endCursor": "d-95" },
               "nodes": [
                 {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000009501",
                   "resolvable": true,
                   "resolved": false,
+                  "userPermissions": { "resolveNote": true },
                   "notes": {
-                    "pageInfo": { "hasPreviousPage": false },
+                    "pageInfo": { "hasNextPage": false, "hasPreviousPage": false },
                     "nodes": [
                       {
                         "system": false,
                         "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
                         "body": "Archived cards still show in search.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:36\" dir=\"auto\">Archived cards still show in search.</p>",
                         "createdAt": "2026-11-01T10:00:00Z",
+                        "lastEditedAt": "2026-11-01T10:00:00Z",
+                        "lastEditedBy": null,
                         "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/95#note_951",
                         "position": null
                       }
@@ -102,20 +128,27 @@
           },
           {
             "iid": "94",
+            "discussionLocked": false,
+            "userPermissions": { "createNote": true },
             "discussions": {
               "pageInfo": { "hasNextPage": false, "endCursor": "d-94" },
               "nodes": [
                 {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000009401",
                   "resolvable": true,
                   "resolved": false,
+                  "userPermissions": { "resolveNote": true },
                   "notes": {
-                    "pageInfo": { "hasPreviousPage": false },
+                    "pageInfo": { "hasNextPage": false, "hasPreviousPage": false },
                     "nodes": [
                       {
                         "system": false,
                         "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
                         "body": "Does the week start on Monday here?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:35\" dir=\"auto\">Does the week start on Monday here?</p>",
                         "createdAt": "2026-10-31T10:00:00Z",
+                        "lastEditedAt": "2026-10-31T10:00:00Z",
+                        "lastEditedBy": null,
                         "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/94#note_941",
                         "position": {
                           "filePath": "src/board/week.ts",
@@ -131,20 +164,27 @@
           },
           {
             "iid": "93",
+            "discussionLocked": false,
+            "userPermissions": { "createNote": true },
             "discussions": {
               "pageInfo": { "hasNextPage": false, "endCursor": "d-93" },
               "nodes": [
                 {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000009301",
                   "resolvable": true,
                   "resolved": false,
+                  "userPermissions": { "resolveNote": true },
                   "notes": {
-                    "pageInfo": { "hasPreviousPage": false },
+                    "pageInfo": { "hasNextPage": false, "hasPreviousPage": false },
                     "nodes": [
                       {
                         "system": false,
                         "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
                         "body": "A comma inside a title breaks this column.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:42\" dir=\"auto\">A comma inside a title breaks this column.</p>",
                         "createdAt": "2026-10-30T10:00:00Z",
+                        "lastEditedAt": "2026-10-30T10:00:00Z",
+                        "lastEditedBy": null,
                         "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/93#note_931",
                         "position": {
                           "filePath": "src/export/csv.ts",
@@ -156,16 +196,21 @@
                   }
                 },
                 {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000009302",
                   "resolvable": true,
                   "resolved": false,
+                  "userPermissions": { "resolveNote": true },
                   "notes": {
-                    "pageInfo": { "hasPreviousPage": false },
+                    "pageInfo": { "hasNextPage": false, "hasPreviousPage": false },
                     "nodes": [
                       {
                         "system": false,
                         "author": { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
                         "body": "Please add a test with an empty board.",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:38\" dir=\"auto\">Please add a test with an empty board.</p>",
                         "createdAt": "2026-10-30T11:00:00Z",
+                        "lastEditedAt": "2026-10-30T11:00:00Z",
+                        "lastEditedBy": null,
                         "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/93#note_932",
                         "position": null
                       }
@@ -177,20 +222,27 @@
           },
           {
             "iid": "92",
+            "discussionLocked": false,
+            "userPermissions": { "createNote": true },
             "discussions": {
               "pageInfo": { "hasNextPage": false, "endCursor": "d-92" },
               "nodes": [
                 {
+                  "id": "gid://gitlab/Discussion/0000000000000000000000000000000000009201",
                   "resolvable": true,
                   "resolved": false,
+                  "userPermissions": { "resolveNote": true },
                   "notes": {
-                    "pageInfo": { "hasPreviousPage": false },
+                    "pageInfo": { "hasNextPage": false, "hasPreviousPage": false },
                     "nodes": [
                       {
                         "system": false,
                         "author": { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
                         "body": "Can a lane be collapsed?",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:24\" dir=\"auto\">Can a lane be collapsed?</p>",
                         "createdAt": "2026-10-29T10:00:00Z",
+                        "lastEditedAt": "2026-10-29T10:00:00Z",
+                        "lastEditedBy": null,
                         "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/92#note_921",
                         "position": null
                       }
