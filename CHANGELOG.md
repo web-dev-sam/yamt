@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- A thread's Preview shows a plain comment at once, drawn by yamt exactly as GitLab draws it; a comment with
+  anything GitLab adds (a reference, a mention, an emoji, a link, an image, a task box, HTML, math, a diagram) still
+  goes to GitLab's preview.
+- GitLab's login and the project are checked once per repository while yamt runs instead of before every action, so
+  every merge-request action is about a second faster. A lost login or a missing project is noticed by the action
+  that meets it ("not logged in" as before), and the page's Refresh and the discussions box's reload button check
+  both again.
+
 ## [0.6.9] - 2026-11-04
 
 ### Added
