@@ -61,8 +61,8 @@ merge-requests page. Every step in yamt Dark and yamt Light (`--settings '{"them
 4. **C3–C5 Thread.** d01: four comments oldest first, no system note; pictures, names, muted `@username`, the crown
    only on Dmitri Volkov's comment (tooltip "Author"); "3 hours ago" style times with `DD.MM.YYYY, HH:MM` on hover;
    "· Edited … ago by Dmitri Volkov" on Sam Weller's, "· Edited … ago" on Anna Berg's; code in yamt's colours, the
-   table, the images, a link that logs `fixture_page` on click; "Loading…" before the answer; each reopen logs a new
-   `fixture_thread`.
+   table, the images, a link that logs `fixture_page` on click; the header's "Open on GitLab" logs one `fixture_page`
+   naming d01's first comment's page (#2375); "Loading…" before the answer; each reopen logs a new `fixture_thread`.
 5. **C6 Field.** The placeholder; 2 lines → 3 lines high, 8 → 8, 20 → 12 and scrolling; the text kept after closing
    the box and reopening; another discussion's field empty.
 6. **C7 Preview.** Type `**Hi** @anna`, press Preview: "Loading…", then bold "Hi" and the mention link; Write: the same
