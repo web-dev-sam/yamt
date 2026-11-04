@@ -1482,13 +1482,15 @@ listed row's —) logs `mergeRequests.fixture_discussions { iids }` and answers 
 `FIXTURE_ANSWERED` 10 distinct iids by `fixtureDiscussions(iid, store)`, the unresolved ones: !637 (`THREADS_IID`) and
 !636 (`LOCKED_THREADS_IID`) the turn rule's cases d01–d16 (`ipc/fixtureMergeRequestTurnCases.ts` `turnCases`, ids the
 decimal serial padded to 40 digits, as `tests/glab/mr-threads`), every other row its `openDiscussions` one-comment
-discussions (ids `iid × 100 + n`), the
-second's last comment by the row's first reviewer and newer, so turns for `sam` and for each reviewer occur both ways
-(the review orders the WebKit steps expect), a markup text, !638's 400-character line, pageless notes on every 6th row, !615
+discussions (ids `iid × 100 + n`), the second's last comment by the row's first reviewer and newer, so turns for `sam`
+and for each reviewer occur both ways, and the due rows' first one asking their reviewer (`ASKED`: !618, !633 and !623
+`@sam`, !602 `@anna`, its mentions by `mentionsIn`), so it is that reviewer's turn (the review orders the WebKit steps
+expect), a markup text, !638's 400-character line, pageless notes on every 6th row, !615
 (`DISCUSSIONS_FAILED_IID`) `failed`, !629 (`DISCUSSIONS_LOGGED_OUT_IID`) `notLoggedIn`, an unlisted iid `failed`; the
 thread's five methods (`ipc/fixtureMergeRequestThreads.ts` `threadsScript(log, store)`, the same store): a read logs
 `mergeRequests.fixture_thread { iid, discussion }` and answers after 400 ms (an unknown discussion `notFound`;
-`commenting` `locked` on !636), a write logs `mergeRequests.fixture_write { kind, iid, discussion }` and a preview
+`commenting` `locked` on !636; !637's d13 `failed` "glab timed out" at its first read per source, then read: the
+panel's Retry), a write logs `mergeRequests.fixture_write { kind, iid, discussion }` and a preview
 `mergeRequests.fixture_preview { iid }`, both after 300 ms, never a text; a blank text `refused` "There is nothing to
 send.", one starting `refuse` `refused` "403 Forbidden", `fail` `failed` "glab timed out", an unknown discussion
 `refused` "404 Not Found", a write on !636 `refused` "403 Forbidden", else `sent` and the store changed (a comment
@@ -2218,8 +2220,9 @@ line marked resolved since its answer reads Lucide `check` and `RESOLVED` "Resol
 `noteExcerpt` (three lines, 280 code points, then "…") clamped to three lines; the shown line has `aria-current` and
 `bg-row-selected`; every text interpolated, never `v-html`. A Shift tap (`useShiftTaps`, as the CI box's) with the box
 open and no text field focused (`isTypingTarget`) shows the pointed line's thread, else the focused line's
-(`showThread`; the one shown already: nothing). When the box closes: `closeThread` if its thread was shown, then
-`boxClosed(iid)`. The queue that fills the entries is §5.1's row. `MergeRequestDiscussionSetting.vue` is Settings →
+(`showThread`; the one shown already: nothing). When the box closes, and when the row unmounts with its box open:
+`closeThread` if its thread was shown, then `boxClosed(iid)`; when another row's thread is shown, an open box closes
+itself (`useHoverBox`'s `close`). The queue that fills the entries is §5.1's row. `MergeRequestDiscussionSetting.vue` is Settings →
 "Discussion details" (`DISCUSSION_DETAILS_OPTIONS` "Load fully" / "Load lazily" / "Off" through `ChoiceButtons`,
 `setDiscussionDetails` on the settings seam); the compare and range roots put it into `SettingsView`'s slot; the merge
 window has no such section.
@@ -2241,9 +2244,16 @@ through `MergeRequestDescriptionBlocks`, "Nothing to preview." for none), a fiel
 `replyTexts.get(id) ?? ""` through `setReplyText`, 3 to 12 lines high), "Add review" (a draft), "Add comment",
 "Resolve thread" / "Unresolve thread"; each off while the thread is not read, refreshing or a send is under way, the add
 buttons also for a blank text and with `commentingReason`'s sentence (locked, not allowed) as tip, resolve with "You may
-not resolve this thread."; a failed send's `writeFailureText` under the row. Keys: `boxKeys.ts` `boxKeydown` (Mod-Enter
-adds the comment, Escape closes the panel; Enter types a line); the panel's own Escape (one nothing took) closes it and
-the box focuses the row's line; the box's Escape then closes the box. Every word is `ui/mergeRequestThreadText.ts`;
+not resolve this thread."; a failed send's `writeFailureText` under the row. Focus stays in the panel across a send and
+Retry (WebKit drops the focus of a pressed button that turns disabled or is removed to the body, with no `focusout` —
+the HTML focus fixup rule —, and the next Escape would reach the page): the add and resolve buttons focus the field
+first, or in Preview (the field hidden) the panel (`focusPanel`); "Submit review" (`publish`) and Retry (`retry`) focus
+the panel before they call. Keys: `boxKeys.ts` `boxKeydown` (Mod-Enter adds the comment, Escape closes the panel; Enter
+types a line). While a thread is shown, Escape is the panel's: `MergeRequestsView.vue`'s `escapePressed` closes an open
+filter menu and otherwise leaves Escape alone while `thread` (or `description`) is set; the panel's element `keydown`
+takes an Escape inside it, so `useHoverBox`'s area keydown never sees it; a window `keydown` listener, for the
+component's life, closes it on any Escape nothing took (`defaultPrevented`) while its thread is shown, focus on the body
+included. A close focuses the row's line; the next Escape closes the box, the one after leaves the page. Every word is `ui/mergeRequestThreadText.ts`;
 failure sentences go through `problemText` at the steps `thread`, `reply`, `draft`, `resolveThread`,
 `unresolveThread`, `submitReview`, `preview`. The state is §5.1's thread row.
 
@@ -2256,10 +2266,10 @@ the list while `description` is set, keyed by the iid (a replace mounts a new pa
 about `min(64rem, 100vw − 4rem)` wide and up to `85vh`, centred, its content scrolling inside; it takes focus on mount;
 Escape (a window `keydown` listener in the bubble phase, only for an Escape nothing took (`defaultPrevented`), skipped
 while `asking`; MergeRequestsView's own window listener runs first, closes an open filter menu, and otherwise leaves
-Escape to the panel while a description is shown) and its close button call
+Escape to the panel while a description or a thread is shown) and its close button call
 `closeDescription` and return focus to the row's opener when still listed; a press outside it closes it
 (`onClickOutside`, ignoring `[data-description-opener]` and `[data-refreshes-list]` — Refresh and the list failure's
-Retry —, so a refresh leaves it as loaded); a page scroll leaves it. Its header is the title as opened; its body
+Retry, the attribute `useHoverBox`'s pinned rule reads too —, so a refresh leaves it as loaded); a page scroll leaves it. Its header is the title as opened; its body
 "Loading…", `NO_DESCRIPTION` "No description." for no blocks, `descriptionRefusalText` or `problemText` at step
 `description` with Retry (`retryDescription`), or the blocks. Renderers use text interpolation only, never `href`,
 `v-html` (`vue/no-v-html` an ESLint error), `innerHTML` or `title`: `MergeRequestDescriptionBlocks.vue` and
@@ -2311,7 +2321,8 @@ WebKit sends no pointer events to a disabled button, so a control that can be di
 Rich content is a box the pointer enters, `useHoverBox` (`ui/useHoverBox.ts`: open at once on hover or focus,
 `position: fixed`, not teleported, so Tab reaches it, held while pointer or focus is in opener or box, closed by
 leaving both, by Escape or by a scroll outside, `useScrollOutside`; with `pinned()` true — a side panel open — leaving,
-a window blur and a scroll outside never close it, and a `pointerdown` outside the area closes it, RK73):
+a window blur and a scroll outside never close it, and a `pointerdown` outside the area closes it unless it lands on or
+inside a `[data-refreshes-list]` element — Refresh, the failed list's Retry —, RK73):
 `CiStatusBox.vue`'s failed jobs, the people, the labels, the links and the discussions boxes. The filter bar holds one `useHoverMenu<ListFilter | "review">` (`ui/useHoverMenu.ts` over
 `useDropdownMenu`): hovering an opener opens its list with focus kept, leaving closes it after 300 ms (`dismiss`: focus
 returns to the opener only from inside), a click pins it and moves focus in (the narrowing box when there is one),
