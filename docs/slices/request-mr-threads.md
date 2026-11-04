@@ -57,8 +57,8 @@ count (rule 4 of the discussions request stands). "Mentioned" is a GitLab user r
 - **B2. The viewer's turn** ("Your turn"; "<name>'s turn" in review mode for another reviewer) when someone else
   wrote the last comment and at least one of these holds:
   1. the viewer started the discussion;
-  2. the viewer is mentioned in a comment written after the viewer's own last comment in it (or anywhere in it,
-     when the viewer never wrote in it);
+  2. the viewer is mentioned anywhere in it, in any comment by someone else, whether or not the viewer answered
+     since (owner #2334);
   3. the viewer is the author (a reviewer's open point on your own merge request waits on you; today's rule, kept
      for the author);
   4. the viewer took part in it (wrote at least one comment) and someone else answered after the viewer's last
