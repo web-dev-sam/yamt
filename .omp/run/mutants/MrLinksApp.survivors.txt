@@ -1,0 +1,2 @@
+just mutants HEAD → 6 mutants tested in 73s: 6 unviable
+

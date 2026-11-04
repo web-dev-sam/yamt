@@ -1,0 +1,220 @@
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index f4b620e..bd2f883 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -86,6 +86,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         merge_requests::search_people::<tauri::Wry>,
+         merge_requests::change_people::<tauri::Wry>,
+         merge_requests::description::read_description::<tauri::Wry>,
++        merge_requests::links::read_links::<tauri::Wry>,
+     ])
+ }
+ 
+diff --git a/src-tauri/src/merge_requests.rs b/src-tauri/src/merge_requests.rs
+index a151cc7..ce1c093 100644
+--- a/src-tauri/src/merge_requests.rs
++++ b/src-tauri/src/merge_requests.rs
+@@ -22,6 +22,7 @@ use crate::second_window;
+ pub(crate) mod description;
+ mod discussions;
+ mod job_logs;
++pub(crate) mod links;
+ mod list;
+ mod people;
+ mod pictures;
+@@ -376,8 +377,8 @@ fn local_merge(state: &MergeRequestState) -> LocalMerge {
+         })
+ }
+ 
+-/// Opens `page` in the browser only when a list of this window sent it: the window cannot hand any other
+-/// address to the system.
++/// Opens `page` in the browser only when a reply of this window sent it (lists, discussions, descriptions, links): the
++/// window cannot hand any other address to the system.
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+diff --git a/src-tauri/src/merge_requests/links.rs b/src-tauri/src/merge_requests/links.rs
+new file mode 100644
+index 0000000..86dc8cf
+--- /dev/null
++++ b/src-tauri/src/merge_requests/links.rs
+@@ -0,0 +1,31 @@
++use tauri::{Manager, Runtime, WebviewWindow};
++use yamt_merge_requests::{Glab, LinksReply, MergeRequestIid};
++
++use super::{MergeRequestState, NO_PROJECT, offer};
++use crate::ipc_error::{IpcError, blocking_reply};
++
++/// No GitLab project → `Failed`; else glab reads the links, and every line's and parent's page is offered before the
++/// reply is returned; `pages` is never held while glab runs.
++pub(super) fn links_reply(
++    state: &MergeRequestState,
++    glab: Option<&Glab>,
++    iid: MergeRequestIid,
++) -> LinksReply {
++    let Some(repository) = &state.gitlab else {
++        return LinksReply::Failed {
++            message: NO_PROJECT.to_owned(),
++        };
++    };
++    let read = yamt_merge_requests::read_links(repository, glab, iid);
++    offer(state, read.pages, Vec::new());
++    read.reply
++}
++
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn read_links<R: Runtime>(
++    window: WebviewWindow<R>,
++    iid: MergeRequestIid,
++) -> Result<LinksReply, IpcError> {
++    blocking_reply(move || Ok(links_reply(&window.state(), Glab::find().as_ref(), iid))).await
++}
+diff --git a/src-tauri/src/merge_requests/tests.rs b/src-tauri/src/merge_requests/tests.rs
+index 6187c05..0c64a6a 100644
+--- a/src-tauri/src/merge_requests/tests.rs
++++ b/src-tauri/src/merge_requests/tests.rs
+@@ -134,6 +134,9 @@ mod people;
+ #[cfg(unix)]
+ mod description;
+ 
++#[cfg(unix)]
++mod links;
++
+ mod csp;
+ 
+ #[cfg(unix)]
+diff --git a/src-tauri/src/merge_requests/tests/links.rs b/src-tauri/src/merge_requests/tests/links.rs
+new file mode 100644
+index 0000000..2224e0d
+--- /dev/null
++++ b/src-tauri/src/merge_requests/tests/links.rs
+@@ -0,0 +1,128 @@
++use super::through_glab::{log_after, open, opened_log, run_with_fakes};
++use super::*;
++use crate::merge_requests::links::{links_reply, read_links};
++
++const SCENARIO: &str = "mr-links";
++const OFFERED_TEST: &str = "merge_requests::tests::links::line_and_parent_pages_on_paths_opener";
++const UNNAMED_TEST: &str = "merge_requests::tests::links::unnamed_pages_on_paths_opener";
++const UNSEEN_TEST: &str = "merge_requests::tests::links::an_unseen_page_on_paths_opener";
++const COMMAND_TEST: &str = "merge_requests::tests::links::the_command_on_paths_glab";
++const ISSUE_PAGE: &str = "https://gitlab.example/taskboard/taskboard/-/work_items/12";
++const PARENT_PAGE: &str = "https://gitlab.example/groups/taskboard/-/work_items/3";
++const UNSEEN_PAGE: &str = "https://gitlab.example/secret/vault/-/issues/9";
++
++/// Reads merge request `iid`'s links through the command, as the window does.
++fn read(window: &MergeRequestWindow, iid: u32) {
++    block_on(read_links(window.webview.clone(), MergeRequestIid(iid))).unwrap();
++}
++
++#[test]
++fn a_line_and_a_parent_page_are_offered_before_the_reply() {
++    run_with_fakes(OFFERED_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by a_line_and_a_parent_page_are_offered_before_the_reply"]
++fn line_and_parent_pages_on_paths_opener() {
++    let window = open_window_in(gitlab_repo());
++    let not_offered = json!({ "kind": "notOffered" });
++    for page in [ISSUE_PAGE, PARENT_PAGE] {
++        assert_eq!(open(&window, page), not_offered, "{page}");
++    }
++    assert_eq!(opened_log(), "");
++
++    read(&window, 62);
++
++    // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `web_page.rs`), not PATH's fake: it would
++    // open the real browser.
++    if cfg!(target_os = "macos") {
++        return;
++    }
++    let mut before = String::new();
++    for page in [ISSUE_PAGE, PARENT_PAGE] {
++        assert_eq!(open(&window, page), json!({ "kind": "opened" }), "{page}");
++        let logged = format!("{before}argv: {page}\n");
++        assert_eq!(log_after(&before), logged);
++        before = logged;
++    }
++}
++
++#[test]
++fn a_page_the_links_reply_did_not_name_is_not_offered() {
++    run_with_fakes(UNNAMED_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by a_page_the_links_reply_did_not_name_is_not_offered"]
++fn unnamed_pages_on_paths_opener() {
++    let window = open_window_in(gitlab_repo());
++
++    read(&window, 62);
++
++    let not_offered = json!({ "kind": "notOffered" });
++    for page in [
++        "https://evil.example/groups/x/-/work_items/1",
++        "https://gitlab.example/taskboard/taskboard/-/milestones/1",
++        "https://gitlab.other/x/y/-/issues/1",
++    ] {
++        assert_eq!(open(&window, page), not_offered, "{page}");
++    }
++    assert_eq!(opened_log(), "");
++}
++
++#[test]
++fn an_unseen_things_address_is_offered() {
++    run_with_fakes(UNSEEN_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by an_unseen_things_address_is_offered"]
++fn an_unseen_page_on_paths_opener() {
++    let window = open_window_in(gitlab_repo());
++
++    read(&window, 62);
++
++    if cfg!(target_os = "macos") {
++        return;
++    }
++    assert_eq!(open(&window, UNSEEN_PAGE), json!({ "kind": "opened" }));
++    assert_eq!(log_after(""), format!("argv: {UNSEEN_PAGE}\n"));
++}
++
++#[test]
++fn no_gitlab_project_fails_the_read() {
++    let plain = TempDir::new().unwrap();
++    git_ok(plain.path(), &["init", "-q"]).unwrap();
++    let window = open_window_in(plain);
++
++    let reply = links_reply(&window.webview.state(), None, MergeRequestIid(62));
++
++    let failed = json!({ "kind": "failed", "message": NO_PROJECT });
++    assert_eq!(serde_json::to_value(reply).unwrap(), failed);
++}
++
++#[test]
++fn read_links_answers_through_the_command() {
++    run_with_fakes(COMMAND_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by read_links_answers_through_the_command"]
++fn the_command_on_paths_glab() {
++    let window = open_window_in(gitlab_repo());
++    let reply = |iid: u32| invoke(&window, "read_links", json!({ "iid": iid })).unwrap();
++
++    let read = reply(62);
++    let failed = reply(60);
++
++    assert_eq!(read["kind"], "read");
++    let length = |group: &str| read["links"][group].as_array().unwrap().len();
++    assert_eq!(
++        [length("epics"), length("issues"), length("commits")],
++        [3, 6, 4]
++    );
++    assert_eq!(
++        failed,
++        json!({ "kind": "failed", "message": "glab: a deadline line" })
++    );
++}

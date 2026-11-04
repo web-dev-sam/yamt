@@ -22,6 +22,7 @@ use crate::second_window;
 pub(crate) mod description;
 mod discussions;
 mod job_logs;
+pub(crate) mod links;
 mod list;
 mod people;
 mod pictures;
@@ -376,8 +377,8 @@ fn local_merge(state: &MergeRequestState) -> LocalMerge {
         })
 }
 
-/// Opens `page` in the browser only when a list of this window sent it: the window cannot hand any other
-/// address to the system.
+/// Opens `page` in the browser only when a reply of this window sent it (lists, discussions, descriptions, links): the
+/// window cannot hand any other address to the system.
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]

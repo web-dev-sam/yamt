@@ -134,6 +134,9 @@ mod people;
 #[cfg(unix)]
 mod description;
 
+#[cfg(unix)]
+mod links;
+
 mod csp;
 
 #[cfg(unix)]

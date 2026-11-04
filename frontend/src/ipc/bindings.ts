@@ -74,8 +74,8 @@ export const commands = {
 	listMergeRequests: (messages: Channel<ListMessage>) => typedError<null, IpcError>(__TAURI_INVOKE("list_merge_requests", { messages })),
 	openMergeRequest: (iid: MergeRequestIid) => typedError<OpenReply, IpcError>(__TAURI_INVOKE("open_merge_request", { iid })),
 	/**
-	 *  Opens `page` in the browser only when a list of this window sent it: the window cannot hand any other
-	 *  address to the system.
+	 *  Opens `page` in the browser only when a reply of this window sent it (lists, discussions, descriptions, links): the
+	 *  window cannot hand any other address to the system.
 	 */
 	openPage: (page: WebPage) => __TAURI_INVOKE<PageOpened>("open_page", { page }),
 	resolveMergeRequest: (iid: MergeRequestIid) => typedError<ResolveReply, IpcError>(__TAURI_INVOKE("resolve_merge_request", { iid })),
@@ -88,6 +88,7 @@ export const commands = {
 	searchPeople: (text: string) => typedError<PeopleSearchReply, IpcError>(__TAURI_INVOKE("search_people", { text })),
 	changePeople: (iid: MergeRequestIid, change: PeopleChange) => typedError<PeopleChangeReply, IpcError>(__TAURI_INVOKE("change_people", { iid, change })),
 	readDescription: (iid: MergeRequestIid) => typedError<DescriptionReply, IpcError>(__TAURI_INVOKE("read_description", { iid })),
+	readLinks: (iid: MergeRequestIid) => typedError<LinksReply, IpcError>(__TAURI_INVOKE("read_links", { iid })),
 };
 
 /* Types */
@@ -432,6 +433,16 @@ page: WebPage } |
 /**  The address as written. */
 address: string };
 
+/**  Every epic, issue and commit the description links to, each once, each group in the order of first mention. */
+export type DescriptionLinks = {
+	/**  The epics. */
+	epics: LinkedEpic[],
+	/**  The issues, tasks, incidents and other work items that are not epics. */
+	issues: LinkedIssue[],
+	/**  The commits and commit ranges. */
+	commits: LinkedCommit[],
+};
+
 /**  How reading a merge request's description ended. */
 export type DescriptionReply = 
 /**  GitLab's rendering of the description as yamt shows it; no blocks for an empty one. */
@@ -762,6 +773,66 @@ export type LineRange<L> = {
 	/**  Number of lines in the range. */
 	len: number,
 };
+
+/**  A commit or a commit range the description links to. */
+export type LinkedCommit = {
+	/**  `fa3335f3`, `web@fa3335f3`, `other/lib@fa3335f3`, `a1b2c3d4…e5f6a7b8`. */
+	reference: string,
+	/**  Its first mention's address, as the description resolved it. */
+	page: WebPage,
+	/**
+	 *  GitLab's `title` on its reference link (a commit's first message line; a range's "Commits … through …");
+	 *  None: GitLab made no reference of it for this user ("Not found or no access").
+	 */
+	title: string | null,
+};
+
+/**  An epic the description links to. */
+export type LinkedEpic = {
+	/**  As GitLab writes it from the merge request's project: `&3`, `group/sub&3`. */
+	reference: string,
+	/**  Its first mention's address, as the description resolved it. */
+	page: WebPage,
+	/**  None: GitLab did not show it to this user ("Not found or no access"). */
+	shown: ShownEpic | null,
+};
+
+/**  An issue the description links to. */
+export type LinkedIssue = {
+	/**  As GitLab writes it from the merge request's project: `#12`, `web#12`, `other/lib#12`. */
+	reference: string,
+	/**  Its first mention's address, as the description resolved it. */
+	page: WebPage,
+	/**  None: GitLab did not show it to this user ("Not found or no access"). */
+	shown: ShownIssue | null,
+};
+
+/**  An issue's direct parent. */
+export type LinkedParent = {
+	/**  As GitLab writes it from the merge request's project. */
+	reference: string,
+	/**  Its title. */
+	title: string,
+	/**  GitLab's address of it. */
+	page: WebPage,
+};
+
+/**  How reading the epics, issues and commits a merge request's description links to ended. */
+export type LinksReply = 
+/**  The description's links, looked up. */
+{ kind: "read"; 
+/**  The links. */
+links: DescriptionLinks } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first line, which names the instance. */
+detail: string } | 
+/**  glab's or GitLab's words, `page.rs` `NO_MERGE_REQUEST` or `NO_PROJECT`. */
+{ kind: "failed"; 
+/**  What went wrong. */
+message: string };
 
 /**  How a load ended; the pages already sent stay. */
 export type ListEnd = 
@@ -1458,6 +1529,27 @@ export type SettingsRead = {
 	path: string,
 	default_path: string,
 	stored: StoredSettings,
+};
+
+/**  What GitLab shows of an epic. */
+export type ShownEpic = {
+	/**  Its title. */
+	title: string,
+	/**  Whether it is closed. */
+	closed: boolean,
+};
+
+/**
+ *  What GitLab shows of an issue. `parent`: the direct parent (an epic, or the issue above a task) when GitLab names
+ *  one on the project's server.
+ */
+export type ShownIssue = {
+	/**  Its title. */
+	title: string,
+	/**  Whether it is closed. */
+	closed: boolean,
+	/**  Its direct parent. */
+	parent: LinkedParent | null,
 };
 
 export type Side = "local" | "remote";
