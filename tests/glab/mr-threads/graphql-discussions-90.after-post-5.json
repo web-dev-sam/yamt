@@ -35,7 +35,7 @@
                           "name": "Anna Berg",
                           "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
                         },
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_901",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_901",
                         "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
                       },
                       {
@@ -50,7 +50,7 @@
                         "createdAt": "2026-11-01T10:00:00Z",
                         "lastEditedAt": "2026-11-04T10:06:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_902",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_902",
                         "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
                       },
                       {
@@ -60,8 +60,8 @@
                           "name": "Sam Weller",
                           "avatarUrl": "/uploads/-/system/user/avatar/1/avatar.png"
                         },
-                        "body": "Shorter:\n\n```suggestion:-0+0\nconst lanes = board.lanes.toSorted(byOrder);\n```\n\n![shot](/uploads/-/system/note/attachment/903/shot.png){width=60%}",
-                        "bodyHtml": "<p data-sourcepos=\"1:1-1:8\" dir=\"auto\">Shorter:</p>\n<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"3:1-5:3\" data-canonical-lang=\"suggestion\" data-lang-params=\"-0+0\" class=\"code highlight js-syntax-highlight language-suggestion\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" lang=\"suggestion\">const lanes = board.lanes.toSorted(byOrder);</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>\n<p data-sourcepos=\"7:1-7:66\" dir=\"auto\"><a class=\"no-attachment-icon\" href=\"/uploads/-/system/note/attachment/903/shot.png\" target=\"_blank\" rel=\"noopener noreferrer\"><img data-sourcepos=\"7:1-7:66\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" alt=\"shot\" width=\"60%\" decoding=\"async\" class=\"lazy\" data-src=\"/uploads/-/system/note/attachment/903/shot.png\"></a></p>",
+                        "body": "Shorter:\n\n```suggestion:-0+0\nconst lanes = board.lanes.toSorted(byOrder);\n```\n\n![shot](/uploads/903a1b2c3d4e5f60718293a4b5c6d7e8/shot.png){width=60%}",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:8\" dir=\"auto\">Shorter:</p>\n<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"3:1-5:3\" data-canonical-lang=\"suggestion\" data-lang-params=\"-0+0\" class=\"code highlight js-syntax-highlight language-suggestion\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" lang=\"suggestion\">const lanes = board.lanes.toSorted(byOrder);</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>\n<p data-sourcepos=\"7:1-7:70\" dir=\"auto\"><a class=\"no-attachment-icon gfm\" href=\"/-/project/7/uploads/903a1b2c3d4e5f60718293a4b5c6d7e8/shot.png\" target=\"_blank\" rel=\"noopener noreferrer\" data-canonical-src=\"/uploads/903a1b2c3d4e5f60718293a4b5c6d7e8/shot.png\" data-link=\"true\"><img data-sourcepos=\"7:1-7:70\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" alt=\"shot\" width=\"60%\" decoding=\"async\" class=\"lazy gfm\" data-src=\"/-/project/7/uploads/903a1b2c3d4e5f60718293a4b5c6d7e8/shot.png\" data-canonical-src=\"/uploads/903a1b2c3d4e5f60718293a4b5c6d7e8/shot.png\"></a></p>",
                         "createdAt": "2026-11-01T11:00:00Z",
                         "lastEditedAt": "2026-11-01T12:30:00Z",
                         "lastEditedBy": {
@@ -69,7 +69,7 @@
                           "name": "Dmitri Volkov",
                           "avatarUrl": "/uploads/-/system/user/avatar/5/avatar.png"
                         },
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_903",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_903",
                         "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
                       },
                       {
@@ -84,7 +84,7 @@
                         "createdAt": "2026-11-02T08:00:00Z",
                         "lastEditedAt": "2026-11-04T10:06:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_904",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_904",
                         "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
                       },
                       {
@@ -99,7 +99,7 @@
                         "createdAt": "2026-11-02T09:00:00Z",
                         "lastEditedAt": "2026-11-04T10:06:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_905",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_905",
                         "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
                       },
                       {
@@ -114,7 +114,7 @@
                         "createdAt": "2026-11-04T10:00:00Z",
                         "lastEditedAt": "2026-11-04T10:06:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_951",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_951",
                         "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
                       },
                       {
@@ -129,7 +129,7 @@
                         "createdAt": "2026-11-04T10:07:00Z",
                         "lastEditedAt": "2026-11-04T10:07:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_952",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_952",
                         "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
                       },
                       {
@@ -144,7 +144,7 @@
                         "createdAt": "2026-11-04T10:07:00Z",
                         "lastEditedAt": "2026-11-04T10:07:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_953",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_953",
                         "position": { "filePath": "src/board.ts", "newLine": 12, "oldLine": null }
                       }
                     ]
@@ -170,7 +170,7 @@
                         "createdAt": "2026-11-02T10:00:00Z",
                         "lastEditedAt": "2026-11-02T10:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_906",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_906",
                         "position": null
                       },
                       {
@@ -185,7 +185,7 @@
                         "createdAt": "2026-11-02T10:30:00Z",
                         "lastEditedAt": "2026-11-02T10:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_907",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_907",
                         "position": null
                       }
                     ]
@@ -211,7 +211,7 @@
                         "createdAt": "2026-11-02T11:00:00Z",
                         "lastEditedAt": "2026-11-02T11:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_908",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_908",
                         "position": null
                       },
                       {
@@ -226,7 +226,7 @@
                         "createdAt": "2026-11-02T11:30:00Z",
                         "lastEditedAt": "2026-11-02T11:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_909",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_909",
                         "position": null
                       }
                     ]
@@ -252,7 +252,7 @@
                         "createdAt": "2026-11-02T12:00:00Z",
                         "lastEditedAt": "2026-11-02T12:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_910",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_910",
                         "position": { "filePath": "src/due.ts", "newLine": null, "oldLine": 4 }
                       },
                       {
@@ -267,7 +267,7 @@
                         "createdAt": "2026-11-02T12:30:00Z",
                         "lastEditedAt": "2026-11-02T12:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_911",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_911",
                         "position": { "filePath": "src/due.ts", "newLine": null, "oldLine": 4 }
                       }
                     ]
@@ -293,7 +293,7 @@
                         "createdAt": "2026-11-02T13:00:00Z",
                         "lastEditedAt": "2026-11-02T13:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_912",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_912",
                         "position": null
                       },
                       {
@@ -308,7 +308,7 @@
                         "createdAt": "2026-11-02T13:30:00Z",
                         "lastEditedAt": "2026-11-02T13:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_913",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_913",
                         "position": null
                       },
                       {
@@ -323,7 +323,7 @@
                         "createdAt": "2026-11-02T14:00:00Z",
                         "lastEditedAt": "2026-11-02T14:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_914",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_914",
                         "position": null
                       },
                       {
@@ -338,7 +338,7 @@
                         "createdAt": "2026-11-04T10:07:00Z",
                         "lastEditedAt": "2026-11-04T10:07:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_954",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_954",
                         "position": null
                       }
                     ]
@@ -364,7 +364,7 @@
                         "createdAt": "2026-11-02T15:00:00Z",
                         "lastEditedAt": "2026-11-02T15:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_915",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_915",
                         "position": null
                       },
                       {
@@ -379,7 +379,7 @@
                         "createdAt": "2026-11-02T15:30:00Z",
                         "lastEditedAt": "2026-11-02T15:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_916",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_916",
                         "position": null
                       }
                     ]
@@ -405,7 +405,7 @@
                         "createdAt": "2026-11-02T16:00:00Z",
                         "lastEditedAt": "2026-11-02T16:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_917",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_917",
                         "position": null
                       },
                       {
@@ -420,7 +420,7 @@
                         "createdAt": "2026-11-02T16:30:00Z",
                         "lastEditedAt": "2026-11-02T16:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_918",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_918",
                         "position": null
                       },
                       {
@@ -435,7 +435,7 @@
                         "createdAt": "2026-11-02T17:00:00Z",
                         "lastEditedAt": "2026-11-02T17:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_919",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_919",
                         "position": null
                       }
                     ]
@@ -461,7 +461,7 @@
                         "createdAt": "2026-11-03T08:00:00Z",
                         "lastEditedAt": "2026-11-03T08:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_920",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_920",
                         "position": null
                       },
                       {
@@ -476,7 +476,7 @@
                         "createdAt": "2026-11-03T08:30:00Z",
                         "lastEditedAt": "2026-11-03T08:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_921",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_921",
                         "position": null
                       }
                     ]
@@ -502,7 +502,7 @@
                         "createdAt": "2026-11-03T09:00:00Z",
                         "lastEditedAt": "2026-11-03T09:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_922",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_922",
                         "position": null
                       }
                     ]
@@ -524,7 +524,7 @@
                         "createdAt": "2026-11-03T09:30:00Z",
                         "lastEditedAt": "2026-11-03T09:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_923",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_923",
                         "position": null
                       },
                       {
@@ -535,7 +535,7 @@
                         "createdAt": "2026-11-03T10:00:00Z",
                         "lastEditedAt": "2026-11-03T10:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_924",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_924",
                         "position": null
                       }
                     ]
@@ -561,7 +561,7 @@
                         "createdAt": "2026-11-03T10:30:00Z",
                         "lastEditedAt": "2026-11-03T10:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_925",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_925",
                         "position": null
                       },
                       {
@@ -576,7 +576,7 @@
                         "createdAt": "2026-11-03T11:00:00Z",
                         "lastEditedAt": "2026-11-03T11:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_926",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_926",
                         "position": null
                       }
                     ]
@@ -602,7 +602,7 @@
                         "createdAt": "2026-11-03T11:30:00Z",
                         "lastEditedAt": "2026-11-03T11:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_927",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_927",
                         "position": null
                       },
                       {
@@ -617,7 +617,7 @@
                         "createdAt": "2026-11-03T12:00:00Z",
                         "lastEditedAt": "2026-11-03T12:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_928",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_928",
                         "position": null
                       }
                     ]
@@ -643,7 +643,7 @@
                         "createdAt": "2026-11-03T12:30:00Z",
                         "lastEditedAt": "2026-11-03T12:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/90#note_929",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_929",
                         "position": null
                       }
                     ]

@@ -286,14 +286,16 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   `graphql-description-58.json` links only the two commits given as plain links.
 - `mr-threads/` — whose turn a discussion is, its whole thread and the four writes
   (`docs/slices/briefs/mr-threads-fixtures.md`; `crates/merge-requests/tests/{discussions,threads}.rs`, the thread app
-  tests): logged in; `merge-requests/`'s project; user `sam`; people sam "Sam Weller", anna "Anna Berg", ben "Ben
-  Okafor", chiara "Chiara Rossi", dmitri "Dmitri Volkov" (user ids 1–5, avatars
+  tests): logged in; `mr-description/`'s project on gitlab.com (id 7, `https://gitlab.com/taskboard/taskboard`: a
+  comment's upload is fetched with the login only there); user `sam`; people sam "Sam Weller", anna "Anna Berg", ben
+  "Ben Okafor", chiara "Chiara Rossi", dmitri "Dmitri Volkov" (user ids 1–5, avatars
   `/uploads/-/system/user/avatar/<id>/avatar.png` in `pictures/`). One page, the last: !91 (by sam, locked:
   `discussionLocked: true`, `createNote: false`; 3 open) and !90 (by dmitri; 13 open). Discussion ids `dNN` are the
   hex `000…0NN`. !90, in order: d01 on `src/board.ts`
   new line 12 — anna (a paragraph with `strong`, `code` and a link, a typescript code block, a table, `@ben`; edited
   by herself two days later), a system note, sam (a suggestion block and the lazy upload
-  `/uploads/-/system/note/attachment/903/shot.png` at `width="60%"`; edited by dmitri), dmitri (a web image at
+  `/-/project/7/uploads/903a1b2c3d4e5f60718293a4b5c6d7e8/shot.png` at `width="60%"`, served by the uploads API,
+  `uploads/7/uploads/…/shot.png`; edited by dmitri), dmitri (a web image at
   `height="80"` and `<code>@sam</code>`), anna; d02 anna, sam; d03 sam, anna; d04 on `src/due.ts` old line 4 — ben
   mentioning `@sam`, chiara; d05 anna mentioning `@sam`, sam, anna; d06 chiara, anna mentioning `@ben`; d07 anna, a
   system note, anna; d08 anna, dmitri; d09 dmitri; d10 two deleted users (`author: null`); d11 chiara, ben mentioning

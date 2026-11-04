@@ -106,6 +106,7 @@ field() {
 # redirected (post calls respond).
 reply() {
 	posts=$(text_or "${YAMT_FAKE_GLAB_STATE:-}" 0)
+	posts=${posts:-0}
 	while [ "$posts" -gt 0 ]; do
 		if [ -f "$1.after-post-$posts.json" ]; then
 			respond "$1.after-post-$posts" "$2"

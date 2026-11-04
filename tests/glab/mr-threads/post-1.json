@@ -9,8 +9,8 @@
     "name": "Sam Weller",
     "state": "active",
     "locked": false,
-    "avatar_url": "https://gitlab.example/uploads/-/system/user/avatar/1/avatar.png",
-    "web_url": "https://gitlab.example/sam"
+    "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/1/avatar.png",
+    "web_url": "https://gitlab.com/sam"
   },
   "created_at": "2026-11-04T10:00:00.000Z",
   "updated_at": "2026-11-04T10:00:00.000Z",

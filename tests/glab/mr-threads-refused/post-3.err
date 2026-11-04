@@ -1,1 +1,1 @@
-glab: Post "https://gitlab.example/api/v4/projects/taskboard%2Ftaskboard/merge_requests/90/discussions/0000000000000000000000000000000000000001/notes": context deadline exceeded
+glab: Post "https://gitlab.com/api/v4/projects/taskboard%2Ftaskboard/merge_requests/90/discussions/0000000000000000000000000000000000000001/notes": context deadline exceeded
