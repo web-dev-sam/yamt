@@ -25,11 +25,13 @@
       "frontend/src/ipc/AGENTS.md"
     ]
   },
-  "MrFastPreviewLocalR3": {
+  "MrFastPreviewDocs": {
     "owned": [
-      "frontend/src/editor/internal/localPreview.ts",
-      "frontend/src/editor/internal/localPreview.test.ts",
-      "frontend/src/editor/AGENTS.md"
+      "docs/architecture.md",
+      ".omp/skills/project-map/**",
+      ".omp/skills/ipc-contract/SKILL.md",
+      "docs/plan.md",
+      ".omp/skills/risk-register/**"
     ]
   }
 }
