@@ -25,6 +25,10 @@ const PLANTED_TEXTS = [
 const DESCRIPTION_PAUSE_MS = 400;
 const LONG_PARAGRAPHS = 120;
 const FIRST_NUMBER = 3;
+const NARROW_PX = 120;
+const PART = 40;
+const WIDER_THAN_PANEL_PX = 4000;
+const LOW_PX = 60;
 const BLUE_SQUARE =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGUlEQVQoz2O0bvrGQApgIkn1qIZRDUNKAwBkagHTBOkobgAAAABJRU5ErkJggg==";
 // Stands in for another site's https image: a `data:` address keeps the fixture offline.
@@ -148,7 +152,7 @@ function linksAndImages(): Block[] {
     return { kind: "link", link: target, inlines: [text(words)] };
   }
   function image(source: Generated.DescriptionImage, caption: string): Inline {
-    return { kind: "image", image: source, caption };
+    return { kind: "image", image: source, caption, size: null };
   }
   return [
     paragraph(
@@ -166,6 +170,12 @@ function linksAndImages(): Block[] {
       image({ kind: "web", address: GREEN_BANNER }, "outside picture"),
       image({ kind: "refused" }, "refused picture"),
     ),
+    paragraph(
+      fixtureWebImage("120 px wide", { kind: "width", width: pixels(NARROW_PX) }),
+      fixtureWebImage("40 % wide", { kind: "width", width: { kind: "percent", value: PART } }),
+      fixtureWebImage("4000 px wide", { kind: "width", width: pixels(WIDER_THAN_PANEL_PX) }),
+      fixtureWebImage("60 px high", { kind: "height", height: pixels(LOW_PX) }),
+    ),
   ];
 }
 
@@ -173,13 +183,18 @@ function read(blocks: Block[]): Generated.DescriptionReply {
   return { kind: "read", description: { blocks } };
 }
 
-function rich(): Generated.DescriptionReply {
-  return read([
-    ...headingsAndText(),
-    ...codeAndLists(),
-    ...tableAndContainers(),
-    ...linksAndImages(),
-  ]);
+export function pixels(value: number): Generated.ImageLength {
+  return { kind: "pixels", value };
+}
+
+/** A web image of the fixture's own data address (another site's https image in the app), at `size`. */
+export function fixtureWebImage(caption: string, size: Generated.ImageSize | null): Inline {
+  return { kind: "image", image: { kind: "web", address: GREEN_BANNER }, caption, size };
+}
+
+/** !640's description: every element of rule 3, then its sized images. */
+export function richDescriptionBlocks(): Block[] {
+  return [...headingsAndText(), ...codeAndLists(), ...tableAndContainers(), ...linksAndImages()];
 }
 
 /** The fixture's answer for `iid`, `firstAsk` when this window never asked it before; a listed row without a
@@ -191,7 +206,7 @@ export function fixtureDescription(
 ): Generated.DescriptionReply {
   switch (iid) {
     case RICH_DESCRIPTION_IID:
-      return rich();
+      return read(richDescriptionBlocks());
     case LONG_DESCRIPTION_IID:
       return read(
         Array.from({ length: LONG_PARAGRAPHS }, (_, at) => paragraph(text(`Paragraph ${at + 1}.`))),
@@ -199,7 +214,7 @@ export function fixtureDescription(
     case EMPTY_DESCRIPTION_IID:
       return read([]);
     case FAILS_ONCE_IID:
-      return firstAsk ? { kind: "failed", message: TIMED_OUT } : rich();
+      return firstAsk ? { kind: "failed", message: TIMED_OUT } : read(richDescriptionBlocks());
     case PLANTED_IID:
       return read(PLANTED_TEXTS.map((words) => paragraph(text(words))));
     default:

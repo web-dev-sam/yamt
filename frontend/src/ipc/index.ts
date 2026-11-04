@@ -64,9 +64,15 @@ export type {
   Theme,
   WriteReply,
 } from "./domain";
-export { agentSessionId, isAgentSessionId, isMergeRequestIid, nextColumnVersion } from "./domain";
-export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
+export {
+  agentSessionId,
+  isAgentSessionId,
+  isDiscussionId,
+  isMergeRequestIid,
+  nextColumnVersion,
+} from "./domain";
 export type { AbortReply, Leftover, MergeView, PushReply, ReturnTo } from "./localMergeDomain";
+export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
 export type {
   Description,
   DescriptionBlock,
@@ -78,6 +84,7 @@ export type {
   DescriptionReply,
   DescriptionRow,
 } from "./descriptionDomain";
+export type { DiscussionsAnswer, OpenDiscussion, RowDiscussions } from "./discussionDomain";
 export type {
   DescriptionLinks,
   LinkedCommit,
@@ -89,7 +96,6 @@ export type {
 export type {
   CheckedRow,
   ContinueMergeReply,
-  DiscussionsAnswer,
   GitLabProject,
   JobLogReply,
   ListEnd,
@@ -98,7 +104,6 @@ export type {
   MergeRequestPage,
   MergeRequestPeople,
   MergeRequestRow,
-  OpenDiscussion,
   OpenReply,
   PageOpened,
   PeopleChange,
@@ -112,7 +117,6 @@ export type {
   ResolveRefusal,
   ResolveReply,
   Reviewer,
-  RowDiscussions,
   Started,
 } from "./mergeRequestDomain";
 export type { MergeRequestSource } from "./MergeRequestSource";

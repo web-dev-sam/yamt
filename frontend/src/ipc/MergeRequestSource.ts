@@ -1,5 +1,12 @@
 import type { DescriptionReply, UploadKey } from "./descriptionDomain";
-import type { MergeRequestIid, SourceResult, WebPage } from "./domain";
+import type {
+  DiscussionThreadReply,
+  DiscussionWriteReply,
+  MarkdownPreviewReply,
+  ReplyKind,
+  RowDiscussions,
+} from "./discussionDomain";
+import type { DiscussionId, MergeRequestIid, SourceResult, WebPage } from "./domain";
 import type { LinksReply } from "./linksDomain";
 import type {
   CheckedRow,
@@ -16,7 +23,6 @@ import type {
   PeopleSearchReply,
   RerequestReply,
   ResolveReply,
-  RowDiscussions,
 } from "./mergeRequestDomain";
 
 export interface MergeRequestSource {
@@ -57,4 +63,27 @@ export interface MergeRequestSource {
   /** The epics, issues and commits a merge request's description links to, with titles, states and parents; asked
    *  on a row's first hover (plan §2 rows 176–177). */
   readLinks(iid: MergeRequestIid): Promise<SourceResult<LinksReply>>;
+  /** One discussion's whole thread, the viewer's drafts and what they may do in it, read afresh on every call
+   *  (plan §2 row 180). */
+  readDiscussionThread(
+    iid: MergeRequestIid,
+    discussion: DiscussionId,
+  ): Promise<SourceResult<DiscussionThreadReply>>;
+  /** `text` posted in `discussion` at once or as a draft of the viewer's review (plan §2 row 181). */
+  replyToDiscussion(
+    iid: MergeRequestIid,
+    discussion: DiscussionId,
+    kind: ReplyKind,
+    text: string,
+  ): Promise<SourceResult<DiscussionWriteReply>>;
+  /** `discussion` resolved, or unresolved when `resolve` is false (plan §2 row 181). */
+  resolveDiscussion(
+    iid: MergeRequestIid,
+    discussion: DiscussionId,
+    resolve: boolean,
+  ): Promise<SourceResult<DiscussionWriteReply>>;
+  /** Every pending draft of the viewer on merge request `iid` published (plan §2 row 181). */
+  submitReview(iid: MergeRequestIid): Promise<SourceResult<DiscussionWriteReply>>;
+  /** `text` as GitLab renders it in this project, reduced like a description (plan §2 row 182). */
+  previewMarkdown(iid: MergeRequestIid, text: string): Promise<SourceResult<MarkdownPreviewReply>>;
 }

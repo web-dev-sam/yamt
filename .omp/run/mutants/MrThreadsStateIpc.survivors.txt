@@ -1,0 +1,10 @@
+just mutants HEAD — 13 TS files, 1840 mutants: 1493 killed, 338 survived, 11 no coverage (no Rust changes)
+fixtureMergeRequestTurnCases.ts:41-123 case/draft/place/RICH_CHANGES literals — gate-covered: module-level constants the vitest runner never re-evaluates (#732); the_b_cases… and d01_… assert them
+fixtureMergeRequestTurnCases.ts:23-39 HEX/serial/size constants — gate-covered: module-level constants (#732)
+fixtureMergeRequestData.ts:17-25 THREADS_IID/OPEN_DISCUSSIONS — gate-covered: module-level constants (#732); asserted by fixtureMergeRequests.test row counts
+fixtureMergeRequestThreads.ts:31-34 NOTHING_TO_SEND/FORBIDDEN/NOT_FOUND/SENT — gate-covered: module-level constants (#732); refuse_and_fail… asserts each word
+fixtureMergeRequestDescriptions.ts:28-31 NARROW_PX…LOW_PX — gate-covered: module-level constants (#732); the_rich_description… asserts the sizes
+fixtureMergeRequestDiscussions.ts:50-52 SHORT_TEXTS — gate-covered: module-level constants (#732)
+fixtureMergeRequestThreads.ts:49 `?? []`→`?? ["Stryker was here"]` — equivalent: a string has no matching .id, so the answer is notFound either way
+fixtureMergeRequestDiscussions.ts:136-137 empty-comments throw — equivalent: no stored discussion is ever empty (NoCoverage)
+fixtureMergeRequestTurnCases.ts:183-184 unknown-person throw — equivalent: the fixture only names people in PEOPLE (NoCoverage)

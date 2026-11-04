@@ -1,7 +1,13 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type * as Generated from "./bindings";
-import { isMergeRequestIid, isWebPage, type WebPage } from "./domain";
+import {
+  isDiscussionId,
+  isMergeRequestIid,
+  isWebPage,
+  type DiscussionId,
+  type WebPage,
+} from "./domain";
 import type { CheckedRow, MergeRequestPage } from "./mergeRequestDomain";
 import { createTauriMergeRequests, PICTURE_SCHEME } from "./tauriMergeRequests";
 import { branded } from "./validate";
@@ -18,6 +24,11 @@ const commands = vi.hoisted(() => ({
   changePeople: vi.fn(),
   readDescription: vi.fn(),
   readLinks: vi.fn(),
+  readDiscussionThread: vi.fn(),
+  replyToDiscussion: vi.fn(),
+  resolveDiscussion: vi.fn(),
+  submitReview: vi.fn(),
+  previewMarkdown: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -60,6 +71,21 @@ const STOPPED = { kind: "WorkerStopped" };
 const JOB_PAGE = "https://gitlab.example/x/-/jobs/9000";
 const UPLOAD = "upload~00000000000000000000000000000001";
 const MICROTASKS = 10;
+const D01 = "0000000000000000000000000000000000000001";
+const D02 = "0000000000000000000000000000000000000002";
+const ANNA_RAW: Generated.Person = {
+  username: "anna",
+  name: "Anna Berg",
+  picture: { kind: "none" },
+};
+const SAM_MENTION: Generated.Mention = { username: "sam", name: "Sam Weller" };
+
+function discussionId(text: string): DiscussionId {
+  if (!isDiscussionId(text)) {
+    throw new Error("not a discussion id");
+  }
+  return text;
+}
 
 function jobPage(): WebPage {
   if (!isWebPage(JOB_PAGE)) {
@@ -385,7 +411,12 @@ test("readDescription_calls_the_command_with_the_iid_and_converts_the_reply", as
         {
           kind: "paragraph",
           inlines: [
-            { kind: "image", image: { kind: "uploaded", key: UPLOAD }, caption: "shot" },
+            {
+              kind: "image",
+              image: { kind: "uploaded", key: UPLOAD },
+              caption: "shot",
+              size: { kind: "width", width: { kind: "percent", value: 40 } },
+            },
             {
               kind: "link",
               link: { kind: "page", page: "http://docs.example/x" },
@@ -474,17 +505,28 @@ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", as
         kind: "open",
         discussions: [
           {
+            id: D01,
             place: { kind: "file", path: "src/a.ts", line: 4 },
+            earlier: [{ author: ANNA_RAW, mentions: [SAM_MENTION] }],
             last: {
               author: { username: "ben", name: "Ben Okafor", picture: { kind: "uploaded" } },
               createdAt: "2026-10-29T09:00:00Z",
               text: "**not bold**",
               page: note,
+              mentions: [SAM_MENTION],
             },
           },
           {
+            id: D02,
             place: { kind: "overview" },
-            last: { author: null, createdAt: "2026-10-29T10:00:00Z", text: "x", page: null },
+            earlier: [],
+            last: {
+              author: null,
+              createdAt: "2026-10-29T10:00:00Z",
+              text: "x",
+              page: null,
+              mentions: [],
+            },
           },
         ],
       },
@@ -503,7 +545,14 @@ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", as
           kind: "open",
           discussions: [
             {
+              id: D01,
               place: { kind: "file", path: "src/a.ts", line: 4 },
+              earlier: [
+                {
+                  author: { username: "anna", name: "Anna Berg", picture: null },
+                  mentions: [SAM_MENTION],
+                },
+              ],
               last: {
                 author: {
                   username: "ben",
@@ -513,15 +562,19 @@ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", as
                 createdAt: Date.parse("2026-10-29T09:00:00Z"),
                 text: "**not bold**",
                 page: note,
+                mentions: [SAM_MENTION],
               },
             },
             {
+              id: D02,
               place: { kind: "overview" },
+              earlier: [],
               last: {
                 author: null,
                 createdAt: Date.parse("2026-10-29T10:00:00Z"),
                 text: "x",
                 page: null,
+                mentions: [],
               },
             },
           ],
@@ -545,7 +598,13 @@ test.each([
     /rows\[0\]\.answer\.discussions\[0\]\.last\.page/u,
   ],
 ] as const)("readDiscussions throws on %s, naming the field", async (_, change, field) => {
-  const last = { author: null, createdAt: "2026-10-29T09:00:00Z", text: "x", page: null };
+  const last = {
+    author: null,
+    createdAt: "2026-10-29T09:00:00Z",
+    text: "x",
+    page: null,
+    mentions: [],
+  };
   commands.readDiscussions.mockResolvedValue({
     status: "ok",
     data: [
@@ -553,7 +612,9 @@ test.each([
         iid: 12,
         answer: {
           kind: "open",
-          discussions: [{ place: { kind: "overview" }, last: { ...last, ...change } }],
+          discussions: [
+            { id: D01, place: { kind: "overview" }, earlier: [], last: { ...last, ...change } },
+          ],
         },
       },
     ],
@@ -588,24 +649,169 @@ test.each([
   ["changePeople", { kind: "WorkerStopped" }],
   ["readDescription", { kind: "WorkerStopped" }],
   ["readLinks", { kind: "WorkerStopped" }],
+  ["readDiscussionThread", { kind: "WorkerStopped" }],
+  ["replyToDiscussion", { kind: "WorkerStopped" }],
+  ["resolveDiscussion", { kind: "WorkerStopped" }],
+  ["submitReview", { kind: "WorkerStopped" }],
+  ["previewMarkdown", { kind: "WorkerStopped" }],
 ] as const)("a %s failure comes back unchanged", async (name, failure) => {
   commands[name].mockResolvedValue({ status: "error", error: failure });
   const source = createTauriMergeRequests();
+  const one = branded(1, isMergeRequestIid, "iid");
   const calls = {
     listMergeRequests: () => source.listMergeRequests(() => undefined, unchecked),
-    openMergeRequest: () => source.openMergeRequest(branded(1, isMergeRequestIid, "iid")),
-    rerequestReview: () => source.rerequestReview(branded(1, isMergeRequestIid, "iid"), "anna"),
+    openMergeRequest: () => source.openMergeRequest(one),
+    rerequestReview: () => source.rerequestReview(one, "anna"),
     readJobLog: () => source.readJobLog(jobPage()),
-    readDiscussions: () => source.readDiscussions([branded(1, isMergeRequestIid, "iid")]),
+    readDiscussions: () => source.readDiscussions([one]),
     searchPeople: () => source.searchPeople("an"),
     changePeople: () =>
-      source.changePeople(branded(1, isMergeRequestIid, "iid"), {
+      source.changePeople(one, {
         group: "assignees",
         action: "remove",
         username: "anna",
       }),
-    readDescription: () => source.readDescription(branded(1, isMergeRequestIid, "iid")),
-    readLinks: () => source.readLinks(branded(1, isMergeRequestIid, "iid")),
+    readDescription: () => source.readDescription(one),
+    readLinks: () => source.readLinks(one),
+    readDiscussionThread: () => source.readDiscussionThread(one, discussionId(D01)),
+    replyToDiscussion: () => source.replyToDiscussion(one, discussionId(D01), "comment", "x"),
+    resolveDiscussion: () => source.resolveDiscussion(one, discussionId(D01), true),
+    submitReview: () => source.submitReview(one),
+    previewMarkdown: () => source.previewMarkdown(one, "x"),
   };
   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
+});
+
+test("each_thread_method_calls_its_command_with_its_arguments", async () => {
+  const iid = branded(12, isMergeRequestIid, "iid");
+  const d01 = discussionId(D01);
+  const source = createTauriMergeRequests();
+  const ben: Generated.Person = {
+    username: "ben",
+    name: "Ben Okafor",
+    picture: { kind: "uploaded" },
+  };
+  const link: Generated.DescriptionInline = {
+    kind: "link",
+    link: { kind: "page", page: "https://docs.example/board" },
+    inlines: [{ kind: "text", text: "docs" }],
+  };
+  const body: Generated.Description = { blocks: [{ kind: "paragraph", inlines: [link] }] };
+  const last = {
+    author: ben,
+    createdAt: "2026-11-02T10:00:00Z",
+    text: "x",
+    page: null,
+    mentions: [],
+  };
+  commands.readDiscussionThread.mockResolvedValue({
+    status: "ok",
+    data: {
+      kind: "read",
+      thread: {
+        discussion: { id: D01, place: { kind: "overview" }, earlier: [], last },
+        resolved: false,
+        comments: [
+          {
+            author: ben,
+            createdAt: "2026-11-02T10:00:00Z",
+            edited: { at: "2026-11-02T11:00:00Z", by: ben },
+            body,
+            page: null,
+          },
+        ],
+        drafts: [],
+        pending: 0,
+        commenting: "allowed",
+        mayResolve: true,
+      },
+    },
+  });
+  const read = await source.readDiscussionThread(iid, d01);
+  expect(commands.readDiscussionThread).toHaveBeenCalledWith(12, D01);
+  const shownBen = { username: "ben", name: "Ben Okafor", picture: "yamt-picture://localhost/ben" };
+  expect(read).toMatchObject({
+    ok: true,
+    value: {
+      kind: "read",
+      thread: {
+        discussion: { last: { author: shownBen, createdAt: Date.UTC(2026, 10, 2, 10) } },
+        comments: [{ author: shownBen, edited: { at: Date.UTC(2026, 10, 2, 11), by: shownBen } }],
+      },
+    },
+  });
+
+  commands.replyToDiscussion.mockResolvedValue({ status: "ok", data: { kind: "sent" } });
+  expect(await source.replyToDiscussion(iid, d01, "draft", "Looks good")).toEqual({
+    ok: true,
+    value: { kind: "sent" },
+  });
+  expect(commands.replyToDiscussion).toHaveBeenCalledWith(12, D01, "draft", "Looks good");
+
+  const refused = { kind: "refused", reason: "403 Forbidden" };
+  commands.resolveDiscussion.mockResolvedValue({ status: "ok", data: refused });
+  expect(await source.resolveDiscussion(iid, d01, false)).toEqual({ ok: true, value: refused });
+  expect(commands.resolveDiscussion).toHaveBeenCalledWith(12, D01, false);
+
+  commands.submitReview.mockResolvedValue({ status: "ok", data: { kind: "glabMissing" } });
+  expect(await source.submitReview(iid)).toEqual({ ok: true, value: { kind: "glabMissing" } });
+  expect(commands.submitReview).toHaveBeenCalledWith(12);
+
+  commands.previewMarkdown.mockResolvedValue({
+    status: "ok",
+    data: { kind: "read", preview: body },
+  });
+  expect(await source.previewMarkdown(iid, "**Preview**")).toEqual({
+    ok: true,
+    value: { kind: "read", preview: body },
+  });
+  expect(commands.previewMarkdown).toHaveBeenCalledWith(12, "**Preview**");
+});
+
+test("a_thread_or_preview_with_a_bad_page_throws_naming_it", async () => {
+  const iid = branded(12, isMergeRequestIid, "iid");
+  const bad: Generated.Description = {
+    blocks: [
+      {
+        kind: "paragraph",
+        inlines: [{ kind: "link", link: { kind: "page", page: "javascript:x" }, inlines: [] }],
+      },
+    ],
+  };
+  commands.previewMarkdown.mockResolvedValue({
+    status: "ok",
+    data: { kind: "read", preview: bad },
+  });
+  await expect(createTauriMergeRequests().previewMarkdown(iid, "x")).rejects.toThrow(
+    "preview.link.page must be an http or https address",
+  );
+  commands.readDiscussionThread.mockResolvedValue({
+    status: "ok",
+    data: {
+      kind: "read",
+      thread: {
+        discussion: {
+          id: "d01",
+          place: { kind: "overview" },
+          earlier: [],
+          last: {
+            author: null,
+            createdAt: "2026-11-02T10:00:00Z",
+            text: "x",
+            page: null,
+            mentions: [],
+          },
+        },
+        resolved: false,
+        comments: [],
+        drafts: [],
+        pending: 0,
+        commenting: "allowed",
+        mayResolve: true,
+      },
+    },
+  });
+  await expect(
+    createTauriMergeRequests().readDiscussionThread(iid, discussionId(D01)),
+  ).rejects.toThrow('thread.discussion.id must be 40 lowercase hex digits, got "d01"');
 });

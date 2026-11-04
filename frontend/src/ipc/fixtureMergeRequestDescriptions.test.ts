@@ -53,6 +53,29 @@ function source(image: Generated.DescriptionImage): string {
   }
 }
 
+function lengthMark(length: Generated.ImageLength): string {
+  switch (length.kind) {
+    case "pixels":
+      return `${length.value}px`;
+    case "percent":
+      return `${length.value}%`;
+  }
+}
+
+function sizeMark(size: Generated.ImageSize | null): string {
+  if (size === null) {
+    return "";
+  }
+  switch (size.kind) {
+    case "width":
+      return ` (width ${lengthMark(size.width)})`;
+    case "height":
+      return ` (height ${lengthMark(size.height)})`;
+    case "both":
+      return ` (${lengthMark(size.width)} by ${lengthMark(size.height)})`;
+  }
+}
+
 function inlineMarks(inline: Generated.DescriptionInline): string[] {
   switch (inline.kind) {
     case "text":
@@ -68,7 +91,7 @@ function inlineMarks(inline: Generated.DescriptionInline): string[] {
     case "link":
       return [`link ${target(inline.link)}`, ...inline.inlines.flatMap(inlineMarks)];
     case "image":
-      return [`image ${source(inline.image)} ${inline.caption}`];
+      return [`image ${source(inline.image)} ${inline.caption}${sizeMark(inline.size)}`];
   }
 }
 
@@ -215,6 +238,10 @@ test("the_rich_description_holds_every_element_of_rule_3", () => {
     `image uploaded ${BROKEN_UPLOAD} broken screenshot`,
     "image web png outside picture",
     "image refused refused picture",
+    "image web png 120 px wide (width 120px)",
+    "image web png 40 % wide (width 40%)",
+    "image web png 4000 px wide (width 4000px)",
+    "image web png 60 px high (height 60px)",
   ]);
   expect(fixtureUploadedImage(LOADING_UPLOAD)).toMatch(/^data:image\/png;base64,iVBOR.{40}/u);
   expect(fixtureUploadedImage(BROKEN_UPLOAD)).toBe("data:image/png;base64,AAAA");

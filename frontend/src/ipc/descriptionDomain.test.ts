@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type * as Generated from "./bindings";
-import { toDescriptionReply } from "./descriptionDomain";
+import { toDescription, toDescriptionReply, type ImageSize } from "./descriptionDomain";
 
 type Inline = Generated.DescriptionInline;
 type Block = Generated.DescriptionBlock;
@@ -15,7 +15,7 @@ function everyKind(page: string): Block[] {
     { kind: "emphasis", inlines: [linked(page)] },
     { kind: "strong", inlines: [{ kind: "strike", inlines: [linked(page)] }] },
     { kind: "code", text: "x" },
-    { kind: "image", image: { kind: "refused" }, caption: "c" },
+    { kind: "image", image: { kind: "refused" }, caption: "c", size: null },
     { kind: "lineBreak" },
     { kind: "link", link: { kind: "refused", address: "mailto:a@b" }, inlines: [] },
   ];
@@ -87,4 +87,38 @@ test("a refusal passes unchanged", () => {
   for (const reply of replies) {
     expect(toDescriptionReply(reply)).toBe(reply);
   }
+});
+
+test("an_images_size_passes_as_sent", () => {
+  const sizes: readonly ImageSize[] = [
+    { kind: "width", width: { kind: "pixels", value: 120 } },
+    { kind: "height", height: { kind: "percent", value: 50 } },
+    {
+      kind: "both",
+      width: { kind: "percent", value: 40 },
+      height: { kind: "pixels", value: 9999 },
+    },
+  ];
+  const images: Inline[] = sizes.map((size) => ({
+    kind: "image",
+    image: { kind: "web", address: "https://images.example/a.png" },
+    caption: "a",
+    size,
+  }));
+  const raw = read([{ kind: "paragraph", inlines: images }]);
+
+  expect(toDescriptionReply(raw)).toEqual(raw);
+});
+
+test("a_comment_body_names_its_field_when_a_link_is_not_http", () => {
+  const body: Generated.Description = {
+    blocks: [{ kind: "quote", blocks: [{ kind: "paragraph", inlines: [linked("ftp://x/")] }] }],
+  };
+
+  expect(() => toDescription(body, "thread.comments[2].body")).toThrow(
+    'thread.comments[2].body.link.page must be an http or https address, got "ftp://x/"',
+  );
+  expect(() => toDescriptionReply({ kind: "read", description: body })).toThrow(
+    'description.link.page must be an http or https address, got "ftp://x/"',
+  );
 });

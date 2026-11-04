@@ -2,6 +2,11 @@ import { Channel, convertFileSrc } from "@tauri-apps/api/core";
 
 import { commands, type ListMessage } from "./bindings";
 import { toDescriptionReply } from "./descriptionDomain";
+import {
+  toDiscussionThreadReply,
+  toMarkdownPreviewReply,
+  toRowDiscussions,
+} from "./discussionDomain";
 import type { SourceResult } from "./domain";
 import { toLinksReply } from "./linksDomain";
 import {
@@ -11,7 +16,6 @@ import {
   toPeopleChangeReply,
   toPeopleSearchReply,
   toRerequestReply,
-  toRowDiscussions,
   type CheckedRow,
   type ListEnd,
   type MergeRequestPage,
@@ -97,6 +101,35 @@ function descriptionCalls(): Pick<
   };
 }
 
+function threadCalls(): Pick<
+  MergeRequestSource,
+  | "readDiscussionThread"
+  | "replyToDiscussion"
+  | "resolveDiscussion"
+  | "submitReview"
+  | "previewMarkdown"
+> {
+  return {
+    async readDiscussionThread(iid, discussion) {
+      return converted(toResult(await commands.readDiscussionThread(iid, discussion)), (reply) =>
+        toDiscussionThreadReply(reply, uploadedPicture),
+      );
+    },
+    async replyToDiscussion(iid, discussion, kind, text) {
+      return toResult(await commands.replyToDiscussion(iid, discussion, kind, text));
+    },
+    async resolveDiscussion(iid, discussion, resolve) {
+      return toResult(await commands.resolveDiscussion(iid, discussion, resolve));
+    },
+    async submitReview(iid) {
+      return toResult(await commands.submitReview(iid));
+    },
+    async previewMarkdown(iid, text) {
+      return converted(toResult(await commands.previewMarkdown(iid, text)), toMarkdownPreviewReply);
+    },
+  };
+}
+
 export function createTauriMergeRequests(): MergeRequestSource {
   return {
     async findGitLabProject() {
@@ -133,5 +166,6 @@ export function createTauriMergeRequests(): MergeRequestSource {
     },
     ...peopleCalls(),
     ...descriptionCalls(),
+    ...threadCalls(),
   };
 }

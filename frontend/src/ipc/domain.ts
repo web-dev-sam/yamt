@@ -65,6 +65,7 @@ export type CheckoutFolder = string & { readonly __brand: "CheckoutFolder" };
 export type AgentSessionId = string & { readonly __brand: "AgentSessionId" };
 export type MergeRequestIid = number & { readonly __brand: "MergeRequestIid" };
 export type WebPage = string & { readonly __brand: "WebPage" };
+export type DiscussionId = string & { readonly __brand: "DiscussionId" };
 
 export type ProgramFolders = Readonly<Record<keyof Generated.ProgramFolders, readonly string[]>>;
 export type ServerCommand = Omit<Generated.ServerCommand, "args" | "folders"> & {
@@ -205,6 +206,10 @@ export function isWebPage(text: string): text is WebPage {
 
 export function isLinkedPage(text: string): text is WebPage {
   return text.startsWith("https://") || text.startsWith("http://");
+}
+
+export function isDiscussionId(text: string): text is DiscussionId {
+  return /^[0-9a-f]{40}$/u.test(text);
 }
 
 export function nextColumnVersion(version: ColumnVersion): ColumnVersion {

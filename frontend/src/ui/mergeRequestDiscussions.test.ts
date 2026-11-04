@@ -3,6 +3,7 @@ import { effectScope, nextTick, shallowRef, type ShallowRef } from "vue";
 
 import {
   createFixtureCompareSource,
+  isDiscussionId,
   isMergeRequestIid,
   log,
   type DiscussionDetails,
@@ -53,9 +54,15 @@ beforeAll(async () => {
   ROWS = rows;
   const author = rows.find((row) => row.author !== null)?.author ?? null;
   const page = rows.find((row) => row.page !== null)?.page ?? null;
+  const id = "0000000000000000000000000000000000000001";
+  if (!isDiscussionId(id)) {
+    throw new Error(`${id} is not a discussion id`);
+  }
   DISCUSSION = {
+    id,
     place: { kind: "file", path: "src/board/card.ts", line: 12 },
-    last: { author, createdAt: 0, text: NOTE_TEXT, page },
+    earlier: [],
+    last: { author, createdAt: 0, text: NOTE_TEXT, page, mentions: [] },
   };
 });
 
@@ -424,12 +431,13 @@ test("a_refused_answer_is_kept_per_row", async () => {
     [638, { kind: "notLoggedIn", detail: "gitlab.example: no token" }],
     [636, { kind: "failed", message: "glab timed out" }],
   ];
-  expect(callAt(live, 0).iids).toEqual([639, 638, 636, 635]);
+  expect(callAt(live, 0).iids).toEqual([639, 638, 637, 636, 635]);
 
   callAt(live, 0).answer({
     ok: true,
     value: [
       ...refusals.map(([value, answer]) => ({ iid: iid(value), answer })),
+      { iid: iid(637), answer: { kind: "open", discussions: [] } },
       { iid: iid(635), answer: { kind: "open", discussions: [] } },
     ],
   });
@@ -487,8 +495,8 @@ test("the_log_event_never_carries_text_or_names", async () => {
   await settled();
 
   expect(info.mock.calls).toEqual([
-    ["mergeRequests.discussions_read", { asked: 4, answered: 3, refused: 2, ms: 250 }],
-    ["mergeRequests.discussions_read", { asked: 1, failed: "WorkerStopped", ms: 8 }],
+    ["mergeRequests.discussions_read", { asked: 5, answered: 3, refused: 2, ms: 250 }],
+    ["mergeRequests.discussions_read", { asked: 2, failed: "WorkerStopped", ms: 8 }],
   ]);
   const logged = JSON.stringify(info.mock.calls);
   const author = DISCUSSION.last.author;

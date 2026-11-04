@@ -14,6 +14,15 @@ export const ALREADY_OPEN_IID = 639;
 export const FETCH_FAILS_IID = 638;
 export const PREPARING_IID = 637;
 const CHECKING_IID = 635;
+/** The rows whose discussions are the turn rule's cases (`fixtureMergeRequestDiscussions.ts`); !636's are locked. */
+export const THREADS_IID = 637;
+export const LOCKED_THREADS_IID = 636;
+const THREADS_DISCUSSIONS = 13;
+const LOCKED_DISCUSSIONS = 3;
+const OPEN_DISCUSSIONS: Readonly<Record<number, number>> = {
+  [THREADS_IID]: THREADS_DISCUSSIONS,
+  [LOCKED_THREADS_IID]: LOCKED_DISCUSSIONS,
+};
 const NEWEST_CREATED = Date.parse("2026-10-30T09:00:00Z");
 const CREATED_STEP_MS = 21_600_000;
 const DRAFT_EVERY = 7;
@@ -230,7 +239,7 @@ function row(index: number): Generated.MergeRequestRow {
     assignees: index % NO_ASSIGNEE_EVERY === NO_ASSIGNEE_EVERY - 1 ? [] : [cycled(PEOPLE, index)],
     reviewers: reviewers(index),
     labels: labels(index),
-    openDiscussions: index % BUG_EVERY,
+    openDiscussions: OPEN_DISCUSSIONS[iid] ?? index % BUG_EVERY,
     approvedBy: PEOPLE.slice(0, index % APPROVERS_CYCLE),
     mayRerequest: index % NO_REREQUEST_EVERY !== NO_REREQUEST_EVERY - 1,
     pipeline: pipeline(index),

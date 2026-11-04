@@ -5,6 +5,7 @@ type Inlines = readonly DescriptionInline[];
 type Blocks = readonly DescriptionBlock[];
 
 export type DescriptionImage = Readonly<Generated.DescriptionImage>;
+export type ImageSize = Readonly<Generated.ImageSize>;
 type HeadingLevel = Generated.HeadingLevel;
 type ListNumbering = Readonly<Generated.ListNumbering>;
 type TaskBox = Generated.TaskBox;
@@ -61,11 +62,13 @@ function toLinkedPage(text: string, field: string): WebPage {
   return text;
 }
 
-function toLink(raw: Generated.DescriptionLink): DescriptionLink {
-  return raw.kind === "refused" ? raw : { kind: "page", page: toLinkedPage(raw.page, "link.page") };
+function toLink(raw: Generated.DescriptionLink, field: string): DescriptionLink {
+  return raw.kind === "refused"
+    ? raw
+    : { kind: "page", page: toLinkedPage(raw.page, `${field}.link.page`) };
 }
 
-function toInline(raw: Generated.DescriptionInline): DescriptionInline {
+function toInline(raw: Generated.DescriptionInline, field: string): DescriptionInline {
   switch (raw.kind) {
     case "text":
     case "code":
@@ -75,41 +78,66 @@ function toInline(raw: Generated.DescriptionInline): DescriptionInline {
     case "emphasis":
     case "strong":
     case "strike":
-      return { kind: raw.kind, inlines: raw.inlines.map(toInline) };
+      return { kind: raw.kind, inlines: raw.inlines.map((each) => toInline(each, field)) };
     case "link":
-      return { kind: "link", link: toLink(raw.link), inlines: raw.inlines.map(toInline) };
+      return {
+        kind: "link",
+        link: toLink(raw.link, field),
+        inlines: raw.inlines.map((each) => toInline(each, field)),
+      };
   }
 }
 
-function toRow(raw: Generated.DescriptionRow): DescriptionRow {
-  return { cells: raw.cells.map((cell) => ({ ...cell, inlines: cell.inlines.map(toInline) })) };
+function toRow(raw: Generated.DescriptionRow, field: string): DescriptionRow {
+  return {
+    cells: raw.cells.map((cell) => ({
+      ...cell,
+      inlines: cell.inlines.map((each) => toInline(each, field)),
+    })),
+  };
 }
 
-function toBlock(raw: Generated.DescriptionBlock): DescriptionBlock {
+function toBlock(raw: Generated.DescriptionBlock, field: string): DescriptionBlock {
   switch (raw.kind) {
     case "code":
     case "rule":
       return raw;
     case "paragraph":
     case "heading":
-      return { ...raw, inlines: raw.inlines.map(toInline) };
+      return { ...raw, inlines: raw.inlines.map((each) => toInline(each, field)) };
     case "list":
       return {
         ...raw,
-        items: raw.items.map((item) => ({ ...item, blocks: item.blocks.map(toBlock) })),
+        items: raw.items.map((item) => ({
+          ...item,
+          blocks: item.blocks.map((each) => toBlock(each, field)),
+        })),
       };
     case "quote":
-      return { kind: "quote", blocks: raw.blocks.map(toBlock) };
+      return { kind: "quote", blocks: raw.blocks.map((each) => toBlock(each, field)) };
     case "table":
-      return { kind: "table", head: raw.head.map(toRow), body: raw.body.map(toRow) };
+      return {
+        kind: "table",
+        head: raw.head.map((each) => toRow(each, field)),
+        body: raw.body.map((each) => toRow(each, field)),
+      };
     case "details":
-      return { ...raw, summary: raw.summary.map(toInline), blocks: raw.blocks.map(toBlock) };
+      return {
+        ...raw,
+        summary: raw.summary.map((each) => toInline(each, field)),
+        blocks: raw.blocks.map((each) => toBlock(each, field)),
+      };
   }
 }
 
-/** Brands every link's page as a WebPage on http or https, as Rust's `WebPage::linked` makes it; any other throws. */
+/** Brands every link's page as a WebPage on http or https, as Rust's `WebPage::linked` makes it; any other throws,
+ *  naming `field`. An image's size passes as sent. */
+export function toDescription(raw: Generated.Description, field: string): Description {
+  return { blocks: raw.blocks.map((block) => toBlock(block, field)) };
+}
+
 export function toDescriptionReply(raw: Generated.DescriptionReply): DescriptionReply {
   return raw.kind === "read"
-    ? { kind: "read", description: { blocks: raw.description.blocks.map(toBlock) } }
+    ? { kind: "read", description: toDescription(raw.description, "description") }
     : raw;
 }

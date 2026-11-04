@@ -4,6 +4,7 @@ import { nextTick, shallowRef, type ShallowRef } from "vue";
 
 import {
   createFixtureCompareSource,
+  isDiscussionId,
   isMergeRequestIid,
   log,
   type CheckedRow,
@@ -210,6 +211,11 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
       ok: true,
       value: { kind: "read", links: { epics: [], issues: [], commits: [] } },
     }),
+    readDiscussionThread: async () => ({ ok: true, value: { kind: "notFound" } }),
+    replyToDiscussion: async () => ({ ok: true, value: { kind: "sent" } }),
+    resolveDiscussion: async () => ({ ok: true, value: { kind: "sent" } }),
+    submitReview: async () => ({ ok: true, value: { kind: "sent" } }),
+    previewMarkdown: async () => ({ ok: true, value: { kind: "read", preview: { blocks: [] } } }),
     ...edit,
   };
   const screen = shallowRef<Screen>({ kind: "files" });
@@ -1569,9 +1575,15 @@ function reviewedBy(username: string): readonly MergeRequestRow[] {
 }
 
 function lastBy(author: Person): OpenDiscussion {
+  const id = "0000000000000000000000000000000000000001";
+  if (!isDiscussionId(id)) {
+    throw new Error(`${id} is not a discussion id`);
+  }
   return {
+    id,
     place: { kind: "overview" },
-    last: { author, createdAt: T0, text: "a comment", page: null },
+    earlier: [],
+    last: { author, createdAt: T0, text: "a comment", page: null, mentions: [] },
   };
 }
 

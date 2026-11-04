@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 
+import type { RowDiscussions } from "./discussionDomain";
 import { isMergeRequestIid, isWebPage, type MergeRequestIid } from "./domain";
 import { createFixtureCompareSource } from "./fixtureCompare";
 import {
@@ -22,7 +23,6 @@ import type {
   MergeRequestPage,
   RerequestReply,
   ResolveReply,
-  RowDiscussions,
 } from "./mergeRequestDomain";
 import type { MergeRequestSource } from "./MergeRequestSource";
 import { branded } from "./validate";
@@ -124,8 +124,9 @@ test("the list holds every case the page filters and shows (catches a fixture th
     newest - 6 * hour,
     newest - 24 * hour,
   ]);
+  const turnCases: Readonly<Record<number, number>> = { 637: 13, 636: 3 };
   expect(rows.map((row) => [row.openDiscussions, row.approvedBy.length])).toEqual(
-    Array.from({ length: 40 }, (_, at) => [at % 3, at % 4]),
+    Array.from({ length: 40 }, (_, at) => [turnCases[640 - at] ?? at % 3, at % 4]),
   );
   expect(rows.filter((row) => row.draft).map((row) => row.iid)).toEqual([634, 627, 620, 613, 606]);
   expect(count((row) => row.draft !== row.title.startsWith("Draft: "))).toBe(0);
@@ -510,12 +511,15 @@ test("discussions_answer_a_prefix_of_ten_after_400_ms_and_log_the_ask", async ()
     kind: "open",
     discussions: [
       {
+        id: "f99c".padStart(40, "0"),
         place: { kind: "file", path: "src/board/card.ts", line: 11 },
+        earlier: [],
         last: {
           author: { username: "chiara", name: "Chiara Rossi", picture: null },
           createdAt: Date.parse("2026-10-30T04:00:00Z"),
           text: "Could you look at this again?",
           page: null,
+          mentions: [],
         },
       },
     ],

@@ -15,10 +15,11 @@ import {
   REFUSING_REVIEWER,
 } from "./fixtureMergeRequestData";
 import { descriptionScript } from "./fixtureMergeRequestDescriptions";
-import { discussionsScript } from "./fixtureMergeRequestDiscussions";
+import { createDiscussionStore, discussionsScript } from "./fixtureMergeRequestDiscussions";
 import { linksScript } from "./fixtureMergeRequestLinks";
 import { fixtureJobLog } from "./fixtureMergeRequestLogs";
 import { peopleScript } from "./fixtureMergeRequestPeople";
+import { threadsScript } from "./fixtureMergeRequestThreads";
 import type { Log } from "./log";
 import {
   toCheckedRow,
@@ -254,6 +255,7 @@ function pageScript(log: Log): Pick<MergeRequestSource, "openPage" | "readJobLog
 export function createFixtureMergeRequests(log: Log, search: string): MergeRequestSource {
   const script = shownScript(log, search);
   let loads = 0;
+  const discussions = createDiscussionStore(LISTED_ROWS);
   return {
     async findGitLabProject() {
       return { ok: true, value: fixtureProject(script) };
@@ -282,7 +284,8 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
     ...localMergeScript(),
     ...rerequestScript(log),
     ...pageScript(log),
-    ...discussionsScript(log, LISTED_ROWS),
+    ...discussionsScript(log, discussions),
+    ...threadsScript(log, discussions),
     ...peopleScript(log, LISTED_ROWS),
     ...descriptionScript(log, LISTED_ROWS),
     ...linksScript(log),

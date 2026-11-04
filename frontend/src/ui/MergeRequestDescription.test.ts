@@ -173,7 +173,7 @@ test("an_upload_and_another_sites_image_load_their_address_and_a_refused_one_sho
   const html = await rendered(RICH);
   const images = [...html.matchAll(/<img [^>]*>/gu)].map((found) => found[0]);
 
-  expect(images).toHaveLength(3);
+  expect(images).toHaveLength(7);
   expect(images[0]).toContain(`src="${source.uploadedImage(LOADING_UPLOAD)}"`);
   expect(images[0]).toContain('alt="screenshot"');
   expect(images[1]).toContain(`src="${source.uploadedImage(BROKEN_UPLOAD)}"`);
@@ -188,11 +188,12 @@ test("an image without a caption stands in with its address, or with 'picture'",
   const html = await blocks({
     kind: "paragraph",
     inlines: [
-      { kind: "image", image: { kind: "refused" }, caption: "" },
+      { kind: "image", image: { kind: "refused" }, caption: "", size: null },
       {
         kind: "image",
         image: { kind: "web", address: "https://images.example/a.png" },
         caption: "",
+        size: null,
       },
     ],
   });
