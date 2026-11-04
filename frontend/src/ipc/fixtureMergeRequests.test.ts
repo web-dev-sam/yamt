@@ -81,6 +81,12 @@ test("a script finds the project by its repository", async () => {
   });
 });
 
+test("asking_gitlab_again_logs_fixture_ask_again_and_answers_at_once", async () => {
+  const lines: string[] = [];
+  expect(await source("?mr=list", lines).askGitLabAgain()).toEqual({ ok: true, value: null });
+  expect(lines).toEqual(["mergeRequests.fixture_ask_again {}"]);
+});
+
 test.each<[MergeRequestScript, readonly number[], ListEnd]>([
   ["list", [20, 20], { kind: "loaded" }],
   ["local", [20, 20], { kind: "loaded" }],

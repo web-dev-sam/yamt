@@ -12,7 +12,7 @@ import {
   type SourceResult,
 } from "../ipc";
 import type { Discussions } from "./mergeRequestDiscussionRows";
-import { readPreview, type Preview } from "./mergeRequestPreview";
+import { previewHere, readPreview, type Preview } from "./mergeRequestPreview";
 import { attempt, type Outcome, type ProblemCause } from "./problem";
 
 export type ShownThread = { readonly iid: MergeRequestIid; readonly discussion: DiscussionId };
@@ -73,6 +73,7 @@ type State = {
 const LOADING: ThreadLoad = { kind: "loading" };
 const IDLE: Sending = { kind: "idle" };
 const WRITING: Preview = { kind: "writing" };
+const EMPTY: Preview = { kind: "empty" };
 
 function isShown(state: State, shown: ShownThread): boolean {
   const current = state.thread.value?.shown;
@@ -201,8 +202,9 @@ async function preview(state: State): Promise<void> {
   }
   const { shown } = current;
   const text = state.replyTexts.value.get(shown.discussion) ?? "";
-  if (text.trim() === "") {
-    patch(state, shown, { preview: { kind: "empty" } });
+  const atOnce = text.trim() === "" ? EMPTY : previewHere(shown.iid, text);
+  if (atOnce !== null) {
+    patch(state, shown, { preview: atOnce });
     return;
   }
   const loading: Preview = { kind: "loading" };

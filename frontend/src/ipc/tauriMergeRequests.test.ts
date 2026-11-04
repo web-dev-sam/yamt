@@ -14,6 +14,7 @@ import { branded } from "./validate";
 
 const commands = vi.hoisted(() => ({
   findGitlabProject: vi.fn(),
+  askGitlabAgain: vi.fn(),
   listMergeRequests: vi.fn(),
   openMergeRequest: vi.fn(),
   openPage: vi.fn(),
@@ -140,6 +141,13 @@ test("the project comes back as GitLab answered it", async () => {
     ok: true,
     value: { kind: "found", repository: "/r/.git" },
   });
+});
+
+test("askGitLabAgain_calls_the_command", async () => {
+  commands.askGitlabAgain.mockResolvedValue({ status: "ok", data: null });
+  expect(await createTauriMergeRequests().askGitLabAgain()).toEqual({ ok: true, value: null });
+  expect(commands.askGitlabAgain).toHaveBeenCalledTimes(1);
+  expect(commands.askGitlabAgain).toHaveBeenCalledWith();
 });
 
 test("each page from the channel reaches the callback converted, then the end message ends the load (catches a time left as text)", async () => {
@@ -640,6 +648,7 @@ test("readDiscussions throws on a negative iid, naming the row", async () => {
 });
 
 test.each([
+  ["askGitlabAgain", { kind: "WorkerStopped" }],
   ["listMergeRequests", { kind: "WorkerStopped" }],
   ["openMergeRequest", { kind: "WorkerStopped" }],
   ["rerequestReview", { kind: "WorkerStopped" }],
@@ -659,6 +668,7 @@ test.each([
   const source = createTauriMergeRequests();
   const one = branded(1, isMergeRequestIid, "iid");
   const calls = {
+    askGitlabAgain: () => source.askGitLabAgain(),
     listMergeRequests: () => source.listMergeRequests(() => undefined, unchecked),
     openMergeRequest: () => source.openMergeRequest(one),
     rerequestReview: () => source.rerequestReview(one, "anna"),

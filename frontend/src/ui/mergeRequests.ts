@@ -26,6 +26,7 @@ import { createLinks, linksOf, type LinkQueue, type Links } from "./mergeRequest
 import { createPeopleChanges, type PeopleChanges } from "./mergeRequestPeople";
 import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
 import { loadList, type ListLoad, type ListState } from "./mergeRequestsList";
+import { createRefreshes, type Refreshes } from "./mergeRequestsRefresh";
 import { shownOf, type Shown } from "./mergeRequestsShown";
 import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
 import { createThreads, type Threads } from "./mergeRequestThread";
@@ -54,6 +55,7 @@ export type MergeRequests = RowActions &
   Threads &
   Links &
   Shown &
+  Refreshes &
   PeopleChanges & {
     readonly project: Readonly<ShallowRef<GitLabProject>>;
     readonly me: Readonly<ShallowRef<string | null>>;
@@ -68,7 +70,6 @@ export type MergeRequests = RowActions &
     findProject(): Promise<void>;
     show(): void;
     close(): void;
-    refresh(): Promise<void>;
     setSearch(text: string): void;
     setDueDate(iid: MergeRequestIid, day: CalendarDay | null): void;
     openChanges(iid: MergeRequestIid): Promise<void>;
@@ -282,7 +283,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     close: () => {
       state.screen.value = { kind: "files" };
     },
-    refresh: () => loadList(state),
+    ...createRefreshes(state),
     openChanges: (iid) => openChanges(state, iid),
     ...state.rowActions,
     ...people,

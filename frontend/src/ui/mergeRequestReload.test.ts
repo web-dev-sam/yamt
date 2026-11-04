@@ -20,6 +20,8 @@ type Rig = {
   readonly slice: MergeRequests;
   readonly source: MergeRequestSource;
   readonly threadReads: MergeRequestIid[];
+  /** Every ask-again and discussions read, in call order. */
+  readonly calls: string[];
   /** The second and later list loads: their page is sent; the end waits for the test. */
   readonly held: ((end: SourceResult<ListEnd>) => void)[];
 };
@@ -47,13 +49,22 @@ function iid(value: number): MergeRequestIid {
   return value;
 }
 
-function rig(): Rig {
+function rig(askedAgain: SourceResult<null> = { ok: true, value: null }): Rig {
   const fixture = createFixtureCompareSource(log, "?mr=list", {});
   const threadReads: MergeRequestIid[] = [];
+  const calls: string[] = [];
   const held: ((end: SourceResult<ListEnd>) => void)[] = [];
   let first: MergeRequestPage | null = null;
   const source: MergeRequestSource = {
     ...fixture,
+    askGitLabAgain: async () => {
+      calls.push("askGitLabAgain");
+      return askedAgain;
+    },
+    readDiscussions: (asked) => {
+      calls.push("readDiscussions");
+      return fixture.readDiscussions(asked);
+    },
     listMergeRequests: async (onPage, onChecked) => {
       if (first !== null) {
         onPage(first);
@@ -77,7 +88,7 @@ function rig(): Rig {
     report: () => undefined,
     discussionDetails: () => "lazy",
   });
-  return { slice, source, threadReads, held };
+  return { slice, source, threadReads, calls, held };
 }
 
 function rowOf(live: Rig, value: number): MergeRequestRow {
@@ -156,6 +167,7 @@ test("a_list_refresh_rereads_the_shown_thread", async () => {
   const live = rig();
   const shown = await threadShown(live);
   const refreshing = live.slice.refresh();
+  await vi.advanceTimersByTimeAsync(0);
   expect(live.threadReads).toHaveLength(1);
 
   live.held[0]?.({ ok: true, value: { kind: "loaded" } });
@@ -212,4 +224,39 @@ test("a_box_thread_answer_through_the_slice_marks_its_row", async () => {
   live.slice.threadRead(iid(THREADS), second, true);
   const marked = live.slice.discussions.value.get(iid(THREADS));
   expect(marked?.kind === "read" && [...marked.resolved]).toEqual([second.id]);
+});
+
+test("the_discussions_reload_button_asks_gitlab_again", async () => {
+  const live = rig();
+  await threadShown(live);
+  expect(live.calls).toEqual(["askGitLabAgain", "readDiscussions"]);
+
+  const submitting = live.slice.submitReview();
+  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS * 2);
+  await submitting;
+  expect(live.calls).toEqual(["askGitLabAgain", "readDiscussions", "readDiscussions"]);
+
+  live.slice.refreshDiscussions(iid(THREADS));
+  expect(live.calls).toHaveLength(4);
+  expect(live.slice.reloads.value.size).toBe(0);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(live.calls.slice(3)).toEqual(["askGitLabAgain", "readDiscussions"]);
+  expect(live.slice.reloads.value.get(iid(THREADS))).toEqual({ kind: "running" });
+});
+
+test("a_failed_ask_still_reloads_the_discussions", async () => {
+  const live = rig({ ok: false, failure: { kind: "WorkerStopped" } });
+  await threadShown(live);
+  live.slice.refreshDiscussions(iid(THREADS));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(live.calls).toEqual([
+    "askGitLabAgain",
+    "readDiscussions",
+    "askGitLabAgain",
+    "readDiscussions",
+  ]);
+  expect(live.slice.reloads.value.get(iid(THREADS))).toEqual({ kind: "running" });
+  expect(log.info).toHaveBeenCalledWith("mergeRequests.ask_again_failed", {
+    kind: "WorkerStopped",
+  });
 });

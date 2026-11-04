@@ -237,7 +237,9 @@ function rerequestScript(log: Log): Pick<MergeRequestSource, "rerequestReview"> 
   };
 }
 
-function pageScript(log: Log): Pick<MergeRequestSource, "openPage" | "readJobLog"> {
+function pageScript(
+  log: Log,
+): Pick<MergeRequestSource, "openPage" | "readJobLog" | "askGitLabAgain"> {
   return {
     async openPage(page) {
       log.info("mergeRequests.fixture_page", { page });
@@ -247,6 +249,10 @@ function pageScript(log: Log): Pick<MergeRequestSource, "openPage" | "readJobLog
       log.info("mergeRequests.fixture_job_log", { page });
       await pause(LOG_PAUSE_MS);
       return { ok: true, value: fixtureJobLog(page, fixtureRows(0, LISTED_ROWS)) };
+    },
+    async askGitLabAgain() {
+      log.info("mergeRequests.fixture_ask_again", {});
+      return { ok: true, value: null };
     },
   };
 }

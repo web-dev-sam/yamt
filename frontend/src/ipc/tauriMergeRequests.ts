@@ -130,11 +130,20 @@ function threadCalls(): Pick<
   };
 }
 
-export function createTauriMergeRequests(): MergeRequestSource {
+function projectCalls(): Pick<MergeRequestSource, "findGitLabProject" | "askGitLabAgain"> {
   return {
     async findGitLabProject() {
       return { ok: true, value: await commands.findGitlabProject() };
     },
+    async askGitLabAgain() {
+      return toResult(await commands.askGitlabAgain());
+    },
+  };
+}
+
+export function createTauriMergeRequests(): MergeRequestSource {
+  return {
+    ...projectCalls(),
     listMergeRequests: listed,
     async openMergeRequest(iid) {
       return converted(toResult(await commands.openMergeRequest(iid)), toOpenReply);

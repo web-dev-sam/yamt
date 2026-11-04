@@ -1,0 +1,886 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index c45eb55..25c4767 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -6,7 +6,7 @@ The range window's threads and GitLab (plan §2 #116–#120) come through `Revie
+ 
+ Your own notes until they are on GitLab (plan §2 #123): `editNote(message, text)` and `deleteMessage(message)` answer the new `ThreadList`. `fixtureReview.ts` mirrors Rust's order: `SendRunning` while its send runs, then `UnknownMessage`, `NotANote` (an AI answer), `MessagePending`, and for an edit `EmptyMessage`; an edit of a queued or refused note leaves it `queued` with the new text; a delete drops the note and a thread left empty; ids are never reused.
+ 
+-The GitLab merge-request overview (compare and range windows) comes through `MergeRequestSource` (`MergeRequestSource.ts`: `findGitLabProject`, `listMergeRequests` with a page callback, `openMergeRequest`, `openPage`), which `CompareSource` and `RangeSource` extend: the `MergeRequestIid`/`WebPage` brands in `domain.ts` (a `WebPage` is a failed job's, a merge request's, a note's or a links line's https page, minted by `isWebPage`/`toWebPage`, plan §2 #137, #162, or a description's link, http or https, minted by `isLinkedPage`, plan §2 #172), the shapes and their conversions in `mergeRequestDomain.ts` (`createdAt` to ms since 1970, a missing commit's `short_id` as `shortId`), the app's in `tauriMergeRequests.ts`: one `Channel<ListMessage>` per load carries every page, then exactly one end, and the load ends on that end message (or the command's IPC failure), never on the command's own answer, since Tauri may deliver a page after it; an unreadable page fails the load; no page reaches the callback after the load ended. Fixture mode's is `fixtureMergeRequests.ts` over `fixtureMergeRequestData.ts`: `?mr=<script>` (`list`, `local`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`, `refused`, `pageFails`) scripts GitLab's answers, every row with its page `<origin>/-/merge_requests/<iid>`, and an opened page logs `mergeRequests.fixture_page`; without `mr` the project is `none`, and an unknown script logs `mergeRequests.fixture_miss` and is `none` too.
++The GitLab merge-request overview (compare and range windows) comes through `MergeRequestSource` (`MergeRequestSource.ts`: `findGitLabProject`, `askGitLabAgain`, `listMergeRequests` with a page callback, `openMergeRequest`, `openPage`), which `CompareSource` and `RangeSource` extend: the `MergeRequestIid`/`WebPage` brands in `domain.ts` (a `WebPage` is a failed job's, a merge request's, a note's or a links line's https page, minted by `isWebPage`/`toWebPage`, plan §2 #137, #162, or a description's link, http or https, minted by `isLinkedPage`, plan §2 #172), the shapes and their conversions in `mergeRequestDomain.ts` (`createdAt` to ms since 1970, a missing commit's `short_id` as `shortId`), the app's in `tauriMergeRequests.ts`: one `Channel<ListMessage>` per load carries every page, then exactly one end, and the load ends on that end message (or the command's IPC failure), never on the command's own answer, since Tauri may deliver a page after it; an unreadable page fails the load; no page reaches the callback after the load ended. `askGitLabAgain()` (plan §2 #187, owner #2423: called by every explicit refresh button) is `ask_gitlab_again` through `toResult`: the next GitLab action asks glab for the login and the project again. Fixture mode's is `fixtureMergeRequests.ts` over `fixtureMergeRequestData.ts`: `?mr=<script>` (`list`, `local`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`, `refused`, `pageFails`) scripts GitLab's answers, every row with its page `<origin>/-/merge_requests/<iid>`, an opened page logs `mergeRequests.fixture_page`, and an ask again logs `mergeRequests.fixture_ask_again {}` and answers `null` at once; without `mr` the project is `none`, and an unknown script logs `mergeRequests.fixture_miss` and is `none` too.
+ 
+ yamt's local conflict check (request `docs/slices/request-local-conflict-check.md`): `listMergeRequests`'s second callback `onChecked` gets a `CheckedRow` (`toCheckedRow`, iid branded) for each `checked` message, which Rust sends after the load's `end` on the same channel, so `tauriMergeRequests.ts` passes it on after the load settled while a late `page` still reaches nobody; the fixture script `?mr=local` is `list`'s rows and end, then, 1,000 ms after the end, !640 and !635 `mergesCleanly` and !638 `conflicts` (every other script sends none).
+ 
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index 55f76aa..8160c90 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -27,6 +27,9 @@ import type {
+ 
+ export interface MergeRequestSource {
+   findGitLabProject(): Promise<SourceResult<GitLabProject>>;
++  /** An explicit refresh (the page's Refresh and its Retry, the discussions box's reload button; owner decision 2423):
++   *  the next GitLab action asks glab for the login and the project again (plan §2 row 187). */
++  askGitLabAgain(): Promise<SourceResult<null>>;
+   /**
+    * Every page reaches `onPage` before the returned promise settles, and none after. `onChecked` gets this load's
+    * local results (rows yamt's own merge changed), after the promise settled, and never another load's.
+diff --git a/frontend/src/ipc/fixtureMergeRequests.test.ts b/frontend/src/ipc/fixtureMergeRequests.test.ts
+index 4cb3fa9..e6ef8a2 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.test.ts
+@@ -81,6 +81,12 @@ test("a script finds the project by its repository", async () => {
+   });
+ });
+ 
++test("asking_gitlab_again_logs_fixture_ask_again_and_answers_at_once", async () => {
++  const lines: string[] = [];
++  expect(await source("?mr=list", lines).askGitLabAgain()).toEqual({ ok: true, value: null });
++  expect(lines).toEqual(["mergeRequests.fixture_ask_again {}"]);
++});
++
+ test.each<[MergeRequestScript, readonly number[], ListEnd]>([
+   ["list", [20, 20], { kind: "loaded" }],
+   ["local", [20, 20], { kind: "loaded" }],
+diff --git a/frontend/src/ipc/fixtureMergeRequests.ts b/frontend/src/ipc/fixtureMergeRequests.ts
+index 1ec040b..8c82a1f 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.ts
+@@ -237,7 +237,9 @@ function rerequestScript(log: Log): Pick<MergeRequestSource, "rerequestReview">
+   };
+ }
+ 
+-function pageScript(log: Log): Pick<MergeRequestSource, "openPage" | "readJobLog"> {
++function pageScript(
++  log: Log,
++): Pick<MergeRequestSource, "openPage" | "readJobLog" | "askGitLabAgain"> {
+   return {
+     async openPage(page) {
+       log.info("mergeRequests.fixture_page", { page });
+@@ -248,6 +250,10 @@ function pageScript(log: Log): Pick<MergeRequestSource, "openPage" | "readJobLog
+       await pause(LOG_PAUSE_MS);
+       return { ok: true, value: fixtureJobLog(page, fixtureRows(0, LISTED_ROWS)) };
+     },
++    async askGitLabAgain() {
++      log.info("mergeRequests.fixture_ask_again", {});
++      return { ok: true, value: null };
++    },
+   };
+ }
+ 
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index 0d9caeb..9c13fca 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -14,6 +14,7 @@ import { branded } from "./validate";
+ 
+ const commands = vi.hoisted(() => ({
+   findGitlabProject: vi.fn(),
++  askGitlabAgain: vi.fn(),
+   listMergeRequests: vi.fn(),
+   openMergeRequest: vi.fn(),
+   openPage: vi.fn(),
+@@ -142,6 +143,13 @@ test("the project comes back as GitLab answered it", async () => {
+   });
+ });
+ 
++test("askGitLabAgain_calls_the_command", async () => {
++  commands.askGitlabAgain.mockResolvedValue({ status: "ok", data: null });
++  expect(await createTauriMergeRequests().askGitLabAgain()).toEqual({ ok: true, value: null });
++  expect(commands.askGitlabAgain).toHaveBeenCalledTimes(1);
++  expect(commands.askGitlabAgain).toHaveBeenCalledWith();
++});
++
+ test("each page from the channel reaches the callback converted, then the end message ends the load (catches a time left as text)", async () => {
+   commands.listMergeRequests.mockImplementation(async (channel: MessageChannel) => {
+     channel.onmessage(page([ROW]));
+@@ -640,6 +648,7 @@ test("readDiscussions throws on a negative iid, naming the row", async () => {
+ });
+ 
+ test.each([
++  ["askGitlabAgain", { kind: "WorkerStopped" }],
+   ["listMergeRequests", { kind: "WorkerStopped" }],
+   ["openMergeRequest", { kind: "WorkerStopped" }],
+   ["rerequestReview", { kind: "WorkerStopped" }],
+@@ -659,6 +668,7 @@ test.each([
+   const source = createTauriMergeRequests();
+   const one = branded(1, isMergeRequestIid, "iid");
+   const calls = {
++    askGitlabAgain: () => source.askGitLabAgain(),
+     listMergeRequests: () => source.listMergeRequests(() => undefined, unchecked),
+     openMergeRequest: () => source.openMergeRequest(one),
+     rerequestReview: () => source.rerequestReview(one, "anna"),
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index dd09fe8..0fe6b0d 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -130,11 +130,20 @@ function threadCalls(): Pick<
+   };
+ }
+ 
+-export function createTauriMergeRequests(): MergeRequestSource {
++function projectCalls(): Pick<MergeRequestSource, "findGitLabProject" | "askGitLabAgain"> {
+   return {
+     async findGitLabProject() {
+       return { ok: true, value: await commands.findGitlabProject() };
+     },
++    async askGitLabAgain() {
++      return toResult(await commands.askGitlabAgain());
++    },
++  };
++}
++
++export function createTauriMergeRequests(): MergeRequestSource {
++  return {
++    ...projectCalls(),
+     listMergeRequests: listed,
+     async openMergeRequest(iid) {
+       return converted(toResult(await commands.openMergeRequest(iid)), toOpenReply);
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 5125dd0..f01ce99 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -58,10 +58,12 @@ Job logs (request `docs/slices/request-ci-job-log.md`, plan §2 #158–#161): `m
+ 
+ Discussions (request `docs/slices/request-mr-discussions.md`, design `docs/slices/briefs/mr-discussions-design.md` option A, plan §2 #163, #164): `mergeRequestDiscussions.ts` owns `discussions` (its only writer), one entry per asked row while the list stands. One call at a time; a generation is raised by `replaced` and by "off", so an older answer is dropped. "Load fully": the rows with a count above 0 are queued from `received` (`listed`), all again at `ended`'s swap (`replaced`: a Refresh, or a show 30 s or more after the last load, `RECHECK_PAUSE_MS`), and a watch on the setting asks them when it turns to full, with no reload. "Load lazily": `askDiscussions(iid)` puts that row first and asks it once. "Off": every entry and any call in flight dropped. Log `mergeRequests.discussions_read` (counts only). A refused or failed entry is a `DiscussionFailure` (`mergeRequestDiscussions.ts`). `MergeRequestDiscussions.vue` is the row's count: with "Off" or a count of 0 the plain count (`vTooltip` `discussionsText`, muted at 0), no box and no ask; else the people box's shape (`useHoverBox`, an opener button named by `discussionsText` with no tooltip, #154) whose entry comes from `useRowDiscussions`, which calls `askDiscussions` when the box opens and again when an open box loses its entry (a swap), so a hover and keyboard focus both ask. The box speaks for the slice's `viewer` (me, or review mode's person). Its `role="status"` header is `DISCUSSIONS_LOADING` with no entry or while loading, `turnSummaryText(turnCounts(…))` once read, else `discussionsFailedText` (`mergeRequestsText.ts`: `glabRefusalText`, the glab words of the list, the box and a re-request reply, or `problemText` at step `discussions`) in the error colour — never the problem bar. Its list is `discussionTurns(…)` (the viewer's turn first, newest first); each line shows the author's picture and `noteAuthorName`, `agoText`, `turnText` (the viewer's turn in `text-primary`), `placeText`, and `noteExcerpt` clamped to 3 lines. All of its text is interpolated, never `v-html` (RK60). `MergeRequestDiscussionSetting.vue` is Settings → "Discussion details" (`DISCUSSION_DETAILS_OPTIONS` through `ChoiceButtons`, `setDiscussionDetails` on the settings seam, the hint under it); the compare and the range root put it into `SettingsView`'s slot, and the merge window, which has no merge-request page, has no such section.
+ 
+-The box's thread side (request `docs/slices/request-mr-threads.md` B4, C1, C2, C10, C11, D1, D2, design `docs/slices/briefs/mr-threads-design.md` option A §1.3, §4 items 5, 10, 13, RK59, RK73): the words speak for the slice's `viewer` on the row's `author` (`turnOf`/`discussionTurns`/`turnCounts` with `row.author?.username ?? null`). Every line is a `<button>` keyed by `discussion.id`, with `data-discussion-id`, `aria-keyshortcuts="Shift"` and the tip `SHOW_THREAD_KEY`; a click still opens the last comment's page (`aria-disabled` without one); the shown line has `aria-current="true"` and `bg-row-selected`; a line marked resolved since its answer (`DiscussionLoad.resolved`) reads `Check` + `RESOLVED` (`mergeRequestThreadText.ts`) muted instead of its turn. The header counts the unmarked discussions only; at its right `RELOAD_DISCUSSIONS` (Lucide `refresh-cw`, spinning while `reloads.get(iid)` is `running`) calls `reloadDiscussions`; a failed reload replaces the summary by `discussionsFailedText` in the error colour and keeps the lines. Shift is `watch(useShiftTaps())` as `CiStatusBox.vue`: the pointed line, else the focused one, only while the box is open and `!isTypingTarget(document.activeElement)` → `showThread(iid, id)`. The panel `MergeRequestThread.vue` is a DOM child of the hover area (`v-if` open and this row's thread shown, keyed by the discussion id; `anchor` the box's `useElementBounding` left/top; place and turn words from the entry's discussion, else the thread's); its `close` calls `closeThread` and focuses that line's button. While it shows, `useHoverBox`'s `pinned` holds the box: the pointer or focus leaving, a window blur and a scroll outside never close it; a `pointerdown` outside the area (a `document` listener present only while open and pinned) closes both, except one on or inside a `[data-refreshes-list]` element (Refresh and the failed list's Retry read the list again under the open box and panel). The count stays a box while its panel shows even at 0 (`boxed`, design §4 item 10). When the box closes, and when the row unmounts with its box open (the page left): `closeThread` if its thread was shown, then `boxClosed(iid)` (marked lines leave, the count drops, C10). When another row's thread is shown, an open box closes itself (`useHoverBox`'s `close`), so only the shown thread's box stays. With "Off" there is no box and so no panel (C11).
++The box's thread side (request `docs/slices/request-mr-threads.md` B4, C1, C2, C10, C11, D1, D2, design `docs/slices/briefs/mr-threads-design.md` option A §1.3, §4 items 5, 10, 13, RK59, RK73): the words speak for the slice's `viewer` on the row's `author` (`turnOf`/`discussionTurns`/`turnCounts` with `row.author?.username ?? null`). Every line is a `<button>` keyed by `discussion.id`, with `data-discussion-id`, `aria-keyshortcuts="Shift"` and the tip `SHOW_THREAD_KEY`; a click still opens the last comment's page (`aria-disabled` without one); the shown line has `aria-current="true"` and `bg-row-selected`; a line marked resolved since its answer (`DiscussionLoad.resolved`) reads `Check` + `RESOLVED` (`mergeRequestThreadText.ts`) muted instead of its turn. The header counts the unmarked discussions only; at its right `RELOAD_DISCUSSIONS` (Lucide `refresh-cw`, spinning while `reloads.get(iid)` is `running`) calls `refreshDiscussions` (asks GitLab again, then `reloadDiscussions`, below); a failed reload replaces the summary by `discussionsFailedText` in the error colour and keeps the lines. Shift is `watch(useShiftTaps())` as `CiStatusBox.vue`: the pointed line, else the focused one, only while the box is open and `!isTypingTarget(document.activeElement)` → `showThread(iid, id)`. The panel `MergeRequestThread.vue` is a DOM child of the hover area (`v-if` open and this row's thread shown, keyed by the discussion id; `anchor` the box's `useElementBounding` left/top; place and turn words from the entry's discussion, else the thread's); its `close` calls `closeThread` and focuses that line's button. While it shows, `useHoverBox`'s `pinned` holds the box: the pointer or focus leaving, a window blur and a scroll outside never close it; a `pointerdown` outside the area (a `document` listener present only while open and pinned) closes both, except one on or inside a `[data-refreshes-list]` element (Refresh and the failed list's Retry read the list again under the open box and panel). The count stays a box while its panel shows even at 0 (`boxed`, design §4 item 10). When the box closes, and when the row unmounts with its box open (the page left): `closeThread` if its thread was shown, then `boxClosed(iid)` (marked lines leave, the count drops, C10). When another row's thread is shown, an open box closes itself (`useHoverBox`'s `close`), so only the shown thread's box stays. With "Off" there is no box and so no panel (C11).
+ 
+ The thread panel (request `docs/slices/request-mr-threads.md` C1–C11, plan §2 #180–#183, #185, RK33, RK72, RK73): `mergeRequestThread.ts` `createThreads`, spread into the slice by `discussingOf`, owns `thread` — the window's one shown thread (`ThreadLoad` loading | read { thread, refreshing } | refused | failed, its `sending`, its `preview`; a read's answer lands only for the latest generation, which every show, close and re-read raises) — and `replyTexts` by `DiscussionId` for the window's life (cleared only by a write GitLab took whose text is still the one sent); `showThread` (the shown one: nothing), `closeThread`, `retryThread`, one write at a time in the window (`sendReply(kind)`, `setResolved(resolve)`, `submitReview()`), `showPreview`/`showWrite`; `refreshed(iid)` re-reads the shown thread at its row's reload or a list swap. `MergeRequestThread.vue` is a non-modal `role="dialog"` placed by `useBesidePlacement` that takes focus on mount: header (place, turn words or "Resolved", "Open on GitLab", "Submit review" with the pending count, "Close"), the comments through `MergeRequestThreadComment.vue`, the viewer's drafts under "Pending", or Loading, a refusal or a failure with Retry. `MergeRequestReplyField.vue` is its bottom: Write / Preview, the field (`replyTexts` through `setReplyText`, 3 to 12 lines by its measured `scrollHeight`, `boxKeydown`: Mod-Enter adds the comment, Escape closes the panel), "Add review", "Add comment", "Resolve thread"/"Unresolve thread", each off while not writable, blank or not allowed (the reason as tip), a failed send's sentence under the row. Focus stays in the panel across a send and Retry: a pressed button that turns disabled, or Retry removed by the read, drops WebKit's focus to the body without a `focusout` (the HTML focus fixup rule), and the next Escape would reach the page; so the add and resolve buttons focus the field first, or in Preview (the field hidden) emit `focusPanel`, and Submit review (`publish`) and Retry (`retry`) focus the panel before they call. Escape while a thread is shown is the panel's: `MergeRequestsView.vue`'s `escapePressed` leaves it alone while `thread` is set (as while `description` is), the panel's element `keydown` takes an Escape inside it (so `useHoverBox`'s area keydown never closes the box under it), and a window `keydown` listener for the component's life closes it on any Escape nothing took (`defaultPrevented`) while its thread is shown, focus on the body included. That listener does nothing while a question is open (`asking`, passed View → Row → Discussions → Thread, as the description gets it) or while `description` is set (window listeners run in mount order, so the panel's would run before a later description's): that Escape is the question's or the description's, and the next one closes the panel. The close focuses the row's line, the next Escape closes the box, the one after leaves the page. Every word is `mergeRequestThreadText.ts`.
+ 
++The instant preview and the explicit refreshes (request `docs/slices/request-mr-fast-preview.md` A1–A4, B2, plan §2 #186, #187, owner #2423): `preview` words a blank text `empty`, then asks `mergeRequestPreview.ts` `previewHere(iid, text)` — `localPreview` from `editor/index.ts`, the one owner of "renders as GitLab would" — whose non-null answer is the same `{ kind: "read", preview }` GitLab's becomes, set at once with no `loading` and no call (so the reply field never draws "Loading…"), logged `mergeRequests.preview_local { iid, blocks }` (counts only); null goes to `readPreview` as before (`loading`, `previewMarkdown`, `preview_read`), and a late GitLab answer lands only while its own `loading` is still shown, so it never replaces a later local read. `mergeRequestsRefresh.ts` `createRefreshes` (spread into the slice) holds the buttons that ask GitLab for the login and the project again first: `refresh` (the page's Refresh and its Retry) awaits `askGitLabAgain` through `attempt`, then `loadList`; `refreshDiscussions(iid)` (the discussions box's reload button) does the same before `reloadDiscussions(iid)`. A failed ask logs `mergeRequests.ask_again_failed { kind }` and the reload runs anyway. `show` (the first load, the 30 s stale reload) and the reload a submit triggers never ask again: no button was pressed.
++
+ Review mode (request `docs/slices/request-mr-review-mode.md`, design `docs/slices/briefs/mr-review-mode-design.md` option A, plan §2 #165, #166): it is `filters.review`, a field of the remembered filters. `mergeRequestFilters.ts` `createRememberedFilters(repository, reviewable, storage)` is the gate (RK62): `review` reads null while `!reviewable()` (details not "full"), and turning false with a stored review writes the entry once without it, keeping Reviewer and Draft. `review(who)` writes `reviewing(who)` (Reviewer = who, Ready, the other filters off); "Clear filters" (`clearAll`, `NO_FILTERS`) is the only way out. `MergeRequestReviewMode.vue` is the button (Lucide `user-round-search`, `vTooltip` and name `REVIEW_MODE`, a set filter's `border-primary` while on), shown only while `discussionDetails === "full"`, after the three filters; its picker is a `menuitemradio` list of `choices.review` (Me, then the Reviewer list's people, no None; `MENU_ITEMS` steps radio items too) in the filters' `MergeRequestMenu.vue`, named Reviewer; a pick calls `review(value)` and closes the menu with the focus back on the button. `MergeRequestReviewSort.vue` is the sort icon (Lucide `arrow-down-wide-narrow`, a `role="img"` span with `vTooltip` and `aria-label`), shown while `reviewSort` is not null: `text-primary` with `reviewSortedText(viewer, loading)` when sorted, `text-problem-error` with `reviewFailedText(viewer, iid, discussionsFailedText(…))` when a shown row's details failed (RK63: the list keeps the normal order).
+ 
+ Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid (`rechecked`, `mergeRequests/`) among its own load's rows only — `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap, `null` once a failed first load cleared them) is that load, else the load's own buffer (empty unless it is a refresh, read only by a refresh's swap) — so any other is dropped, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
+diff --git a/frontend/src/ui/MergeRequestDiscussions.vue b/frontend/src/ui/MergeRequestDiscussions.vue
+index 63317f7..5740f45 100644
+--- a/frontend/src/ui/MergeRequestDiscussions.vue
++++ b/frontend/src/ui/MergeRequestDiscussions.vue
+@@ -265,7 +265,7 @@ function threadClosed(): void {
+           type="button"
+           :aria-label="RELOAD_DISCUSSIONS"
+           class="shrink-0 rounded p-0.5 hover:bg-hover"
+-          @click="mergeRequests.reloadDiscussions(row.iid)"
++          @click="mergeRequests.refreshDiscussions(row.iid)"
+         >
+           <RefreshCw
+             class="size-4"
+diff --git a/frontend/src/ui/MergeRequestThreadPanel.test.ts b/frontend/src/ui/MergeRequestThreadPanel.test.ts
+index 580552e..df9858d 100644
+--- a/frontend/src/ui/MergeRequestThreadPanel.test.ts
++++ b/frontend/src/ui/MergeRequestThreadPanel.test.ts
+@@ -225,7 +225,7 @@ test("preview_shows_loading_then_blocks_and_nothing_for_empty", async () => {
+   slice.showPreview();
+   expect(await panel()).toContain('<p class="text-fg-muted">Nothing to preview.</p>');
+ 
+-  slice.setReplyText(d(1), "fail here");
++  slice.setReplyText(d(1), "fail here #1");
+   slice.showPreview();
+   await vi.advanceTimersByTimeAsync(WRITE_MS);
+   expect(await panel()).toContain(
+@@ -233,6 +233,29 @@ test("preview_shows_loading_then_blocks_and_nothing_for_empty", async () => {
+   );
+ });
+ 
++test("a_plain_preview_shows_no_loading_and_asks_nothing", async () => {
++  const info = vi.spyOn(log, "info");
++  function previewsAsked(): number {
++    return info.mock.calls.filter(([event]) => event === "mergeRequests.fixture_preview").length;
++  }
++  await shown(THREADS, 1);
++  slice.setReplyText(d(1), "Looks **good**, see `code`.\n\n- one\n- two");
++  slice.showPreview();
++  const read = await panel();
++  expect(read).not.toContain("Loading…");
++  expect(read).toContain("<strong>good</strong>");
++  expect(read).toMatch(/<li[^>]*>.*one.*<\/li>/u);
++  expect(previewsAsked()).toBe(0);
++
++  slice.showWrite();
++  slice.setReplyText(d(1), "**Preview** of @anna");
++  slice.showPreview();
++  expect(await panel()).toContain('<p class="text-fg-muted">Loading…</p>');
++  await vi.advanceTimersByTimeAsync(WRITE_MS);
++  expect(await panel()).toContain(">@anna</a>");
++  expect(previewsAsked()).toBe(1);
++});
++
+ test("the_buttons_row_has_add_review_add_comment_and_resolve_at_the_right", async () => {
+   await shown(THREADS, 1);
+   expect(buttons(await panel()).slice(-3)).toEqual([
+diff --git a/frontend/src/ui/mergeRequestPreview.ts b/frontend/src/ui/mergeRequestPreview.ts
+index 7d88a01..cdabc5b 100644
+--- a/frontend/src/ui/mergeRequestPreview.ts
++++ b/frontend/src/ui/mergeRequestPreview.ts
+@@ -1,3 +1,4 @@
++import { localPreview } from "../editor";
+ import {
+   log,
+   type Description,
+@@ -18,6 +19,18 @@ export type Preview =
+     }
+   | { readonly kind: "failed"; readonly cause: ProblemCause };
+ 
++/** `text` drawn by yamt itself when `localPreview` renders it as GitLab would (plan §2 row 186): a read at once, no
++ *  call; null when GitLab must. Logs `mergeRequests.preview_local { iid, blocks }` (counts only, never the text).
++ *  The caller words a blank text. */
++export function previewHere(iid: MergeRequestIid, text: string): Preview | null {
++  const preview = localPreview(text);
++  if (preview === null) {
++    return null;
++  }
++  log.info("mergeRequests.preview_local", { iid, blocks: preview.blocks.length });
++  return { kind: "read", preview };
++}
++
+ /** C7: `text` as GitLab renders it in merge request `iid`'s project; the caller words a blank text itself. */
+ export async function readPreview(
+   source: MergeRequestSource,
+diff --git a/frontend/src/ui/mergeRequestReload.test.ts b/frontend/src/ui/mergeRequestReload.test.ts
+index 06d1ae2..c245ad3 100644
+--- a/frontend/src/ui/mergeRequestReload.test.ts
++++ b/frontend/src/ui/mergeRequestReload.test.ts
+@@ -20,6 +20,8 @@ type Rig = {
+   readonly slice: MergeRequests;
+   readonly source: MergeRequestSource;
+   readonly threadReads: MergeRequestIid[];
++  /** Every ask-again and discussions read, in call order. */
++  readonly calls: string[];
+   /** The second and later list loads: their page is sent; the end waits for the test. */
+   readonly held: ((end: SourceResult<ListEnd>) => void)[];
+ };
+@@ -47,13 +49,22 @@ function iid(value: number): MergeRequestIid {
+   return value;
+ }
+ 
+-function rig(): Rig {
++function rig(askedAgain: SourceResult<null> = { ok: true, value: null }): Rig {
+   const fixture = createFixtureCompareSource(log, "?mr=list", {});
+   const threadReads: MergeRequestIid[] = [];
++  const calls: string[] = [];
+   const held: ((end: SourceResult<ListEnd>) => void)[] = [];
+   let first: MergeRequestPage | null = null;
+   const source: MergeRequestSource = {
+     ...fixture,
++    askGitLabAgain: async () => {
++      calls.push("askGitLabAgain");
++      return askedAgain;
++    },
++    readDiscussions: (asked) => {
++      calls.push("readDiscussions");
++      return fixture.readDiscussions(asked);
++    },
+     listMergeRequests: async (onPage, onChecked) => {
+       if (first !== null) {
+         onPage(first);
+@@ -77,7 +88,7 @@ function rig(): Rig {
+     report: () => undefined,
+     discussionDetails: () => "lazy",
+   });
+-  return { slice, source, threadReads, held };
++  return { slice, source, threadReads, calls, held };
+ }
+ 
+ function rowOf(live: Rig, value: number): MergeRequestRow {
+@@ -156,6 +167,7 @@ test("a_list_refresh_rereads_the_shown_thread", async () => {
+   const live = rig();
+   const shown = await threadShown(live);
+   const refreshing = live.slice.refresh();
++  await vi.advanceTimersByTimeAsync(0);
+   expect(live.threadReads).toHaveLength(1);
+ 
+   live.held[0]?.({ ok: true, value: { kind: "loaded" } });
+@@ -213,3 +225,38 @@ test("a_box_thread_answer_through_the_slice_marks_its_row", async () => {
+   const marked = live.slice.discussions.value.get(iid(THREADS));
+   expect(marked?.kind === "read" && [...marked.resolved]).toEqual([second.id]);
+ });
++
++test("the_discussions_reload_button_asks_gitlab_again", async () => {
++  const live = rig();
++  await threadShown(live);
++  expect(live.calls).toEqual(["askGitLabAgain", "readDiscussions"]);
++
++  const submitting = live.slice.submitReview();
++  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS * 2);
++  await submitting;
++  expect(live.calls).toEqual(["askGitLabAgain", "readDiscussions", "readDiscussions"]);
++
++  live.slice.refreshDiscussions(iid(THREADS));
++  expect(live.calls).toHaveLength(4);
++  expect(live.slice.reloads.value.size).toBe(0);
++  await vi.advanceTimersByTimeAsync(0);
++  expect(live.calls.slice(3)).toEqual(["askGitLabAgain", "readDiscussions"]);
++  expect(live.slice.reloads.value.get(iid(THREADS))).toEqual({ kind: "running" });
++});
++
++test("a_failed_ask_still_reloads_the_discussions", async () => {
++  const live = rig({ ok: false, failure: { kind: "WorkerStopped" } });
++  await threadShown(live);
++  live.slice.refreshDiscussions(iid(THREADS));
++  await vi.advanceTimersByTimeAsync(0);
++  expect(live.calls).toEqual([
++    "askGitLabAgain",
++    "readDiscussions",
++    "askGitLabAgain",
++    "readDiscussions",
++  ]);
++  expect(live.slice.reloads.value.get(iid(THREADS))).toEqual({ kind: "running" });
++  expect(log.info).toHaveBeenCalledWith("mergeRequests.ask_again_failed", {
++    kind: "WorkerStopped",
++  });
++});
+diff --git a/frontend/src/ui/mergeRequestThread.test.ts b/frontend/src/ui/mergeRequestThread.test.ts
+index a6ef95f..97f3290 100644
+--- a/frontend/src/ui/mergeRequestThread.test.ts
++++ b/frontend/src/ui/mergeRequestThread.test.ts
+@@ -1,4 +1,5 @@
+ import { afterEach, expect, test, vi } from "vitest";
++import { watch } from "vue";
+ 
+ import {
+   createFixtureCompareSource,
+@@ -49,6 +50,8 @@ const STOPPED: SourceFailure = { kind: "WorkerStopped" };
+ const LOADING: ThreadLoad = { kind: "loading" };
+ const WRITING: Preview = { kind: "writing" };
+ const SECRET = "the secret words of the reply";
++const ASKED = `${SECRET} @anna`;
++const PLAIN = "Looks **good**, see `code`.\n\n- one\n- two";
+ const RENDERED: Description = {
+   blocks: [{ kind: "paragraph", inlines: [{ kind: "text", text: SECRET }] }],
+ };
+@@ -496,10 +499,10 @@ test("a_blank_preview_is_empty_without_a_call", async () => {
+ test("a_preview_shows_gitlabs_rendering_of_the_text", async () => {
+   const live = rig();
+   await shownAndRead(live);
+-  live.threads.setReplyText(D1, SECRET);
++  live.threads.setReplyText(D1, ASKED);
+   live.threads.showPreview();
+   expect(shownOf(live)?.preview).toEqual({ kind: "loading" });
+-  expect(at(live.previews, 0).args).toEqual([MR, SECRET]);
++  expect(at(live.previews, 0).args).toEqual([MR, ASKED]);
+   at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
+   await settled();
+   expect(shownOf(live)?.preview).toEqual({ kind: "read", preview: RENDERED });
+@@ -513,20 +516,20 @@ test("a_preview_shows_gitlabs_rendering_of_the_text", async () => {
+ test("a_preview_failure_keeps_the_text", async () => {
+   const live = rig();
+   await shownAndRead(live);
+-  live.threads.setReplyText(D1, SECRET);
++  live.threads.setReplyText(D1, ASKED);
+   live.threads.showPreview();
+   at(live.previews, 0).answer({ ok: false, failure: STOPPED });
+   await settled();
+   expect(shownOf(live)?.preview).toEqual({ kind: "failed", cause: STOPPED });
+-  expect(textOf(live, D1)).toBe(SECRET);
++  expect(textOf(live, D1)).toBe(ASKED);
+ });
+ 
+ test("typing_while_a_preview_loads_drops_its_answer", async () => {
+   const live = rig();
+   await shownAndRead(live);
+-  live.threads.setReplyText(D1, "first");
++  live.threads.setReplyText(D1, "first @anna");
+   live.threads.showPreview();
+-  live.threads.setReplyText(D1, "first, longer");
++  live.threads.setReplyText(D1, "first @anna, longer");
+   expect(shownOf(live)?.preview).toEqual(WRITING);
+   at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
+   await settled();
+@@ -566,7 +569,7 @@ test("the_thread_logs_carry_no_text_names_or_ids", async () => {
+   const comment = { author: null, createdAt: 0, edited: null, body: RENDERED, page: null };
+   live.threads.showThread(MR, D1);
+   await readAt(live, 0, threadOf(D1, { comments: [comment, comment] }));
+-  live.threads.setReplyText(D1, SECRET);
++  live.threads.setReplyText(D1, ASKED);
+   void live.threads.sendReply("comment");
+   await writeAt(live, 0, { kind: "refused", reason: "403 Forbidden" });
+   live.threads.showPreview();
+@@ -604,10 +607,75 @@ test("an_old_read_of_the_same_thread_never_reaches_the_panel", async () => {
+ test("a_preview_answered_after_the_panel_closed_changes_nothing", async () => {
+   const live = rig();
+   await shownAndRead(live);
+-  live.threads.setReplyText(D1, SECRET);
++  live.threads.setReplyText(D1, ASKED);
+   live.threads.showPreview();
+   live.threads.closeThread();
+   at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
+   await settled();
+   expect(shownOf(live)).toBeNull();
+ });
++
++function previewKinds(live: Rig): string[] {
++  const seen: string[] = [];
++  watch(
++    live.threads.thread,
++    (thread) => {
++      seen.push(thread?.preview.kind ?? "closed");
++    },
++    { flush: "sync" },
++  );
++  return seen;
++}
++
++function blockKinds(preview: Preview | undefined): string[] {
++  return preview?.kind === "read" ? preview.preview.blocks.map((block) => block.kind) : [];
++}
++
++test("a_plain_preview_is_read_at_once_without_a_call", async () => {
++  const info = vi.spyOn(log, "info");
++  const live = rig();
++  await shownAndRead(live);
++  const seen = previewKinds(live);
++  live.threads.setReplyText(D1, PLAIN);
++  live.threads.showPreview();
++
++  expect(shownOf(live)?.preview.kind).toBe("read");
++  expect(blockKinds(shownOf(live)?.preview)).toEqual(["paragraph", "list"]);
++  expect(live.previews).toEqual([]);
++  expect(seen).toEqual(["writing", "read"]);
++  expect(info).toHaveBeenLastCalledWith("mergeRequests.preview_local", { iid: MR, blocks: 2 });
++  expect(JSON.stringify(info.mock.calls)).not.toContain("good");
++});
++
++test("a_preview_with_a_reference_goes_to_gitlab", async () => {
++  const live = rig();
++  await shownAndRead(live);
++  for (const [index, text] of ["see #12", "thanks @anna"].entries()) {
++    live.threads.setReplyText(D1, text);
++    live.threads.showPreview();
++    expect(shownOf(live)?.preview).toEqual({ kind: "loading" });
++    expect(live.previews).toHaveLength(index + 1);
++    expect(at(live.previews, index).args).toEqual([MR, text]);
++    at(live.previews, index).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
++    await settled();
++    expect(shownOf(live)?.preview).toEqual({ kind: "read", preview: RENDERED });
++  }
++});
++
++test("a_late_gitlab_answer_never_replaces_a_local_read", async () => {
++  const live = rig();
++  await shownAndRead(live);
++  live.threads.setReplyText(D1, "thanks @anna");
++  live.threads.showPreview();
++  expect(shownOf(live)?.preview).toEqual({ kind: "loading" });
++  live.threads.showWrite();
++  live.threads.setReplyText(D1, PLAIN);
++  live.threads.showPreview();
++  const local = shownOf(live)?.preview;
++  expect(blockKinds(local)).toEqual(["paragraph", "list"]);
++
++  at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
++  await settled();
++  expect(shownOf(live)?.preview).toBe(local);
++  expect(live.previews).toHaveLength(1);
++});
+diff --git a/frontend/src/ui/mergeRequestThread.ts b/frontend/src/ui/mergeRequestThread.ts
+index b7d0850..20e252f 100644
+--- a/frontend/src/ui/mergeRequestThread.ts
++++ b/frontend/src/ui/mergeRequestThread.ts
+@@ -12,7 +12,7 @@ import {
+   type SourceResult,
+ } from "../ipc";
+ import type { Discussions } from "./mergeRequestDiscussionRows";
+-import { readPreview, type Preview } from "./mergeRequestPreview";
++import { previewHere, readPreview, type Preview } from "./mergeRequestPreview";
+ import { attempt, type Outcome, type ProblemCause } from "./problem";
+ 
+ export type ShownThread = { readonly iid: MergeRequestIid; readonly discussion: DiscussionId };
+@@ -73,6 +73,7 @@ type State = {
+ const LOADING: ThreadLoad = { kind: "loading" };
+ const IDLE: Sending = { kind: "idle" };
+ const WRITING: Preview = { kind: "writing" };
++const EMPTY: Preview = { kind: "empty" };
+ 
+ function isShown(state: State, shown: ShownThread): boolean {
+   const current = state.thread.value?.shown;
+@@ -201,8 +202,9 @@ async function preview(state: State): Promise<void> {
+   }
+   const { shown } = current;
+   const text = state.replyTexts.value.get(shown.discussion) ?? "";
+-  if (text.trim() === "") {
+-    patch(state, shown, { preview: { kind: "empty" } });
++  const atOnce = text.trim() === "" ? EMPTY : previewHere(shown.iid, text);
++  if (atOnce !== null) {
++    patch(state, shown, { preview: atOnce });
+     return;
+   }
+   const loading: Preview = { kind: "loading" };
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index f3ce74b..8b50b82 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -81,6 +81,7 @@ type Rig = {
+   readonly storage: MemoryStorage;
+   readonly mode: ShallowRef<DiscussionDetails>;
+   readonly discussionCalls: DiscussionCall[];
++  readonly calls: string[];
+ };
+ 
+ type MemoryStorage = StorageLike & { readonly items: Map<string, string> };
+@@ -164,11 +165,17 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+   const peopleChanges: Asked<PeopleChangeReply>[] = [];
+   const problems: Problem[] = [];
+   const discussionCalls: DiscussionCall[] = [];
++  const calls: string[] = [];
+   const mode = shallowRef<DiscussionDetails>("full");
+   const source: MergeRequestSource = {
+     findGitLabProject: async () => ({ ok: true, value: { kind: "found", repository: REPOSITORY } }),
++    askGitLabAgain: async () => {
++      calls.push("askGitLabAgain");
++      return { ok: true, value: null };
++    },
+     listMergeRequests: (onPage, onChecked) =>
+       new Promise((resolve) => {
++        calls.push("listMergeRequests");
+         loads.push({ send: onPage, check: onChecked, end: resolve });
+       }),
+     openMergeRequest: (asked) =>
+@@ -195,6 +202,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+     readJobLog: async () => ({ ok: true, value: { kind: "noLog" } }),
+     readDiscussions: (asked) =>
+       new Promise((resolve) => {
++        calls.push("readDiscussions");
+         discussionCalls.push({ iids: [...asked], answer: resolve });
+       }),
+     searchPeople: async () => ({ ok: true, value: { kind: "found", people: [] } }),
+@@ -240,6 +248,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+     storage,
+     mode,
+     discussionCalls,
++    calls,
+   };
+ }
+ 
+@@ -346,6 +355,7 @@ test("a reload keeps the old rows until its end, then swaps them in (catches a r
+   const kept = ROWS.slice(1);
+ 
+   const reloading = live.slice.refresh();
++  await settled();
+   const reload = loadAt(live, 1);
+   reload.send({ me: "anna", rows: kept.slice(0, 5) });
+   reload.send({ me: "anna", rows: kept.slice(5) });
+@@ -377,6 +387,7 @@ test("a_buffered_refresh_replaces_details_only_at_its_swap", async () => {
+   expect(details.get(iid(639))?.kind).toBe("refused");
+ 
+   const reloading = live.slice.refresh();
++  await settled();
+   const reload = loadAt(live, 1);
+   reload.send({ me: "sam", rows: ROWS });
+   expect(live.slice.discussions.value).toBe(details);
+@@ -399,6 +410,7 @@ test.each<ListEnd>([
+     await loaded(live);
+ 
+     const reloading = live.slice.refresh();
++    await settled();
+     const reload = loadAt(live, 1);
+     reload.send({ me: "sam", rows: ROWS.slice(0, 3) });
+     reload.end({ ok: true, value: end });
+@@ -430,6 +442,7 @@ test.each<ListEnd>([
+     await settled();
+ 
+     const retrying = live.slice.refresh();
++    await settled();
+     expect(live.slice.listing.value).toEqual({ kind: "loading", first: true });
+     loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(0, 20) });
+     expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(0, 20)));
+@@ -445,6 +458,7 @@ test("Refresh of a loaded empty list streams its pages (catches the page blank u
+   await loaded(live, []);
+ 
+   const refreshing = live.slice.refresh();
++  await settled();
+   expect(live.slice.listing.value).toEqual({ kind: "loading", first: true });
+   loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(0, 3) });
+   expect(live.slice.rows.value).toHaveLength(3);
+@@ -471,6 +485,7 @@ test.each<[ListEnd, string | null]>([
+     expect(live.slice.failure.value).toBe(failure);
+ 
+     const again = live.slice.refresh();
++    await settled();
+     expect(live.slice.failure.value).toBeNull();
+     loadAt(live, 1).end(LOADED);
+     await again;
+@@ -481,12 +496,53 @@ test("one load at a time: Refresh and show while loading start nothing (catches
+   const live = rig();
+   live.slice.show();
+   const refreshing = live.slice.refresh();
++  await settled();
+   vi.setSystemTime(T0 + RECHECK_PAUSE_MS * 2);
+   live.slice.show();
+   expect(live.loads).toHaveLength(1);
+   await refreshing;
+ });
+ 
++function gitLabCalls(live: Rig): string[] {
++  return live.calls.filter((call) => call !== "readDiscussions");
++}
++
++test("refresh_asks_gitlab_again_before_listing", async () => {
++  const live = rig();
++  await loaded(live);
++  vi.setSystemTime(T0 + RECHECK_PAUSE_MS);
++  live.slice.show();
++  loadAt(live, 1).end(LOADED);
++  await settled();
++  expect(gitLabCalls(live)).toEqual(["listMergeRequests", "listMergeRequests"]);
++
++  const refreshing = live.slice.refresh();
++  await settled();
++  expect(gitLabCalls(live).slice(2)).toEqual(["askGitLabAgain", "listMergeRequests"]);
++  loadAt(live, 2).end(LOADED);
++  await refreshing;
++
++  const info = vi.spyOn(log, "info");
++  const asks: ((result: SourceResult<null>) => void)[] = [];
++  const held = rig({
++    askGitLabAgain: () =>
++      new Promise((resolve) => {
++        asks.push(resolve);
++      }),
++  });
++  await loaded(held);
++  const retrying = held.slice.refresh();
++  await settled();
++  expect(held.loads).toHaveLength(1);
++  asks[0]?.({ ok: false, failure: STOPPED });
++  await settled();
++  expect(held.loads).toHaveLength(2);
++  expect(info).toHaveBeenCalledWith("mergeRequests.ask_again_failed", { kind: "WorkerStopped" });
++  loadAt(held, 1).end(LOADED);
++  await retrying;
++  expect(held.slice.listing.value.kind).toBe("done");
++});
++
+ test("a failed first list call is reported and leaves nothing loaded, so the next show tries again", async () => {
+   const live = rig();
+   live.slice.show();
+@@ -531,6 +587,7 @@ test("a_refresh_drops_every_rows_links", async () => {
+   expect([...live.slice.links.value.values()]).toEqual([read, read]);
+ 
+   const reloading = live.slice.refresh();
++  await settled();
+   loadAt(live, 1).send({ me: "sam", rows: ROWS });
+   expect(live.slice.links.value.size).toBe(2);
+   loadAt(live, 1).end({ ok: true, value: { kind: "failed", message: "502" } });
+@@ -538,6 +595,7 @@ test("a_refresh_drops_every_rows_links", async () => {
+   expect(live.slice.links.value.size).toBe(2);
+ 
+   const swapping = live.slice.refresh();
++  await settled();
+   loadAt(live, 2).send({ me: "sam", rows: ROWS });
+   loadAt(live, 2).end(LOADED);
+   await swapping;
+@@ -605,6 +663,7 @@ test("a failed reload call is reported and keeps the list and its last end", asy
+   await loaded(live);
+ 
+   const reloading = live.slice.refresh();
++  await settled();
+   loadAt(live, 1).end({ ok: false, failure: STOPPED });
+   await reloading;
+ 
+@@ -642,6 +701,7 @@ test("a refresh keeps listedAt while it runs and writes its end's time once list
+   await loaded(live);
+   vi.setSystemTime(T0 + 7);
+   const reloading = live.slice.refresh();
++  await settled();
+   loadAt(live, 1).send({ me: "sam", rows: ROWS });
+   expect(live.slice.listedAt.value).toBe(T0);
+   vi.setSystemTime(T0 + 9);
+@@ -660,6 +720,7 @@ test.each<SourceResult<ListEnd>>([
+     await loaded(live);
+     vi.setSystemTime(T0 + 9);
+     const reloading = live.slice.refresh();
++    await settled();
+     loadAt(live, 1).end(end);
+     await reloading;
+     expect(live.slice.listedAt.value).toBe(T0);
+@@ -718,6 +779,7 @@ test("a refresh's checked row arriving while it is buffered lands in the swapped
+   const live = rig();
+   await loaded(live);
+   const reloading = live.slice.refresh();
++  await settled();
+   const reload = loadAt(live, 1);
+   reload.send({ me: "sam", rows: ROWS });
+   reload.check(checkedRow(640));
+@@ -735,6 +797,7 @@ test("an older load's checked row lands while its rows are shown and is dropped
+   const live = rig();
+   await loaded(live);
+   const reloading = live.slice.refresh();
++  await settled();
+   loadAt(live, 1).send({ me: "sam", rows: ROWS });
+   loadAt(live, 0).check(checkedRow(640));
+   expect(readinessOf(live, 640)).toEqual(CLEAN);
+@@ -756,6 +819,7 @@ test.each<SourceResult<ListEnd>>([
+     const live = rig();
+     await loaded(live);
+     const reloading = live.slice.refresh();
++    await settled();
+     const reload = loadAt(live, 1);
+     reload.send({ me: "sam", rows: ROWS });
+     reload.check(checkedRow(640));
+@@ -788,11 +852,13 @@ test("the summary counts shown and loaded rows and says when the list was cut, a
+   expect(cut).not.toBe("40 of 40 merge requests");
+ 
+   const reloading = live.slice.refresh();
++  await settled();
+   loadAt(live, 1).end({ ok: true, value: { kind: "failed", message: "502" } });
+   await reloading;
+   expect(live.slice.summary.value).toBe(cut);
+ 
+   const again = live.slice.refresh();
++  await settled();
+   loadAt(live, 2).send({ me: "sam", rows: ROWS });
+   loadAt(live, 2).end(LOADED);
+   await again;
+@@ -1198,6 +1264,7 @@ test("a_complete_load_drops_due_dates_of_merge_requests_it_no_longer_lists, the
+ 
+   const live = await dated();
+   const reloading = live.slice.refresh();
++  await settled();
+   loadAt(live, 1).send({ me: "sam", rows: ROWS.filter((row) => row.iid !== 640) });
+   expect([...live.slice.dueDates.value.keys()]).toEqual([630, 640]);
+   loadAt(live, 1).end(LOADED);
+@@ -1215,6 +1282,7 @@ test.each<SourceResult<ListEnd>>([
+ ])("a_cut_or_failed_load_keeps_every_due_date: %j", async (result) => {
+   const live = await dated();
+   const reloading = live.slice.refresh();
++  await settled();
+   loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(20) });
+   loadAt(live, 1).end(result);
+   await reloading;
+@@ -1250,6 +1318,7 @@ test("a_rerequest_reply_replaces_that_rows_reviewers_in_rows_and_in_a_buffering_
+   const live = rig();
+   await loaded(live);
+   const reloading = live.slice.refresh();
++  await settled();
+   loadAt(live, 1).send({ me: "sam", rows: ROWS });
+ 
+   const asking = live.slice.rerequestReview(iid(638), "chiara");
+@@ -1316,6 +1385,7 @@ test("a_people_change_rewrites_both_lists_in_rows_and_in_a_buffering_refresh", a
+   const live = rig();
+   await loaded(live);
+   const reloading = live.slice.refresh();
++  await settled();
+   loadAt(live, 1).send({ me: "sam", rows: ROWS });
+ 
+   const people: MergeRequestPeople = {
+@@ -1390,6 +1460,7 @@ test("an_open_box_does_not_bring_back_a_row_a_refresh_dropped", async () => {
+   await loaded(live);
+   live.slice.peopleBoxOpened(iid(640));
+   const reloading = live.slice.refresh();
++  await settled();
+   loadAt(live, 1).send({ me: "sam", rows: ROWS.filter((row) => row.iid !== 640) });
+   loadAt(live, 1).end(LOADED);
+   await reloading;
+@@ -1409,6 +1480,7 @@ test("a later refresh's rows replace a re-requested row's reviewers", async () =
+   expect(reviewersOf(live.slice.rows.value, 630)).toEqual(RE_REQUESTED);
+ 
+   const reloading = live.slice.refresh();
++  await settled();
+   loadAt(live, 1).send({ me: "sam", rows: ROWS });
+   loadAt(live, 1).end(LOADED);
+   await reloading;
+@@ -1483,6 +1555,7 @@ test("Refresh keeps the search; show empties it (catches the text surviving a pa
+   live.slice.setSearch("!630");
+ 
+   const reloading = live.slice.refresh();
++  await settled();
+   loadAt(live, 1).send({ me: "sam", rows: ROWS });
+   loadAt(live, 1).end(LOADED);
+   await reloading;
+@@ -1535,6 +1608,7 @@ test("a_refresh_keeps_the_open_description", async () => {
+   }
+   const opening = live.slice.toggleDescription(first);
+   const refreshing = live.slice.refresh();
++  await settled();
+   loadAt(live, live.loads.length - 1).send({ me: "sam", rows: [first, second] });
+   loadAt(live, live.loads.length - 1).end(LOADED);
+   await refreshing;
+@@ -1548,6 +1622,7 @@ test("a_refresh_keeps_the_open_description", async () => {
+   });
+ 
+   const again = live.slice.refresh();
++  await settled();
+   loadAt(live, live.loads.length - 1).send({ me: "sam", rows: [second] });
+   loadAt(live, live.loads.length - 1).end(LOADED);
+   await again;
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index c783912..e05d9a7 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -26,6 +26,7 @@ import { createLinks, linksOf, type LinkQueue, type Links } from "./mergeRequest
+ import { createPeopleChanges, type PeopleChanges } from "./mergeRequestPeople";
+ import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
+ import { loadList, type ListLoad, type ListState } from "./mergeRequestsList";
++import { createRefreshes, type Refreshes } from "./mergeRequestsRefresh";
+ import { shownOf, type Shown } from "./mergeRequestsShown";
+ import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
+ import { createThreads, type Threads } from "./mergeRequestThread";
+@@ -54,6 +55,7 @@ export type MergeRequests = RowActions &
+   Threads &
+   Links &
+   Shown &
++  Refreshes &
+   PeopleChanges & {
+     readonly project: Readonly<ShallowRef<GitLabProject>>;
+     readonly me: Readonly<ShallowRef<string | null>>;
+@@ -68,7 +70,6 @@ export type MergeRequests = RowActions &
+     findProject(): Promise<void>;
+     show(): void;
+     close(): void;
+-    refresh(): Promise<void>;
+     setSearch(text: string): void;
+     setDueDate(iid: MergeRequestIid, day: CalendarDay | null): void;
+     openChanges(iid: MergeRequestIid): Promise<void>;
+@@ -282,7 +283,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     close: () => {
+       state.screen.value = { kind: "files" };
+     },
+-    refresh: () => loadList(state),
++    ...createRefreshes(state),
+     openChanges: (iid) => openChanges(state, iid),
+     ...state.rowActions,
+     ...people,
+diff --git a/frontend/src/ui/mergeRequestsRefresh.ts b/frontend/src/ui/mergeRequestsRefresh.ts
+new file mode 100644
+index 0000000..e66d7ae
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestsRefresh.ts
+@@ -0,0 +1,36 @@
++import { log, type MergeRequestIid, type MergeRequestSource } from "../ipc";
++import type { Discussions } from "./mergeRequestDiscussionRows";
++import { loadList, type ListState } from "./mergeRequestsList";
++import { attempt } from "./problem";
++
++export type Refreshes = {
++  /** The page's Refresh and its Retry: `askGitLabAgain`, then the list. */
++  refresh(): Promise<void>;
++  /** The discussions box's reload button: `askGitLabAgain`, then `reloadDiscussions(iid)`. */
++  refreshDiscussions(iid: MergeRequestIid): void;
++};
++
++async function askAgain(source: MergeRequestSource): Promise<void> {
++  const outcome = await attempt(() => source.askGitLabAgain());
++  if (!outcome.ok) {
++    log.info("mergeRequests.ask_again_failed", { kind: outcome.cause.kind });
++  }
++}
++
++/** Every explicit refresh button asks GitLab for the login and the project again first (owner decision 2423, plan §2
++ *  row 187); a failed ask is logged and the reload runs anyway. Loads no button starts never ask again. */
++export function createRefreshes(
++  state: ListState & { readonly rowDiscussions: Pick<Discussions, "reloadDiscussions"> },
++): Refreshes {
++  return {
++    refresh: async () => {
++      await askAgain(state.source);
++      await loadList(state);
++    },
++    refreshDiscussions: (iid) => {
++      void askAgain(state.source).then(() => {
++        state.rowDiscussions.reloadDiscussions(iid);
++      });
++    },
++  };
++}

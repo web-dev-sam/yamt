@@ -225,12 +225,35 @@ test("preview_shows_loading_then_blocks_and_nothing_for_empty", async () => {
   slice.showPreview();
   expect(await panel()).toContain('<p class="text-fg-muted">Nothing to preview.</p>');
 
-  slice.setReplyText(d(1), "fail here");
+  slice.setReplyText(d(1), "fail here #1");
   slice.showPreview();
   await vi.advanceTimersByTimeAsync(WRITE_MS);
   expect(await panel()).toContain(
     '<p role="alert" class="text-problem-error">Could not preview: glab timed out</p>',
   );
+});
+
+test("a_plain_preview_shows_no_loading_and_asks_nothing", async () => {
+  const info = vi.spyOn(log, "info");
+  function previewsAsked(): number {
+    return info.mock.calls.filter(([event]) => event === "mergeRequests.fixture_preview").length;
+  }
+  await shown(THREADS, 1);
+  slice.setReplyText(d(1), "Looks **good**, see `code`.\n\n- one\n- two");
+  slice.showPreview();
+  const read = await panel();
+  expect(read).not.toContain("Loading…");
+  expect(read).toContain("<strong>good</strong>");
+  expect(read).toMatch(/<li[^>]*>.*one.*<\/li>/u);
+  expect(previewsAsked()).toBe(0);
+
+  slice.showWrite();
+  slice.setReplyText(d(1), "**Preview** of @anna");
+  slice.showPreview();
+  expect(await panel()).toContain('<p class="text-fg-muted">Loading…</p>');
+  await vi.advanceTimersByTimeAsync(WRITE_MS);
+  expect(await panel()).toContain(">@anna</a>");
+  expect(previewsAsked()).toBe(1);
 });
 
 test("the_buttons_row_has_add_review_add_comment_and_resolve_at_the_right", async () => {

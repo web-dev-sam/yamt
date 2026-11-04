@@ -1,4 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
+import { watch } from "vue";
 
 import {
   createFixtureCompareSource,
@@ -49,6 +50,8 @@ const STOPPED: SourceFailure = { kind: "WorkerStopped" };
 const LOADING: ThreadLoad = { kind: "loading" };
 const WRITING: Preview = { kind: "writing" };
 const SECRET = "the secret words of the reply";
+const ASKED = `${SECRET} @anna`;
+const PLAIN = "Looks **good**, see `code`.\n\n- one\n- two";
 const RENDERED: Description = {
   blocks: [{ kind: "paragraph", inlines: [{ kind: "text", text: SECRET }] }],
 };
@@ -496,10 +499,10 @@ test("a_blank_preview_is_empty_without_a_call", async () => {
 test("a_preview_shows_gitlabs_rendering_of_the_text", async () => {
   const live = rig();
   await shownAndRead(live);
-  live.threads.setReplyText(D1, SECRET);
+  live.threads.setReplyText(D1, ASKED);
   live.threads.showPreview();
   expect(shownOf(live)?.preview).toEqual({ kind: "loading" });
-  expect(at(live.previews, 0).args).toEqual([MR, SECRET]);
+  expect(at(live.previews, 0).args).toEqual([MR, ASKED]);
   at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
   await settled();
   expect(shownOf(live)?.preview).toEqual({ kind: "read", preview: RENDERED });
@@ -513,20 +516,20 @@ test("a_preview_shows_gitlabs_rendering_of_the_text", async () => {
 test("a_preview_failure_keeps_the_text", async () => {
   const live = rig();
   await shownAndRead(live);
-  live.threads.setReplyText(D1, SECRET);
+  live.threads.setReplyText(D1, ASKED);
   live.threads.showPreview();
   at(live.previews, 0).answer({ ok: false, failure: STOPPED });
   await settled();
   expect(shownOf(live)?.preview).toEqual({ kind: "failed", cause: STOPPED });
-  expect(textOf(live, D1)).toBe(SECRET);
+  expect(textOf(live, D1)).toBe(ASKED);
 });
 
 test("typing_while_a_preview_loads_drops_its_answer", async () => {
   const live = rig();
   await shownAndRead(live);
-  live.threads.setReplyText(D1, "first");
+  live.threads.setReplyText(D1, "first @anna");
   live.threads.showPreview();
-  live.threads.setReplyText(D1, "first, longer");
+  live.threads.setReplyText(D1, "first @anna, longer");
   expect(shownOf(live)?.preview).toEqual(WRITING);
   at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
   await settled();
@@ -566,7 +569,7 @@ test("the_thread_logs_carry_no_text_names_or_ids", async () => {
   const comment = { author: null, createdAt: 0, edited: null, body: RENDERED, page: null };
   live.threads.showThread(MR, D1);
   await readAt(live, 0, threadOf(D1, { comments: [comment, comment] }));
-  live.threads.setReplyText(D1, SECRET);
+  live.threads.setReplyText(D1, ASKED);
   void live.threads.sendReply("comment");
   await writeAt(live, 0, { kind: "refused", reason: "403 Forbidden" });
   live.threads.showPreview();
@@ -604,10 +607,75 @@ test("an_old_read_of_the_same_thread_never_reaches_the_panel", async () => {
 test("a_preview_answered_after_the_panel_closed_changes_nothing", async () => {
   const live = rig();
   await shownAndRead(live);
-  live.threads.setReplyText(D1, SECRET);
+  live.threads.setReplyText(D1, ASKED);
   live.threads.showPreview();
   live.threads.closeThread();
   at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
   await settled();
   expect(shownOf(live)).toBeNull();
+});
+
+function previewKinds(live: Rig): string[] {
+  const seen: string[] = [];
+  watch(
+    live.threads.thread,
+    (thread) => {
+      seen.push(thread?.preview.kind ?? "closed");
+    },
+    { flush: "sync" },
+  );
+  return seen;
+}
+
+function blockKinds(preview: Preview | undefined): string[] {
+  return preview?.kind === "read" ? preview.preview.blocks.map((block) => block.kind) : [];
+}
+
+test("a_plain_preview_is_read_at_once_without_a_call", async () => {
+  const info = vi.spyOn(log, "info");
+  const live = rig();
+  await shownAndRead(live);
+  const seen = previewKinds(live);
+  live.threads.setReplyText(D1, PLAIN);
+  live.threads.showPreview();
+
+  expect(shownOf(live)?.preview.kind).toBe("read");
+  expect(blockKinds(shownOf(live)?.preview)).toEqual(["paragraph", "list"]);
+  expect(live.previews).toEqual([]);
+  expect(seen).toEqual(["writing", "read"]);
+  expect(info).toHaveBeenLastCalledWith("mergeRequests.preview_local", { iid: MR, blocks: 2 });
+  expect(JSON.stringify(info.mock.calls)).not.toContain("good");
+});
+
+test("a_preview_with_a_reference_goes_to_gitlab", async () => {
+  const live = rig();
+  await shownAndRead(live);
+  for (const [index, text] of ["see #12", "thanks @anna"].entries()) {
+    live.threads.setReplyText(D1, text);
+    live.threads.showPreview();
+    expect(shownOf(live)?.preview).toEqual({ kind: "loading" });
+    expect(live.previews).toHaveLength(index + 1);
+    expect(at(live.previews, index).args).toEqual([MR, text]);
+    at(live.previews, index).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
+    await settled();
+    expect(shownOf(live)?.preview).toEqual({ kind: "read", preview: RENDERED });
+  }
+});
+
+test("a_late_gitlab_answer_never_replaces_a_local_read", async () => {
+  const live = rig();
+  await shownAndRead(live);
+  live.threads.setReplyText(D1, "thanks @anna");
+  live.threads.showPreview();
+  expect(shownOf(live)?.preview).toEqual({ kind: "loading" });
+  live.threads.showWrite();
+  live.threads.setReplyText(D1, PLAIN);
+  live.threads.showPreview();
+  const local = shownOf(live)?.preview;
+  expect(blockKinds(local)).toEqual(["paragraph", "list"]);
+
+  at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
+  await settled();
+  expect(shownOf(live)?.preview).toBe(local);
+  expect(live.previews).toHaveLength(1);
 });

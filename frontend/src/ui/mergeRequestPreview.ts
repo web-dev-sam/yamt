@@ -1,3 +1,4 @@
+import { localPreview } from "../editor";
 import {
   log,
   type Description,
@@ -17,6 +18,18 @@ export type Preview =
       readonly reply: Exclude<MarkdownPreviewReply, { readonly kind: "read" }>;
     }
   | { readonly kind: "failed"; readonly cause: ProblemCause };
+
+/** `text` drawn by yamt itself when `localPreview` renders it as GitLab would (plan §2 row 186): a read at once, no
+ *  call; null when GitLab must. Logs `mergeRequests.preview_local { iid, blocks }` (counts only, never the text).
+ *  The caller words a blank text. */
+export function previewHere(iid: MergeRequestIid, text: string): Preview | null {
+  const preview = localPreview(text);
+  if (preview === null) {
+    return null;
+  }
+  log.info("mergeRequests.preview_local", { iid, blocks: preview.blocks.length });
+  return { kind: "read", preview };
+}
 
 /** C7: `text` as GitLab renders it in merge request `iid`'s project; the caller words a blank text itself. */
 export async function readPreview(

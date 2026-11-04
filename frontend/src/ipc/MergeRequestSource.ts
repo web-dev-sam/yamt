@@ -27,6 +27,9 @@ import type {
 
 export interface MergeRequestSource {
   findGitLabProject(): Promise<SourceResult<GitLabProject>>;
+  /** An explicit refresh (the page's Refresh and its Retry, the discussions box's reload button; owner decision 2423):
+   *  the next GitLab action asks glab for the login and the project again (plan §2 row 187). */
+  askGitLabAgain(): Promise<SourceResult<null>>;
   /**
    * Every page reaches `onPage` before the returned promise settles, and none after. `onChecked` gets this load's
    * local results (rows yamt's own merge changed), after the promise settled, and never another load's.

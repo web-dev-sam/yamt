@@ -265,7 +265,7 @@ function threadClosed(): void {
           type="button"
           :aria-label="RELOAD_DISCUSSIONS"
           class="shrink-0 rounded p-0.5 hover:bg-hover"
-          @click="mergeRequests.reloadDiscussions(row.iid)"
+          @click="mergeRequests.refreshDiscussions(row.iid)"
         >
           <RefreshCw
             class="size-4"

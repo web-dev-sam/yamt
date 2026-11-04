@@ -1,0 +1,2 @@
+just mutants HEAD (Stryker, 8 TS files): 747 killed, 25 survived, 2 no coverage, 3 errors; mergeRequestPreview.ts and mergeRequestsRefresh.ts 100%
+None on changed lines. All 25 survivors are on unchanged lines: fixtureMergeRequests.ts 53-82/143/176, tauriMergeRequests.ts:27, mergeRequests.ts:140/217, mergeRequestThread.ts:85/124/222

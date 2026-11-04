@@ -81,6 +81,7 @@ type Rig = {
   readonly storage: MemoryStorage;
   readonly mode: ShallowRef<DiscussionDetails>;
   readonly discussionCalls: DiscussionCall[];
+  readonly calls: string[];
 };
 
 type MemoryStorage = StorageLike & { readonly items: Map<string, string> };
@@ -164,11 +165,17 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
   const peopleChanges: Asked<PeopleChangeReply>[] = [];
   const problems: Problem[] = [];
   const discussionCalls: DiscussionCall[] = [];
+  const calls: string[] = [];
   const mode = shallowRef<DiscussionDetails>("full");
   const source: MergeRequestSource = {
     findGitLabProject: async () => ({ ok: true, value: { kind: "found", repository: REPOSITORY } }),
+    askGitLabAgain: async () => {
+      calls.push("askGitLabAgain");
+      return { ok: true, value: null };
+    },
     listMergeRequests: (onPage, onChecked) =>
       new Promise((resolve) => {
+        calls.push("listMergeRequests");
         loads.push({ send: onPage, check: onChecked, end: resolve });
       }),
     openMergeRequest: (asked) =>
@@ -195,6 +202,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
     readJobLog: async () => ({ ok: true, value: { kind: "noLog" } }),
     readDiscussions: (asked) =>
       new Promise((resolve) => {
+        calls.push("readDiscussions");
         discussionCalls.push({ iids: [...asked], answer: resolve });
       }),
     searchPeople: async () => ({ ok: true, value: { kind: "found", people: [] } }),
@@ -240,6 +248,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
     storage,
     mode,
     discussionCalls,
+    calls,
   };
 }
 
@@ -346,6 +355,7 @@ test("a reload keeps the old rows until its end, then swaps them in (catches a r
   const kept = ROWS.slice(1);
 
   const reloading = live.slice.refresh();
+  await settled();
   const reload = loadAt(live, 1);
   reload.send({ me: "anna", rows: kept.slice(0, 5) });
   reload.send({ me: "anna", rows: kept.slice(5) });
@@ -377,6 +387,7 @@ test("a_buffered_refresh_replaces_details_only_at_its_swap", async () => {
   expect(details.get(iid(639))?.kind).toBe("refused");
 
   const reloading = live.slice.refresh();
+  await settled();
   const reload = loadAt(live, 1);
   reload.send({ me: "sam", rows: ROWS });
   expect(live.slice.discussions.value).toBe(details);
@@ -399,6 +410,7 @@ test.each<ListEnd>([
     await loaded(live);
 
     const reloading = live.slice.refresh();
+    await settled();
     const reload = loadAt(live, 1);
     reload.send({ me: "sam", rows: ROWS.slice(0, 3) });
     reload.end({ ok: true, value: end });
@@ -430,6 +442,7 @@ test.each<ListEnd>([
     await settled();
 
     const retrying = live.slice.refresh();
+    await settled();
     expect(live.slice.listing.value).toEqual({ kind: "loading", first: true });
     loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(0, 20) });
     expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(0, 20)));
@@ -445,6 +458,7 @@ test("Refresh of a loaded empty list streams its pages (catches the page blank u
   await loaded(live, []);
 
   const refreshing = live.slice.refresh();
+  await settled();
   expect(live.slice.listing.value).toEqual({ kind: "loading", first: true });
   loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(0, 3) });
   expect(live.slice.rows.value).toHaveLength(3);
@@ -471,6 +485,7 @@ test.each<[ListEnd, string | null]>([
     expect(live.slice.failure.value).toBe(failure);
 
     const again = live.slice.refresh();
+    await settled();
     expect(live.slice.failure.value).toBeNull();
     loadAt(live, 1).end(LOADED);
     await again;
@@ -481,10 +496,51 @@ test("one load at a time: Refresh and show while loading start nothing (catches 
   const live = rig();
   live.slice.show();
   const refreshing = live.slice.refresh();
+  await settled();
   vi.setSystemTime(T0 + RECHECK_PAUSE_MS * 2);
   live.slice.show();
   expect(live.loads).toHaveLength(1);
   await refreshing;
+});
+
+function gitLabCalls(live: Rig): string[] {
+  return live.calls.filter((call) => call !== "readDiscussions");
+}
+
+test("refresh_asks_gitlab_again_before_listing", async () => {
+  const live = rig();
+  await loaded(live);
+  vi.setSystemTime(T0 + RECHECK_PAUSE_MS);
+  live.slice.show();
+  loadAt(live, 1).end(LOADED);
+  await settled();
+  expect(gitLabCalls(live)).toEqual(["listMergeRequests", "listMergeRequests"]);
+
+  const refreshing = live.slice.refresh();
+  await settled();
+  expect(gitLabCalls(live).slice(2)).toEqual(["askGitLabAgain", "listMergeRequests"]);
+  loadAt(live, 2).end(LOADED);
+  await refreshing;
+
+  const info = vi.spyOn(log, "info");
+  const asks: ((result: SourceResult<null>) => void)[] = [];
+  const held = rig({
+    askGitLabAgain: () =>
+      new Promise((resolve) => {
+        asks.push(resolve);
+      }),
+  });
+  await loaded(held);
+  const retrying = held.slice.refresh();
+  await settled();
+  expect(held.loads).toHaveLength(1);
+  asks[0]?.({ ok: false, failure: STOPPED });
+  await settled();
+  expect(held.loads).toHaveLength(2);
+  expect(info).toHaveBeenCalledWith("mergeRequests.ask_again_failed", { kind: "WorkerStopped" });
+  loadAt(held, 1).end(LOADED);
+  await retrying;
+  expect(held.slice.listing.value.kind).toBe("done");
 });
 
 test("a failed first list call is reported and leaves nothing loaded, so the next show tries again", async () => {
@@ -531,6 +587,7 @@ test("a_refresh_drops_every_rows_links", async () => {
   expect([...live.slice.links.value.values()]).toEqual([read, read]);
 
   const reloading = live.slice.refresh();
+  await settled();
   loadAt(live, 1).send({ me: "sam", rows: ROWS });
   expect(live.slice.links.value.size).toBe(2);
   loadAt(live, 1).end({ ok: true, value: { kind: "failed", message: "502" } });
@@ -538,6 +595,7 @@ test("a_refresh_drops_every_rows_links", async () => {
   expect(live.slice.links.value.size).toBe(2);
 
   const swapping = live.slice.refresh();
+  await settled();
   loadAt(live, 2).send({ me: "sam", rows: ROWS });
   loadAt(live, 2).end(LOADED);
   await swapping;
@@ -605,6 +663,7 @@ test("a failed reload call is reported and keeps the list and its last end", asy
   await loaded(live);
 
   const reloading = live.slice.refresh();
+  await settled();
   loadAt(live, 1).end({ ok: false, failure: STOPPED });
   await reloading;
 
@@ -642,6 +701,7 @@ test("a refresh keeps listedAt while it runs and writes its end's time once list
   await loaded(live);
   vi.setSystemTime(T0 + 7);
   const reloading = live.slice.refresh();
+  await settled();
   loadAt(live, 1).send({ me: "sam", rows: ROWS });
   expect(live.slice.listedAt.value).toBe(T0);
   vi.setSystemTime(T0 + 9);
@@ -660,6 +720,7 @@ test.each<SourceResult<ListEnd>>([
     await loaded(live);
     vi.setSystemTime(T0 + 9);
     const reloading = live.slice.refresh();
+    await settled();
     loadAt(live, 1).end(end);
     await reloading;
     expect(live.slice.listedAt.value).toBe(T0);
@@ -718,6 +779,7 @@ test("a refresh's checked row arriving while it is buffered lands in the swapped
   const live = rig();
   await loaded(live);
   const reloading = live.slice.refresh();
+  await settled();
   const reload = loadAt(live, 1);
   reload.send({ me: "sam", rows: ROWS });
   reload.check(checkedRow(640));
@@ -735,6 +797,7 @@ test("an older load's checked row lands while its rows are shown and is dropped 
   const live = rig();
   await loaded(live);
   const reloading = live.slice.refresh();
+  await settled();
   loadAt(live, 1).send({ me: "sam", rows: ROWS });
   loadAt(live, 0).check(checkedRow(640));
   expect(readinessOf(live, 640)).toEqual(CLEAN);
@@ -756,6 +819,7 @@ test.each<SourceResult<ListEnd>>([
     const live = rig();
     await loaded(live);
     const reloading = live.slice.refresh();
+    await settled();
     const reload = loadAt(live, 1);
     reload.send({ me: "sam", rows: ROWS });
     reload.check(checkedRow(640));
@@ -788,11 +852,13 @@ test("the summary counts shown and loaded rows and says when the list was cut, a
   expect(cut).not.toBe("40 of 40 merge requests");
 
   const reloading = live.slice.refresh();
+  await settled();
   loadAt(live, 1).end({ ok: true, value: { kind: "failed", message: "502" } });
   await reloading;
   expect(live.slice.summary.value).toBe(cut);
 
   const again = live.slice.refresh();
+  await settled();
   loadAt(live, 2).send({ me: "sam", rows: ROWS });
   loadAt(live, 2).end(LOADED);
   await again;
@@ -1198,6 +1264,7 @@ test("a_complete_load_drops_due_dates_of_merge_requests_it_no_longer_lists, the 
 
   const live = await dated();
   const reloading = live.slice.refresh();
+  await settled();
   loadAt(live, 1).send({ me: "sam", rows: ROWS.filter((row) => row.iid !== 640) });
   expect([...live.slice.dueDates.value.keys()]).toEqual([630, 640]);
   loadAt(live, 1).end(LOADED);
@@ -1215,6 +1282,7 @@ test.each<SourceResult<ListEnd>>([
 ])("a_cut_or_failed_load_keeps_every_due_date: %j", async (result) => {
   const live = await dated();
   const reloading = live.slice.refresh();
+  await settled();
   loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(20) });
   loadAt(live, 1).end(result);
   await reloading;
@@ -1250,6 +1318,7 @@ test("a_rerequest_reply_replaces_that_rows_reviewers_in_rows_and_in_a_buffering_
   const live = rig();
   await loaded(live);
   const reloading = live.slice.refresh();
+  await settled();
   loadAt(live, 1).send({ me: "sam", rows: ROWS });
 
   const asking = live.slice.rerequestReview(iid(638), "chiara");
@@ -1316,6 +1385,7 @@ test("a_people_change_rewrites_both_lists_in_rows_and_in_a_buffering_refresh", a
   const live = rig();
   await loaded(live);
   const reloading = live.slice.refresh();
+  await settled();
   loadAt(live, 1).send({ me: "sam", rows: ROWS });
 
   const people: MergeRequestPeople = {
@@ -1390,6 +1460,7 @@ test("an_open_box_does_not_bring_back_a_row_a_refresh_dropped", async () => {
   await loaded(live);
   live.slice.peopleBoxOpened(iid(640));
   const reloading = live.slice.refresh();
+  await settled();
   loadAt(live, 1).send({ me: "sam", rows: ROWS.filter((row) => row.iid !== 640) });
   loadAt(live, 1).end(LOADED);
   await reloading;
@@ -1409,6 +1480,7 @@ test("a later refresh's rows replace a re-requested row's reviewers", async () =
   expect(reviewersOf(live.slice.rows.value, 630)).toEqual(RE_REQUESTED);
 
   const reloading = live.slice.refresh();
+  await settled();
   loadAt(live, 1).send({ me: "sam", rows: ROWS });
   loadAt(live, 1).end(LOADED);
   await reloading;
@@ -1483,6 +1555,7 @@ test("Refresh keeps the search; show empties it (catches the text surviving a pa
   live.slice.setSearch("!630");
 
   const reloading = live.slice.refresh();
+  await settled();
   loadAt(live, 1).send({ me: "sam", rows: ROWS });
   loadAt(live, 1).end(LOADED);
   await reloading;
@@ -1535,6 +1608,7 @@ test("a_refresh_keeps_the_open_description", async () => {
   }
   const opening = live.slice.toggleDescription(first);
   const refreshing = live.slice.refresh();
+  await settled();
   loadAt(live, live.loads.length - 1).send({ me: "sam", rows: [first, second] });
   loadAt(live, live.loads.length - 1).end(LOADED);
   await refreshing;
@@ -1548,6 +1622,7 @@ test("a_refresh_keeps_the_open_description", async () => {
   });
 
   const again = live.slice.refresh();
+  await settled();
   loadAt(live, live.loads.length - 1).send({ me: "sam", rows: [second] });
   loadAt(live, live.loads.length - 1).end(LOADED);
   await again;
