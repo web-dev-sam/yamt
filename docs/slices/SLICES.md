@@ -49,6 +49,25 @@ Order: rust ∥ look, app, `just bindings`, state, page, docs ∥ smoke, final.
 | 7   | docs keeper (`MrDescriptionDocs`); smoke (`MrDescriptionSmoke`), then final | docs-keeper, verifier | running |                                                                                                                                                                                                                                                                                                                                                                                        |
 | 8   | owner check on the GitLab playground                                        | human                 | todo    |                                                                                                                                                                                                                                                                                                                                                                                        |
 
+## Linked epics, issues and commits (session 49; owner #2247, answer #2250; continued in this session by #2260)
+
+Request `docs/slices/request-mr-links.md` (rules 1–6); facts `.omp/run/notes/PlanScoutMrDescriptionFacts.md` §9–§11.
+Design `briefs/mr-links-design.md` option A: `read_links(iid)` reuses the description's fetch and walk, classifies
+pages on the project's https server by GitLab's routes, one aliased CE-only `workItems(iids)` query per hover for
+titles, states and direct parents (measured 50 of 200), commit titles from GitLab's reference title; every line and
+parent page offered before the reply; proposed plan #175–#177, RK68–RK70. No open question. Order: rust, app,
+`just bindings`, state, page (after the description page lands), docs ∥ smoke, final.
+
+| row | slice                                                  | owner                 | status | evidence                                                         |
+| --- | ------------------------------------------------------ | --------------------- | ------ | ---------------------------------------------------------------- |
+| 1   | design                                                 | designer              | done   | `MrLinksDesign`: option A, five briefs. Notes `MrLinksDesign.md` |
+| 2   | rust (`briefs/mr-links-rust.md`)                       | rust-impl             | todo   |                                                                  |
+| 3   | app (`briefs/mr-links-app.md`)                         | rust-impl             | todo   |                                                                  |
+| 4   | state (`briefs/mr-links-state.md`)                     | web-impl              | todo   |                                                                  |
+| 5   | page (`briefs/mr-links-page.md`): links button and box | web-impl              | todo   |                                                                  |
+| 6   | docs keeper; verify (`briefs/mr-links-verify.md`)      | docs-keeper, verifier | todo   |                                                                  |
+| 7   | owner check on the GitLab playground                   | human                 | todo   |                                                                  |
+
 ## Release 0.6.7 (session 48, owner: "release the next patch")
 
 0.6.7 = 0.6.6 (published, tag `v0.6.6` on origin; section archived) plus the merge-request page work since: whose

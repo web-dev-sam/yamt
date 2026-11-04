@@ -522,7 +522,7 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   lock is released; a worker panic answers `WorkerStopped` and the lock recovers), `add_tab`, `close_tab(tab)`,
   `rename_tab(tab, name)`, `set_tab_language(tab, language)`, `show_tab(tab)` (each `-> TabList`). The merge commands are
   registered there too and answer Tauri's "state not managed"; the compare page never calls them.
-- **Merge requests** (`merge_requests.rs`, crate `yamt-merge-requests`, plan §2 #128–#137, #144, #149, #152, #153, #158, #162, #169): `manage(app, folder,
+- **Merge requests** (`merge_requests.rs`, crate `yamt-merge-requests`, plan §2 #128–#137, #144, #149, #152, #153, #158, #162, #169, #171–#173): `manage(app, folder,
   app_folder, ai)` runs for the compare window (its start folder, `window.rs` `open_compare`) and the range window (its
   repository, `range.rs`) and manages `MergeRequestState { gitlab: Option<GitLabRepository>, range_dir, pages:
   Mutex<BTreeSet<WebPage>>, merged: Mutex<MergedPairs>, pictures: Pictures, job_logs: JobLogs, ai: Ai }` (`gitlab_repository`: offline, once; `ai` the window's
@@ -534,7 +534,7 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   as `ListMessage::Page { page }`, then exactly one `ListMessage::End { end: ListEnd }` on the channel (tauri 2.12
   delivers a channel message of 8 KiB or more by a later fetch, so the end cannot be the command's answer), each page's
   merge-request and failed-job pages (`row_pages`) added to `pages` and its uploaded pictures offered to `pictures` before it is sent (`merge_requests/list.rs` `forward_page`
-  through `offer(state, pages, pictures)`, the one writer path of `pages`: `pages` and the pictures' shelf locked one after the other, never together); then, when the list reached
+  through `offer(state, pages, pictures)`, one of the two writer paths of `pages` with `offer_described` (below): `pages` and the pictures' shelf locked one after the other, never together); then, when the list reached
   the project (`Listed::to_check` is `Some`), it runs `check_conflicts` under `merged` and sends each row the check
   changed as `ListMessage::Checked { row: CheckedRow }` (a send failure is not logged: the check logs one line per
   load); the command answers only after the check; async
@@ -564,20 +564,30 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   PeopleSearchReply` and `change_people(iid, change: PeopleChange) -> PeopleChangeReply` (#169, on a `blocking_reply`
   worker each, `merge_requests/people.rs` `search_reply`/`change_reply`, RK53): no project → `Failed { NO_PROJECT }`;
   else `yamt_merge_requests::search_people`/`change_people` with `Glab::find()`, then the people found, or everyone in
-  GitLab's answered lists, offered to `pictures` through `Pictures::offer` before the reply is returned. GitLab, git and launch problems are values (`ListEnd`, `OpenReply`,
-  `PageOpened`, `ResolveReply`, `ContinueMergeReply`, `RerequestReply`, `JobLogReply`, `DiscussionsAnswer`, `PeopleSearchReply`, `PeopleChangeReply`), never an `IpcError`; a window without a project answers `Failed`.
-- **Profile pictures** (`merge_requests/pictures.rs`, plan §2 #152, RK53): the asynchronous URI scheme `yamt-picture`
+  GitLab's answered lists, offered to `pictures` through `Pictures::offer` before the reply is returned. Async
+  `read_description(iid) -> DescriptionReply` (#171–#173, on a `blocking_reply` worker, `merge_requests/description.rs`
+  `description_reply`, RK41, RK53): no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_description`
+  with `Glab::find()`, then `offer_described` remembers its linked `pages` (in `pages`) and then its uploads (through
+  `Pictures::offer_uploads`), each lock held alone, before the reply is returned, so a click on a link opens through
+  `open_page` and an uploaded image loads through the picture scheme. `offer` and `offer_described` are the two writers
+  of `pages` and of the pictures' offered set. GitLab, git and launch problems are values (`ListEnd`, `OpenReply`,
+  `PageOpened`, `ResolveReply`, `ContinueMergeReply`, `RerequestReply`, `JobLogReply`, `DiscussionsAnswer`, `PeopleSearchReply`, `PeopleChangeReply`, `DescriptionReply`), never an `IpcError`; a window without a project answers `Failed`.
+- **Profile pictures and uploads** (`merge_requests/pictures.rs`, plan §2 #152, #173, RK53): the asynchronous URI scheme `yamt-picture`
   (`PICTURE_SCHEME`, registered in `commands.rs` for every window; the window's `PICTURE_SCHEME` names the same) answers
-  `GET yamt-picture://localhost/<username>` on a `spawn_blocking` worker (`answer_picture`), so the webview never waits:
-  `picture_answer` takes a username of `[A-Za-z0-9._-]` that a list, a `read_discussions` reply, a `search_people` or a `change_people` reply of this run offered (`Pictures::offer` from
-  `offer` or `merge_requests/people.rs`, each username's latest `PictureAddress`), fetches it once per run through `fetch_picture` (`glab api
-  <address>`, failures remembered too), and answers its bytes with the sniffed `Content-Type` and `X-Content-Type-Options:
-  nosniff`; anything else is 404 with an empty body. `Pictures` is the one gate: a `Mutex<PictureShelf>` (offered,
-  fetched, `running` ≤ `PICTURE_FETCHES` 4) and a `Condvar` the askers wait on for a running fetch of the same picture or
-  a free turn; the shelf is never held across a glab run. A Gravatar picture never passes through yamt: the window loads
-  Rust's checked `GravatarAddress` itself. The CSP (`tauri.conf.json` `csp` and `devCsp`): `img-src 'self' data:
-  yamt-picture: http://yamt-picture.localhost https://secure.gravatar.com https://www.gravatar.com` (pinned by
-  `merge_requests/tests/csp.rs`).
+  `GET yamt-picture://localhost/<name>` on a `spawn_blocking` worker (`answer_picture`), so the webview never waits:
+  `picture_answer` takes a name that is a username of `[A-Za-z0-9._-]` or an `UploadKey` (`UploadKey::is_key`:
+  `upload~` and 32 lowercase hex digits) that this run offered — a username from a list, a `read_discussions` reply, a
+  `search_people` or a `change_people` reply (`Pictures::offer` from `offer` or `merge_requests/people.rs`), an upload key
+  from a `read_description` reply (`Pictures::offer_uploads` from `offer_described`); each name's latest `PictureAddress`
+  wins — fetches it once per run through `fetch_picture` (an avatar: `glab api <address>`; an upload: its uploads API
+  route, then its web path on `(HTTP 403)`/`(HTTP 404)`; failures remembered too), and answers its bytes with the sniffed
+  `Content-Type` and `X-Content-Type-Options: nosniff`; anything else is 404 with an empty body and no glab run.
+  `Pictures` is the one gate: a `Mutex<PictureShelf>` (offered, fetched, `running` ≤ `PICTURE_FETCHES` 4) and a `Condvar`
+  the askers wait on for a running fetch of the same picture or a free turn; the shelf is never held across a glab run.
+  A Gravatar picture or another site's image in a description never passes through yamt: the window loads Rust's checked
+  address itself. The CSP (`tauri.conf.json` `csp` and `devCsp`): `img-src 'self' data: yamt-picture:
+  http://yamt-picture.localhost https:` (Gravatar's two hosts inside `https:`); scripts, frames, media, fonts and
+  `connect-src` stay the app's only (pinned by `merge_requests/tests/csp.rs`).
 - **A second process** (`second_window.rs`, plan §2 #132, #138; amends "one process, one window": opening a merge
   request's changes or resolving its conflicts starts another yamt): `start_range(range)` runs `yamt --diff=<base_sha>..<head_sha>
   --repo <root>` (`range_arguments`, no `--ai`; a spawn failure → `OpenReply::StartFailed`), `start_merge(root)` runs
@@ -756,7 +766,7 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   folder's sum), built once per list by `RangeApp`, which fills the tree's optional `folder` slot (after the label;
   the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair of file and folder rows.
 
-### 3.9 `merge-requests` — the GitLab project's open merge requests (plan §2 #128–#139, #149, #151–#153, #158, #162, #169)
+### 3.9 `merge-requests` — the GitLab project's open merge requests (plan §2 #128–#139, #149, #151–#153, #158, #162, #169, #171–#173)
 
 Package `yamt-merge-requests`; depends on `gitio` and `range` among `yamt-*` (may use `merge-core`), never on tauri
 (`scripts/arch-check.sh`); no `Mutex`; the one memory across loads is the run's `MergedPairs`, held by the shell and
@@ -764,7 +774,7 @@ lent to `check_conflicts` (plan §2 #149). Every glab call goes through `Glab::g
 (§3.2); GitLab, git and launch problems are values, never errors. The writes to GitLab are the re-request mutation and,
 per people change, one `APPEND` or `REMOVE` of one username (RK54).
 
-- **Types crossing the IPC** (`lib.rs`, re-exporting `row.rs`, `people.rs`, `labels.rs`, `picture.rs`, `rerequest.rs`, `people_search.rs`, `people_change.rs`, `job_log.rs`, `discussions.rs` and
+- **Types crossing the IPC** (`lib.rs`, re-exporting `row.rs`, `people.rs`, `labels.rs`, `picture.rs`, `rerequest.rs`, `people_search.rs`, `people_change.rs`, `job_log.rs`, `discussions.rs`, `description.rs` and
   `list.rs`'s types; the list's row types live in `row.rs`): `GitLabProject` `none` | `found { repository }` (the absolute common git dir,
   the key the window remembers filters and due dates by), `MergeRequestIid`, `Person { username, name, picture:
   PersonPicture }` (`uploaded` — the window asks the scheme by username — | `gravatar { address: GravatarAddress }` |
@@ -773,19 +783,28 @@ per people change, one `APPEND` or `REMOVE` of one username (RK54).
   → reviewed, `REQUESTED_CHANGES` → changes requested; an unknown state → requested, warned once per load), `Label {
   title, colors: LabelColors | null }` (`LabelColors { background, text }`, each `#rgb` or `#rrggbb`, else none), `CiStatus` (GitLab's
   fifteen folded into seven: `passed`, `failed`, `running`, `pending`, `canceled`, `skipped`, `manual`; an unknown one
-  `pending` with a warning), `WebPage` (a string only `WebPage::job`, `WebPage::merge_request` and `WebPage::note` make), `FailedJob {
+  `pending` with a warning), `WebPage` (a string only `WebPage::job`, `WebPage::merge_request`, `WebPage::note` and `WebPage::linked` make), `FailedJob {
   name, stage, allowFailure, page }`, `Pipeline { status, failedJobs, moreFailedJobs }`, `MergeRequestRow` (`createdAt`
   as GitLab sent it, `author: Option<Person>`, `assignees`, `reviewers: Vec<Reviewer>`, `labels: Vec<Label>` in GitLab's
   order, `openDiscussions` = resolvable − resolved saturating, `approvedBy: Vec<Person>` in GitLab's order,
   `mayRerequest` (your `updateMergeRequest` permission: re-request a review, add and remove people), `page` its
   GitLab page or `None` off https, `size: Option<ChangeSize { additions, deletions, files }>` (the sums over
   `diffStats`, `files` its entry count; +0 −0 for no entries with `diffRefs` set — a computed empty diff —, none
-  without `diffRefs` — not yet computed), `readiness: Readiness`, `fromFork`; #138), `RerequestReply` `requested {
+  without `diffRefs` — not yet computed), `readiness: Readiness`, `fromFork`; #138; `hasDescription`: GitLab's
+  `description` holds more than white space, #171), `RerequestReply` `requested {
   reviewers }` | `notReviewer` | `notOpen` | `glabMissing` | `notLoggedIn { detail }` | `refused { message }` | `failed
   { message }`, `PeopleSearchReply` `found { people: Person[] }` | `glabMissing` | `notLoggedIn { detail }` | `failed {
   message }`, `PeopleChange { group: PeopleGroup (assignees | reviewers), action: PeopleAction (add | remove), username }`,
   `PeopleChangeReply` `changed { people }` | `unchanged { people }` (`people: MergeRequestPeople { assignees, reviewers }`
-  as GitLab answered) | `glabMissing` | `notLoggedIn { detail }` | `refused { message }` | `failed { message }`, `Readiness` `ready` | `conflicts { also:
+  as GitLab answered) | `glabMissing` | `notLoggedIn { detail }` | `refused { message }` | `failed { message }`,
+  `DescriptionReply` `read { description: Description { blocks } }` | `glabMissing` | `notLoggedIn { detail }` | `failed
+  { message }` with `DescriptionBlock` `paragraph { inlines }` | `heading { level: HeadingLevel }` | `code { language,
+  text }` | `list { numbering: ListNumbering, items: DescriptionItem { task: TaskBox, blocks }[] }` | `quote` | `rule` |
+  `table { head, body: DescriptionRow { cells: DescriptionCell { header, align: CellAlign, inlines }[] }[] }` |
+  `details { open, summary, blocks }`, `DescriptionInline` `text` | `emphasis` | `strong` | `strike` | `code` | `link {
+  link: DescriptionLink, inlines }` | `image { image: DescriptionImage, caption }` | `lineBreak`, `DescriptionLink`
+  `page { page: WebPage }` | `refused { address }`, `DescriptionImage` `uploaded { key: UploadKey }` | `web { address }`
+  | `refused` (`description/address.rs`, re-exported), `Readiness` `ready` | `conflicts { also:
   BlockedReason[] }` | `needsRebase` | `checking` | `blocked { reason }` | `mergesCleanly` (yamt's own merge is clean
   while GitLab still checks or keeps a conflict), `BlockedReason` (GitLab's
   `DetailedMergeStatus` in yamt's words: `draft`, `discussions`, `approvals`, `pipelineMustPass`, …, `other { status
@@ -803,11 +822,12 @@ per people change, one `APPEND` or `REMOVE` of one username (RK54).
   config order (`gitlab_remotes`).
 - **The list** (`project.rs`, `query.rs`, `page.rs`, `readiness.rs`, `list.rs`, #131, #138, #151): glab missing → `GlabMissing`;
   `project.rs` `logged_in_project` (the one fold of `auth_status` and `glab api projects/:fullpath` for the list, opening,
-  resolving, re-requesting, the job log, the discussions and the people search and change; `NoProject` → `ListEnd`/`OpenReply`/`ResolveRefusal`/`RerequestReply`/`PeopleSearchReply`/`PeopleChangeReply` by `From`) → `NotLoggedIn`/`Failed`, else
+  resolving, re-requesting, the job log, the discussions, the people search and change and the description; `NoProject` → `ListEnd`/`OpenReply`/`ResolveRefusal`/`RerequestReply`/`PeopleSearchReply`/`PeopleChangeReply`/`DescriptionReply` by `From`) → `NotLoggedIn`/`Failed`, else
   `Project { full_path, web_path, web_origin }` (`web_path`:
   the `web_url` after the origin, so any sub-path GitLab is installed under stays; origin and path only on https,
   else `None` and empty); then at most 5 pages of the one single-line GraphQL query (`list_args`: `api graphql -f query=… -f
-  fullPath=<path> -F first=100 [-f after=<cursor>]`; it asks `author { username name avatarUrl }`, `avatarUrl` on
+  fullPath=<path> -F first=100 [-f after=<cursor>]`; 172 of GitLab's complexity limit of 250 logged in on gitlab.com; it asks
+  `description` (folded to `hasDescription`, the text never kept), `author { username name avatarUrl }`, `avatarUrl` on
   assignees, reviewers and approvers, reviewers' `mergeRequestInteraction { approved reviewState }`, `userPermissions {
   updateMergeRequest }`, labels' `color textColor`, `detailedMergeStatus conflicts diffStats { additions
   deletions } diffRefs { baseSha } sourceProjectId targetProjectId targetBranch diffHeadSha` too — never `diffStatsSummary`, beside which gitlab.com answers
@@ -853,17 +873,21 @@ per people change, one `APPEND` or `REMOVE` of one username (RK54).
   sourceProjectId targetProjectId`; no merge request or not `opened` → `NotOpen`), `is_from_fork` → `FromFork`, a
   branch holding `:` → `Failed` (`require_branch_name`), `remote_for` none → `NoRemote { project }`; `Ok(ResolveTarget)`
   for the shell to hand to `yamt_local_merge::start` (§3.10). Nothing is fetched or written.
-- **People and pictures** (`people.rs`, `picture.rs`, #151, #152, RK53): `People` turns GraphQL user nodes into
+- **People and pictures** (`people.rs`, `picture.rs`, #151, #152, #173, RK53): `People` turns GraphQL user nodes into
   `Person`s and `Reviewer`s, collecting the page's `OfferedPicture`s and the review states yamt does not know.
-  `avatar_source(origin, avatar_url)` is the only maker of both addresses: `Uploaded(PictureAddress)` for a path
+  `avatar_source(origin, avatar_url)` is the only maker of both avatar addresses: `Uploaded(PictureAddress)` for a path
   starting with `/`, or an `https` address of the project's origin, whose path is
   `(/segment)*/uploads/-/system/user/avatar/<digits>/<file>` (segments of `[A-Za-z0-9._~-]` — `web_page.rs`
   `is_path_segment`, no `..` —, an optional query of `[A-Za-z0-9=&._-]`); `Gravatar(GravatarAddress)` for
   `https://secure.gravatar.com` or `https://www.gravatar.com` with the path `/avatar/<32 or 64 hex digits>` and a query of
   `[A-Za-z0-9=&%._-]`; anything else (`http`, another host, a custom Gravatar host, null) → none, initials. A
-  `PictureAddress` never reaches the window. `fetch_picture(glab, root, address)`: `Glab::get` of `api <address>`,
-  then PNG, JPEG, GIF or WebP by their first bytes (`ImageKind`, its `mime`) and at most `MAX_PICTURE_BYTES` 1 MiB,
-  else `Err`.
+  description's upload address is made only by `description/address.rs` (`PictureAddress::upload(route, web)`, crate-only,
+  below). A `PictureAddress` never reaches the window. `fetch_picture(glab, root, address)` (`fetched` with an injected
+  getter): an avatar is `Glab::get` of `api <address>`; an upload is `api <its uploads API route>`, then, only when glab's
+  line ends in `(HTTP 403)` or `(HTTP 404)` (`page.rs` `FORBIDDEN`, `NOT_FOUND`), `api <its web address>` — glab 1.126.0
+  follows a GET's redirect itself, so a `glab: HTTP 3xx` yamt sees is an error, never retried —; then PNG, JPEG, GIF or
+  WebP by their first bytes (`ImageKind`, its `mime`) and at most `MAX_PICTURE_BYTES` 1 MiB (an avatar) or
+  `MAX_UPLOAD_BYTES` 10 MiB (an upload), else `Err` ("larger than N MiB").
 - **Re-requesting a review** (`rerequest.rs`, #153, RK54): `rerequest_review(repository, glab, iid, username) ->
   RerequestReply`: glab (`GlabMissing`), `logged_in_project`, then the reviewers asked afresh (`reviewers_args`: `state
   reviewers { nodes { id username name avatarUrl mergeRequestInteraction { approved reviewState } } }`; no merge

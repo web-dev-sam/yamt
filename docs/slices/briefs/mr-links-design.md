@@ -81,7 +81,7 @@ keep yet is a commit reference's `title`; it gains `commit_titles`.
 
 | field                                                  | since                      | source                                                       |
 | ------------------------------------------------------ | -------------------------- | ------------------------------------------------------------ |
-| `Project.workItems(iids: [String!], first:)`           | 15.1 (experiment), at 15.6 | reference at v15.6.0-ee `projectworkitemsiids`               |
+| `Project.workItems(iids: [String!], first:)`           | 15.1 (experiment), at 15.6 | reference at v15.6.0-ee `:17999-18006`                       |
 | `WorkItem.iid title state webUrl workItemType widgets` | at 15.6                    | reference at v15.6.0-ee `:20395-20405`                       |
 | `WorkItemWidgetHierarchy.parent: WorkItem`             | at 15.6                    | reference at v15.6.0-ee `:20466`                             |
 | `Group.workItems(iids:, first:)`                       | **16.3** (experiment)      | reference at v16.4.0-ee `:18400-18415`; absent at v16.2.0-ee |
@@ -118,7 +118,8 @@ fragment linked on WorkItem { iid title state webUrl workItemType { name }
   names]`. Rule: `Epic` → Epics, any other → Issues.
 
 **Cost.** One project part with the fragment: 25 at `first: 1`, 27 at `first: 3`, 74 at `first: 50`, 124 without
-`first` (measured; `onlyTypes: [HIERARCHY]` changes the score by nothing, 27 either way, and is absent at 15.6, so it is
+`first` (measured; `onlyTypes: [HIERARCHY]` changes the score by nothing, 27 either way, and the reference at v15.6.0-ee
+lists `widgets` without arguments, `:20404`, so it is
 not asked; the unfiltered `widgets` list costs only bytes, about 26 empty objects per item). So a call scores about
 **25 × parts + iids**. Each part holds at most 100 iids (`workItems(iids:)` "maximum is 100 IIDs", facts §11); parts are
 packed into glab calls of at most **200** by that sum, below the logged-in limit of 250 (plan #131: the list query's 170
