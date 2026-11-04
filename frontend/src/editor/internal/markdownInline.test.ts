@@ -194,3 +194,18 @@ test("commonmark_flanking_reads_unicode_punctuation_and_white_space", () => {
     { kind: "text", text: "." },
   ]);
 });
+
+function strongStrike(text: string): unknown {
+  return { kind: "strong", children: [{ kind: "strike", children: [{ kind: "text", text }] }] };
+}
+
+test("commonmark_flanking_reads_a_runs_neighbours_past_strike_tildes", () => {
+  expect(parseInline("**~~old~~**new", "commonMark")).toEqual([
+    strongStrike("old"),
+    { kind: "text", text: "new" },
+  ]);
+  expect(parseInline("a**~~b~~**", "commonMark")).toEqual([
+    { kind: "text", text: "a" },
+    strongStrike("b"),
+  ]);
+});

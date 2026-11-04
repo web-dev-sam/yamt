@@ -18,7 +18,8 @@ type OpenBracket = { readonly bracket: Bracket; readonly piece: number; readonly
 /** How a delimiter run may open or close: "yamt" — the AI chat's rule since plan §2 row 112 (not beside white
  *  space; `_` not inside a word); "commonMark" — CommonMark 0.31.2 §6.2's left- and right-flanking rule, with
  *  Unicode punctuation (P and S categories) and white space (Zs, tab, line ending; a text's start and end count as
- *  white space); `*` and `~` open when left-flanking and close when right-flanking; `_` as §6.2 rules 2 and 4. */
+ *  white space); `*` and `~` open when left-flanking and close when right-flanking; `_` as §6.2 rules 2 and 4; a
+ *  run's neighbours are read past any `~`, as GitLab's cmark-gfm (inlines.c `skip_chars`) and comrak read them. */
 export type Flanking = "yamt" | "commonMark";
 
 type Neighbour = "space" | "punctuation" | "other";
@@ -175,16 +176,25 @@ function commonMarkAbility(char: Delimiter, { before, after }: Neighbours): Abil
   };
 }
 
+function commonMarkNeighbours(source: string, at: number, end: number): Neighbours {
+  let before = at;
+  while (source.charAt(before - 1) === "~") {
+    before -= 1;
+  }
+  let after = end;
+  while (source.charAt(after) === "~") {
+    after += 1;
+  }
+  return { before: codePointBefore(source, before), after: codePointAt(source, after) };
+}
+
 function delimiterRun(source: string, at: number, char: Delimiter, flanking: Flanking): Run {
   const length = runLength(source, at, char);
   const end = at + length;
   const ability =
     flanking === "yamt"
       ? yamtAbility(char, { before: source.charAt(at - 1), after: source.charAt(end) })
-      : commonMarkAbility(char, {
-          before: codePointBefore(source, at),
-          after: codePointAt(source, end),
-        });
+      : commonMarkAbility(char, commonMarkNeighbours(source, at, end));
   return { kind: "run", char, length, ...ability, closes: [], opens: [] };
 }
 

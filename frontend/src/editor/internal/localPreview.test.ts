@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import { GITLAB_DRAWN_LANGUAGES, localPreview } from "./localPreview";
+import { MAX_NESTING } from "./markdownTree";
 
 type Entry = {
   readonly name: string;
@@ -14,7 +15,7 @@ const CORPUS_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
   { eager: true, import: "default" },
 );
 
-const NESTED = 15;
+const NESTED = MAX_NESTING - 1;
 
 const TRIGGERS: readonly (readonly [rule: string, text: string])[] = [
   ["C1 escape", "a\\*b"],
@@ -43,21 +44,41 @@ const TRIGGERS: readonly (readonly [rule: string, text: string])[] = [
   ["T5 www", "www.x.org"],
   ["T5 mailto", "mailto:a"],
   ["T6 commit", "abc1234"],
+  ["T1 GitLab issue", "see GL-123"],
+  ["T1 project reference", "see group/project> now"],
+  ["T1 iteration", 'see *iteration:"Sprint 1" now'],
+  ["T1 iteration number", "see *iteration:12 now"],
   ["T7 link", "see [x](y)"],
   ["S1 setext h1", "Title\n==="],
   ["S1 setext h2", "Sub\n---"],
+  ["S1 setext in a quote", "> Title\n> ==="],
+  ["S1 dash setext in a quote", "> a\n> -"],
   ["S2 indented code", "p\n\n    code"],
   ["S2 indented first line", "    code"],
+  ["S2 indented code in a quote", ">     code"],
+  ["S2 indented code in an item", "-     code"],
   ["S3 paren item", "1) a"],
+  ["S3 paren item in a quote", "> 1) a"],
+  ["S3 paren item in an item", "- 1) a"],
   ["S4 plus item", "+ a"],
+  ["S4 plus item in a quote", "> + a"],
   ["S5 mixed bullets", "- a\n* b"],
+  ["S5 mixed bullets in a quote", "> - a\n> * b"],
   ["S6 multi-line quote", ">>>\nq\n>>>"],
   ["S7 front matter", "---\nk: v\n---"],
   ["S7 toml front matter", "+++\nk = 1\n+++"],
+  ["S7 front matter with a language", "+++toml\nk = 1\n+++"],
+  ["S7 front matter closed by dots", "---json\nx\n..."],
+  ["S7 front matter after a blank line", "\n---\nk: v\n..."],
+  ["S7 front matter after an encoding line", "coding: utf-8\n\n+++\nk = 1\n+++"],
   ["S8 description list", "term\n: def"],
   ["S9 tab", "a\tb"],
   ["S9 nul", "a\0b"],
+  ["S9 nul in a fence", "```\na\0b\n```"],
+  ["S9 ideographic space line", "a\n\u3000\nb"],
+  ["S9 ideographic space indent", "\u3000x"],
   ["S13 info words", "```rust ignore\nlet a = 1;\n```"],
+  ["S13 info words in a quote", "> ```rust ignore\n> let a = 1;\n> ```"],
   ["S14 quick action", "/close"],
   ["S15 empty item", "-"],
   ["S15 empty numbered item", "1."],
@@ -66,7 +87,7 @@ const TRIGGERS: readonly (readonly [rule: string, text: string])[] = [
   ["K3 blank last line", "```\na\n\n```"],
   ["K3 blank first line", "```\n\na\n```"],
   ["K3 empty block", "```\n```"],
-  ["N quote", `${">".repeat(NESTED)} deep`],
+  ["N quote", `${"> ".repeat(NESTED)}deep`],
   ["N emphasis", `${"*a ".repeat(NESTED)}x${" a*".repeat(NESTED)}`],
 ];
 

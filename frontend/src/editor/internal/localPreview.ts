@@ -14,12 +14,13 @@ import {
   isBlank,
   LINE_BREAK,
   parseBlocks,
+  RULE,
   type Block,
   type CodeBlock,
 } from "./markdownBlocks";
 import { parseInline } from "./markdownInline";
 import type { Table } from "./markdownTable";
-import type { Inline } from "./markdownTree";
+import { MAX_NESTING, type Inline } from "./markdownTree";
 
 /** Fenced-block languages GitLab draws instead of showing code (docs.gitlab.com: Diagrams and flowcharts, Math,
  *  GeoJSON, STL, suggestions); each goes to GitLab even if yamt colours it. */
@@ -61,31 +62,38 @@ export const GITLAB_DRAWN_LANGUAGES = [
   "wireviz",
 ] as const;
 
-const NESTING_LIMIT = 15;
+const NESTING_LIMIT = MAX_NESTING - 1;
 const INDENTED_CODE_COLUMNS = 4;
 const OUTSIDE_CODE = ["\\", "[", "<", "{", "$"] as const;
-const TEXT_TRIGGERS: readonly RegExp[] = [
-  /[#!%@][\p{L}\p{N}_"]/u,
-  /&[\p{L}\p{N}_#]/u,
-  /~/,
-  /:[A-Za-z0-9_+-]+:/,
-  /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{FE0F}\u{20E3}]/u,
-  /[A-Za-z][A-Za-z0-9+.-]*:\/\//,
-  /www\./i,
-  /mailto:|xmpp:/i,
-  /(?<![\p{L}\p{N}_])[0-9A-Fa-f]{7,40}(?![\p{L}\p{N}_])/u,
-];
-const LINE_TRIGGERS: readonly RegExp[] = [
-  /^\s*\d{1,9}\)(\s|$)/,
-  /^\s*\+(\s|$)/,
-  /^ {0,3}>>>/,
-  /^\s*:\s/,
-  /[\t\0]/,
-  /^\/[A-Za-z]/,
-  /^\s*([-*]|\d{1,9}\.)\s*$/,
-];
+const NUL = "\0";
+const ENCODING_LINE = "coding:";
+const TEXT_TRIGGERS: Readonly<Record<string, RegExp>> = {
+  reference: /[#!%@][\p{L}\p{N}_"]/u,
+  entity: /&[\p{L}\p{N}_#]/u,
+  label: /~/,
+  emojiCode: /:[A-Za-z0-9_+-]+:/,
+  pictograph: /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{FE0F}\u{20E3}]/u,
+  scheme: /[A-Za-z][A-Za-z0-9+.-]*:\/\//,
+  www: /www\./i,
+  mailOrChat: /mailto:|xmpp:/i,
+  commit: /(?<![\p{L}\p{N}_])[0-9A-Fa-f]{7,40}(?![\p{L}\p{N}_])/u,
+  gitlabIssue: /GL-\d/,
+  iteration: /iteration:/,
+  projectPath: /[\p{L}\p{N}_.-]\/[\p{L}\p{N}_.-]+>/u,
+};
+const LINE_TRIGGERS: Readonly<Record<string, RegExp>> = {
+  parenItem: /^\s*\d{1,9}\)(\s|$)/,
+  plusItem: /^\s*\+(\s|$)/,
+  longQuote: /^ {0,3}>>>/,
+  descriptionList: /^\s*:\s/,
+  tab: /\t/,
+  otherWhiteSpace: /[^\S \t\r\n]/,
+  quickAction: /^\/[A-Za-z]/,
+  emptyItem: /^\s*([-*]|\d{1,9}\.)\s*$/,
+};
+const CONTAINER_PREFIX = /^ {0,3}(?:> ?|(?:[-*+]|\d{1,9}[.)])(?: |$))/;
 const SETEXT_UNDERLINE = /^ {0,3}(=+|-+)[ \t]*$/;
-const FRONT_MATTER = /^(---|\+\+\+|;;;)\s*$/;
+const FRONT_MATTER_OPENER = /^(---|\+\+\+|;;;)[ \t]*\S*[ \t]*$/;
 const DASH_ITEM = /^\s*-\s/;
 const STAR_ITEM = /^\s*\*\s/;
 const WHITE_SPACE = /\s/;
@@ -107,26 +115,47 @@ function countOf(text: string, char: string): number {
   return text.split(char).length - 1;
 }
 
+function containerLayers(line: string): string[] {
+  const layers = [line];
+  let inner = line;
+  while (layers.length <= MAX_NESTING && !RULE.test(inner)) {
+    const prefix = CONTAINER_PREFIX.exec(inner)?.[0];
+    if (prefix === undefined) {
+      break;
+    }
+    inner = inner.slice(prefix.length);
+    layers.push(inner);
+  }
+  return layers;
+}
+
 function lineGoesToGitLab(lines: readonly string[], at: number): boolean {
-  const line = lines[at] ?? "";
   const afterBlank = isBlank(lines[at - 1] ?? "");
-  const [, , , fenceInfo = ""] = FENCE.exec(line) ?? [];
-  return (
-    (!afterBlank && SETEXT_UNDERLINE.test(line)) ||
-    (afterBlank && indentOf(line) >= INDENTED_CODE_COLUMNS) ||
-    WHITE_SPACE.test(fenceInfo.trim()) ||
-    LINE_TRIGGERS.some((trigger) => trigger.test(line))
-  );
+  return containerLayers(lines[at] ?? "").some((layer, depth) => {
+    const [, , , fenceInfo = ""] = FENCE.exec(layer) ?? [];
+    return (
+      (!afterBlank && SETEXT_UNDERLINE.test(layer)) ||
+      ((afterBlank || depth > 0) && indentOf(layer) >= INDENTED_CODE_COLUMNS) ||
+      WHITE_SPACE.test(fenceInfo.trim()) ||
+      Object.values(LINE_TRIGGERS).some((trigger) => trigger.test(layer))
+    );
+  });
+}
+
+function frontMatterOpens(lines: readonly string[]): boolean {
+  const afterEncoding = (lines[0] ?? "").includes(ENCODING_LINE) ? lines.slice(1) : lines;
+  return FRONT_MATTER_OPENER.test(afterEncoding.find((line) => !isBlank(line)) ?? "");
 }
 
 function linesGoToGitLab(text: string): boolean {
   const lines = text.split(LINE_BREAK);
   const fenced = fencedLines(text);
-  const outside = lines.filter((_, at) => !fenced.has(at));
-  const dashItems = outside.some((line) => DASH_ITEM.test(line));
-  const starItems = outside.some((line) => STAR_ITEM.test(line));
+  const outside = lines.flatMap((line, at) => (fenced.has(at) ? [] : containerLayers(line)));
+  const dashItems = outside.some((layer) => DASH_ITEM.test(layer));
+  const starItems = outside.some((layer) => STAR_ITEM.test(layer));
   return (
-    FRONT_MATTER.test(lines[0] ?? "") ||
+    text.includes(NUL) ||
+    frontMatterOpens(lines) ||
     (dashItems && starItems) ||
     lines.some((_, at) => !fenced.has(at) && lineGoesToGitLab(lines, at))
   );
@@ -143,10 +172,12 @@ function codeText(inlines: readonly Inline[]): string {
     .join("");
 }
 
-function inlineOf(parsed: Inline, depth: number): DescriptionInline | null {
+function describedInline(parsed: Inline, depth: number): DescriptionInline | null {
   switch (parsed.kind) {
     case "text":
-      return TEXT_TRIGGERS.some((trigger) => trigger.test(parsed.text)) ? null : parsed;
+      return Object.values(TEXT_TRIGGERS).some((trigger) => trigger.test(parsed.text))
+        ? null
+        : parsed;
     case "code":
       return parsed;
     case "break":
@@ -154,7 +185,7 @@ function inlineOf(parsed: Inline, depth: number): DescriptionInline | null {
     case "emphasis":
     case "strong":
     case "strike": {
-      const inlines = inlinesOf(parsed.children, depth + 1);
+      const inlines = describedInlines(parsed.children, depth + 1);
       return inlines === null ? null : { kind: parsed.kind, inlines };
     }
     case "link":
@@ -162,15 +193,17 @@ function inlineOf(parsed: Inline, depth: number): DescriptionInline | null {
   }
 }
 
-function inlinesOf(parsed: readonly Inline[], depth: number): DescriptionInline[] | null {
-  return depth >= NESTING_LIMIT ? null : allOrNull(parsed, (inline) => inlineOf(inline, depth));
+function describedInlines(parsed: readonly Inline[], depth: number): DescriptionInline[] | null {
+  return depth >= NESTING_LIMIT
+    ? null
+    : allOrNull(parsed, (inline) => describedInline(inline, depth));
 }
 
-function sourceInlines(source: string): DescriptionInline[] | null {
+function describedSource(source: string): DescriptionInline[] | null {
   const parsed = parseInline(source, "commonMark");
   const code = codeText(parsed);
   const outsideCode = OUTSIDE_CODE.some((char) => countOf(source, char) > countOf(code, char));
-  return outsideCode ? null : inlinesOf(parsed, 0);
+  return outsideCode ? null : describedInlines(parsed, 0);
 }
 
 function codeGoesToGitLab({ info, code }: CodeBlock): boolean {
@@ -183,23 +216,26 @@ function codeGoesToGitLab({ info, code }: CodeBlock): boolean {
   return blankEdge || (info !== "" && !shownAsWritten);
 }
 
-function rowOf(cells: readonly string[], header: boolean): DescriptionRow | null {
+function describedRow(cells: readonly string[], header: boolean): DescriptionRow | null {
   const described = allOrNull(cells, (cell): DescriptionCell | null => {
-    const inlines = sourceInlines(cell);
+    const inlines = describedSource(cell);
     return inlines === null ? null : { header, align: "start", inlines };
   });
   return described === null ? null : { cells: described };
 }
 
-function tableOf(parsed: Table): DescriptionBlock | null {
-  const head = rowOf(parsed.header, true);
-  const body = allOrNull(parsed.rows, (row) => rowOf(row, false));
+function describedTable(parsed: Table): DescriptionBlock | null {
+  const head = describedRow(parsed.header, true);
+  const body = allOrNull(parsed.rows, (row) => describedRow(row, false));
   return head === null || body === null ? null : { kind: "table", head: [head], body };
 }
 
-function listOf(parsed: Extract<Block, { kind: "list" }>, depth: number): DescriptionBlock | null {
+function describedList(
+  parsed: Extract<Block, { kind: "list" }>,
+  depth: number,
+): DescriptionBlock | null {
   const items = allOrNull(parsed.items, (item): DescriptionItem | null => {
-    const blocks = blocksOf(item.blocks, depth + 1);
+    const blocks = describedBlocks(item.blocks, depth + 1);
     return blocks === null ? null : { task: "none", blocks };
   });
   if (items === null) {
@@ -211,14 +247,14 @@ function listOf(parsed: Extract<Block, { kind: "list" }>, depth: number): Descri
     : { kind: "list", numbering: { kind: "numbers", start: numbering.start }, items };
 }
 
-function blockOf(parsed: Block, depth: number): DescriptionBlock | null {
+function describedBlock(parsed: Block, depth: number): DescriptionBlock | null {
   switch (parsed.kind) {
     case "paragraph": {
-      const inlines = sourceInlines(parsed.text);
+      const inlines = describedSource(parsed.text);
       return inlines === null ? null : { kind: "paragraph", inlines };
     }
     case "heading": {
-      const inlines = sourceInlines(parsed.text);
+      const inlines = describedSource(parsed.text);
       return inlines === null ? null : { kind: "heading", level: parsed.tag, inlines };
     }
     case "code":
@@ -226,20 +262,20 @@ function blockOf(parsed: Block, depth: number): DescriptionBlock | null {
         ? null
         : { kind: "code", language: parsed.info === "" ? null : parsed.info, text: parsed.code };
     case "list":
-      return listOf(parsed, depth);
+      return describedList(parsed, depth);
     case "quote": {
-      const blocks = blocksOf(parsed.blocks, depth + 1);
+      const blocks = describedBlocks(parsed.blocks, depth + 1);
       return blocks === null ? null : { kind: "quote", blocks };
     }
     case "table":
-      return tableOf(parsed);
+      return describedTable(parsed);
     case "rule":
       return parsed;
   }
 }
 
-function blocksOf(parsed: readonly Block[], depth: number): DescriptionBlock[] | null {
-  return depth >= NESTING_LIMIT ? null : allOrNull(parsed, (block) => blockOf(block, depth));
+function describedBlocks(parsed: readonly Block[], depth: number): DescriptionBlock[] | null {
+  return depth >= NESTING_LIMIT ? null : allOrNull(parsed, (block) => describedBlock(block, depth));
 }
 
 /** `text` as yamt's Markdown subset draws it, in the blocks GitLab's preview reduces to, when that is exactly what
@@ -249,7 +285,7 @@ export function localPreview(text: string): Description | null {
   if (linesGoToGitLab(text)) {
     return null;
   }
-  const blocks = blocksOf(
+  const blocks = describedBlocks(
     parseBlocks(text).map(({ block }) => block),
     0,
   );
