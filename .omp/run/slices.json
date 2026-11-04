@@ -1,9 +1,13 @@
 {
-  "MrThreadsImages": {
+  "MrThreadsCrate": {
     "owned": [
-      "crates/merge-requests/src/description.rs",
-      "crates/merge-requests/src/description/**",
-      "crates/merge-requests/tests/description.rs"
+      "crates/merge-requests/src/*.rs",
+      "crates/merge-requests/src/query/**",
+      "crates/merge-requests/src/discussions/**",
+      "crates/merge-requests/src/discussion_thread/**",
+      "crates/merge-requests/tests/discussions.rs",
+      "crates/merge-requests/tests/threads.rs",
+      "crates/merge-requests/AGENTS.md"
     ]
   }
 }

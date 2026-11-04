@@ -60,7 +60,7 @@ description's rule #2280 (`description/address.rs` `upload_of`): d01's image `da
 `/-/project/7/uploads/<32 hex>/shot.png`, served from `uploads/7/uploads/<hex>/shot.png` as `mr-description` does;
 every note `url` and web address on `https://gitlab.com`.)
 
-`project.json` as `merge-requests/project.json`; `auth-status.out` absent (logged in). `graphql-page-1.json`: one page,
+`project.json` as `mr-description/project.json` (gitlab.com); `auth-status.out` absent (logged in). `graphql-page-1.json`: one page,
 the last, rows **!91** (author **sam**, 3 open discussions) and **!90** (author **dmitri**, 13 open discussions), the
 list query's fields as `mr-discussions/graphql-page-1.json`. Discussion ids are 40 lowercase hex digits, GraphQL `id`
 `gid://gitlab/Discussion/<hex>`; below `dNN` means the hex `00000000000000000000000000000000000000NN` (`d01` … `d15`).
@@ -102,7 +102,7 @@ People: `sam` "Sam Weller", `anna` "Anna Berg", `ben` "Ben Okafor", `chiara` "Ch
 class="code highlight js-syntax-highlight language-typescript" …><code><span class="line" lang="typescript">…`), a
 table, a mention of `@ben`, edited by herself (`lastEditedBy` anna, `lastEditedAt` two days after `createdAt`); 2. a
 system note ("changed this line"); 3. sam, a suggestion block (`<pre … class="… language-suggestion …"><code>…`) and an
-uploaded image `<img … data-src="/uploads/-/system/note/…/shot.png" width="60%" …>` (a lazy upload, `pictures/` file),
+uploaded image `<img … data-src="/-/project/7/uploads/903a1b2c3d4e5f60718293a4b5c6d7e8/shot.png" width="60%" …>` (a lazy upload, `uploads/7/uploads/<hex>/` file),
 edited by dmitri (`lastEditedBy` dmitri); 4. dmitri, a web image `<img … data-src="https://images.example/arch.png"
 height="80" …>` and `<code>@sam</code>` (no mention); 5. anna, one line. `userPermissions { resolveNote: true }`.
 

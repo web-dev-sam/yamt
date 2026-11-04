@@ -21,6 +21,10 @@ builds the commands on this slice.
   `discussion_thread/tests.rs` (new), `markdown_preview.rs` (new)
 - `crates/merge-requests/tests/discussions.rs`, `crates/merge-requests/tests/threads.rs` (new)
 - `crates/merge-requests/AGENTS.md`
+- `crates/merge-requests/src/description.rs`, its re-export line only (amended after `mr-threads-images`, `03bee845`:
+  it re-exports only `ImageSize`, because `ImageLength` unused there fails `-D unused-imports`; change it to
+  `pub use size::{ImageLength, ImageSize};` when `lib.rs` re-exports both). Images' note also lists a line for this
+  crate's `AGENTS.md` (`.omp/run/notes/MrThreadsImages.md`, deviations): apply it with yours.
 
 **Read-only:** everything else.
 
