@@ -6,6 +6,18 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Release 0.6.8 (session 49, owner: "release the next patch version, commit my css fix before")
+
+0.6.8 = 0.6.7 plus people on a merge request, the description panel, linked epics/issues/commits (sections below;
+GitLab playground checks still open) and the owner's link-line icon fix `3012182c`. The owner pushes `main`, waits for
+green ci, then tags.
+
+| row | slice                                                                                                        | owner        | status  | evidence   |
+| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ------- | ---------- |
+| 1   | release commit 0.6.8: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done    | `631a8f25` |
+| 2   | final run 0.6.8 before tagging (`briefs/release-0.6.8-verify.md`)                                            | verifier     | running |            |
+| 3   | push `main`, ci green on all four jobs, tag `v0.6.8`, publish                                                | human        | todo    |            |
+
 ## People on a merge request (session 49; owner #2243: "add or remove a reviewer/assignee to/from an MR")
 
 Request `docs/slices/request-mr-people.md` (rules 1–8, acceptance, non-goals, reopens); facts
