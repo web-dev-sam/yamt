@@ -42,11 +42,11 @@ A Rust test that needs post n without making posts 1 to n − 1 first calls `Fak
 | `graphql-description-<iid>.json`              | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `query` starting `query MergeRequestDescription` (a merge request's description) and a field `iid=<iid>`                                                                                                                         |
 | `graphql-merge-request-<iid>.json`            | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `iid=<iid>` and any other query                                                                                                                                                                                                  |
 | `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`)                                                                                                                                                                                                                                                  |
-| `pictures/<path>`                             | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`                                                                                                         |
+| `pictures/<path>`                             | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`; a `pictures/<path>.status` answers that status line with no body instead                               |
 | `pictures/<path>.sleep`                       | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists                                                                                                                                                                                                                             |
 | `traces/<n>.log`                              | `glab api` GET `projects/<project>/jobs/<n>/trace` (a job's log, any project): printed with `cat` byte for byte, exit 0 (an empty file prints nothing); no such file answers `404 Not Found`                                                                                                                                 |
 | `traces/<n>.log.sleep`                        | seconds to wait before that log's answer, whether or not the log exists                                                                                                                                                                                                                                                      |
-| `uploads/<project>/uploads/<secret>/<file>`   | `glab api` GET `projects/<project>/uploads/<secret>/<file>` (the uploads API; `<project>` as asked, an id or an encoded path): printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`                                                                                                                |
+| `uploads/<project>/uploads/<secret>/<file>`   | `glab api` GET `projects/<project>/uploads/<secret>/<file>` (the uploads API; `<project>` as asked, an id or an encoded path): printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`; a `.status` beside it answers that status line with no body instead                                           |
 
 `glab api` keeps the value of every `-f`/`--raw-field`/`-F`/`--field` as `name=value` (the first wins when a name
 is given twice) and, as glab does, sends a POST when a field or `--input` is given without `-X`/`--method`. A GET
@@ -70,6 +70,10 @@ Measured with `HOME` and `XDG_CONFIG_HOME` in a temporary folder (no token), aga
   (`{"message":"404 Project Not Found"}`, headers first with `--include`), stderr
   `glab: 404 Project Not Found (HTTP 404)` and a newline, exit 1. The fake takes the message from the body's
   `"message"` string; it never invents one.
+- A 3xx answer to a GET: glab 1.126.0 follows it silently (`glab api --include https://gitlab.com/gitlab-org/gitlab.git`
+  printed `HTTP/2.0 200 OK`, while curl saw a 302, on 2026-11-04; `internal/api/redirect.go`). A 3xx it does not
+  follow (no `Location`) is an error: stdout holds the body, stderr `glab: HTTP <code>` and a newline, exit 1
+  (`internal/commands/api/api.go`, `resp.StatusCode > 299`). The fake answers every 3xx so.
 - `glab auth status` with no token: everything on stderr — the instance (`gitlab.com`), the failed API call,
   "No token found …", the ERROR box — and exit 1. `auth-status.out` in `runner/` is that text (trailing spaces
   dropped).
@@ -237,7 +241,9 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   `button`, a `p` with `onclick`, `style`, `class` and `id`, an `svg` with `onload`, an `object`, an `embed`, a
   `video`, an `audio`, `noscript`, `template`, `title`, `textarea` and `select`, and 40 nested `blockquote`s;
   `graphql-description-49.err` and `.exit` (1) fail before any answer with "glab: a deadline line";
-  `graphql-description-48.json` holds `mergeRequest: null`.
+  `graphql-description-48.json` holds `mergeRequest: null`. `graphql-description-53.json` names two uploads, each
+  answering `302 Found` on one route (`.status`) and holding a PNG on its web path: `2222cccc3333dddd4444eeee5555ffff`
+  on the uploads API, `6666aaaa7777bbbb8888cccc9999dddd` (no API file, so 404 first) on its web path.
 
 ## Fake browser opener
 

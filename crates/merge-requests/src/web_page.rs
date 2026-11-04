@@ -3,6 +3,7 @@ use std::thread;
 
 use crate::{MergeRequestIid, PageOpened, WebPage};
 
+pub(crate) const ESCAPED_SLASH: &str = "%2F";
 pub(crate) const HTTPS: &str = "https://";
 const JOBS_SEGMENT: &str = "/-/jobs/";
 pub(crate) const MERGE_REQUESTS_SEGMENT: &str = "/-/merge_requests/";

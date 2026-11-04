@@ -11,9 +11,9 @@ use yamt_gitio::Glab;
 use crate::page::{NO_MERGE_REQUEST, NO_PROJECT, graphql_data};
 use crate::project::{Project, logged_in_project};
 use crate::query::description_args;
-use crate::{GitLabRepository, MergeRequestIid, PictureAddress, WebPage};
+use crate::{GitLabRepository, MergeRequestIid, WebPage};
 
-pub use address::UploadKey;
+pub use address::{DescriptionImage, DescriptionLink, OfferedUpload, UploadKey};
 use html::{Described, described};
 
 /// How reading a merge request's description ended.
@@ -238,40 +238,6 @@ pub enum DescriptionInline {
     LineBreak,
 }
 
-/// Where a link leads.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum DescriptionLink {
-    /// An http or https address, absolute or resolved against the merge request's GitLab page.
-    Page {
-        /// The page the opener may open.
-        page: WebPage,
-    },
-    /// Any other address, or one yamt cannot read: as written, for the tooltip; opens nothing.
-    Refused {
-        /// The address as written.
-        address: String,
-    },
-}
-
-/// Where an image loads from.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum DescriptionImage {
-    /// Uploaded to the project's GitLab: the window asks the picture scheme by `key` (offered with the reply).
-    Uploaded {
-        /// The upload's key.
-        key: UploadKey,
-    },
-    /// Any other https address (`url`'s serialisation): the window loads it itself, without the login.
-    Web {
-        /// The address.
-        address: String,
-    },
-    /// http, data, file, anything else or unreadable: nothing loads, the caption shows.
-    Refused,
-}
-
 /// Not IPC: what the shell offers before it replies.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReadDescription {
@@ -281,15 +247,6 @@ pub struct ReadDescription {
     pub pages: Vec<WebPage>,
     /// The uploads its images name, once each, in document order.
     pub uploads: Vec<OfferedUpload>,
-}
-
-/// Not IPC: an upload a description named.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OfferedUpload {
-    /// The key the window asks by.
-    pub key: UploadKey,
-    /// Where it is on the project's GitLab.
-    pub address: PictureAddress,
 }
 
 #[derive(Deserialize)]

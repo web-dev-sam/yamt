@@ -22,6 +22,8 @@ const PROJECT: &str = "https://gitlab.example/taskboard/taskboard";
 const HEX_A: &str = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
 const HEX_B: &str = "f9e8d7c6b5a4938271605f4e3d2c1b0a";
 const HEX_C: &str = "1111aaaa2222bbbb3333cccc4444dddd";
+const HEX_REDIRECTED_BY_API: &str = "2222cccc3333dddd4444eeee5555ffff";
+const HEX_REDIRECTED_ON_WEB: &str = "6666aaaa7777bbbb8888cccc9999dddd";
 const DESCRIPTION_QUERY: &str = "query=query MergeRequestDescription($fullPath: ID!, $iid: String!) { \
      project(fullPath: $fullPath) { mergeRequest(iid: $iid) { descriptionHtml } } }";
 
@@ -161,6 +163,31 @@ fn an_upload_missing_on_both_routes_is_an_error() {
         format!("answered: https://gitlab.example/-/project/7/uploads/{HEX_C}/gone.png"),
     ];
     assert_eq!(answered, both);
+}
+
+#[test]
+fn a_redirect_on_either_route_is_refused_and_never_retried() {
+    let (_repo, repository) = gitlab_repo();
+    let fake = Fake::new(SCENARIO);
+    let read = read(&fake, &repository, 53);
+
+    let fetched: Vec<_> = read
+        .uploads
+        .iter()
+        .map(|offered| fetch_picture(&fake.glab, repository.root(), &offered.address))
+        .collect();
+
+    let redirected = Err("glab: HTTP 302".to_owned());
+    assert_eq!(fetched, [redirected.clone(), redirected]);
+    let answered = fake.logged("answered: ");
+    let asked = [
+        format!("answered: projects/7/uploads/{HEX_REDIRECTED_BY_API}/moved.png"),
+        format!("answered: projects/7/uploads/{HEX_REDIRECTED_ON_WEB}/moved.png"),
+        format!(
+            "answered: https://gitlab.example/-/project/7/uploads/{HEX_REDIRECTED_ON_WEB}/moved.png"
+        ),
+    ];
+    assert_eq!(answered, asked);
 }
 
 #[test]

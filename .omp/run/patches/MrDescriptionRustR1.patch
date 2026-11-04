@@ -1,0 +1,442 @@
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+index dcaf8ec..127a611 100644
+--- a/crates/merge-requests/AGENTS.md
++++ b/crates/merge-requests/AGENTS.md
+@@ -1,4 +1,4 @@
+-Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, #138–#143, #149, #151–#153; requests `docs/slices/request-merge-requests.md`, `docs/slices/request-mr-conflicts.md`, `docs/slices/request-local-conflict-check.md`, `docs/slices/request-mr-row-details.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `WebPage` (a string only `WebPage::job`, `WebPage::merge_request` and `WebPage::note` make), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed`, `ResolveRefusal` `notOpen`/`fromFork`/`noRemote`/`glabMissing`/`notLoggedIn`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC), `ResolveTarget` (`root`, `iid`, `remote`, `branch`, `target`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; every module's public types re-exported; `Glab` re-exported; ≤ 400 lines), `row.rs` (a list row's IPC types: `CiStatus` (seven, camelCase), `FailedJob`, `Pipeline`, `ChangeSize` (`additions`, `deletions`, `files`), `Readiness` `ready`/`conflicts { also }`/`needsRebase`/`checking`/`blocked { reason }`/`mergesCleanly` (only from a clean local merge of a row GitLab calls conflicting or has not checked), `CheckedRow` (`iid`, `readiness`: a row the local check changed), `BlockedReason` (GitLab's seventeen blockers and `other { status }`), `MergeRequestRow` (`createdAt` as GitLab sent it, `author` or `None`, `assignees`, `reviewers` (`Reviewer`s), `labels` (`Label`s, GitLab's order), `openDiscussions` a single number, `approvedBy` (people; the approvals count is its length), `mayRerequest` (GitLab's `userPermissions.updateMergeRequest`: re-requesting a review and adding or removing assignees and reviewers; the name stays), `page` its GitLab page or `None`, `size` or `None`, `readiness`, `fromFork`), `MergeRequestPage` (`me`, `rows`)), `people.rs` (the IPC types `Person` (`username`, `name`, `picture`), `PersonPicture` `uploaded`/`gravatar { address }`/`none`, `ReviewState` `requested`/`reviewed`/`approved`/`changesRequested`, `Reviewer` (`person`, `state`); the query nodes `UserNode` (`name` defaults to empty: older recorded pages name approvers by username only) and `ReviewerNode`; `People`: turns nodes into people through `avatar_source`, collecting each uploaded picture as an `OfferedPicture` and each unknown review state; the one fold of the review state (GitLab's `uncollapsed_reviewer_list.vue` order): `approved: true` → approved whatever the state, else `UNREVIEWED`/`REVIEW_STARTED`/null/missing → requested, `REVIEWED`/`UNAPPROVED` → reviewed, `APPROVED` → approved, `REQUESTED_CHANGES` → changes requested, any other text requested and warned of once per load (`warn_unknown_review_state`); `is_awaiting_review`: the fold says requested), `labels.rs` (the IPC types `Label` (`title`, `colors`) and `LabelColors` (`background`, `text`); `label`: both colours `#` then 3 or 6 hex digits, else no colours), `picture.rs` (`avatar_source(origin, avatar_url)`, the only maker of `PictureAddress` (an uploaded avatar's `https` address on the project's GitLab, never sent to the window) and `GravatarAddress` (IPC, a string): a path starting `/`, or an address of the project's https `origin` (same host and port), whose path is `(/segment)*/uploads/-/system/user/avatar/<digits>/<file>` (`web_page.rs`' segment rule, no `..`), an optional query of `[A-Za-z0-9=&._-]` → uploaded (none off https); `https://secure.gravatar.com` or `https://www.gravatar.com` + `/avatar/<32 or 64 hex digits>` + an optional query of `[A-Za-z0-9=&%._-]` → Gravatar; anything else (`http`, another host or port, a custom Gravatar host such as Libravatar, null) → none; `ImageKind` PNG/JPEG/GIF/WebP by the first bytes and its `mime`; `Picture` (`kind`, `bytes`); `fetch_picture`: `glab api <address>` with stdin closed (`Glab::get`), refused above `MAX_PICTURE_BYTES` (1 MiB) or when not one of the four kinds), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`logged_in_project`: `glab auth status` (logged out → `NoProject::NotLoggedIn`, failed → `NoProject::Failed`), then `glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https; `NoProject` turns into `ListEnd`, `OpenReply`, `ResolveRefusal`, `RerequestReply`, `JobLogReply`, `DiscussionsAnswer`, `PeopleSearchReply` and `PeopleChangeReply` through `From`: the one prelude of listing, opening, resolving, re-requesting, reading a log, reading discussions, searching people and changing a merge request's people), `query.rs` (the list query, the details query, the branches query, the reviewers query, the re-request mutation, the people search and the two people mutations, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; the list's nodes ask `author { username name avatarUrl }`, `avatarUrl` on assignees, reviewers and approvers, approvers' `name`, reviewers' `mergeRequestInteraction { approved reviewState }`, `userPermissions { updateMergeRequest }`, labels' `color textColor`, and `detailedMergeStatus conflicts diffStats { additions deletions } diffRefs { baseSha } sourceProjectId targetProjectId targetBranch diffHeadSha` — per-file `diffStats`, never `diffStatsSummary`: beside `diffStatsSummary` in a list, gitlab.com answers `detailedMergeStatus: CONFLICT` for merge requests that merge clean (measured 2026-10-31, `docs/slices/briefs/mr-diff-stats.md`); 170 of 250 on gitlab.com on 2026-11-02, the statuses unchanged by the new fields; `details_args`, `branches_args` and `reviewers_args`: `… -f fullPath=<path> -f iid=<n>`; the branches query asks `state sourceBranch targetBranch sourceProjectId targetProjectId`, the reviewers query `state reviewers { nodes { id username name avatarUrl mergeRequestInteraction { approved reviewState } } }`; `rerequest_body`: `{"query": <mergeRequestReviewerRereview mutation>, "variables": {"projectPath", "iid", "userId"}}` built by `serde_json`, the reviewer's global id a variable, sent with `GRAPHQL_BODY_ARGS` `api graphql --input -`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; `NO_PROJECT` and `NO_MERGE_REQUEST`, the answer-shape messages every reader and write shares; one list answer of a `Project` → `ParsedPage` (its rows and, beside each, its `RowToCheck`: iid, `targetBranch` (non-null in GitLab's schema), `diffHeadSha` as an `Oid` or none when null or no commit id, its `GitLabMerge`; the pictures its people offered, in the order named; the unknown review states): no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; people through `People`, labels through `label`; `may_rerequest` false when `userPermissions` is missing; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; a row's `readiness` is `GitLabMerge::readiness`; `size` from `diffStats`: the sums of the entries' `additions` and `deletions`, `files` the number of entries, whatever `diffRefs` says; no entries and `diffRefs` set → zero (an empty diff); no entries and `diffRefs` null or missing → `None` (GitLab sends `[]` both for an empty diff and one not computed yet, design `mr-row-details-design.md` §1.4); each count saturating into `u32`, below 0 → 0; `is_from_fork`: `sourceProjectId != Some(targetProjectId)`, a deleted source project a fork; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `readiness.rs` (the one fold, plan #138, #149: `GitLabMerge::read` folds GitLab's 24 `DetailedMergeStatus` values into `MergeStatus` (`MERGEABLE` mergeable, `CONFLICT` conflict, `NEED_REBASE` needs rebase, `CHECKING`/`UNCHECKED`/`PREPARING`/`APPROVALS_SYNCING`/null unchecked, the other seventeen a `BlockedReason`, an unknown one `Other { status }` with a warning) beside the `conflicts` and draft flags; `readiness`: GitLab's answer alone, conflicts first (#1998): the `conflicts` flag or a `CONFLICT` status → `Conflicts { also }`, `also` the status's blocked reason, then `Draft` for a draft; `readiness_after(MergeOutcome)`: design §2.1's table — a local conflict → `Conflicts { also }` whatever GitLab says, a clean merge → `ready` for mergeable, `mergesCleanly` for conflict or unchecked, else GitLab's status; the `conflicts` flag is not read), `check.rs` (`check_conflicts`, request rules 4–8, design §2.2: no row with a head → no git run; `Repo::version` → `MergeTreeRun::for_version` (none → stop); `remote_for` (none → stop); one `Repo::remote_refs` (`REMOTE_REFS_TIMEOUT` 20 s) of `refs/heads/<t>` for each distinct target of a row with a head (`require_branch_name` leaves a target holding `:` out) and `refs/merge-requests/*/head` (failed → stop); per row: no head, target or head ref not advertised → kept, head ref ≠ `diffHeadSha` → moving (rule 5), else the pair (target tip, head); pairs in `MergedPairs` sent at once (remembered); one `Repo::missing_commits` over the others' commits, then at most one `Repo::fetch_without_refs` (`FETCH_TIMEOUT`) of `refs/heads/<t>` for each missing tip and `refs/merge-requests/<iid>/head` for each missing head, deduplicated (failed → only the rows that needed it kept); `merged_in_finishing_order` merges the distinct pairs `MERGES_AT_ONCE` (2) at a time in scoped threads, `MERGE_TIMEOUT` 10 s each, none started after `MERGE_PHASE_LIMIT` 60 s, each outcome into `MergedPairs` and then every row of that pair sent through `on_checked` when `readiness_after` differs from `readiness`; `CheckSummary` (`rows`, `merges`, `fetched_refs`, `remembered`, `moving`, `kept` — every row counted once, the rest decided by a merge now — and `problem`, the first thing that went wrong) logged as one line, `info`, or `warn` with a problem; `ConflictCheck` (the project's `full_path`, every listed row's `RowToCheck`) made only by `list_merge_requests`; `MergedPairs` (target commit, source commit) → `MergeOutcome`, which the shell holds for the run), `list.rs` (`list_merge_requests` → `Listed { end, to_check }`: glab missing → `GlabMissing`, `logged_in_project`, then at most 5 pages, each one glab call sent to `on_page` as a `ListedPage` (`page`: what the window sees; `pictures`: the page's `OfferedPicture`s (`username`, `address`), one per username, the last named winning) as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info; each unknown review state warned of once per load; `to_check` `None` when no project was reached, else the rows of every page sent), `rerequest.rs` (`RerequestReply` `requested { reviewers }`/`notReviewer`/`notOpen`/`glabMissing`/`notLoggedIn`/`refused`/`failed`; `rerequest_review`, plan #153, its one write the Rereview mutation: glab missing → `GlabMissing`, `logged_in_project`, the reviewers query asked afresh (no merge request or not `opened` → `NotOpen`), the username not among them → `NotReviewer` (no write: nothing adds a reviewer), their fresh state requested → `Requested` with the fresh reviewers (no write: no second notification), else the Rereview mutation with their global id through `Glab::run` with the body on stdin: glab failing, timing out or exiting non-zero → `Failed` in glab's last stderr line, GitLab's top-level `errors` → `Failed { first }`, the payload's `errors` → `Refused { first }`, else `Requested` with the reviewers it answered; one `info` line per request naming the iid and the outcome's kind), `open.rs` (`prepare_open`: glab, `logged_in_project`, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target refused by `require_branch_name`, the crate's one rule for a branch name holding `:`); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `resolve.rs` (`prepare_resolve`: glab missing → `GlabMissing`, `logged_in_project`, the branches query asked afresh — no merge request or not `opened` → `NotOpen`, `is_from_fork` → `FromFork`, either branch refused by `require_branch_name` → `Failed`; `remote_for` → `NoRemote { project }`; nothing fetched or written), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments checked by `is_path_segment` (`[A-Za-z0-9._~-]`, none empty or `..`), the rule `picture.rs` reuses; `WebPage::note`: GitLab's `url` only when it is exactly `WebPage::merge_request`'s address followed by `#note_<digits>`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no `Mutex`; the one memory across loads is the run's `MergedPairs`, which the shell holds and lends to `check_conflicts` (plan #149); the shell holds the offered pictures. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query/tests.rs` (each query one line with balanced braces; the branches, reviewers and people-search argv exact; the list asks `diffStats`, never `diffStatsSummary`, `diffRefs`, `targetBranch diffHeadSha` and the people's fields; the re-request body exact, the id a variable; the four people-change bodies exact), `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher; the rows to check are the rows sent; one picture per username, the last; each unknown review state new once), `picture/tests.rs` (both address kinds against every look-alike: `http`, another host or port, `..`, other paths, custom hosts, odd queries; the four image kinds by their first bytes, anything else refused; 1 MiB the largest), `rerequest.rs` (glab's failure words, a top-level error against the payload's own, the logged kind of each reply), `readiness.rs` (`readiness_after` over design §2.1's table, both `conflicts` flags, drafts), `check/tests.rs` (the summary's words with and without a problem; the merge scheduler: two at a time, finishing order, none started after the limit, a failed merge; a `:` target left out of `ls-remote`; pairing and moving rows; the fetch's refspecs; a row sent only when it changes), `page/tests.rs` (over `tests/glab/merge-requests/`'s and `tests/glab/mr-conflicts/`'s recorded pages; every merge status as a table, conflicts first, sizes summed per file, an empty diff with `diffRefs` zero, without it no size, saturating counts, forks; each row's check input; the review-state fold, `approved` first; approvers by name; label colours; a null author; the permission; offered pictures); `tests/fake_glab/mod.rs` (the one fake-glab helper the integration tests share: `Fake` on a scenario, its log and post counter, `answered_posts(n)` so the next post is `post-<n+1>`, `in_this_repository`; a test file using part of it declares `#[expect(dead_code)] mod fake_glab;`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`, `mr-row-details/`: whole rows with people, pictures, states and label colours, the offered pictures anna and sam only, no Gravatar address ever through glab; only a load that reached the project has rows to check), `tests/rerequest.rs` (`mr-row-details/`: the exact body by global id, no write for someone no longer a reviewer or still awaited, the Rereview mutation the re-request path's only write, a mutation error as `Refused`, a merged merge request `NotOpen`, glab missing or logged out), `tests/picture.rs` (`mr-row-details/`: a listed picture byte for byte through glab), `tests/local_conflicts.rs` (`scripts/local-conflicts-repo.sh`'s repository with the fake glab on `local-conflicts/`: the scenario's rows and summary, the moving row, a second load remembered with no fetch or merge, refs, status, `HEAD` and `FETCH_HEAD` byte-identical, an unreachable remote keeping every answer), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/resolve.rs` (`scripts/range-repo.sh`'s repository with the fake glab on `mr-conflicts/`: !21's branches and `origin` with the refs unchanged and the logged argv, !22 `FromFork`, !30 `NotOpen`, `NoRemote`, !33's `:` branch `Failed`, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
++Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, #138–#143, #149, #151–#153; requests `docs/slices/request-merge-requests.md`, `docs/slices/request-mr-conflicts.md`, `docs/slices/request-local-conflict-check.md`, `docs/slices/request-mr-row-details.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `WebPage` (a string only `WebPage::job`, `WebPage::merge_request`, `WebPage::note` and `WebPage::linked` make), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed`, `ResolveRefusal` `notOpen`/`fromFork`/`noRemote`/`glabMissing`/`notLoggedIn`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC), `ResolveTarget` (`root`, `iid`, `remote`, `branch`, `target`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; every module's public types re-exported; `Glab` re-exported; ≤ 400 lines), `row.rs` (a list row's IPC types: `CiStatus` (seven, camelCase), `FailedJob`, `Pipeline`, `ChangeSize` (`additions`, `deletions`, `files`), `Readiness` `ready`/`conflicts { also }`/`needsRebase`/`checking`/`blocked { reason }`/`mergesCleanly` (only from a clean local merge of a row GitLab calls conflicting or has not checked), `CheckedRow` (`iid`, `readiness`: a row the local check changed), `BlockedReason` (GitLab's seventeen blockers and `other { status }`), `MergeRequestRow` (`createdAt` as GitLab sent it, `author` or `None`, `assignees`, `reviewers` (`Reviewer`s), `labels` (`Label`s, GitLab's order), `openDiscussions` a single number, `approvedBy` (people; the approvals count is its length), `mayRerequest` (GitLab's `userPermissions.updateMergeRequest`: re-requesting a review and adding or removing assignees and reviewers; the name stays), `page` its GitLab page or `None`, `size` or `None`, `readiness`, `fromFork`, `hasDescription` (GitLab's description holds more than white space)), `MergeRequestPage` (`me`, `rows`)), `people.rs` (the IPC types `Person` (`username`, `name`, `picture`), `PersonPicture` `uploaded`/`gravatar { address }`/`none`, `ReviewState` `requested`/`reviewed`/`approved`/`changesRequested`, `Reviewer` (`person`, `state`); the query nodes `UserNode` (`name` defaults to empty: older recorded pages name approvers by username only) and `ReviewerNode`; `People`: turns nodes into people through `avatar_source`, collecting each uploaded picture as an `OfferedPicture` and each unknown review state; the one fold of the review state (GitLab's `uncollapsed_reviewer_list.vue` order): `approved: true` → approved whatever the state, else `UNREVIEWED`/`REVIEW_STARTED`/null/missing → requested, `REVIEWED`/`UNAPPROVED` → reviewed, `APPROVED` → approved, `REQUESTED_CHANGES` → changes requested, any other text requested and warned of once per load (`warn_unknown_review_state`); `is_awaiting_review`: the fold says requested), `labels.rs` (the IPC types `Label` (`title`, `colors`) and `LabelColors` (`background`, `text`); `label`: both colours `#` then 3 or 6 hex digits, else no colours), `picture.rs` (`avatar_source(origin, avatar_url)`, the only maker of `GravatarAddress` (IPC, a string) and, beside `image_of` (a description's upload, below), of `PictureAddress` (an uploaded avatar's or upload's `https` address on the project's GitLab, never sent to the window): a path starting `/`, or an address of the project's https `origin` (same host and port), whose path is `(/segment)*/uploads/-/system/user/avatar/<digits>/<file>` (`web_page.rs`' segment rule, no `..`), an optional query of `[A-Za-z0-9=&._-]` → uploaded (none off https); `https://secure.gravatar.com` or `https://www.gravatar.com` + `/avatar/<32 or 64 hex digits>` + an optional query of `[A-Za-z0-9=&%._-]` → Gravatar; anything else (`http`, another host or port, a custom Gravatar host such as Libravatar, null) → none; `ImageKind` PNG/JPEG/GIF/WebP by the first bytes and its `mime`; `Picture` (`kind`, `bytes`); `fetch_picture`: an avatar by `glab api <address>` with stdin closed (`Glab::get`), refused above `MAX_PICTURE_BYTES` (1 MiB), an upload as the description paragraph says, refused above `MAX_UPLOAD_BYTES` (10 MiB); either refused when not one of the four kinds), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`logged_in_project`: `glab auth status` (logged out → `NoProject::NotLoggedIn`, failed → `NoProject::Failed`), then `glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https; `NoProject` turns into `ListEnd`, `OpenReply`, `ResolveRefusal`, `RerequestReply`, `JobLogReply`, `DiscussionsAnswer`, `PeopleSearchReply`, `PeopleChangeReply` and `DescriptionReply` through `From`: the one prelude of listing, opening, resolving, re-requesting, reading a log, reading discussions, searching people, changing a merge request's people and reading a description), `query.rs` (the list query, the details query, the branches query, the reviewers query, the re-request mutation, the people search and the two people mutations, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; the list's nodes ask `description` after `title`, `author { username name avatarUrl }`, `avatarUrl` on assignees, reviewers and approvers, approvers' `name`, reviewers' `mergeRequestInteraction { approved reviewState }`, `userPermissions { updateMergeRequest }`, labels' `color textColor`, and `detailedMergeStatus conflicts diffStats { additions deletions } diffRefs { baseSha } sourceProjectId targetProjectId targetBranch diffHeadSha` — per-file `diffStats`, never `diffStatsSummary`: beside `diffStatsSummary` in a list, gitlab.com answers `detailedMergeStatus: CONFLICT` for merge requests that merge clean (measured 2026-10-31, `docs/slices/briefs/mr-diff-stats.md`); 172 of 250 logged in on gitlab.com on 2026-11-04 (170 without `description`), the statuses unchanged by the new fields; `details_args`, `branches_args` and `reviewers_args`: `… -f fullPath=<path> -f iid=<n>`; the branches query asks `state sourceBranch targetBranch sourceProjectId targetProjectId`, the reviewers query `state reviewers { nodes { id username name avatarUrl mergeRequestInteraction { approved reviewState } } }`; `rerequest_body`: `{"query": <mergeRequestReviewerRereview mutation>, "variables": {"projectPath", "iid", "userId"}}` built by `serde_json`, the reviewer's global id a variable, sent with `GRAPHQL_BODY_ARGS` `api graphql --input -`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; `NO_PROJECT` and `NO_MERGE_REQUEST`, the answer-shape messages every reader and write shares; `FORBIDDEN` and `NOT_FOUND`, how glab's line for an HTTP 403 or 404 ends, shared by `job_log.rs` and `picture.rs`; one list answer of a `Project` → `ParsedPage` (its rows and, beside each, its `RowToCheck`: iid, `targetBranch` (non-null in GitLab's schema), `diffHeadSha` as an `Oid` or none when null or no commit id, its `GitLabMerge`; the pictures its people offered, in the order named; the unknown review states): no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; people through `People`, labels through `label`; `may_rerequest` false when `userPermissions` is missing; `has_description` from the node's `description` (more than white space; the text goes nowhere else); GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; a row's `readiness` is `GitLabMerge::readiness`; `size` from `diffStats`: the sums of the entries' `additions` and `deletions`, `files` the number of entries, whatever `diffRefs` says; no entries and `diffRefs` set → zero (an empty diff); no entries and `diffRefs` null or missing → `None` (GitLab sends `[]` both for an empty diff and one not computed yet, design `mr-row-details-design.md` §1.4); each count saturating into `u32`, below 0 → 0; `is_from_fork`: `sourceProjectId != Some(targetProjectId)`, a deleted source project a fork; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `readiness.rs` (the one fold, plan #138, #149: `GitLabMerge::read` folds GitLab's 24 `DetailedMergeStatus` values into `MergeStatus` (`MERGEABLE` mergeable, `CONFLICT` conflict, `NEED_REBASE` needs rebase, `CHECKING`/`UNCHECKED`/`PREPARING`/`APPROVALS_SYNCING`/null unchecked, the other seventeen a `BlockedReason`, an unknown one `Other { status }` with a warning) beside the `conflicts` and draft flags; `readiness`: GitLab's answer alone, conflicts first (#1998): the `conflicts` flag or a `CONFLICT` status → `Conflicts { also }`, `also` the status's blocked reason, then `Draft` for a draft; `readiness_after(MergeOutcome)`: design §2.1's table — a local conflict → `Conflicts { also }` whatever GitLab says, a clean merge → `ready` for mergeable, `mergesCleanly` for conflict or unchecked, else GitLab's status; the `conflicts` flag is not read), `check.rs` (`check_conflicts`, request rules 4–8, design §2.2: no row with a head → no git run; `Repo::version` → `MergeTreeRun::for_version` (none → stop); `remote_for` (none → stop); one `Repo::remote_refs` (`REMOTE_REFS_TIMEOUT` 20 s) of `refs/heads/<t>` for each distinct target of a row with a head (`require_branch_name` leaves a target holding `:` out) and `refs/merge-requests/*/head` (failed → stop); per row: no head, target or head ref not advertised → kept, head ref ≠ `diffHeadSha` → moving (rule 5), else the pair (target tip, head); pairs in `MergedPairs` sent at once (remembered); one `Repo::missing_commits` over the others' commits, then at most one `Repo::fetch_without_refs` (`FETCH_TIMEOUT`) of `refs/heads/<t>` for each missing tip and `refs/merge-requests/<iid>/head` for each missing head, deduplicated (failed → only the rows that needed it kept); `merged_in_finishing_order` merges the distinct pairs `MERGES_AT_ONCE` (2) at a time in scoped threads, `MERGE_TIMEOUT` 10 s each, none started after `MERGE_PHASE_LIMIT` 60 s, each outcome into `MergedPairs` and then every row of that pair sent through `on_checked` when `readiness_after` differs from `readiness`; `CheckSummary` (`rows`, `merges`, `fetched_refs`, `remembered`, `moving`, `kept` — every row counted once, the rest decided by a merge now — and `problem`, the first thing that went wrong) logged as one line, `info`, or `warn` with a problem; `ConflictCheck` (the project's `full_path`, every listed row's `RowToCheck`) made only by `list_merge_requests`; `MergedPairs` (target commit, source commit) → `MergeOutcome`, which the shell holds for the run), `list.rs` (`list_merge_requests` → `Listed { end, to_check }`: glab missing → `GlabMissing`, `logged_in_project`, then at most 5 pages, each one glab call sent to `on_page` as a `ListedPage` (`page`: what the window sees; `pictures`: the page's `OfferedPicture`s (`username`, `address`), one per username, the last named winning) as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info; each unknown review state warned of once per load; `to_check` `None` when no project was reached, else the rows of every page sent), `rerequest.rs` (`RerequestReply` `requested { reviewers }`/`notReviewer`/`notOpen`/`glabMissing`/`notLoggedIn`/`refused`/`failed`; `rerequest_review`, plan #153, its one write the Rereview mutation: glab missing → `GlabMissing`, `logged_in_project`, the reviewers query asked afresh (no merge request or not `opened` → `NotOpen`), the username not among them → `NotReviewer` (no write: nothing adds a reviewer), their fresh state requested → `Requested` with the fresh reviewers (no write: no second notification), else the Rereview mutation with their global id through `Glab::run` with the body on stdin: glab failing, timing out or exiting non-zero → `Failed` in glab's last stderr line, GitLab's top-level `errors` → `Failed { first }`, the payload's `errors` → `Refused { first }`, else `Requested` with the reviewers it answered; one `info` line per request naming the iid and the outcome's kind), `open.rs` (`prepare_open`: glab, `logged_in_project`, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target refused by `require_branch_name`, the crate's one rule for a branch name holding `:`); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `resolve.rs` (`prepare_resolve`: glab missing → `GlabMissing`, `logged_in_project`, the branches query asked afresh — no merge request or not `opened` → `NotOpen`, `is_from_fork` → `FromFork`, either branch refused by `require_branch_name` → `Failed`; `remote_for` → `NoRemote { project }`; nothing fetched or written), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments checked by `is_path_segment` (`[A-Za-z0-9._~-]`, none empty or `..`), the rule `picture.rs` reuses; `ESCAPED_SLASH`, the `%2F` a project path's "/" becomes in an API route (`job_log.rs`, `description/address.rs`); `WebPage::note`: GitLab's `url` only when it is exactly `WebPage::merge_request`'s address followed by `#note_<digits>`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no `Mutex`; the one memory across loads is the run's `MergedPairs`, which the shell holds and lends to `check_conflicts` (plan #149); the shell holds the offered pictures. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query/tests.rs` (each query one line with balanced braces; the branches, reviewers and people-search argv exact; the list asks `diffStats`, never `diffStatsSummary`, `diffRefs`, `targetBranch diffHeadSha` and the people's fields; the re-request body exact, the id a variable; the four people-change bodies exact), `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher; the rows to check are the rows sent; one picture per username, the last; each unknown review state new once), `picture/tests.rs` (both address kinds against every look-alike: `http`, another host or port, `..`, other paths, custom hosts, odd queries; the four image kinds by their first bytes, anything else refused; 1 MiB the largest), `rerequest.rs` (glab's failure words, a top-level error against the payload's own, the logged kind of each reply), `readiness.rs` (`readiness_after` over design §2.1's table, both `conflicts` flags, drafts), `check/tests.rs` (the summary's words with and without a problem; the merge scheduler: two at a time, finishing order, none started after the limit, a failed merge; a `:` target left out of `ls-remote`; pairing and moving rows; the fetch's refspecs; a row sent only when it changes), `page/tests.rs` (over `tests/glab/merge-requests/`'s and `tests/glab/mr-conflicts/`'s recorded pages; every merge status as a table, conflicts first, sizes summed per file, an empty diff with `diffRefs` zero, without it no size, saturating counts, forks; each row's check input; the review-state fold, `approved` first; approvers by name; label colours; a null author; the permission; offered pictures); `tests/fake_glab/mod.rs` (the one fake-glab helper the integration tests share: `Fake` on a scenario, its log and post counter, `answered_posts(n)` so the next post is `post-<n+1>`, `in_this_repository`; a test file using part of it declares `#[expect(dead_code)] mod fake_glab;`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`, `mr-row-details/`: whole rows with people, pictures, states and label colours, the offered pictures anna and sam only, no Gravatar address ever through glab; only a load that reached the project has rows to check), `tests/rerequest.rs` (`mr-row-details/`: the exact body by global id, no write for someone no longer a reviewer or still awaited, the Rereview mutation the re-request path's only write, a mutation error as `Refused`, a merged merge request `NotOpen`, glab missing or logged out), `tests/picture.rs` (`mr-row-details/`: a listed picture byte for byte through glab), `tests/local_conflicts.rs` (`scripts/local-conflicts-repo.sh`'s repository with the fake glab on `local-conflicts/`: the scenario's rows and summary, the moving row, a second load remembered with no fetch or merge, refs, status, `HEAD` and `FETCH_HEAD` byte-identical, an unreachable remote keeping every answer), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/resolve.rs` (`scripts/range-repo.sh`'s repository with the fake glab on `mr-conflicts/`: !21's branches and `origin` with the refs unchanged and the logged argv, !22 `FromFork`, !30 `NotOpen`, `NoRemote`, !33's `:` branch `Failed`, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
+ 
+ A failed job's log (plan §2 #158, request `docs/slices/request-ci-job-log.md`, design `docs/slices/briefs/ci-job-log-design.md` §1.1–1.3): `job_log.rs` (the IPC types `JobLog` (`text`, `cut`) and `JobLogReply` `log { log }`/`notOffered`/`noLog`/`glabMissing`/`notLoggedIn`/`failed`; `MAX_LOG_BYTES` 500 KiB, GitLab's `Stream::LIMIT_SIZE`; `read_job_log`: glab missing → `GlabMissing`, a page that is not `…/-/jobs/<digits>` (`WebPage::job_parts`, the one split `WebPage::job` shares) → `NotOffered` before any glab run, `logged_in_project`, then `trace_route` — `projects/<the page's own project path, "/" as "%2F">/jobs/<n>/trace`, the path after the project's origin and without the sub-path GitLab is installed under (`web_path` minus `/<full_path>`), so a fork's job is asked from the fork; another origin or an odd path → `NotOffered` — read whole through `Glab::get` (no `Range`, no `byte_offset`); empty → `NoLog`, glab's line ending in `(HTTP 404)` → `NoLog`, any other failure → `Failed` in glab's words; `tail`: GitLab's `Stream#limit` — over `MAX_LOG_BYTES` the last 512,000 bytes from just after their first `\n` (the line the cut lands in dropped, even a whole one; no `\n` → empty), `cut`; then lossy UTF-8; one `info` line per call naming the page, the outcome's kind, the bytes read and `cut`, never the text; nothing kept here: the shell keeps the run's logs). Tests: `job_log.rs` (the cut at, over and on a line start or break, no line break, lossy bytes, the route for the project, a fork, a sub-path with and without it in the page, look-alike origins and paths, 404 against glab's other words, each logged kind), `tests/job_log.rs` (`ci-job-log/`: 302 byte for byte, 303 cut at a line start, 310 by the fork's path, 304 and 305 `NoLog`, glab missing, logged out, a merge-request page or another GitLab's job page asking no trace).
+ 
+@@ -6,6 +6,4 @@ Each row's open discussions (plan §2 #162, #163; request `docs/slices/request-m
+ 
+ People on a merge request (plan §2 #153 amended, #169; request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, §1.1–1.5): `people_search.rs` (the IPC type `PeopleSearchReply` `found { people }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`; the shell's `FoundPeople { reply, pictures }`; `search_people`: glab missing → `GlabMissing`, `logged_in_project`, one `Glab::get` of `people_search_args` — `api graphql -f query=<PeopleSearch> -f fullPath=<path> -f search=<text>`, the text a raw `-f` field (glab 1.126.0 searched `@sam` as text on gitlab.com, 2026-11-03) — asking `project.autocompleteUsers(search:)` as GitLab's own merge-request dropdown does (everyone with access, invited groups included, at most 20, by name; 13 of 250 on gitlab-org/gitlab, about 1 s); glab's failure or a GraphQL error (an older GitLab's missing field included) → `Failed`, `project: null` → `Failed` (page.rs `NO_PROJECT`), `autocompleteUsers: null` → `Found` with nobody; people through `People`, their uploaded pictures one per username; one `info` line: the outcome's kind and the count, never the text or a name), `people_change.rs` (the IPC types `PeopleGroup` `assignees`/`reviewers`, `PeopleAction` `add`/`remove`, `PeopleChange` (`group`, `action`, `username`; sent by the window), `MergeRequestPeople` (`assignees`, `reviewers`), `PeopleChangeReply` `changed { people }`/`unchanged { people }`/`glabMissing`/`notLoggedIn { detail }`/`refused { message }`/`failed { message }`; the shell's `ChangedPeople { reply, pictures }`; `change_people`: glab missing → `GlabMissing`, `logged_in_project`, then exactly one `Glab::post` of `people_change_body` with `GRAPHQL_BODY_ARGS`, nothing read before it (rule 8) — the group's `mergeRequestSetAssignees`/`mergeRequestSetReviewers`, aliased `changed`, with `usernames: [<one>]` and `mode` `APPEND` for add, `REMOVE` for remove, never `REPLACE`, the username only a variable; both mutations answer both lists with the list query's fields; glab's failure or GitLab's top-level error → `Failed`, no payload or no `mergeRequest` → `Failed` (`NO_MERGE_REQUEST`), the payload's first `errors` entry → `Refused`; else GitLab's answered group decides (usernames compared with `eq_ignore_ascii_case`): an add listed or a remove not listed → `Changed`, otherwise `Unchanged` (GitLab Free's one assignee and one reviewer, no permission, an unknown user), both with the two lists as answered; unknown review states warned of; uploaded pictures of everyone in both lists, one per username; one `info` line: iid, group, action and the outcome's kind, never a username). The shell offers each reply's pictures before the reply reaches the window (`src-tauri/src/merge_requests/people.rs`, RK53). Tests: `people_search.rs` and `people_change/tests.rs` (inline answers: order and pictures, null project and null list, glab's and GitLab's words, the `changed`/`unchanged` table for both groups and actions, ASCII case, refused against failed, no payload or merge request, pictures once, each outcome's logged kind), `tests/people.rs` (`mr-people/`: the search argv exact and nothing written, nobody found, glab's failure; posts 1–8 through `answered_posts`: the exact `APPEND` body, a reviewer's state, two `REMOVE`s and nothing else asked, GitLab Free's dropped add and a remove not made `Unchanged`, a mutation error `Refused`, a top-level error `Failed`; a run of eight changes writes only one `APPEND` or `REMOVE` of one username each, never `REPLACE`, `-X` or REST ids (RK54); glab missing or logged out before any query).
+ 
+-A merge request's description (plan §2 #171–#174; request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, §1.1–§1.6): `description.rs` (the IPC types `DescriptionReply` `read { description }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, `Description { blocks }`, `DescriptionBlock` `paragraph`/`heading { level: HeadingLevel h1–h6 }`/`code { language, text }`/`list { numbering: ListNumbering bullets|numbers { start }, items: DescriptionItem { task: TaskBox none|open|done|inapplicable, blocks } }`/`quote`/`rule`/`table { head, body: DescriptionRow { cells: DescriptionCell { header, align: CellAlign start|center|end, inlines } } }`/`details { open, summary, blocks }`, `DescriptionInline` `text`/`emphasis`/`strong`/`strike`/`code`/`link { link: DescriptionLink page { page }|refused { address } }`/`image { image: DescriptionImage uploaded { key }|web { address }|refused, caption }`/`lineBreak`; the shell's `ReadDescription { reply, pages, uploads }` and `OfferedUpload { key, address }`; `read_description`: glab missing → `GlabMissing`, `logged_in_project`, `fetch_description` — the one request, `request-mr-links.md` reuses it: one `Glab::get` of `description_args` (`MergeRequestDescription { project { mergeRequest(iid) { descriptionHtml } } }`, 10 of 250 logged in, 1.0 s, measured 2026-11-04), glab's line or GitLab's first error → `failed` in those words, `project: null` → `NO_PROJECT`, `mergeRequest: null` → `NO_MERGE_REQUEST`, `descriptionHtml: null` → "" — then `described` against `WebPage::merge_request` (None off https); one `info` line with iid, outcome, blocks, pages, uploads and web images, never text or an address). **The walk** (`description/html.rs` `described`, `MAX_NESTING` 32): `dom_query` parses the fragment; `Walk::children` is the one place rule 6 is kept — it drops comments, the `LEFT_OUT` elements with all their text (`script`, `style`, `template`, `noscript`, `iframe`, `frame`, `frameset`, `object`, `embed`, `applet`, `video`, `audio`, `source`, `track`, `canvas`, `svg`, `math`, `link`, `meta`, `base`, `head`, `title`, `button`, `select`, `textarea`, `option`, `input`) and every element deeper than 32 (one `warn` per read); block elements `p`, `h1`–`h6`, `pre`, `ul`, `ol`, `blockquote`, `hr`, `table`, `details`, `div` end the inline run before them, which becomes a paragraph unless it is only white space; inline elements `em`/`i`, `strong`/`b`, `del`/`s`/`strike`, `code`, `a`, `img`, `br`; every other element gives its content in place (`span`, `gl-emoji`, `copy-code`, `section`, `form` …); `li`, `thead`/`tbody`/`tfoot`, `tr`, `th`/`td` and `summary` count only inside their parents; a link without `href`, inside another link or left with nothing but white space gives its content only, and its images follow it (`lifted`), so a link never holds an image; an image's address is `data-src` (GitLab's lazy images) else `src`, its caption alt, else title, else the address as written; pages and uploads are collected once each in document order. `description/element.rs` reads what one element says: the code language (`data-canonical-lang`, else `lang`, empty → none; the `<pre>`'s text with one final `\n` removed), `<ol start>` (else 1), the heading level, the task box (the item's first content, or its first paragraph's, an `input.task-list-item-checkbox`: `data-inapplicable` → inapplicable, `checked` → done, else open) and the cell alignment (exactly `text-align: center`/`right`, else start). **Addresses** (`description/address.rs`, the only maker of `UploadKey` and, beside `avatar_source`, of `PictureAddress`): `WebPage::linked` (an `http`/`https` `url::Url` as `url` serialises it: no space, quote, `<`, `>` or control character), `link_of` (`Url::options().base_url(base).parse(href)`; http/https → `page`, else `refused { address: href }`), `image_of` (an empty address or anything but https → `refused`; https on `base`'s origin with the path `[<segments>]/-/project/<digits>/uploads/<32 lowercase hex>/<file>` or `<the merge request's project web path>/uploads/<secret>/<file>`, `<file>` one segment of `[A-Za-z0-9._~%+-]`, not `..` → `uploaded { key: "upload~<secret>" }` with the route `projects/<digits, or the web path with "/" as "%2F">/uploads/<secret>/<file>` and the address without query or fragment; any other https → `web { address }`). **Uploads** (`picture.rs`): `PictureAddress` holds an avatar or an upload (route and web address), `as_str` the https address; `fetch_picture` asks an upload by `glab api <route>`, then, only when glab's line ends `(HTTP 403)` or `(HTTP 404)`, by `glab api <web address>` (both answered gitlab-org/gitlab !200000's screenshots, 62–158 KB PNGs, on 2026-11-04); an upload may be up to `MAX_UPLOAD_BYTES` 10 MiB, an avatar still 1 MiB. The list query asks `description` after `title` (172 of 250 logged in, +2), and `page.rs` folds it to `MergeRequestRow.hasDescription` (more than white space); the text goes nowhere else. Tests: `description/tests.rs` over the measured GitLab shapes and the planted answer of the scenario `mr-description`, `picture/tests.rs` for both routes and the two limits, `tests/description.rs` over the fake glab (`tests/glab/README.md`).
+-
+-What the description changes above: `WebPage` has a fourth maker, `WebPage::linked`; `PictureAddress` is made by `avatar_source` and `image_of` only; `NoProject` also turns into `DescriptionReply`; the list query is 172 of 250 with `description`; `MergeRequestRow` carries `hasDescription`; `fetch_picture`'s limit is per kind (`MAX_PICTURE_BYTES` for an avatar, `MAX_UPLOAD_BYTES` for an upload).
++A merge request's description (plan §2 #171–#174; request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, §1.1–§1.6): `description.rs` (the IPC types `DescriptionReply` `read { description }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, `Description { blocks }`, `DescriptionBlock` `paragraph`/`heading { level: HeadingLevel h1–h6 }`/`code { language, text }`/`list { numbering: ListNumbering bullets|numbers { start }, items: DescriptionItem { task: TaskBox none|open|done|inapplicable, blocks } }`/`quote`/`rule`/`table { head, body: DescriptionRow { cells: DescriptionCell { header, align: CellAlign start|center|end, inlines } } }`/`details { open, summary, blocks }`, `DescriptionInline` `text`/`emphasis`/`strong`/`strike`/`code`/`link { link: DescriptionLink }`/`image { image: DescriptionImage, caption }`/`lineBreak`; the shell's `ReadDescription { reply, pages, uploads }`; `read_description`: glab missing → `GlabMissing`, `logged_in_project`, `fetch_description` — the one request, `request-mr-links.md` reuses it: one `Glab::get` of `description_args` (`MergeRequestDescription { project { mergeRequest(iid) { descriptionHtml } } }`, 10 of 250 logged in, 1.0 s, measured 2026-11-04), glab's line or GitLab's first error → `failed` in those words, `project: null` → `NO_PROJECT`, `mergeRequest: null` → `NO_MERGE_REQUEST`, `descriptionHtml: null` → "" — then `described` against `WebPage::merge_request` (None off https); one `info` line with iid, outcome, blocks, pages, uploads and web images, never text or an address). **The walk** (`description/html.rs` `described`, `MAX_NESTING` 32): `dom_query` parses the fragment; `Walk::children` is the one place rule 6 is kept — it drops comments, the `LEFT_OUT` elements with all their text (`script`, `style`, `template`, `noscript`, `iframe`, `frame`, `frameset`, `object`, `embed`, `applet`, `video`, `audio`, `source`, `track`, `canvas`, `svg`, `math`, `link`, `meta`, `base`, `head`, `title`, `button`, `select`, `textarea`, `option`, `input`) and every element deeper than 32 (one `warn` per read); block elements `p`, `h1`–`h6`, `pre`, `ul`, `ol`, `blockquote`, `hr`, `table`, `details`, `div` end the inline run before them, which becomes a paragraph unless it is only white space; inline elements `em`/`i`, `strong`/`b`, `del`/`s`/`strike`, `code`, `a`, `img`, `br`; every other element gives its content in place (`span`, `gl-emoji`, `copy-code`, `section`, `form` …); `li`, `thead`/`tbody`/`tfoot`, `tr`, `th`/`td` and `summary` count only inside their parents; a link without `href`, inside another link or left with nothing but white space gives its content only, and its images follow it (`lifted`), so a link never holds an image; an image's address is `data-src` (GitLab's lazy images) else `src`, its caption alt, else title, else the address as written; pages and uploads are collected once each in document order. `description/element.rs` reads what one element says: the code language (`data-canonical-lang`, else `lang`, empty → none; the `<pre>`'s text with one final `\n` removed), `<ol start>` (else 1), the heading level, the task box (the item's first content, or its first paragraph's, an `input.task-list-item-checkbox`: `data-inapplicable` → inapplicable, `checked` → done, else open) and the cell alignment (exactly `text-align: center`/`right`, else start). **Addresses** (`description/address.rs`: the IPC types `DescriptionLink` `page { page }`/`refused { address }`, `DescriptionImage` `uploaded { key }`/`web { address }`/`refused` and `UploadKey`, and the shell's `OfferedUpload { key, address }`, re-exported from `description.rs`; the only maker of `UploadKey` and, beside `avatar_source`, of `PictureAddress`): `WebPage::linked` (an `http`/`https` `url::Url` as `url` serialises it: no space, quote, `<`, `>` or control character), `link_of` (`Url::options().base_url(base).parse(href)`; http/https → `page`, else `refused { address: href }`), `image_of` (an empty address or anything but https → `refused`; https on `base`'s origin with the path `[<segments>]/-/project/<digits>/uploads/<32 lowercase hex>/<file>` or `<the merge request's project web path>/uploads/<secret>/<file>`, `<file>` one segment of `[A-Za-z0-9._~%+-]`, not `..` → `uploaded { key: "upload~<secret>" }` with the route `projects/<digits, or the web path with "/" as "%2F">/uploads/<secret>/<file>` and the address without query or fragment; any other https → `web { address }`). **Uploads** (`picture.rs`): `PictureAddress` holds an avatar or an upload (route and web address), `as_str` the https address; `fetch_picture` asks an upload by `glab api <route>`, then, only when glab's line ends `(HTTP 403)` or `(HTTP 404)` (`page.rs` `FORBIDDEN`, `NOT_FOUND`), by `glab api <web address>` (both answered gitlab-org/gitlab !200000's screenshots, 62–158 KB PNGs, on 2026-11-04); a 3xx glab did not follow (`glab: HTTP 3xx`) fails on either route and never tries the other: glab 1.126.0 follows a GET's redirect itself, and gitlab.com answered both routes 200 with no redirect (`glab api --include`, 2026-11-04); an upload may be up to `MAX_UPLOAD_BYTES` 10 MiB, an avatar still 1 MiB. The list query asks `description` after `title` (172 of 250 logged in, +2), and `page.rs` folds it to `MergeRequestRow.hasDescription` (more than white space); the text goes nowhere else. Tests: `description/tests.rs` over the measured GitLab shapes and the planted answer of the scenario `mr-description`, `picture/tests.rs` for both routes and the two limits, `tests/description.rs` over the fake glab (`tests/glab/README.md`; !53 a redirect on either route refused).
+diff --git a/crates/merge-requests/src/description.rs b/crates/merge-requests/src/description.rs
+index 2e5f96b..3b6b689 100644
+--- a/crates/merge-requests/src/description.rs
++++ b/crates/merge-requests/src/description.rs
+@@ -11,9 +11,9 @@ use yamt_gitio::Glab;
+ use crate::page::{NO_MERGE_REQUEST, NO_PROJECT, graphql_data};
+ use crate::project::{Project, logged_in_project};
+ use crate::query::description_args;
+-use crate::{GitLabRepository, MergeRequestIid, PictureAddress, WebPage};
++use crate::{GitLabRepository, MergeRequestIid, WebPage};
+ 
+-pub use address::UploadKey;
++pub use address::{DescriptionImage, DescriptionLink, OfferedUpload, UploadKey};
+ use html::{Described, described};
+ 
+ /// How reading a merge request's description ended.
+@@ -238,40 +238,6 @@ pub enum DescriptionInline {
+     LineBreak,
+ }
+ 
+-/// Where a link leads.
+-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+-#[serde(tag = "kind", rename_all = "camelCase")]
+-pub enum DescriptionLink {
+-    /// An http or https address, absolute or resolved against the merge request's GitLab page.
+-    Page {
+-        /// The page the opener may open.
+-        page: WebPage,
+-    },
+-    /// Any other address, or one yamt cannot read: as written, for the tooltip; opens nothing.
+-    Refused {
+-        /// The address as written.
+-        address: String,
+-    },
+-}
+-
+-/// Where an image loads from.
+-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+-#[serde(tag = "kind", rename_all = "camelCase")]
+-pub enum DescriptionImage {
+-    /// Uploaded to the project's GitLab: the window asks the picture scheme by `key` (offered with the reply).
+-    Uploaded {
+-        /// The upload's key.
+-        key: UploadKey,
+-    },
+-    /// Any other https address (`url`'s serialisation): the window loads it itself, without the login.
+-    Web {
+-        /// The address.
+-        address: String,
+-    },
+-    /// http, data, file, anything else or unreadable: nothing loads, the caption shows.
+-    Refused,
+-}
+-
+ /// Not IPC: what the shell offers before it replies.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct ReadDescription {
+@@ -283,15 +249,6 @@ pub struct ReadDescription {
+     pub uploads: Vec<OfferedUpload>,
+ }
+ 
+-/// Not IPC: an upload a description named.
+-#[derive(Clone, Debug, PartialEq, Eq)]
+-pub struct OfferedUpload {
+-    /// The key the window asks by.
+-    pub key: UploadKey,
+-    /// Where it is on the project's GitLab.
+-    pub address: PictureAddress,
+-}
+-
+ #[derive(Deserialize)]
+ struct DescriptionData {
+     project: Option<DescriptionProject>,
+diff --git a/crates/merge-requests/src/description/address.rs b/crates/merge-requests/src/description/address.rs
+index 7613e39..a0c7ec3 100644
+--- a/crates/merge-requests/src/description/address.rs
++++ b/crates/merge-requests/src/description/address.rs
+@@ -2,9 +2,9 @@ use serde::Serialize;
+ use specta::Type;
+ use url::Url;
+ 
+-use super::{DescriptionImage, DescriptionLink, OfferedUpload};
+-use crate::job_log::ESCAPED_SLASH;
+-use crate::web_page::{MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_number, is_web_path};
++use crate::web_page::{
++    ESCAPED_SLASH, MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_number, is_web_path,
++};
+ use crate::{PictureAddress, WebPage};
+ 
+ const HTTP_SCHEME: &str = "http";
+@@ -28,6 +28,49 @@ impl UploadKey {
+     }
+ }
+ 
++/// Where a link leads.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DescriptionLink {
++    /// An http or https address, absolute or resolved against the merge request's GitLab page.
++    Page {
++        /// The page the opener may open.
++        page: WebPage,
++    },
++    /// Any other address, or one yamt cannot read: as written, for the tooltip; opens nothing.
++    Refused {
++        /// The address as written.
++        address: String,
++    },
++}
++
++/// Where an image loads from.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DescriptionImage {
++    /// Uploaded to the project's GitLab: the window asks the picture scheme by `key` (offered with the reply).
++    Uploaded {
++        /// The upload's key.
++        key: UploadKey,
++    },
++    /// Any other https address (`url`'s serialisation): the window loads it itself, without the login.
++    Web {
++        /// The address.
++        address: String,
++    },
++    /// http, data, file, anything else or unreadable: nothing loads, the caption shows.
++    Refused,
++}
++
++/// Not IPC: an upload a description named.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct OfferedUpload {
++    /// The key the window asks by.
++    pub key: UploadKey,
++    /// Where it is on the project's GitLab.
++    pub address: PictureAddress,
++}
++
+ impl WebPage {
+     /// An http or https `url` as `url` serialises it.
+     pub(crate) fn linked(url: &Url) -> Option<WebPage> {
+diff --git a/crates/merge-requests/src/description/tests.rs b/crates/merge-requests/src/description/tests.rs
+index 09a0648..a2cab21 100644
+--- a/crates/merge-requests/src/description/tests.rs
++++ b/crates/merge-requests/src/description/tests.rs
+@@ -6,6 +6,7 @@ use url::Url;
+ use super::address::{image_of, link_of};
+ use super::html::{MAX_NESTING, described};
+ use super::*;
++use crate::PictureAddress;
+ 
+ const BASE: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/52";
+ const MERGE_REQUESTS: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/";
+diff --git a/crates/merge-requests/src/job_log.rs b/crates/merge-requests/src/job_log.rs
+index 8a5bbfb..e6a2e97 100644
+--- a/crates/merge-requests/src/job_log.rs
++++ b/crates/merge-requests/src/job_log.rs
+@@ -2,16 +2,14 @@ use serde::Serialize;
+ use specta::Type;
+ use yamt_gitio::Glab;
+ 
++use crate::page::NOT_FOUND;
+ use crate::project::{Project, logged_in_project};
+-use crate::web_page::is_web_path;
++use crate::web_page::{ESCAPED_SLASH, is_web_path};
+ use crate::{GitLabRepository, WebPage};
+ 
+ /// The most of a log the window shows: GitLab's job page shows the same tail (`Gitlab::Ci::Trace::Stream::LIMIT_SIZE`,
+ /// 500 KiB).
+ pub const MAX_LOG_BYTES: usize = 500 * 1024;
+-/// glab's last line for an HTTP 404 ends so (`tests/glab/README.md`); GitLab answers 404 for a job without a log.
+-const NOT_FOUND: &str = "(HTTP 404)";
+-pub(crate) const ESCAPED_SLASH: &str = "%2F";
+ 
+ /// A failed job's log as the window shows it.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+diff --git a/crates/merge-requests/src/page.rs b/crates/merge-requests/src/page.rs
+index c6baac9..031e389 100644
+--- a/crates/merge-requests/src/page.rs
++++ b/crates/merge-requests/src/page.rs
+@@ -19,6 +19,10 @@ const NO_DATA: &str = "GitLab's answer holds no data";
+ pub(crate) const NO_PROJECT: &str = "GitLab finds no such project, or you may not see it";
+ pub(crate) const NO_MERGE_REQUEST: &str = "GitLab's answer names no merge request";
+ const NO_CURSOR: &str = "GitLab says more merge requests follow, but sent no cursor for them";
++/// glab's last line for an HTTP 403 ends so (`tests/glab/README.md`).
++pub(crate) const FORBIDDEN: &str = "(HTTP 403)";
++/// glab's last line for an HTTP 404 ends so (`tests/glab/README.md`).
++pub(crate) const NOT_FOUND: &str = "(HTTP 404)";
+ 
+ /// One GraphQL answer of the list query.
+ pub(crate) struct ParsedPage {
+diff --git a/crates/merge-requests/src/picture.rs b/crates/merge-requests/src/picture.rs
+index 08f602a..623bfac 100644
+--- a/crates/merge-requests/src/picture.rs
++++ b/crates/merge-requests/src/picture.rs
+@@ -4,6 +4,7 @@ use serde::Serialize;
+ use specta::Type;
+ use yamt_gitio::Glab;
+ 
++use crate::page::{FORBIDDEN, NOT_FOUND};
+ use crate::web_page::{is_number, is_path_segment, is_web_path};
+ 
+ const MIB: usize = 1 << 20;
+@@ -11,9 +12,8 @@ const MIB: usize = 1 << 20;
+ pub const MAX_PICTURE_BYTES: usize = MIB;
+ /// The largest upload a description names that yamt takes from GitLab: a screenshot is often over 1 MiB.
+ pub const MAX_UPLOAD_BYTES: usize = 10 << 20;
+-/// glab's last line for an HTTP 403 or 404 ends so (`tests/glab/README.md`): GitLab older than 17.4 has no uploads
+-/// API, and a project you are no member of may refuse it.
+-const REFUSED_ENDINGS: [&str; 2] = ["(HTTP 403)", "(HTTP 404)"];
++/// GitLab older than 17.4 has no uploads API, and a project you are no member of may refuse it.
++const REFUSED_ENDINGS: [&str; 2] = [FORBIDDEN, NOT_FOUND];
+ 
+ const UPLOADED_AVATARS: &str = "/uploads/-/system/user/avatar/";
+ const GRAVATAR_HOSTS: [&str; 2] = ["https://secure.gravatar.com", "https://www.gravatar.com"];
+@@ -204,6 +204,9 @@ fn fetched(address: &PictureAddress, get: &mut Get) -> Result<Picture, String> {
+     match &address.0 {
+         Address::Avatar(address) => picture_from(get(&["api", address])?, MAX_PICTURE_BYTES),
+         Address::Upload { route, web } => {
++            // gitlab.com answers both routes itself, 200, no redirect (`glab api --include` on !200000's upload,
++            // 2026-11-04); glab 1.126.0 follows a GET's redirect silently (`internal/api/redirect.go`), so the 3xx
++            // yamt sees, "glab: HTTP 3xx", is one glab did not follow: an error, never a reason to try the web path.
+             let bytes = match get(&["api", route]) {
+                 Err(line) if REFUSED_ENDINGS.iter().any(|end| line.ends_with(end)) => {
+                     get(&["api", web])
+diff --git a/crates/merge-requests/src/web_page.rs b/crates/merge-requests/src/web_page.rs
+index d73480b..38f4492 100644
+--- a/crates/merge-requests/src/web_page.rs
++++ b/crates/merge-requests/src/web_page.rs
+@@ -3,6 +3,7 @@ use std::thread;
+ 
+ use crate::{MergeRequestIid, PageOpened, WebPage};
+ 
++pub(crate) const ESCAPED_SLASH: &str = "%2F";
+ pub(crate) const HTTPS: &str = "https://";
+ const JOBS_SEGMENT: &str = "/-/jobs/";
+ pub(crate) const MERGE_REQUESTS_SEGMENT: &str = "/-/merge_requests/";
+diff --git a/crates/merge-requests/tests/description.rs b/crates/merge-requests/tests/description.rs
+index 1ffc7ff..47a3c58 100644
+--- a/crates/merge-requests/tests/description.rs
++++ b/crates/merge-requests/tests/description.rs
+@@ -22,6 +22,8 @@ const PROJECT: &str = "https://gitlab.example/taskboard/taskboard";
+ const HEX_A: &str = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
+ const HEX_B: &str = "f9e8d7c6b5a4938271605f4e3d2c1b0a";
+ const HEX_C: &str = "1111aaaa2222bbbb3333cccc4444dddd";
++const HEX_REDIRECTED_BY_API: &str = "2222cccc3333dddd4444eeee5555ffff";
++const HEX_REDIRECTED_ON_WEB: &str = "6666aaaa7777bbbb8888cccc9999dddd";
+ const DESCRIPTION_QUERY: &str = "query=query MergeRequestDescription($fullPath: ID!, $iid: String!) { \
+      project(fullPath: $fullPath) { mergeRequest(iid: $iid) { descriptionHtml } } }";
+ 
+@@ -163,6 +165,31 @@ fn an_upload_missing_on_both_routes_is_an_error() {
+     assert_eq!(answered, both);
+ }
+ 
++#[test]
++fn a_redirect_on_either_route_is_refused_and_never_retried() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++    let read = read(&fake, &repository, 53);
++
++    let fetched: Vec<_> = read
++        .uploads
++        .iter()
++        .map(|offered| fetch_picture(&fake.glab, repository.root(), &offered.address))
++        .collect();
++
++    let redirected = Err("glab: HTTP 302".to_owned());
++    assert_eq!(fetched, [redirected.clone(), redirected]);
++    let answered = fake.logged("answered: ");
++    let asked = [
++        format!("answered: projects/7/uploads/{HEX_REDIRECTED_BY_API}/moved.png"),
++        format!("answered: projects/7/uploads/{HEX_REDIRECTED_ON_WEB}/moved.png"),
++        format!(
++            "answered: https://gitlab.example/-/project/7/uploads/{HEX_REDIRECTED_ON_WEB}/moved.png"
++        ),
++    ];
++    assert_eq!(answered, asked);
++}
++
+ #[test]
+ fn another_sites_image_never_reaches_glab() {
+     let (_repo, repository) = gitlab_repo();
+diff --git a/scripts/fake-glab/glab b/scripts/fake-glab/glab
+index b4d02d3..1b97819 100755
+--- a/scripts/fake-glab/glab
++++ b/scripts/fake-glab/glab
+@@ -5,7 +5,8 @@
+ # layout, glab.env and the log format are in tests/glab/README.md.
+ # What it imitates, as glab 1.124.0 printed it: `auth status` writes everything on stderr; `api` prints the body
+ # as GitLab sent it (no final newline), after the status line, the headers and an empty line, each ending in
+-# CRLF, with `--include`; on an HTTP error it also prints "glab: <message> (HTTP <code>)" on stderr and exits 1.
++# CRLF, with `--include`; on an HTTP error it also prints "glab: <message> (HTTP <code>)" on stderr and exits 1,
++# and on a 3xx glab did not follow, "glab: HTTP <code>" (glab 1.126.0 `internal/commands/api/api.go`).
+ set -u
+ 
+ fail() {
+@@ -71,9 +72,13 @@ answer() {
+ 	fi
+ 	printf '%s' "$2"
+ 	code=${1%% *}
+-	if [ "$code" -lt 400 ]; then
++	if [ "$code" -lt 300 ]; then
+ 		exit 0
+ 	fi
++	if [ "$code" -lt 400 ]; then
++		printf 'glab: HTTP %s\n' "$code" >&2
++		exit 1
++	fi
+ 	if [ -f "${3-}" ]; then
+ 		cat "$3" >&2
+ 		exit 1
+@@ -157,13 +162,16 @@ graphql() {
+ }
+ 
+ # $1: a file under $scenario, printed with cat (answer's printf would drop NUL bytes) after its .sleep seconds;
+-# "answered: <endpoint>" is logged before the answer, so a test sees which fetches overlapped. No such file answers
+-# 404.
++# "answered: <endpoint>" is logged before the answer, so a test sees which fetches overlapped. A $1.status file
++# answers that status line with no body instead; no such file answers 404.
+ serve_file() {
+ 	if [ -f "$1.sleep" ]; then
+ 		sleep "$(cat "$1.sleep")"
+ 	fi
+ 	log "answered: $endpoint"
++	if [ -f "$1.status" ]; then
++		answer "$(cat "$1.status")" ''
++	fi
+ 	if [ -f "$1" ]; then
+ 		cat "$1"
+ 		exit 0
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index f57d5d3..f9f61f6 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -42,11 +42,11 @@ A Rust test that needs post n without making posts 1 to n − 1 first calls `Fak
+ | `graphql-description-<iid>.json`              | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `query` starting `query MergeRequestDescription` (a merge request's description) and a field `iid=<iid>`                                                                                                                         |
+ | `graphql-merge-request-<iid>.json`            | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `iid=<iid>` and any other query                                                                                                                                                                                                  |
+ | `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`)                                                                                                                                                                                                                                                  |
+-| `pictures/<path>`                             | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`                                                                                                         |
++| `pictures/<path>`                             | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`; a `pictures/<path>.status` answers that status line with no body instead                               |
+ | `pictures/<path>.sleep`                       | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists                                                                                                                                                                                                                             |
+ | `traces/<n>.log`                              | `glab api` GET `projects/<project>/jobs/<n>/trace` (a job's log, any project): printed with `cat` byte for byte, exit 0 (an empty file prints nothing); no such file answers `404 Not Found`                                                                                                                                 |
+ | `traces/<n>.log.sleep`                        | seconds to wait before that log's answer, whether or not the log exists                                                                                                                                                                                                                                                      |
+-| `uploads/<project>/uploads/<secret>/<file>`   | `glab api` GET `projects/<project>/uploads/<secret>/<file>` (the uploads API; `<project>` as asked, an id or an encoded path): printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`                                                                                                                |
++| `uploads/<project>/uploads/<secret>/<file>`   | `glab api` GET `projects/<project>/uploads/<secret>/<file>` (the uploads API; `<project>` as asked, an id or an encoded path): printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`; a `.status` beside it answers that status line with no body instead                                           |
+ 
+ `glab api` keeps the value of every `-f`/`--raw-field`/`-F`/`--field` as `name=value` (the first wins when a name
+ is given twice) and, as glab does, sends a POST when a field or `--input` is given without `-X`/`--method`. A GET
+@@ -70,6 +70,10 @@ Measured with `HOME` and `XDG_CONFIG_HOME` in a temporary folder (no token), aga
+   (`{"message":"404 Project Not Found"}`, headers first with `--include`), stderr
+   `glab: 404 Project Not Found (HTTP 404)` and a newline, exit 1. The fake takes the message from the body's
+   `"message"` string; it never invents one.
++- A 3xx answer to a GET: glab 1.126.0 follows it silently (`glab api --include https://gitlab.com/gitlab-org/gitlab.git`
++  printed `HTTP/2.0 200 OK`, while curl saw a 302, on 2026-11-04; `internal/api/redirect.go`). A 3xx it does not
++  follow (no `Location`) is an error: stdout holds the body, stderr `glab: HTTP <code>` and a newline, exit 1
++  (`internal/commands/api/api.go`, `resp.StatusCode > 299`). The fake answers every 3xx so.
+ - `glab auth status` with no token: everything on stderr — the instance (`gitlab.com`), the failed API call,
+   "No token found …", the ERROR box — and exit 1. `auth-status.out` in `runner/` is that text (trailing spaces
+   dropped).
+@@ -237,7 +241,9 @@ answered: <address or endpoint>            (a picture or a job's log, after its
+   `button`, a `p` with `onclick`, `style`, `class` and `id`, an `svg` with `onload`, an `object`, an `embed`, a
+   `video`, an `audio`, `noscript`, `template`, `title`, `textarea` and `select`, and 40 nested `blockquote`s;
+   `graphql-description-49.err` and `.exit` (1) fail before any answer with "glab: a deadline line";
+-  `graphql-description-48.json` holds `mergeRequest: null`.
++  `graphql-description-48.json` holds `mergeRequest: null`. `graphql-description-53.json` names two uploads, each
++  answering `302 Found` on one route (`.status`) and holding a PNG on its web path: `2222cccc3333dddd4444eeee5555ffff`
++  on the uploads API, `6666aaaa7777bbbb8888cccc9999dddd` (no API file, so 404 first) on its web path.
+ 
+ ## Fake browser opener
+ 
+diff --git a/tests/glab/mr-description/graphql-description-53.json b/tests/glab/mr-description/graphql-description-53.json
+new file mode 100644
+index 0000000..888dfd7
+--- /dev/null
++++ b/tests/glab/mr-description/graphql-description-53.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":{"descriptionHtml":"<p><img src=\"/-/project/7/uploads/2222cccc3333dddd4444eeee5555ffff/moved.png\" alt=\"moved\"><img src=\"/-/project/7/uploads/6666aaaa7777bbbb8888cccc9999dddd/moved.png\" alt=\"moved\"></p>"}}}}
+diff --git a/tests/glab/mr-description/pictures/-/project/7/uploads/2222cccc3333dddd4444eeee5555ffff/moved.png b/tests/glab/mr-description/pictures/-/project/7/uploads/2222cccc3333dddd4444eeee5555ffff/moved.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..3a295f56ad1008595b4c6ffab8007f030cdf498f
+GIT binary patch
+literal 362
+zcme7R@N?(olHy`uVBq!ia0y~yU=RRd0VW0ph69XSN*Nd!4Lw~PLo7}w?@1Nc5?*n}
+z!T5la!>+I+@lROlOzUUe&#6gv+{7xdIMR$OPkd5ShrzWCx#_$46aVM`eEQQ{aMhM+
+zfE}FwP*N{D;)C>AGk>FSu4QR*ht1eRcWjDL**jTsNkQacr=E*z<b=+vo-&yGsroqg
+zN%7c%sS#@v6^~^cGubAv&FkCSPnlds0w3qk<4?D(ICM&3qgzvhsn3o_4AU<PFbFoD
+zc=So0WkE!POz#Oc$D8+`-WHvspt4LSP;9{x-c1b4glB%pZfG%`a`xwjPY3NdIyJjb
+zcUtH+xZM38x&PXqtm7seN=y@5R~&h%{$x?po)oUc|6WygKX1;r|M%YZ{z8>tw=<hK
+z(%lX-7D)1%@&+@91nM^1A2w$5*mbPK;mL+$sV08%3BTC(^PkXp({a&<hk@by@|V@A
+T4%WR43=9mOu6{1-oD!M<*l?JO
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/glab/mr-description/pictures/-/project/7/uploads/6666aaaa7777bbbb8888cccc9999dddd/moved.png b/tests/glab/mr-description/pictures/-/project/7/uploads/6666aaaa7777bbbb8888cccc9999dddd/moved.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..3a295f56ad1008595b4c6ffab8007f030cdf498f
+GIT binary patch
+literal 362
+zcme7R@N?(olHy`uVBq!ia0y~yU=RRd0VW0ph69XSN*Nd!4Lw~PLo7}w?@1Nc5?*n}
+z!T5la!>+I+@lROlOzUUe&#6gv+{7xdIMR$OPkd5ShrzWCx#_$46aVM`eEQQ{aMhM+
+zfE}FwP*N{D;)C>AGk>FSu4QR*ht1eRcWjDL**jTsNkQacr=E*z<b=+vo-&yGsroqg
+zN%7c%sS#@v6^~^cGubAv&FkCSPnlds0w3qk<4?D(ICM&3qgzvhsn3o_4AU<PFbFoD
+zc=So0WkE!POz#Oc$D8+`-WHvspt4LSP;9{x-c1b4glB%pZfG%`a`xwjPY3NdIyJjb
+zcUtH+xZM38x&PXqtm7seN=y@5R~&h%{$x?po)oUc|6WygKX1;r|M%YZ{z8>tw=<hK
+z(%lX-7D)1%@&+@91nM^1A2w$5*mbPK;mL+$sV08%3BTC(^PkXp({a&<hk@by@|V@A
+T4%WR43=9mOu6{1-oD!M<*l?JO
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/glab/mr-description/pictures/-/project/7/uploads/6666aaaa7777bbbb8888cccc9999dddd/moved.png.status b/tests/glab/mr-description/pictures/-/project/7/uploads/6666aaaa7777bbbb8888cccc9999dddd/moved.png.status
+new file mode 100644
+index 0000000..21a4b1e
+--- /dev/null
++++ b/tests/glab/mr-description/pictures/-/project/7/uploads/6666aaaa7777bbbb8888cccc9999dddd/moved.png.status
+@@ -0,0 +1 @@
++302 Found
+diff --git a/tests/glab/mr-description/uploads/7/uploads/2222cccc3333dddd4444eeee5555ffff/moved.png.status b/tests/glab/mr-description/uploads/7/uploads/2222cccc3333dddd4444eeee5555ffff/moved.png.status
+new file mode 100644
+index 0000000..21a4b1e
+--- /dev/null
++++ b/tests/glab/mr-description/uploads/7/uploads/2222cccc3333dddd4444eeee5555ffff/moved.png.status
+@@ -0,0 +1 @@
++302 Found

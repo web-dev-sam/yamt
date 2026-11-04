@@ -5,7 +5,8 @@
 # layout, glab.env and the log format are in tests/glab/README.md.
 # What it imitates, as glab 1.124.0 printed it: `auth status` writes everything on stderr; `api` prints the body
 # as GitLab sent it (no final newline), after the status line, the headers and an empty line, each ending in
-# CRLF, with `--include`; on an HTTP error it also prints "glab: <message> (HTTP <code>)" on stderr and exits 1.
+# CRLF, with `--include`; on an HTTP error it also prints "glab: <message> (HTTP <code>)" on stderr and exits 1,
+# and on a 3xx glab did not follow, "glab: HTTP <code>" (glab 1.126.0 `internal/commands/api/api.go`).
 set -u
 
 fail() {
@@ -71,8 +72,12 @@ answer() {
 	fi
 	printf '%s' "$2"
 	code=${1%% *}
-	if [ "$code" -lt 400 ]; then
+	if [ "$code" -lt 300 ]; then
 		exit 0
+	fi
+	if [ "$code" -lt 400 ]; then
+		printf 'glab: HTTP %s\n' "$code" >&2
+		exit 1
 	fi
 	if [ -f "${3-}" ]; then
 		cat "$3" >&2
@@ -157,13 +162,16 @@ graphql() {
 }
 
 # $1: a file under $scenario, printed with cat (answer's printf would drop NUL bytes) after its .sleep seconds;
-# "answered: <endpoint>" is logged before the answer, so a test sees which fetches overlapped. No such file answers
-# 404.
+# "answered: <endpoint>" is logged before the answer, so a test sees which fetches overlapped. A $1.status file
+# answers that status line with no body instead; no such file answers 404.
 serve_file() {
 	if [ -f "$1.sleep" ]; then
 		sleep "$(cat "$1.sleep")"
 	fi
 	log "answered: $endpoint"
+	if [ -f "$1.status" ]; then
+		answer "$(cat "$1.status")" ''
+	fi
 	if [ -f "$1" ]; then
 		cat "$1"
 		exit 0

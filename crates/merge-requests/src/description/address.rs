@@ -2,9 +2,9 @@ use serde::Serialize;
 use specta::Type;
 use url::Url;
 
-use super::{DescriptionImage, DescriptionLink, OfferedUpload};
-use crate::job_log::ESCAPED_SLASH;
-use crate::web_page::{MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_number, is_web_path};
+use crate::web_page::{
+    ESCAPED_SLASH, MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_number, is_web_path,
+};
 use crate::{PictureAddress, WebPage};
 
 const HTTP_SCHEME: &str = "http";
@@ -26,6 +26,49 @@ impl UploadKey {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Where a link leads.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DescriptionLink {
+    /// An http or https address, absolute or resolved against the merge request's GitLab page.
+    Page {
+        /// The page the opener may open.
+        page: WebPage,
+    },
+    /// Any other address, or one yamt cannot read: as written, for the tooltip; opens nothing.
+    Refused {
+        /// The address as written.
+        address: String,
+    },
+}
+
+/// Where an image loads from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DescriptionImage {
+    /// Uploaded to the project's GitLab: the window asks the picture scheme by `key` (offered with the reply).
+    Uploaded {
+        /// The upload's key.
+        key: UploadKey,
+    },
+    /// Any other https address (`url`'s serialisation): the window loads it itself, without the login.
+    Web {
+        /// The address.
+        address: String,
+    },
+    /// http, data, file, anything else or unreadable: nothing loads, the caption shows.
+    Refused,
+}
+
+/// Not IPC: an upload a description named.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OfferedUpload {
+    /// The key the window asks by.
+    pub key: UploadKey,
+    /// Where it is on the project's GitLab.
+    pub address: PictureAddress,
 }
 
 impl WebPage {

@@ -2,16 +2,14 @@ use serde::Serialize;
 use specta::Type;
 use yamt_gitio::Glab;
 
+use crate::page::NOT_FOUND;
 use crate::project::{Project, logged_in_project};
-use crate::web_page::is_web_path;
+use crate::web_page::{ESCAPED_SLASH, is_web_path};
 use crate::{GitLabRepository, WebPage};
 
 /// The most of a log the window shows: GitLab's job page shows the same tail (`Gitlab::Ci::Trace::Stream::LIMIT_SIZE`,
 /// 500 KiB).
 pub const MAX_LOG_BYTES: usize = 500 * 1024;
-/// glab's last line for an HTTP 404 ends so (`tests/glab/README.md`); GitLab answers 404 for a job without a log.
-const NOT_FOUND: &str = "(HTTP 404)";
-pub(crate) const ESCAPED_SLASH: &str = "%2F";
 
 /// A failed job's log as the window shows it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]

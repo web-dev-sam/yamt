@@ -4,6 +4,7 @@ use serde::Serialize;
 use specta::Type;
 use yamt_gitio::Glab;
 
+use crate::page::{FORBIDDEN, NOT_FOUND};
 use crate::web_page::{is_number, is_path_segment, is_web_path};
 
 const MIB: usize = 1 << 20;
@@ -11,9 +12,8 @@ const MIB: usize = 1 << 20;
 pub const MAX_PICTURE_BYTES: usize = MIB;
 /// The largest upload a description names that yamt takes from GitLab: a screenshot is often over 1 MiB.
 pub const MAX_UPLOAD_BYTES: usize = 10 << 20;
-/// glab's last line for an HTTP 403 or 404 ends so (`tests/glab/README.md`): GitLab older than 17.4 has no uploads
-/// API, and a project you are no member of may refuse it.
-const REFUSED_ENDINGS: [&str; 2] = ["(HTTP 403)", "(HTTP 404)"];
+/// GitLab older than 17.4 has no uploads API, and a project you are no member of may refuse it.
+const REFUSED_ENDINGS: [&str; 2] = [FORBIDDEN, NOT_FOUND];
 
 const UPLOADED_AVATARS: &str = "/uploads/-/system/user/avatar/";
 const GRAVATAR_HOSTS: [&str; 2] = ["https://secure.gravatar.com", "https://www.gravatar.com"];
@@ -204,6 +204,9 @@ fn fetched(address: &PictureAddress, get: &mut Get) -> Result<Picture, String> {
     match &address.0 {
         Address::Avatar(address) => picture_from(get(&["api", address])?, MAX_PICTURE_BYTES),
         Address::Upload { route, web } => {
+            // gitlab.com answers both routes itself, 200, no redirect (`glab api --include` on !200000's upload,
+            // 2026-11-04); glab 1.126.0 follows a GET's redirect silently (`internal/api/redirect.go`), so the 3xx
+            // yamt sees, "glab: HTTP 3xx", is one glab did not follow: an error, never a reason to try the web path.
             let bytes = match get(&["api", route]) {
                 Err(line) if REFUSED_ENDINGS.iter().any(|end| line.ends_with(end)) => {
                     get(&["api", web])

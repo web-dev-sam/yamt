@@ -6,6 +6,7 @@ use url::Url;
 use super::address::{image_of, link_of};
 use super::html::{MAX_NESTING, described};
 use super::*;
+use crate::PictureAddress;
 
 const BASE: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/52";
 const MERGE_REQUESTS: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/";

@@ -19,6 +19,10 @@ const NO_DATA: &str = "GitLab's answer holds no data";
 pub(crate) const NO_PROJECT: &str = "GitLab finds no such project, or you may not see it";
 pub(crate) const NO_MERGE_REQUEST: &str = "GitLab's answer names no merge request";
 const NO_CURSOR: &str = "GitLab says more merge requests follow, but sent no cursor for them";
+/// glab's last line for an HTTP 403 ends so (`tests/glab/README.md`).
+pub(crate) const FORBIDDEN: &str = "(HTTP 403)";
+/// glab's last line for an HTTP 404 ends so (`tests/glab/README.md`).
+pub(crate) const NOT_FOUND: &str = "(HTTP 404)";
 
 /// One GraphQL answer of the list query.
 pub(crate) struct ParsedPage {
