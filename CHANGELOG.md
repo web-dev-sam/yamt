@@ -15,6 +15,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "Remove assignee" / "Remove reviewer". The row shows what GitLab answered; when GitLab did not make a change (GitLab
   Free keeps one assignee and one reviewer) or refused it, the box says so in one sentence. A row whose box is open
   stays on the list until the box closes, even when the change takes it out of the filters.
+- A merge request's description in a floating panel: the info button after a row's approvals opens it, freshly
+  read from GitLab each time, formatted as GitLab shows it — headings, lists, task lists (shown, not clickable),
+  tables, code blocks in yamt's code colours, quotes, collapsible sections, images and GitLab's references. Links
+  (http and https) open in the browser; other addresses only show in their tooltip. Images uploaded to gitlab.com
+  load with your GitLab login; images on other sites, and uploads on a self-managed GitLab, load without it (so a
+  private self-managed project's uploads show their caption). The description never runs code or loads anything but
+  its images. Escape, the close button, a click outside or a second click on the button close it.
 
 ## [0.6.7] - 2026-11-03
 
