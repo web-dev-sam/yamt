@@ -60,8 +60,8 @@ merge-requests page. Every step in yamt Dark and yamt Light (`--settings '{"them
 3. **C1 Shift.** Shift over d01 opens its panel directly left of the box, tops aligned where it fits (rects; clamped
    on screen otherwise); d01 marked; Shift over d02 switches; Shift+a in the field types "A" (no new `fixture_thread`);
    a lone Shift tap with focus in the field and the pointer on another row: no new `fixture_thread`, the panel keeps
-   its discussion (#2386); a focused row and Shift opens its thread. With !637's panel open, hover !636's count and
-   Shift over one of its rows: !637's box and panel close (#2385).
+   its discussion (#2386); a focused row and Shift opens its thread. With !637's panel open, hover !639's count (its box
+   fits above !637's) and Shift over its row: !637's box and panel close (#2385, #2405).
 4. **C3–C5 Thread.** d01: four comments oldest first, no system note; pictures, names, muted `@username`, the crown
    only on Dmitri Volkov's comment (tooltip "Author"); "3 hours ago" style times with `DD.MM.YYYY, HH:MM` on hover;
    "· Edited … ago by Dmitri Volkov" on Sam Weller's, "· Edited … ago" on Anna Berg's; code in yamt's colours, the
@@ -88,8 +88,9 @@ merge-requests page. Every step in yamt Dark and yamt Light (`--settings '{"them
     its row; Escape: box closes; the panel's Close: panel closes, box stays; a press on the list: both close; a list
     Refresh (the page's Refresh button, which does not count as a press outside, #2392) with the panel open: both
     stay and the thread is read again; after "Resolve thread", "Add comment" and "Submit review" the focus stays in
-    the panel, so Escape closes the panel, not the page (#2383/#2389); leaving the page with the panel open and
-    coming back: no box, and a resolved row is gone with the count dropped (#2384/#2390).
+    the panel, so Escape closes the panel, not the page (#2383/#2389); the same after Retry of a failed read and with
+    focus on the page's Refresh (#2400/#2401); leaving the page with the panel open and coming back: no box, and the
+    resolved row gone (the fixture's listed count is fixed, so the count drop shows only in the real app, #2404).
 11. **D Refresh.** "Reload discussions": the icon turns, the rows stay, then the new answer; only `iids: 637` in the
     log; with d01's panel open also one `fixture_thread`.
 12. **C11 Off.** Discussion details "Off": no box, no panel; "Load lazily": both work.

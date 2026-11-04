@@ -1,41 +1,19 @@
 {
-  "MrThreadsDocs": {
+  "MrThreadsBoxR2": {
     "owned": [
-      "docs/architecture.md",
-      "docs/plan.md",
-      "docs/slices/request-mr-discussions.md",
-      "docs/slices/request-mr-description.md",
-      ".omp/skills/project-map/**",
-      ".omp/skills/ipc-contract/SKILL.md",
-      ".omp/skills/risk-register/SKILL.md",
-      "CHANGELOG.md",
-      "crates/gitio/AGENTS.md",
-      "crates/merge-requests/AGENTS.md",
-      "src-tauri/AGENTS.md",
-      "frontend/src/ui/AGENTS.md",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/mergeRequests/AGENTS.md",
-      "docs/slices/briefs/mr-review-mode-design.md"
-    ]
-  },
-  "MrThreadsBoxR1": {
-    "owned": [
-      "frontend/src/mergeRequests/internal/**",
-      "frontend/src/mergeRequests/index.ts",
+      "frontend/src/ui/MergeRequestThread.vue",
+      "frontend/src/ui/MergeRequestThreadPanel.test.ts",
+      "frontend/src/ui/MergeRequestReplyField.vue",
+      "frontend/src/ui/MergeRequestsView.vue",
       "frontend/src/ui/MergeRequestDiscussions.vue",
       "frontend/src/ui/MergeRequestDiscussionsBox.test.ts",
       "frontend/src/ui/useHoverBox.ts",
       "frontend/src/ui/useHoverBox.test.ts",
-      "frontend/src/ui/mergeRequestsText.ts",
-      "frontend/src/ui/mergeRequestsText.test.ts",
-      "frontend/src/ui/MergeRequestsView.vue",
-      "frontend/src/ui/MergeRequestReplyField.vue",
-      "frontend/src/ui/MergeRequestThread.vue",
-      "frontend/src/ui/MergeRequestThreadPanel.test.ts",
       "frontend/src/ipc/fixtureMergeRequestDiscussions.ts",
       "frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestTurnCases.ts",
-      "frontend/src/ui/mergeRequests.test.ts"
+      "frontend/src/ipc/fixtureMergeRequestRendering.ts",
+      "frontend/src/ipc/fixtureMergeRequestThreads.ts",
+      "frontend/src/ipc/fixtureMergeRequestThreads.test.ts"
     ]
   }
 }
