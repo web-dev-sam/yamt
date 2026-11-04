@@ -49,16 +49,16 @@ request B2/B3 amended); #2424 table alignment fixed later in its own request (no
 Order: corpus ∥ remembered, local after corpus, `just bindings` after remembered, panel (wires the window), docs ∥
 smoke, final.
 
-| row | slice                                                                                       | owner                 | status  | evidence                                                                     |
-| --- | ------------------------------------------------------------------------------------------- | --------------------- | ------- | ---------------------------------------------------------------------------- |
-| 1   | design                                                                                      | designer              | done    | `MrFastPreviewDesign`: option A, five briefs. Notes `MrFastPreviewDesign.md` |
-| 2   | corpus (`briefs/mr-fast-preview-corpus.md`): fixture JSON, 25 more recordings, Rust test    | rust-impl             | running |                                                                              |
-| 3   | remembered (`briefs/mr-fast-preview-remembered.md`): B1–B3, callers, fake glab, Refresh cmd | rust-impl             | running |                                                                              |
-| 3b  | `just bindings` after row 3 (`askGitlabAgain`)                                              | orchestrator          | todo    |                                                                              |
-| 4   | local (`briefs/mr-fast-preview-local.md`): `localPreview`, triggers, flanking mode          | web-impl              | todo    |                                                                              |
-| 5   | panel (`briefs/mr-fast-preview-panel.md`): one preview state, Refresh; wires the window     | web-impl              | todo    |                                                                              |
-| 6   | docs keeper; verify (`briefs/mr-fast-preview-verify.md`): smoke after 5, final              | docs-keeper, verifier | todo    |                                                                              |
-| 7   | owner check on the GitLab playground                                                        | human                 | todo    |                                                                              |
+| row | slice                                                                                       | owner                 | status  | evidence                                                                                                                                           |
+| --- | ------------------------------------------------------------------------------------------- | --------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | design                                                                                      | designer              | done    | `MrFastPreviewDesign`: option A, five briefs. Notes `MrFastPreviewDesign.md`                                                                       |
+| 2   | corpus (`briefs/mr-fast-preview-corpus.md`): fixture JSON, 25 more recordings, Rust test    | rust-impl             | review  | `3235c809`: 87 entries (62 measured + 25 recorded), 63 local; 3 tests, reducer pinned; no mutants (test/data only). Notes `MrFastPreviewCorpus.md` |
+| 3   | remembered (`briefs/mr-fast-preview-remembered.md`): B1–B3, callers, fake glab, Refresh cmd | rust-impl             | running |                                                                                                                                                    |
+| 3b  | `just bindings` after row 3 (`askGitlabAgain`)                                              | orchestrator          | todo    |                                                                                                                                                    |
+| 4   | local (`briefs/mr-fast-preview-local.md`): `localPreview`, triggers, flanking mode          | web-impl              | running |                                                                                                                                                    |
+| 5   | panel (`briefs/mr-fast-preview-panel.md`): one preview state, Refresh; wires the window     | web-impl              | todo    |                                                                                                                                                    |
+| 6   | docs keeper; verify (`briefs/mr-fast-preview-verify.md`): smoke after 5, final              | docs-keeper, verifier | todo    |                                                                                                                                                    |
+| 7   | owner check on the GitLab playground                                                        | human                 | todo    |                                                                                                                                                    |
 
 ## Threads beside the box (session 50; owner #2329–#2333: "Your turn" only when it is, the whole thread, answering, sized images)
 
