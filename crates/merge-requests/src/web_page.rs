@@ -149,6 +149,11 @@ pub(crate) fn is_number(text: &str) -> bool {
     !text.is_empty() && text.chars().all(|c| c.is_ascii_digit())
 }
 
+/// `[0-9a-f]`: how GitLab writes a sha, an upload's secret and a discussion id.
+pub(crate) fn is_lower_hex(c: char) -> bool {
+    matches!(c, '0'..='9' | 'a'..='f')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
-use crate::MergeRequestIid;
 use crate::page::{Complexity, Connection, NO_PROJECT, Nodes, graphql_data, merge_request_iid};
 use crate::people::UserNode;
+use crate::{DiscussionId, MergeRequestIid};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,12 +38,17 @@ pub(crate) struct NotePermission {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DiscussionNode {
-    /// GitLab's global id, `gid://gitlab/Discussion/<hex>`.
-    pub id: String,
+    /// GitLab's global id `gid://gitlab/Discussion/<hex>`; `None` when yamt cannot read it.
+    #[serde(deserialize_with = "discussion_id")]
+    pub id: Option<DiscussionId>,
     pub resolvable: bool,
     pub resolved: bool,
     pub user_permissions: ResolvePermission,
     pub notes: NoteConnection,
+}
+
+fn discussion_id<'de, D: Deserializer<'de>>(gid: D) -> Result<Option<DiscussionId>, D::Error> {
+    Ok(DiscussionId::from_gid(&String::deserialize(gid)?))
 }
 
 #[derive(Deserialize)]

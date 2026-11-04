@@ -2,7 +2,7 @@ use url::{Origin, Url};
 
 use crate::WebPage;
 use crate::project::Project;
-use crate::web_page::{is_number, is_path_segment};
+use crate::web_page::{is_lower_hex, is_number, is_path_segment};
 
 /// GitLab's routes put `/-/` between the owner's path and the page (`config/routes/project.rb`, `group.rb`).
 const ROUTE_SEPARATOR: &str = "/-/";
@@ -159,8 +159,7 @@ fn commit_id(url: &Url) -> Option<String> {
 
 /// 7–40 lowercase hex digits.
 fn is_sha(text: &str) -> bool {
-    let is_hex = |c: char| matches!(c, '0'..='9' | 'a'..='f');
-    (MIN_SHA_LENGTH..=FULL_SHA_LENGTH).contains(&text.len()) && text.chars().all(is_hex)
+    (MIN_SHA_LENGTH..=FULL_SHA_LENGTH).contains(&text.len()) && text.chars().all(is_lower_hex)
 }
 
 /// `target` as GitLab writes it on `project`'s pages (`Project#to_reference_base`); `is_epic` picks the epic rule

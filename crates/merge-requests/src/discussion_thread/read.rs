@@ -4,8 +4,8 @@ use yamt_gitio::Glab;
 
 use crate::description::described_on;
 use crate::discussions::{
-    DiscussionNode, Fetch, NoteNode, every_discussion, not_sent, note_page, open_discussion,
-    parsed_batch, person_notes,
+    DiscussionNode, Fetch, NoteNode, later_page, merge_request_page, note_page, open_discussion,
+    person_notes,
 };
 use crate::list::one_per_username;
 use crate::people::People;
@@ -38,8 +38,8 @@ struct Commented {
     uploads: Vec<OfferedUpload>,
 }
 
-/// glab missing → `GlabMissing`; `logged_in_project`; the discussions query for `[iid]` with its later pages (the
-/// same code as `read_discussions`, the `Fetch` seam); the discussion with `id`; then one `Glab::get` of
+/// glab missing → `GlabMissing`; `logged_in_project`; the discussions query for `[iid]`, then its later pages until one
+/// holds the discussion with `id` (the same pages as `read_discussions`, the `Fetch` seam); then one `Glab::get` of
 /// `draft_notes_args` (`--paginate`: one JSON array or one per page). A draft counts for `drafts` when its
 /// `discussion_id` is `id`'s hex; every draft counts for `pending`. The batch failing, the merge request missing, the
 /// 200-note rule or the draft list failing → `Failed`. `pages`/`uploads`/`pictures` empty unless `Read`. One
@@ -151,8 +151,8 @@ pub(super) fn thread_from(
     })
 }
 
-/// Whether the viewer may comment on merge request `iid`, and its discussion `discussion` (`NotFound` when GitLab
-/// answered the merge request without it).
+/// Whether the viewer may comment on merge request `iid`, and its discussion `discussion`: pages are read until one
+/// holds it (`NotFound` when GitLab answered the merge request without it).
 #[expect(
     clippy::result_large_err,
     reason = "the reply is returned at once, never stored"
@@ -162,21 +162,19 @@ fn found_discussion(
     discussion: &DiscussionId,
     fetch: &mut Fetch,
 ) -> Result<(Commenting, DiscussionNode), DiscussionThreadReply> {
-    let mut batch = fetch(&[iid], None)
-        .and_then(|json| parsed_batch(&json))
-        .map_err(failed)?;
-    let node = batch
-        .merge_requests
-        .remove(&iid)
-        .ok_or_else(|| failed(not_sent(iid)))?;
+    let node = merge_request_page(iid, None, fetch).map_err(failed)?;
     let commenting = commenting(node.user_permissions.create_note, node.discussion_locked);
-    let discussions = every_discussion(iid, node.discussions, fetch).map_err(failed)?;
-    let is_asked = |id: &str| DiscussionId::from_gid(id).as_ref() == Some(discussion);
-    let found = discussions
-        .into_iter()
-        .find(|found| is_asked(&found.id))
-        .ok_or(DiscussionThreadReply::NotFound)?;
-    Ok((commenting, found))
+    let is_asked = |found: &DiscussionNode| found.id.as_ref() == Some(discussion);
+    let mut page = Some(node.discussions);
+    let mut pages = 0;
+    while let Some(read) = page {
+        pages += 1;
+        if let Some(found) = read.nodes.into_iter().find(is_asked) {
+            return Ok((commenting, found));
+        }
+        page = later_page(iid, read.page_info, pages, fetch).map_err(failed)?;
+    }
+    Err(DiscussionThreadReply::NotFound)
 }
 
 fn failed(message: String) -> DiscussionThreadReply {

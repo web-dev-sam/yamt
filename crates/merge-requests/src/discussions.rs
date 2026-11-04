@@ -5,13 +5,14 @@ use specta::Type;
 use yamt_gitio::Glab;
 
 use crate::list::one_per_username;
-use crate::page::{Complexity, Connection};
+use crate::page::{Complexity, Connection, PageInfo};
 use crate::people::People;
 use crate::project::{Project, logged_in_project};
 use crate::query::discussions_args;
 use crate::{GitLabRepository, MergeRequestIid, OfferedPicture, Person, WebPage};
 
-pub(crate) use answer::{DiscussionNode, NoteNode, parsed_batch};
+pub(crate) use answer::{DiscussionNode, NoteNode};
+use answer::{MergeRequestNode, parsed_batch};
 pub use id::DiscussionId;
 pub use mentions::Mention;
 use turn::open_notes;
@@ -275,34 +276,57 @@ fn answered(asked: &[MergeRequestIid], project: &Project, fetch: &mut Fetch) -> 
     }
 }
 
-pub(crate) fn not_sent(iid: MergeRequestIid) -> String {
+fn not_sent(iid: MergeRequestIid) -> String {
     format!("GitLab sent no merge request !{}", iid.0)
 }
 
+/// Merge request `iid` as the discussions query for `[iid]` answers it, from the page after `after`.
+pub(crate) fn merge_request_page(
+    iid: MergeRequestIid,
+    after: Option<&str>,
+    fetch: &mut Fetch,
+) -> Result<MergeRequestNode, String> {
+    let mut batch = fetch(&[iid], after).and_then(|json| parsed_batch(&json))?;
+    batch
+        .merge_requests
+        .remove(&iid)
+        .ok_or_else(|| not_sent(iid))
+}
+
 /// `first` and each later page of merge request `iid`'s discussions, at most `MAX_DISCUSSION_PAGES` pages.
-pub(crate) fn every_discussion(
+fn every_discussion(
     iid: MergeRequestIid,
     first: Connection<DiscussionNode>,
     fetch: &mut Fetch,
 ) -> Result<Vec<DiscussionNode>, String> {
-    let mut discussions = first.nodes;
-    let mut page_info = first.page_info;
-    let mut pages = 1;
-    while page_info.has_next_page {
-        if pages == MAX_DISCUSSION_PAGES {
-            return Err(TOO_MANY_DISCUSSIONS.to_owned());
-        }
-        let cursor = page_info.end_cursor.ok_or(NO_CURSOR)?;
-        let mut later = fetch(&[iid], Some(&cursor)).and_then(|json| parsed_batch(&json))?;
-        let page = later
-            .merge_requests
-            .remove(&iid)
-            .ok_or_else(|| not_sent(iid))?;
-        discussions.extend(page.discussions.nodes);
-        page_info = page.discussions.page_info;
+    let mut discussions = Vec::new();
+    let mut page = Some(first);
+    let mut pages = 0;
+    while let Some(read) = page {
         pages += 1;
+        discussions.extend(read.nodes);
+        page = later_page(iid, read.page_info, pages, fetch)?;
     }
     Ok(discussions)
+}
+
+/// The page of merge request `iid`'s discussions after `page_info`, once `pages` pages are read; `None` after the
+/// last. A page past `MAX_DISCUSSION_PAGES` fails.
+pub(crate) fn later_page(
+    iid: MergeRequestIid,
+    page_info: PageInfo,
+    pages: u32,
+    fetch: &mut Fetch,
+) -> Result<Option<Connection<DiscussionNode>>, String> {
+    if !page_info.has_next_page {
+        return Ok(None);
+    }
+    if pages == MAX_DISCUSSION_PAGES {
+        return Err(TOO_MANY_DISCUSSIONS.to_owned());
+    }
+    let cursor = page_info.end_cursor.ok_or(NO_CURSOR)?;
+    let later = merge_request_page(iid, Some(&cursor), fetch)?;
+    Ok(Some(later.discussions))
 }
 
 /// Counts and GitLab's score only: never a name, a body or an address.

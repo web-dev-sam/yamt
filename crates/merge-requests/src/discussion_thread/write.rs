@@ -55,10 +55,7 @@ pub enum DiscussionWriteReply {
 pub(super) enum Write<'a> {
     Reply {
         discussion: &'a DiscussionId,
-        text: &'a str,
-    },
-    DraftReply {
-        discussion: &'a DiscussionId,
+        kind: ReplyKind,
         text: &'a str,
     },
     Resolve {
@@ -79,9 +76,10 @@ pub fn reply_to_discussion(
     kind: ReplyKind,
     text: &str,
 ) -> DiscussionWriteReply {
-    let write = match kind {
-        ReplyKind::Comment => Write::Reply { discussion, text },
-        ReplyKind::Draft => Write::DraftReply { discussion, text },
+    let write = Write::Reply {
+        discussion,
+        kind,
+        text,
     };
     if text.trim().is_empty() {
         let refused = DiscussionWriteReply::Refused {
@@ -155,10 +153,16 @@ pub(super) fn request(
     iid: MergeRequestIid,
 ) -> (Vec<String>, Vec<u8>) {
     match *write {
-        Write::Reply { discussion, text } => {
-            (reply_args(full_path, iid, discussion), reply_body(text))
-        }
-        Write::DraftReply { discussion, text } => (
+        Write::Reply {
+            discussion,
+            kind: ReplyKind::Comment,
+            text,
+        } => (reply_args(full_path, iid, discussion), reply_body(text)),
+        Write::Reply {
+            discussion,
+            kind: ReplyKind::Draft,
+            text,
+        } => (
             draft_reply_args(full_path, iid),
             draft_reply_body(text, discussion),
         ),
@@ -212,8 +216,14 @@ fn logged(
 
 pub(super) fn kind(write: &Write) -> &'static str {
     match write {
-        Write::Reply { .. } => "comment",
-        Write::DraftReply { .. } => "draft",
+        Write::Reply {
+            kind: ReplyKind::Comment,
+            ..
+        } => "comment",
+        Write::Reply {
+            kind: ReplyKind::Draft,
+            ..
+        } => "draft",
         Write::Resolve { resolve: true, .. } => "resolve",
         Write::Resolve { resolve: false, .. } => "unresolve",
         Write::Submit => "submit",

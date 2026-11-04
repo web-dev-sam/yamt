@@ -2,7 +2,9 @@ use serde::Serialize;
 use specta::Type;
 use url::Url;
 
-use crate::web_page::{ESCAPED_SLASH, MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_number};
+use crate::web_page::{
+    ESCAPED_SLASH, MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_lower_hex, is_number,
+};
 use crate::{PictureAddress, WebPage};
 
 const HTTP_SCHEME: &str = "http";
@@ -156,7 +158,6 @@ fn project_of(base: &Url, before: &str) -> Option<String> {
 }
 
 fn is_secret(secret: &str) -> bool {
-    let is_lower_hex = |c: char| c.is_ascii_digit() || ('a'..='f').contains(&c);
     secret.len() == SECRET_HEX_DIGITS && secret.chars().all(is_lower_hex)
 }
 

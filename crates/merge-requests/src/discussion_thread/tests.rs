@@ -136,6 +136,42 @@ fn a_thread_answered_without_its_discussion_is_not_found() {
     }
 }
 
+/// The thread read of discussion `asked` when merge request 1's discussions come in `pages` pages, page `n` holding
+/// discussion `n` and naming `d-<n+1>` as the next but the last; beside it, every cursor asked after.
+fn read_paged(pages: u32, asked: u32) -> (ReadThread, Vec<Option<String>>) {
+    let mut cursors = Vec::new();
+    let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| {
+        assert_eq!(iids, [IID]);
+        cursors.push(after.map(str::to_owned));
+        let n: u32 = after.map_or(1, |cursor| cursor["d-".len()..].parse().unwrap());
+        let next = (n < pages).then(|| format!("d-{}", n + 1));
+        let on_page = with_id(open(&[comment("anna", n)]), n);
+        Ok(answer(&[merge_request(1, &[on_page], next.as_deref())]))
+    };
+    let mut fetch_drafts = || Ok(drafts(&[&[]]));
+    let read = thread_from(IID, &id(asked), &project(), &mut fetch, &mut fetch_drafts);
+    (offered(read), cursors)
+}
+
+#[test]
+fn a_thread_found_on_a_page_reads_no_later_page() {
+    let (first, cursors) = read_paged(3, 1);
+    assert_eq!(thread_of(&first).discussion.last.text, "anna 1");
+    assert_eq!(cursors, [None]);
+
+    let (second, cursors) = read_paged(3, 2);
+    assert_eq!(thread_of(&second).discussion.id, id(2));
+    assert_eq!(cursors, [None, Some("d-2".to_owned())]);
+
+    let (missing, cursors) = read_paged(3, 4);
+    assert_eq!(missing.reply, DiscussionThreadReply::NotFound);
+    assert_eq!(cursors.len(), 3);
+
+    let (too_many, cursors) = read_paged(11, 12);
+    assert_eq!(too_many.reply, failed("more than 1,000 discussions"));
+    assert_eq!(cursors.len(), 10);
+}
+
 #[test]
 fn a_thread_that_cannot_be_read_fails_with_gitlabs_or_glabs_words() {
     let none = Ok(drafts(&[&[]]));
@@ -454,20 +490,20 @@ fn each_write_sends_one_call_with_its_body() {
         discussion: &discussion,
         resolve,
     };
-    let reply = Write::Reply {
+    let reply = |kind| Write::Reply {
         discussion: &discussion,
-        text,
-    };
-    let draft = Write::DraftReply {
-        discussion: &discussion,
+        kind,
         text,
     };
 
     let notes = writing("POST", &format!("{thread}/notes"));
-    assert_eq!(sent(&reply), (notes, json!({ "body": text })));
+    assert_eq!(
+        sent(&reply(ReplyKind::Comment)),
+        (notes, json!({ "body": text }))
+    );
     let drafted = json!({ "note": text, "in_reply_to_discussion_id": hex(1) });
     let draft_notes = writing("POST", &format!("{ROUTE}/draft_notes"));
-    assert_eq!(sent(&draft), (draft_notes, drafted));
+    assert_eq!(sent(&reply(ReplyKind::Draft)), (draft_notes, drafted));
     assert_eq!(
         sent(&resolve(true)),
         (writing("PUT", &thread), json!({ "resolved": true }))
@@ -628,17 +664,14 @@ fn the_log_names_each_write_by_its_kind() {
         discussion: &discussion,
         resolve,
     };
-    let reply = Write::Reply {
+    let reply = |kind| Write::Reply {
         discussion: &discussion,
-        text: "",
-    };
-    let draft = Write::DraftReply {
-        discussion: &discussion,
+        kind,
         text: "",
     };
     let kinds = [
-        &reply,
-        &draft,
+        &reply(ReplyKind::Comment),
+        &reply(ReplyKind::Draft),
         &resolve(true),
         &resolve(false),
         &Write::Submit,

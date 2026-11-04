@@ -20,7 +20,7 @@ pub(super) fn open_notes(
         if !discussion.resolvable || discussion.resolved {
             continue;
         }
-        let id = DiscussionId::from_gid(&discussion.id).ok_or(ODD_ID)?;
+        let id = discussion.id.ok_or(ODD_ID)?;
         open.push((id, person_notes(discussion.notes)?));
     }
     Ok(open)

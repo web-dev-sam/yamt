@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::web_page::is_lower_hex;
+
 /// GitLab's global id of a discussion (`Discussion.id`, measured on gitlab.com for every kind of discussion).
 const GID_PREFIX: &str = "gid://gitlab/Discussion/";
 const HEX_DIGITS: usize = 40;
@@ -45,7 +47,6 @@ impl From<DiscussionId> for String {
 }
 
 fn is_id(hex: &str) -> bool {
-    let is_lower_hex = |c: char| matches!(c, '0'..='9' | 'a'..='f');
     hex.len() == HEX_DIGITS && hex.chars().all(is_lower_hex)
 }
 

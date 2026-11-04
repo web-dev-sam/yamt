@@ -1,0 +1,479 @@
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+index a754c9f..c1a2ede 100644
+--- a/crates/merge-requests/AGENTS.md
++++ b/crates/merge-requests/AGENTS.md
+@@ -10,4 +10,4 @@ A merge request's description (plan §2 #171–#174; request `docs/slices/reques
+ 
+ A merge request's linked epics, issues and commits (plan §2 #176, #178; request `docs/slices/request-mr-links.md` rules 2–6, design `docs/slices/briefs/mr-links-design.md` option A, §1.1–§1.4, §1.6, §1.7; RK41 amended, RK68, RK69): `links.rs` (the IPC types `LinksReply` `read { links }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, `DescriptionLinks { epics, issues, commits }`, `LinkedEpic { reference, page, shown: ShownEpic { title, closed } | null }`, `LinkedIssue { reference, page, shown: ShownIssue { title, closed, parent: LinkedParent { reference, title, page } | null } | null }`, `LinkedCommit { reference, page, title | null }`; the shell's `ReadLinks { reply, pages }`, `pages` every line's page and each parent's after its issue, once each, empty unless `read`; `read_links`: glab missing → `GlabMissing`, `logged_in_project`, the description's own `fetch_description`, `described_on`, then the lookup only when an issue or epic is linked; one `info` line with iid, outcome, epics, issues, commits, not shown, calls and the highest score, never a title, reference or address). **What counts** (`links/target.rs`, the one reader of an address as a thing): the walk's `pages`, read by `target_of` against the `Server` (the `url::Origin` parsed from `Project.web_origin` and the sub-path, `web_path` without `/<full_path>`; none off https, so nothing is listed and nothing asked): the same `url::Origin`, compared as `description/address.rs` does (a `web_url` with an upper-case host or an explicit `:443` keeps every link), under the sub-path, every segment `is_path_segment`, split at the first `/-/`: `groups/<g…>/-/epics|work_items/<n>` → a group's item, `<p…>/-/issues/<n>`, `issues/incident/<n>`, `work_items/<n>` → a project's item (`p` never `groups`), `<p…>/-/commit/<7–40 lowercase hex>` and `<p…>/-/merge_requests/<n>/diffs?commit_id=<40 hex>` → a commit, `<p…>/-/compare/<sha>...<sha>` (or `..`) → a range, anything else none (query and fragment ignored but `commit_id`); one entry per thing at its first page (`Target::is_same`: a commit whose id starts the other's in the same project is that commit). `reference` writes GitLab's `to_reference` from the project: `#n`, `<sibling>#n`, `<path>#n`; an epic `&n` in the project's namespace, else `<group>&n`; a group's other item `<group>#n`; a commit's first 8 characters after `<path>@` or `<sibling>@`; a range `<from 8>…<to 8>`. **The lookup** (`links/lookup.rs`, `query.rs` `links_args`): `calls` groups the items' iids by namespace in order of first mention, cuts each at `MAX_IIDS_PER_PART` 100 (GitLab's `workItems(iids:)` maximum) and packs the parts in order into calls whose estimate `PART_SCORE` 25 × parts + iids stays ≤ `LOOKUP_BUDGET` 200 (GitLab's limit is 250 logged in); each call is one `Glab::get` of `api graphql -f query=<MergeRequestLinks: queryComplexity, part<k>: project|group(fullPath: $path<k>) { workItems(iids: $iids<k>, first: $first<k>) { nodes { ...linked } } }> -f path<k>=… -F iids<k>=<JSON strings> -F first<k>=<count>`, the fragment asking `iid title state webUrl workItemType { name }` and the hierarchy widget's `parent { iid title webUrl workItemType { name } }` only (fields every edition has at 15.6, `Group.workItems` at 16.3; never `epic`, `epics`, `hasEpic`, `hasParent`, `onlyTypes`, `reference`, `namespace` or `project` on a work item); measured logged in with glab 1.126.0 on gitlab.com 2026-11-04: 50 of 250 for 3 project iids and 2 group iids (6.2 s, the `gitlab-org` group part alone 6.9 s), 124 for 100 project iids (1.6 s). glab's `Err` or a GraphQL `errors` entry fails the reply in those words and no later call runs; `part<k>: null` or an iid absent from `nodes` is not shown, never an error. A node typed `Epic` is an epic (its own parent dropped), any other an issue whose parent is kept only when its `webUrl` reads as an item on the project's server (`WebPage::linked` of it is the page). Grouping: shown epic → Epics, shown other → Issues, not shown → Epics for a group's item, Issues for a project's; commits and ranges → Commits, titled from the walk's `commit_titles` of their first page, never looked up. Tests: `links/tests.rs` (routes, sub-path, an upper-case host or `:443` in the `web_url`, references, one entry per thing, groups, unseen parts, parents, packing, the query's fields, pages, no https), `description/tests.rs` (`commit_titles`), `tests/links.rs` over the fake glab scenario `mr-links` (`tests/glab/README.md`; the route `graphql-links-<iids0>`).
+ 
+-A discussion's thread, the four writes and the preview (plan §2 #180–#182; request `docs/slices/request-mr-threads.md` C3–C5, C7–C10; design `docs/slices/briefs/mr-threads-design.md` option A, §1.3; RK54, RK60, RK61, RK66): `discussion_thread.rs` (the IPC types `DiscussionThreadReply` `read { thread }`/`notFound`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, `DiscussionThread` (`discussion` the box's `OpenDiscussion`, resolved or not, `resolved`, `comments`, `drafts`, `pending`, `commenting`, `mayResolve`), `DiscussionComment` (`author`, `createdAt`, `edited: NoteEdit { at, by } | null`, `body: Description`, `page`), `PendingDraft { text }`, `Commenting` `allowed`/`locked`/`notAllowed`; the shell's `ReadThread { reply, pages, uploads, pictures }`), `discussion_thread/read.rs` (`read_discussion_thread`: glab missing → `GlabMissing`, `logged_in_project`, the discussions query for `[iid]` and its later pages through the same `Fetch` seam and `every_discussion` as `read_discussions` (no GraphQL field reads one discussion), the merge request missing → `Failed`, the discussion with the asked id missing (or with no person note) → `NotFound`, the 200-note rule → `Failed`; `commenting` `createNote` true → allowed, false with `discussionLocked` → locked, else not allowed; `mayResolve` = `resolvable && resolveNote`; each person note a comment: its `bodyHtml` only through `described_on` on the merge request's page (RK60, RK66), edited as GitLab's `Note#edited?` (`lastEditedBy` a person and `lastEditedAt` after `createdAt`; resolving moves `lastEditedAt` alone); then one `Glab::get` of `draft_notes_args`; `pages` every comment's page then its links' pages, once each, `uploads` once each, `pictures` the authors' and editors' one per username, all empty unless `read`; one `info` line: iid, outcome, comments, drafts, pending, pages, uploads, queries), `discussion_thread/drafts.rs` (`drafts_in`: `glab api --paginate`'s one JSON array or one per page; a draft whose `discussion_id` is the asked id's hex shows its `note`, every draft counts for `pending`), `discussion_thread/write.rs` (the IPC types `ReplyKind` `comment`/`draft` (sent by the window) and `DiscussionWriteReply` `sent`/`refused { reason }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`; `reply_to_discussion` (a blank text → `refused` "There is nothing to send." before any glab run; the text sent as written), `resolve_discussion`, `submit_review`: glab missing → `GlabMissing`, `logged_in_project`, then exactly one `Glab::send` of the write's argv and body (RK54); 2xx → `sent` (the body not read), 4xx → `refused` with `HttpAnswer::reason`, any other status → `failed` with it, no HTTP answer → `failed` in glab's words; one `info` line per write: iid, kind `comment`/`draft`/`resolve`/`unresolve`/`submit`, outcome and status, never the text, a name or the discussion id), `markdown_preview.rs` (the IPC type `MarkdownPreviewReply` `read { preview }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, the shell's `ReadPreview { reply, pages, uploads }`; `preview_markdown`: a blank text → `read` with no blocks and no glab run, else glab missing → `GlabMissing`, `logged_in_project`, one `Glab::post` of `markdown_args` with `markdown_body` (a read: no `--include`, never counted as a post), the answer's string `html` through `described_on`, else `failed` "GitLab's preview is not JSON with html"; one `info` line: iid, outcome, blocks, pages, uploads). `query/rest.rs` builds every REST call, the project's full path with "/" as "%2F" and the discussion's 40 hex digits in the route (`docs.gitlab.com/api/discussions`, `/api/draft_notes`, `/api/markdown`): `draft_notes_args` `api --paginate projects/<p>/merge_requests/<iid>/draft_notes`; `reply_args` `api --include --method POST …/discussions/<d>/notes --input -` with `reply_body` `{"body"}`; `draft_reply_args` `POST …/draft_notes` with `draft_reply_body` `{"note", "in_reply_to_discussion_id"}`; `resolve_args` `PUT …/discussions/<d>` with `resolve_body` `{"resolved"}`; `submit_review_args` `POST …/draft_notes/bulk_publish` with `submit_review_body` `{}` (never `reviewer_state`); `markdown_args` `api --method POST markdown --input -` with `markdown_body` `{"text", "gfm": true, "project"}`; every body by `serde_json`. `project.rs` turns `NoProject` into `DiscussionThreadReply`, `DiscussionWriteReply` and `MarkdownPreviewReply` too. Measured 2026-11-04 logged in on gitlab.com: the playground's !1 answers the thread's fields (`discussionLocked: false`, `createNote`, `resolveNote`, an unedited note's `lastEditedAt == createdAt` with `lastEditedBy: null`) in 0.9 s, score 46; `POST markdown` answers `201` with `{ "html" }` in 0.7 s, its user link absolute (`https://gitlab.com/samubr`). Tests: `discussion_thread/tests.rs` (the thread's pick, `notFound` without a drafts call, failures, commenting and `mayResolve`, drafts and their pages, edits, a comment's HTML only as blocks, planted handlers left out, an image's size, pages and uploads once each in order; every write's argv and body, a blank reply without glab, 4xx refused with GitLab's reason, no answer, 3xx and 5xx failed), `markdown_preview.rs` (a blank preview without glab, the preview walked on the merge request's page), `tests/threads.rs` (`mr-threads/`: d01 whole with its edits and drafts, its image's size, pages, upload and pictures, !91 locked, a read and a preview write nothing, posts 1–5 one call each in order and the thread read after them; `mr-threads-refused/`: 403 and 400 refused with GitLab's reasons, post 3 without an answer, post 4's 500, a failed preview; glab missing or logged out).
++A discussion's thread, the four writes and the preview (plan §2 #180–#182; request `docs/slices/request-mr-threads.md` C3–C5, C7–C10; design `docs/slices/briefs/mr-threads-design.md` option A, §1.3; RK54, RK60, RK61, RK66): `discussion_thread.rs` (the IPC types `DiscussionThreadReply` `read { thread }`/`notFound`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, `DiscussionThread` (`discussion` the box's `OpenDiscussion`, resolved or not, `resolved`, `comments`, `drafts`, `pending`, `commenting`, `mayResolve`), `DiscussionComment` (`author`, `createdAt`, `edited: NoteEdit { at, by } | null`, `body: Description`, `page`), `PendingDraft { text }`, `Commenting` `allowed`/`locked`/`notAllowed`; the shell's `ReadThread { reply, pages, uploads, pictures }`), `discussion_thread/read.rs` (`read_discussion_thread`: glab missing → `GlabMissing`, `logged_in_project`, the discussions query for `[iid]` (`discussions.rs` `merge_request_page`), then its later pages (`later_page`: the same `Fetch` seam, cursor and 10-page rules as `read_discussions`) only until one holds the asked id (no GraphQL field reads one discussion), the merge request missing → `Failed`, the discussion with the asked id missing (or with no person note) → `NotFound`, the 200-note rule → `Failed`; `commenting` `createNote` true → allowed, false with `discussionLocked` → locked, else not allowed; `mayResolve` = `resolvable && resolveNote`; each person note a comment: its `bodyHtml` only through `described_on` on the merge request's page (RK60, RK66), edited as GitLab's `Note#edited?` (`lastEditedBy` a person and `lastEditedAt` after `createdAt`; resolving moves `lastEditedAt` alone); then one `Glab::get` of `draft_notes_args`; `pages` every comment's page then its links' pages, once each, `uploads` once each, `pictures` the authors' and editors' one per username, all empty unless `read`; one `info` line: iid, outcome, comments, drafts, pending, pages, uploads, queries), `discussion_thread/drafts.rs` (`drafts_in`: `glab api --paginate`'s one JSON array or one per page; a draft whose `discussion_id` is the asked id's hex shows its `note`, every draft counts for `pending`), `discussion_thread/write.rs` (the IPC types `ReplyKind` `comment`/`draft` (sent by the window; `Write::Reply` carries it, the one comment/draft split) and `DiscussionWriteReply` `sent`/`refused { reason }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`; `reply_to_discussion` (a blank text → `refused` "There is nothing to send." before any glab run; the text sent as written), `resolve_discussion`, `submit_review`: glab missing → `GlabMissing`, `logged_in_project`, then exactly one `Glab::send` of the write's argv and body (RK54); 2xx → `sent` (the body not read), 4xx → `refused` with `HttpAnswer::reason`, any other status → `failed` with it, no HTTP answer → `failed` in glab's words; one `info` line per write: iid, kind `comment`/`draft`/`resolve`/`unresolve`/`submit`, outcome and status, never the text, a name or the discussion id), `markdown_preview.rs` (the IPC type `MarkdownPreviewReply` `read { preview }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, the shell's `ReadPreview { reply, pages, uploads }`; `preview_markdown`: a blank text → `read` with no blocks and no glab run, else glab missing → `GlabMissing`, `logged_in_project`, one `Glab::post` of `markdown_args` with `markdown_body` (a read: no `--include`, never counted as a post), the answer's string `html` through `described_on`, else `failed` "GitLab's preview is not JSON with html"; one `info` line: iid, outcome, blocks, pages, uploads). `query/rest.rs` builds every REST call, the project's full path with "/" as "%2F" and the discussion's 40 hex digits in the route (`docs.gitlab.com/api/discussions`, `/api/draft_notes`, `/api/markdown`): `draft_notes_args` `api --paginate projects/<p>/merge_requests/<iid>/draft_notes`; `reply_args` `api --include --method POST …/discussions/<d>/notes --input -` with `reply_body` `{"body"}`; `draft_reply_args` `POST …/draft_notes` with `draft_reply_body` `{"note", "in_reply_to_discussion_id"}`; `resolve_args` `PUT …/discussions/<d>` with `resolve_body` `{"resolved"}`; `submit_review_args` `POST …/draft_notes/bulk_publish` with `submit_review_body` `{}` (never `reviewer_state`); `markdown_args` `api --method POST markdown --input -` with `markdown_body` `{"text", "gfm": true, "project"}`; every body by `serde_json`. `project.rs` turns `NoProject` into `DiscussionThreadReply`, `DiscussionWriteReply` and `MarkdownPreviewReply` too. Measured 2026-11-04 logged in on gitlab.com: the playground's !1 answers the thread's fields (`discussionLocked: false`, `createNote`, `resolveNote`, an unedited note's `lastEditedAt == createdAt` with `lastEditedBy: null`) in 0.9 s, score 46; `POST markdown` answers `201` with `{ "html" }` in 0.7 s, its user link absolute (`https://gitlab.com/samubr`). Tests: `discussion_thread/tests.rs` (the thread's pick, a thread on the first page reading no later page and one on a later page found there, `notFound` without a drafts call, failures, commenting and `mayResolve`, drafts and their pages, edits, a comment's HTML only as blocks, planted handlers left out, an image's size, pages and uploads once each in order; every write's argv and body, a blank reply without glab, 4xx refused with GitLab's reason, no answer, 3xx and 5xx failed), `markdown_preview.rs` (a blank preview without glab, the preview walked on the merge request's page), `tests/threads.rs` (`mr-threads/`: d01 whole with its edits and drafts, its image's size, pages, upload and pictures, !91 locked, a read and a preview write nothing, posts 1–5 one call each in order and the thread read after them; `mr-threads-refused/`: 403 and 400 refused with GitLab's reasons, post 3 without an answer, post 4's 500, a failed preview; glab missing or logged out).
+diff --git a/crates/merge-requests/src/description/address.rs b/crates/merge-requests/src/description/address.rs
+index 3321600..0236fd5 100644
+--- a/crates/merge-requests/src/description/address.rs
++++ b/crates/merge-requests/src/description/address.rs
+@@ -2,7 +2,9 @@ use serde::Serialize;
+ use specta::Type;
+ use url::Url;
+ 
+-use crate::web_page::{ESCAPED_SLASH, MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_number};
++use crate::web_page::{
++    ESCAPED_SLASH, MERGE_REQUESTS_SEGMENT, PARENT_SEGMENT, is_lower_hex, is_number,
++};
+ use crate::{PictureAddress, WebPage};
+ 
+ const HTTP_SCHEME: &str = "http";
+@@ -156,7 +158,6 @@ fn project_of(base: &Url, before: &str) -> Option<String> {
+ }
+ 
+ fn is_secret(secret: &str) -> bool {
+-    let is_lower_hex = |c: char| c.is_ascii_digit() || ('a'..='f').contains(&c);
+     secret.len() == SECRET_HEX_DIGITS && secret.chars().all(is_lower_hex)
+ }
+ 
+diff --git a/crates/merge-requests/src/discussion_thread/read.rs b/crates/merge-requests/src/discussion_thread/read.rs
+index bd953f8..774d356 100644
+--- a/crates/merge-requests/src/discussion_thread/read.rs
++++ b/crates/merge-requests/src/discussion_thread/read.rs
+@@ -4,8 +4,8 @@ use yamt_gitio::Glab;
+ 
+ use crate::description::described_on;
+ use crate::discussions::{
+-    DiscussionNode, Fetch, NoteNode, every_discussion, not_sent, note_page, open_discussion,
+-    parsed_batch, person_notes,
++    DiscussionNode, Fetch, NoteNode, later_page, merge_request_page, note_page, open_discussion,
++    person_notes,
+ };
+ use crate::list::one_per_username;
+ use crate::people::People;
+@@ -38,8 +38,8 @@ struct Commented {
+     uploads: Vec<OfferedUpload>,
+ }
+ 
+-/// glab missing → `GlabMissing`; `logged_in_project`; the discussions query for `[iid]` with its later pages (the
+-/// same code as `read_discussions`, the `Fetch` seam); the discussion with `id`; then one `Glab::get` of
++/// glab missing → `GlabMissing`; `logged_in_project`; the discussions query for `[iid]`, then its later pages until one
++/// holds the discussion with `id` (the same pages as `read_discussions`, the `Fetch` seam); then one `Glab::get` of
+ /// `draft_notes_args` (`--paginate`: one JSON array or one per page). A draft counts for `drafts` when its
+ /// `discussion_id` is `id`'s hex; every draft counts for `pending`. The batch failing, the merge request missing, the
+ /// 200-note rule or the draft list failing → `Failed`. `pages`/`uploads`/`pictures` empty unless `Read`. One
+@@ -151,8 +151,8 @@ pub(super) fn thread_from(
+     })
+ }
+ 
+-/// Whether the viewer may comment on merge request `iid`, and its discussion `discussion` (`NotFound` when GitLab
+-/// answered the merge request without it).
++/// Whether the viewer may comment on merge request `iid`, and its discussion `discussion`: pages are read until one
++/// holds it (`NotFound` when GitLab answered the merge request without it).
+ #[expect(
+     clippy::result_large_err,
+     reason = "the reply is returned at once, never stored"
+@@ -162,21 +162,19 @@ fn found_discussion(
+     discussion: &DiscussionId,
+     fetch: &mut Fetch,
+ ) -> Result<(Commenting, DiscussionNode), DiscussionThreadReply> {
+-    let mut batch = fetch(&[iid], None)
+-        .and_then(|json| parsed_batch(&json))
+-        .map_err(failed)?;
+-    let node = batch
+-        .merge_requests
+-        .remove(&iid)
+-        .ok_or_else(|| failed(not_sent(iid)))?;
++    let node = merge_request_page(iid, None, fetch).map_err(failed)?;
+     let commenting = commenting(node.user_permissions.create_note, node.discussion_locked);
+-    let discussions = every_discussion(iid, node.discussions, fetch).map_err(failed)?;
+-    let is_asked = |id: &str| DiscussionId::from_gid(id).as_ref() == Some(discussion);
+-    let found = discussions
+-        .into_iter()
+-        .find(|found| is_asked(&found.id))
+-        .ok_or(DiscussionThreadReply::NotFound)?;
+-    Ok((commenting, found))
++    let is_asked = |found: &DiscussionNode| found.id.as_ref() == Some(discussion);
++    let mut page = Some(node.discussions);
++    let mut pages = 0;
++    while let Some(read) = page {
++        pages += 1;
++        if let Some(found) = read.nodes.into_iter().find(is_asked) {
++            return Ok((commenting, found));
++        }
++        page = later_page(iid, read.page_info, pages, fetch).map_err(failed)?;
++    }
++    Err(DiscussionThreadReply::NotFound)
+ }
+ 
+ fn failed(message: String) -> DiscussionThreadReply {
+diff --git a/crates/merge-requests/src/discussion_thread/tests.rs b/crates/merge-requests/src/discussion_thread/tests.rs
+index 2fb8d5e..55c3beb 100644
+--- a/crates/merge-requests/src/discussion_thread/tests.rs
++++ b/crates/merge-requests/src/discussion_thread/tests.rs
+@@ -136,6 +136,42 @@ fn a_thread_answered_without_its_discussion_is_not_found() {
+     }
+ }
+ 
++/// The thread read of discussion `asked` when merge request 1's discussions come in `pages` pages, page `n` holding
++/// discussion `n` and naming `d-<n+1>` as the next but the last; beside it, every cursor asked after.
++fn read_paged(pages: u32, asked: u32) -> (ReadThread, Vec<Option<String>>) {
++    let mut cursors = Vec::new();
++    let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| {
++        assert_eq!(iids, [IID]);
++        cursors.push(after.map(str::to_owned));
++        let n: u32 = after.map_or(1, |cursor| cursor["d-".len()..].parse().unwrap());
++        let next = (n < pages).then(|| format!("d-{}", n + 1));
++        let on_page = with_id(open(&[comment("anna", n)]), n);
++        Ok(answer(&[merge_request(1, &[on_page], next.as_deref())]))
++    };
++    let mut fetch_drafts = || Ok(drafts(&[&[]]));
++    let read = thread_from(IID, &id(asked), &project(), &mut fetch, &mut fetch_drafts);
++    (offered(read), cursors)
++}
++
++#[test]
++fn a_thread_found_on_a_page_reads_no_later_page() {
++    let (first, cursors) = read_paged(3, 1);
++    assert_eq!(thread_of(&first).discussion.last.text, "anna 1");
++    assert_eq!(cursors, [None]);
++
++    let (second, cursors) = read_paged(3, 2);
++    assert_eq!(thread_of(&second).discussion.id, id(2));
++    assert_eq!(cursors, [None, Some("d-2".to_owned())]);
++
++    let (missing, cursors) = read_paged(3, 4);
++    assert_eq!(missing.reply, DiscussionThreadReply::NotFound);
++    assert_eq!(cursors.len(), 3);
++
++    let (too_many, cursors) = read_paged(11, 12);
++    assert_eq!(too_many.reply, failed("more than 1,000 discussions"));
++    assert_eq!(cursors.len(), 10);
++}
++
+ #[test]
+ fn a_thread_that_cannot_be_read_fails_with_gitlabs_or_glabs_words() {
+     let none = Ok(drafts(&[&[]]));
+@@ -454,20 +490,20 @@ fn each_write_sends_one_call_with_its_body() {
+         discussion: &discussion,
+         resolve,
+     };
+-    let reply = Write::Reply {
+-        discussion: &discussion,
+-        text,
+-    };
+-    let draft = Write::DraftReply {
++    let reply = |kind| Write::Reply {
+         discussion: &discussion,
++        kind,
+         text,
+     };
+ 
+     let notes = writing("POST", &format!("{thread}/notes"));
+-    assert_eq!(sent(&reply), (notes, json!({ "body": text })));
++    assert_eq!(
++        sent(&reply(ReplyKind::Comment)),
++        (notes, json!({ "body": text }))
++    );
+     let drafted = json!({ "note": text, "in_reply_to_discussion_id": hex(1) });
+     let draft_notes = writing("POST", &format!("{ROUTE}/draft_notes"));
+-    assert_eq!(sent(&draft), (draft_notes, drafted));
++    assert_eq!(sent(&reply(ReplyKind::Draft)), (draft_notes, drafted));
+     assert_eq!(
+         sent(&resolve(true)),
+         (writing("PUT", &thread), json!({ "resolved": true }))
+@@ -628,17 +664,14 @@ fn the_log_names_each_write_by_its_kind() {
+         discussion: &discussion,
+         resolve,
+     };
+-    let reply = Write::Reply {
+-        discussion: &discussion,
+-        text: "",
+-    };
+-    let draft = Write::DraftReply {
++    let reply = |kind| Write::Reply {
+         discussion: &discussion,
++        kind,
+         text: "",
+     };
+     let kinds = [
+-        &reply,
+-        &draft,
++        &reply(ReplyKind::Comment),
++        &reply(ReplyKind::Draft),
+         &resolve(true),
+         &resolve(false),
+         &Write::Submit,
+diff --git a/crates/merge-requests/src/discussion_thread/write.rs b/crates/merge-requests/src/discussion_thread/write.rs
+index 6e40f29..c115c65 100644
+--- a/crates/merge-requests/src/discussion_thread/write.rs
++++ b/crates/merge-requests/src/discussion_thread/write.rs
+@@ -55,10 +55,7 @@ pub enum DiscussionWriteReply {
+ pub(super) enum Write<'a> {
+     Reply {
+         discussion: &'a DiscussionId,
+-        text: &'a str,
+-    },
+-    DraftReply {
+-        discussion: &'a DiscussionId,
++        kind: ReplyKind,
+         text: &'a str,
+     },
+     Resolve {
+@@ -79,9 +76,10 @@ pub fn reply_to_discussion(
+     kind: ReplyKind,
+     text: &str,
+ ) -> DiscussionWriteReply {
+-    let write = match kind {
+-        ReplyKind::Comment => Write::Reply { discussion, text },
+-        ReplyKind::Draft => Write::DraftReply { discussion, text },
++    let write = Write::Reply {
++        discussion,
++        kind,
++        text,
+     };
+     if text.trim().is_empty() {
+         let refused = DiscussionWriteReply::Refused {
+@@ -155,10 +153,16 @@ pub(super) fn request(
+     iid: MergeRequestIid,
+ ) -> (Vec<String>, Vec<u8>) {
+     match *write {
+-        Write::Reply { discussion, text } => {
+-            (reply_args(full_path, iid, discussion), reply_body(text))
+-        }
+-        Write::DraftReply { discussion, text } => (
++        Write::Reply {
++            discussion,
++            kind: ReplyKind::Comment,
++            text,
++        } => (reply_args(full_path, iid, discussion), reply_body(text)),
++        Write::Reply {
++            discussion,
++            kind: ReplyKind::Draft,
++            text,
++        } => (
+             draft_reply_args(full_path, iid),
+             draft_reply_body(text, discussion),
+         ),
+@@ -212,8 +216,14 @@ fn logged(
+ 
+ pub(super) fn kind(write: &Write) -> &'static str {
+     match write {
+-        Write::Reply { .. } => "comment",
+-        Write::DraftReply { .. } => "draft",
++        Write::Reply {
++            kind: ReplyKind::Comment,
++            ..
++        } => "comment",
++        Write::Reply {
++            kind: ReplyKind::Draft,
++            ..
++        } => "draft",
+         Write::Resolve { resolve: true, .. } => "resolve",
+         Write::Resolve { resolve: false, .. } => "unresolve",
+         Write::Submit => "submit",
+diff --git a/crates/merge-requests/src/discussions.rs b/crates/merge-requests/src/discussions.rs
+index a161e2f..9f1f016 100644
+--- a/crates/merge-requests/src/discussions.rs
++++ b/crates/merge-requests/src/discussions.rs
+@@ -5,13 +5,14 @@ use specta::Type;
+ use yamt_gitio::Glab;
+ 
+ use crate::list::one_per_username;
+-use crate::page::{Complexity, Connection};
++use crate::page::{Complexity, Connection, PageInfo};
+ use crate::people::People;
+ use crate::project::{Project, logged_in_project};
+ use crate::query::discussions_args;
+ use crate::{GitLabRepository, MergeRequestIid, OfferedPicture, Person, WebPage};
+ 
+-pub(crate) use answer::{DiscussionNode, NoteNode, parsed_batch};
++pub(crate) use answer::{DiscussionNode, NoteNode};
++use answer::{MergeRequestNode, parsed_batch};
+ pub use id::DiscussionId;
+ pub use mentions::Mention;
+ use turn::open_notes;
+@@ -275,36 +276,59 @@ fn answered(asked: &[MergeRequestIid], project: &Project, fetch: &mut Fetch) ->
+     }
+ }
+ 
+-pub(crate) fn not_sent(iid: MergeRequestIid) -> String {
++fn not_sent(iid: MergeRequestIid) -> String {
+     format!("GitLab sent no merge request !{}", iid.0)
+ }
+ 
++/// Merge request `iid` as the discussions query for `[iid]` answers it, from the page after `after`.
++pub(crate) fn merge_request_page(
++    iid: MergeRequestIid,
++    after: Option<&str>,
++    fetch: &mut Fetch,
++) -> Result<MergeRequestNode, String> {
++    let mut batch = fetch(&[iid], after).and_then(|json| parsed_batch(&json))?;
++    batch
++        .merge_requests
++        .remove(&iid)
++        .ok_or_else(|| not_sent(iid))
++}
++
+ /// `first` and each later page of merge request `iid`'s discussions, at most `MAX_DISCUSSION_PAGES` pages.
+-pub(crate) fn every_discussion(
++fn every_discussion(
+     iid: MergeRequestIid,
+     first: Connection<DiscussionNode>,
+     fetch: &mut Fetch,
+ ) -> Result<Vec<DiscussionNode>, String> {
+-    let mut discussions = first.nodes;
+-    let mut page_info = first.page_info;
+-    let mut pages = 1;
+-    while page_info.has_next_page {
+-        if pages == MAX_DISCUSSION_PAGES {
+-            return Err(TOO_MANY_DISCUSSIONS.to_owned());
+-        }
+-        let cursor = page_info.end_cursor.ok_or(NO_CURSOR)?;
+-        let mut later = fetch(&[iid], Some(&cursor)).and_then(|json| parsed_batch(&json))?;
+-        let page = later
+-            .merge_requests
+-            .remove(&iid)
+-            .ok_or_else(|| not_sent(iid))?;
+-        discussions.extend(page.discussions.nodes);
+-        page_info = page.discussions.page_info;
++    let mut discussions = Vec::new();
++    let mut page = Some(first);
++    let mut pages = 0;
++    while let Some(read) = page {
+         pages += 1;
++        discussions.extend(read.nodes);
++        page = later_page(iid, read.page_info, pages, fetch)?;
+     }
+     Ok(discussions)
+ }
+ 
++/// The page of merge request `iid`'s discussions after `page_info`, once `pages` pages are read; `None` after the
++/// last. A page past `MAX_DISCUSSION_PAGES` fails.
++pub(crate) fn later_page(
++    iid: MergeRequestIid,
++    page_info: PageInfo,
++    pages: u32,
++    fetch: &mut Fetch,
++) -> Result<Option<Connection<DiscussionNode>>, String> {
++    if !page_info.has_next_page {
++        return Ok(None);
++    }
++    if pages == MAX_DISCUSSION_PAGES {
++        return Err(TOO_MANY_DISCUSSIONS.to_owned());
++    }
++    let cursor = page_info.end_cursor.ok_or(NO_CURSOR)?;
++    let later = merge_request_page(iid, Some(&cursor), fetch)?;
++    Ok(Some(later.discussions))
++}
++
+ /// Counts and GitLab's score only: never a name, a body or an address.
+ fn log_read(call: &Answered) {
+     let rows = &call.read.rows;
+diff --git a/crates/merge-requests/src/discussions/answer.rs b/crates/merge-requests/src/discussions/answer.rs
+index 2cbcf75..dd0f69d 100644
+--- a/crates/merge-requests/src/discussions/answer.rs
++++ b/crates/merge-requests/src/discussions/answer.rs
+@@ -1,10 +1,10 @@
+ use std::collections::BTreeMap;
+ 
+-use serde::Deserialize;
++use serde::{Deserialize, Deserializer};
+ 
+-use crate::MergeRequestIid;
+ use crate::page::{Complexity, Connection, NO_PROJECT, Nodes, graphql_data, merge_request_iid};
+ use crate::people::UserNode;
++use crate::{DiscussionId, MergeRequestIid};
+ 
+ #[derive(Deserialize)]
+ #[serde(rename_all = "camelCase")]
+@@ -38,14 +38,19 @@ pub(crate) struct NotePermission {
+ #[derive(Deserialize)]
+ #[serde(rename_all = "camelCase")]
+ pub(crate) struct DiscussionNode {
+-    /// GitLab's global id, `gid://gitlab/Discussion/<hex>`.
+-    pub id: String,
++    /// GitLab's global id `gid://gitlab/Discussion/<hex>`; `None` when yamt cannot read it.
++    #[serde(deserialize_with = "discussion_id")]
++    pub id: Option<DiscussionId>,
+     pub resolvable: bool,
+     pub resolved: bool,
+     pub user_permissions: ResolvePermission,
+     pub notes: NoteConnection,
+ }
+ 
++fn discussion_id<'de, D: Deserializer<'de>>(gid: D) -> Result<Option<DiscussionId>, D::Error> {
++    Ok(DiscussionId::from_gid(&String::deserialize(gid)?))
++}
++
+ #[derive(Deserialize)]
+ #[serde(rename_all = "camelCase")]
+ pub(crate) struct ResolvePermission {
+diff --git a/crates/merge-requests/src/discussions/id.rs b/crates/merge-requests/src/discussions/id.rs
+index 73819ee..42a38b3 100644
+--- a/crates/merge-requests/src/discussions/id.rs
++++ b/crates/merge-requests/src/discussions/id.rs
+@@ -1,6 +1,8 @@
+ use serde::{Deserialize, Serialize};
+ use specta::Type;
+ 
++use crate::web_page::is_lower_hex;
++
+ /// GitLab's global id of a discussion (`Discussion.id`, measured on gitlab.com for every kind of discussion).
+ const GID_PREFIX: &str = "gid://gitlab/Discussion/";
+ const HEX_DIGITS: usize = 40;
+@@ -45,7 +47,6 @@ impl From<DiscussionId> for String {
+ }
+ 
+ fn is_id(hex: &str) -> bool {
+-    let is_lower_hex = |c: char| matches!(c, '0'..='9' | 'a'..='f');
+     hex.len() == HEX_DIGITS && hex.chars().all(is_lower_hex)
+ }
+ 
+diff --git a/crates/merge-requests/src/discussions/turn.rs b/crates/merge-requests/src/discussions/turn.rs
+index 0d2688e..79dd0f0 100644
+--- a/crates/merge-requests/src/discussions/turn.rs
++++ b/crates/merge-requests/src/discussions/turn.rs
+@@ -20,7 +20,7 @@ pub(super) fn open_notes(
+         if !discussion.resolvable || discussion.resolved {
+             continue;
+         }
+-        let id = DiscussionId::from_gid(&discussion.id).ok_or(ODD_ID)?;
++        let id = discussion.id.ok_or(ODD_ID)?;
+         open.push((id, person_notes(discussion.notes)?));
+     }
+     Ok(open)
+diff --git a/crates/merge-requests/src/links/target.rs b/crates/merge-requests/src/links/target.rs
+index 7ce611d..7d611dd 100644
+--- a/crates/merge-requests/src/links/target.rs
++++ b/crates/merge-requests/src/links/target.rs
+@@ -2,7 +2,7 @@ use url::{Origin, Url};
+ 
+ use crate::WebPage;
+ use crate::project::Project;
+-use crate::web_page::{is_number, is_path_segment};
++use crate::web_page::{is_lower_hex, is_number, is_path_segment};
+ 
+ /// GitLab's routes put `/-/` between the owner's path and the page (`config/routes/project.rb`, `group.rb`).
+ const ROUTE_SEPARATOR: &str = "/-/";
+@@ -159,8 +159,7 @@ fn commit_id(url: &Url) -> Option<String> {
+ 
+ /// 7–40 lowercase hex digits.
+ fn is_sha(text: &str) -> bool {
+-    let is_hex = |c: char| matches!(c, '0'..='9' | 'a'..='f');
+-    (MIN_SHA_LENGTH..=FULL_SHA_LENGTH).contains(&text.len()) && text.chars().all(is_hex)
++    (MIN_SHA_LENGTH..=FULL_SHA_LENGTH).contains(&text.len()) && text.chars().all(is_lower_hex)
+ }
+ 
+ /// `target` as GitLab writes it on `project`'s pages (`Project#to_reference_base`); `is_epic` picks the epic rule
+diff --git a/crates/merge-requests/src/web_page.rs b/crates/merge-requests/src/web_page.rs
+index 38f4492..6db6876 100644
+--- a/crates/merge-requests/src/web_page.rs
++++ b/crates/merge-requests/src/web_page.rs
+@@ -149,6 +149,11 @@ pub(crate) fn is_number(text: &str) -> bool {
+     !text.is_empty() && text.chars().all(|c| c.is_ascii_digit())
+ }
+ 
++/// `[0-9a-f]`: how GitLab writes a sha, an upload's secret and a discussion id.
++pub(crate) fn is_lower_hex(c: char) -> bool {
++    matches!(c, '0'..='9' | 'a'..='f')
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
