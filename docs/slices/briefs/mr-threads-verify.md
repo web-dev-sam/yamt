@@ -54,10 +54,14 @@ merge-requests page. Every step in yamt Dark and yamt Light (`--settings '{"them
    with its own proportions (`read` rects). d01's thread: the sized images likewise.
 2. **B words.** !637: d01 "Your turn", d02 "Author's turn", d03–d05 "Your turn", d06 "Ben Okafor's turn", d07 "Author's
    turn", d08 "Anna Berg's turn", d09 "Open", d10–d13 "Author's turn"; the four "Your turn" rows first; header "4 of
-   13 wait for you". !636: "Anna Berg's turn", "Waiting for an answer", "Your turn". Review mode as Ben Okafor: d06
-   "Ben Okafor's turn" and the review tooltip "Sorted for Ben Okafor's review: …".
-3. **C1 Shift.** Shift over d01 opens its panel directly left of the box, tops aligned (rects); d01 marked; Shift over
-   d02 switches; Shift+a in the field types "A" (no new `fixture_thread`); a focused row and Shift opens its thread.
+   13 wait for you". !636: "Anna Berg's turn", "Waiting for an answer", "Your turn". Review mode as Ben Okafor: the
+   review tooltip "Sorted for Ben Okafor's review: …" (!637 is not Ben's to review in the fixture, #2393; d06's
+   "Ben Okafor's turn" is proven by `b5_review_mode_speaks_for_the_reviewer`).
+3. **C1 Shift.** Shift over d01 opens its panel directly left of the box, tops aligned where it fits (rects; clamped
+   on screen otherwise); d01 marked; Shift over d02 switches; Shift+a in the field types "A" (no new `fixture_thread`);
+   a lone Shift tap with focus in the field and the pointer on another row: no new `fixture_thread`, the panel keeps
+   its discussion (#2386); a focused row and Shift opens its thread. With !637's panel open, hover !636's count and
+   Shift over one of its rows: !637's box and panel close (#2385).
 4. **C3–C5 Thread.** d01: four comments oldest first, no system note; pictures, names, muted `@username`, the crown
    only on Dmitri Volkov's comment (tooltip "Author"); "3 hours ago" style times with `DD.MM.YYYY, HH:MM` on hover;
    "· Edited … ago by Dmitri Volkov" on Sam Weller's, "· Edited … ago" on Anna Berg's; code in yamt's colours, the
@@ -82,7 +86,10 @@ merge-requests page. Every step in yamt Dark and yamt Light (`--settings '{"them
    reopen: d02 gone.
 10. **C2 What stays open.** Pointer far away: both stay; a comment link click: both stay; Escape: panel closes, focus on
     its row; Escape: box closes; the panel's Close: panel closes, box stays; a press on the list: both close; a list
-    Refresh with the panel open: both stay and the thread is read again.
+    Refresh (the page's Refresh button, which does not count as a press outside, #2392) with the panel open: both
+    stay and the thread is read again; after "Resolve thread", "Add comment" and "Submit review" the focus stays in
+    the panel, so Escape closes the panel, not the page (#2383/#2389); leaving the page with the panel open and
+    coming back: no box, and a resolved row is gone with the count dropped (#2384/#2390).
 11. **D Refresh.** "Reload discussions": the icon turns, the rows stay, then the new answer; only `iids: 637` in the
     log; with d01's panel open also one `fixture_thread`.
 12. **C11 Off.** Discussion details "Off": no box, no panel; "Load lazily": both work.
