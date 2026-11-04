@@ -1,0 +1,3051 @@
+diff --git a/crates/merge-requests/src/description/tests.rs b/crates/merge-requests/src/description/tests.rs
+index 820535f..ab325f8 100644
+--- a/crates/merge-requests/src/description/tests.rs
++++ b/crates/merge-requests/src/description/tests.rs
+@@ -9,6 +9,8 @@ use super::size::{ImageLength, image_length};
+ use super::*;
+ use crate::PictureAddress;
+ 
++mod corpus;
++
+ const BASE: &str = "https://gitlab.com/taskboard/taskboard/-/merge_requests/52";
+ const MERGE_REQUESTS: &str = "https://gitlab.com/taskboard/taskboard/-/merge_requests/";
+ const SUB_PATH_BASE: &str = "https://gitlab.example/gitlab/taskboard/taskboard/-/merge_requests/52";
+diff --git a/crates/merge-requests/src/description/tests/corpus.rs b/crates/merge-requests/src/description/tests/corpus.rs
+new file mode 100644
+index 0000000..e3ac368
+--- /dev/null
++++ b/crates/merge-requests/src/description/tests/corpus.rs
+@@ -0,0 +1,181 @@
++use std::collections::BTreeSet;
++
++use serde::Deserialize;
++use serde_json::Value;
++
++use super::super::html::described;
++
++const FIXTURE: &str = include_str!("../../../../../frontend/fixtures/markdown/gitlab-preview.json");
++
++const RECORDED: [&str; 62] = [
++    "paragraph",
++    "two_paragraphs",
++    "soft_break",
++    "hard_break_spaces",
++    "hard_break_backslash",
++    "emphasis_star",
++    "emphasis_underscore",
++    "intraword_underscore",
++    "strong",
++    "strong_em",
++    "strike",
++    "inline_code",
++    "inline_code_backticks",
++    "fenced_plain",
++    "fenced_rust",
++    "fenced_ts",
++    "fenced_tilde",
++    "fenced_mermaid",
++    "indented_code",
++    "bullet_dash",
++    "bullet_star",
++    "ordered",
++    "ordered_start",
++    "ordered_paren",
++    "nested_list",
++    "loose_list",
++    "list_with_para",
++    "h1",
++    "h2_h6",
++    "heading_formatting",
++    "heading_duplicate",
++    "setext",
++    "quote",
++    "quote_nested",
++    "quote_with_list",
++    "table",
++    "table_align",
++    "table_inline",
++    "rule_dash",
++    "rule_star",
++    "rule_underscore",
++    "ampersand",
++    "entity",
++    "percent_number",
++    "hash_no_ref",
++    "hex_short",
++    "hex_word_plain",
++    "colon_words",
++    "exclaim",
++    "unicode",
++    "smart_quotes",
++    "trailing_spaces_para",
++    "mixed_doc",
++    "ref_issue",
++    "mention",
++    "emoji",
++    "url",
++    "link",
++    "task",
++    "html",
++    "math_inline",
++    "dollar_word",
++];
++
++const EXTRAS: [&str; 25] = [
++    "code_hides_refs",
++    "fence_hides_refs",
++    "heading_closing_hashes",
++    "heading_then_text",
++    "mixed_bullets",
++    "table_short_row",
++    "table_after_paragraph",
++    "quote_lazy",
++    "quote_two_paragraphs",
++    "list_lazy",
++    "nested_ordered",
++    "ordered_para_items",
++    "ordered_zero_start",
++    "emphasis_punct",
++    "emphasis_nested",
++    "fence_blank_edges",
++    "unicode_plain",
++    "ampersand_no_angle",
++    "hard_break_three_spaces",
++    "rule_after_list",
++    "star_rule",
++    "strike_single_tilde",
++    "code_language_upper",
++    "fence_info_words",
++    "quick_action",
++];
++
++/// GitLab's preview answers (`frontend/fixtures/markdown/gitlab-preview.json`).
++#[derive(Deserialize)]
++struct Corpus {
++    recorded: String,
++    entries: Vec<Entry>,
++}
++
++#[derive(Deserialize)]
++struct Entry {
++    name: String,
++    text: String,
++    html: String,
++    local: bool,
++    blocks: Value,
++}
++
++fn corpus() -> Corpus {
++    serde_json::from_str(FIXTURE).unwrap()
++}
++
++/// Whether `value` holds, at any depth, a part the local preview never builds: a link, an image, a details block or
++/// a task box.
++fn holds_remote_part(value: &Value) -> bool {
++    match value {
++        Value::Object(fields) => {
++            let kind = fields.get("kind").and_then(Value::as_str);
++            let task = fields.get("task").and_then(Value::as_str);
++            matches!(kind, Some("link" | "image" | "details"))
++                || task.is_some_and(|task| task != "none")
++                || fields.values().any(holds_remote_part)
++        }
++        Value::Array(items) => items.iter().any(holds_remote_part),
++        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
++    }
++}
++
++#[test]
++fn every_recorded_answer_reduces_to_its_blocks() {
++    for entry in corpus().entries {
++        let reduced =
++            serde_json::to_value(described(&entry.html, None).description.blocks).unwrap();
++
++        assert_eq!(reduced, entry.blocks, "{}", entry.name);
++    }
++}
++
++#[test]
++fn a_local_entry_holds_no_link_image_details_or_task_box() {
++    let holding: Vec<String> = corpus()
++        .entries
++        .into_iter()
++        .filter(|entry| entry.local && holds_remote_part(&entry.blocks))
++        .map(|entry| entry.name)
++        .collect();
++
++    assert_eq!(holding, Vec::<String>::new());
++}
++
++#[test]
++fn the_corpus_holds_each_name_once_and_every_recorded_name() {
++    let corpus = corpus();
++    let names: Vec<&str> = corpus
++        .entries
++        .iter()
++        .map(|entry| entry.name.as_str())
++        .collect();
++    let unique: BTreeSet<&str> = names.iter().copied().collect();
++    let blank: Vec<&str> = corpus
++        .entries
++        .iter()
++        .filter(|entry| entry.text.trim().is_empty())
++        .map(|entry| entry.name.as_str())
++        .collect();
++
++    assert_eq!(names, [RECORDED.as_slice(), EXTRAS.as_slice()].concat());
++    assert_eq!(unique.len(), names.len());
++    assert_ne!(corpus.recorded.trim(), "");
++    assert_eq!(blank, Vec::<&str>::new());
++}
+diff --git a/frontend/fixtures/markdown/gitlab-preview.json b/frontend/fixtures/markdown/gitlab-preview.json
+new file mode 100644
+index 0000000..24deb07
+--- /dev/null
++++ b/frontend/fixtures/markdown/gitlab-preview.json
+@@ -0,0 +1,2845 @@
++{
++  "recorded": "glab api --method POST markdown --input - with {text, gfm: true, project: \"samubr/glab-yamt-playground\"} on gitlab.com, 2026-11-04",
++  "entries": [
++    {
++      "name": "paragraph",
++      "text": "Looks good to me.",
++      "html": "<p data-sourcepos=\"1:1-1:17\" dir=\"auto\">Looks good to me.</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Looks good to me."
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "two_paragraphs",
++      "text": "First paragraph.\n\nSecond paragraph.",
++      "html": "<p data-sourcepos=\"1:1-1:16\" dir=\"auto\">First paragraph.</p>\n<p data-sourcepos=\"3:1-3:17\" dir=\"auto\">Second paragraph.</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "First paragraph."
++            }
++          ]
++        },
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Second paragraph."
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "soft_break",
++      "text": "line one\nline two",
++      "html": "<p data-sourcepos=\"1:1-2:8\" dir=\"auto\">line one\nline two</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "line one\nline two"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "hard_break_spaces",
++      "text": "line one  \nline two",
++      "html": "<p data-sourcepos=\"1:1-2:8\" dir=\"auto\">line one<br data-sourcepos=\"1:9-1:11\">\nline two</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "line one"
++            },
++            {
++              "kind": "lineBreak"
++            },
++            {
++              "kind": "text",
++              "text": "\nline two"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "hard_break_backslash",
++      "text": "line one\\\nline two",
++      "html": "<p data-sourcepos=\"1:1-2:8\" dir=\"auto\">line one<br data-sourcepos=\"1:9-1:10\">\nline two</p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "line one"
++            },
++            {
++              "kind": "lineBreak"
++            },
++            {
++              "kind": "text",
++              "text": "\nline two"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "emphasis_star",
++      "text": "this is *important* here",
++      "html": "<p data-sourcepos=\"1:1-1:24\" dir=\"auto\">this is <em data-sourcepos=\"1:9-1:19\">important</em> here</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "this is "
++            },
++            {
++              "kind": "emphasis",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "important"
++                }
++              ]
++            },
++            {
++              "kind": "text",
++              "text": " here"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "emphasis_underscore",
++      "text": "this is _important_ here",
++      "html": "<p data-sourcepos=\"1:1-1:24\" dir=\"auto\">this is <em data-sourcepos=\"1:9-1:19\">important</em> here</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "this is "
++            },
++            {
++              "kind": "emphasis",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "important"
++                }
++              ]
++            },
++            {
++              "kind": "text",
++              "text": " here"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "intraword_underscore",
++      "text": "snake_case_name and foo_bar",
++      "html": "<p data-sourcepos=\"1:1-1:27\" dir=\"auto\">snake_case_name and foo_bar</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "snake_case_name and foo_bar"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "strong",
++      "text": "this is **bold** and __bold__",
++      "html": "<p data-sourcepos=\"1:1-1:29\" dir=\"auto\">this is <strong data-sourcepos=\"1:9-1:16\">bold</strong> and <strong data-sourcepos=\"1:22-1:29\">bold</strong></p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "this is "
++            },
++            {
++              "kind": "strong",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "bold"
++                }
++              ]
++            },
++            {
++              "kind": "text",
++              "text": " and "
++            },
++            {
++              "kind": "strong",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "bold"
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "strong_em",
++      "text": "***both*** words",
++      "html": "<p data-sourcepos=\"1:1-1:16\" dir=\"auto\"><em data-sourcepos=\"1:1-1:10\"><strong data-sourcepos=\"1:2-1:9\">both</strong></em> words</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "emphasis",
++              "inlines": [
++                {
++                  "kind": "strong",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "both"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "kind": "text",
++              "text": " words"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "strike",
++      "text": "this is ~~gone~~ now",
++      "html": "<p data-sourcepos=\"1:1-1:20\" dir=\"auto\">this is <del data-sourcepos=\"1:9-1:16\">gone</del> now</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "this is "
++            },
++            {
++              "kind": "strike",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "gone"
++                }
++              ]
++            },
++            {
++              "kind": "text",
++              "text": " now"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "inline_code",
++      "text": "call `foo()` here",
++      "html": "<p data-sourcepos=\"1:1-1:17\" dir=\"auto\">call <code data-sourcepos=\"1:6-1:12\">foo()</code> here</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "call "
++            },
++            {
++              "kind": "code",
++              "text": "foo()"
++            },
++            {
++              "kind": "text",
++              "text": " here"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "inline_code_backticks",
++      "text": "use `` a`b `` here",
++      "html": "<p data-sourcepos=\"1:1-1:18\" dir=\"auto\">use <code data-sourcepos=\"1:5-1:13\">a`b</code> here</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "use "
++            },
++            {
++              "kind": "code",
++              "text": "a`b"
++            },
++            {
++              "kind": "text",
++              "text": " here"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "fenced_plain",
++      "text": "```\nplain code\n  indented\n```",
++      "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-4:3\" class=\"code highlight js-syntax-highlight language-plaintext\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"plaintext\">plain code</span>\n<span id=\"LC2\" class=\"line\" data-lang=\"plaintext\">  indented</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "code",
++          "language": null,
++          "text": "plain code\n  indented"
++        }
++      ]
++    },
++    {
++      "name": "fenced_rust",
++      "text": "```rust\nfn main() { let x = 1; }\n```",
++      "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-3:3\" data-canonical-lang=\"rust\" class=\"code highlight js-syntax-highlight language-rust\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"rust\"><span class=\"k\">fn</span> <span class=\"nf\">main</span><span class=\"p\">()</span> <span class=\"p\">{</span> <span class=\"k\">let</span> <span class=\"n\">x</span> <span class=\"o\">=</span> <span class=\"mi\">1</span><span class=\"p\">;</span> <span class=\"p\">}</span></span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "code",
++          "language": "rust",
++          "text": "fn main() { let x = 1; }"
++        }
++      ]
++    },
++    {
++      "name": "fenced_ts",
++      "text": "```ts\nconst x: number = 1;\n```",
++      "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-3:3\" data-canonical-lang=\"ts\" class=\"code highlight js-syntax-highlight language-typescript\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"typescript\"><span class=\"kd\">const</span> <span class=\"nx\">x</span><span class=\"p\">:</span> <span class=\"kr\">number</span> <span class=\"o\">=</span> <span class=\"mi\">1</span><span class=\"p\">;</span></span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "code",
++          "language": "ts",
++          "text": "const x: number = 1;"
++        }
++      ]
++    },
++    {
++      "name": "fenced_tilde",
++      "text": "~~~\ncode\n~~~",
++      "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-3:3\" class=\"code highlight js-syntax-highlight language-plaintext\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"plaintext\">code</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "code",
++          "language": null,
++          "text": "code"
++        }
++      ]
++    },
++    {
++      "name": "fenced_mermaid",
++      "text": "```mermaid\ngraph TD; A-->B;\n```",
++      "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-3:3\" data-canonical-lang=\"mermaid\" class=\"code highlight js-syntax-highlight language-mermaid\" v-pre=\"true\"><code class=\"js-render-mermaid\" data-proxied-urls=\"{}\"><span id=\"LC1\" class=\"line\" data-lang=\"mermaid\">graph TD; A--&gt;B;</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "code",
++          "language": "mermaid",
++          "text": "graph TD; A-->B;"
++        }
++      ]
++    },
++    {
++      "name": "indented_code",
++      "text": "para\n\n    indented code\n    more",
++      "html": "<p data-sourcepos=\"1:1-1:4\" dir=\"auto\">para</p>\n<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"3:5-4:8\" class=\"code highlight js-syntax-highlight language-plaintext\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"plaintext\">indented code</span>\n<span id=\"LC2\" class=\"line\" data-lang=\"plaintext\">more</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "para"
++            }
++          ]
++        },
++        {
++          "kind": "code",
++          "language": null,
++          "text": "indented code\nmore"
++        }
++      ]
++    },
++    {
++      "name": "bullet_dash",
++      "text": "- one\n- two\n- three",
++      "html": "<ul data-sourcepos=\"1:1-3:7\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:5\">one</li>\n<li data-sourcepos=\"2:1-2:5\">two</li>\n<li data-sourcepos=\"3:1-3:7\">three</li>\n</ul>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "bullets"
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "one"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "two"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "three"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "bullet_star",
++      "text": "* one\n* two",
++      "html": "<ul data-sourcepos=\"1:1-2:5\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:5\">one</li>\n<li data-sourcepos=\"2:1-2:5\">two</li>\n</ul>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "bullets"
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "one"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "two"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "ordered",
++      "text": "1. one\n2. two\n3. three",
++      "html": "<ol data-sourcepos=\"1:1-3:8\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:6\">one</li>\n<li data-sourcepos=\"2:1-2:6\">two</li>\n<li data-sourcepos=\"3:1-3:8\">three</li>\n</ol>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "numbers",
++            "start": 1
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "one"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "two"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "three"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "ordered_start",
++      "text": "3. three\n4. four",
++      "html": "<ol data-sourcepos=\"1:1-2:7\" start=\"3\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:8\">three</li>\n<li data-sourcepos=\"2:1-2:7\">four</li>\n</ol>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "numbers",
++            "start": 3
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "three"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "four"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "ordered_paren",
++      "text": "1) one\n2) two",
++      "html": "<ol data-sourcepos=\"1:1-2:6\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:6\">one</li>\n<li data-sourcepos=\"2:1-2:6\">two</li>\n</ol>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "numbers",
++            "start": 1
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "one"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "two"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "nested_list",
++      "text": "- one\n  - inner\n  - inner two\n- two",
++      "html": "<ul data-sourcepos=\"1:1-4:5\" dir=\"auto\">\n<li data-sourcepos=\"1:1-3:13\">one\n<ul data-sourcepos=\"2:3-3:13\">\n<li data-sourcepos=\"2:3-2:9\">inner</li>\n<li data-sourcepos=\"3:3-3:13\">inner two</li>\n</ul>\n</li>\n<li data-sourcepos=\"4:1-4:5\">two</li>\n</ul>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "bullets"
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "one\n"
++                    }
++                  ]
++                },
++                {
++                  "kind": "list",
++                  "numbering": {
++                    "kind": "bullets"
++                  },
++                  "items": [
++                    {
++                      "task": "none",
++                      "blocks": [
++                        {
++                          "kind": "paragraph",
++                          "inlines": [
++                            {
++                              "kind": "text",
++                              "text": "inner"
++                            }
++                          ]
++                        }
++                      ]
++                    },
++                    {
++                      "task": "none",
++                      "blocks": [
++                        {
++                          "kind": "paragraph",
++                          "inlines": [
++                            {
++                              "kind": "text",
++                              "text": "inner two"
++                            }
++                          ]
++                        }
++                      ]
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "two"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "loose_list",
++      "text": "- one\n\n- two",
++      "html": "<ul data-sourcepos=\"1:1-3:5\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:5\">\n<p data-sourcepos=\"1:3-1:5\">one</p>\n</li>\n<li data-sourcepos=\"3:1-3:5\">\n<p data-sourcepos=\"3:3-3:5\">two</p>\n</li>\n</ul>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "bullets"
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "one"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "two"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "list_with_para",
++      "text": "- item\n\n  continued para",
++      "html": "<ul data-sourcepos=\"1:1-3:16\" dir=\"auto\">\n<li data-sourcepos=\"1:1-3:16\">\n<p data-sourcepos=\"1:3-1:6\">item</p>\n<p data-sourcepos=\"3:3-3:16\">continued para</p>\n</li>\n</ul>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "bullets"
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "item"
++                    }
++                  ]
++                },
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "continued para"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "h1",
++      "text": "# Title",
++      "html": "<h1 id=\"user-content-title\" data-sourcepos=\"1:1-1:7\" dir=\"auto\">Title<a href=\"#title\" aria-label=\"Link to heading 'Title'\" data-heading-content=\"Title\" class=\"anchor\"></a></h1>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "heading",
++          "level": "h1",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Title"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "h2_h6",
++      "text": "## Two\n### Three\n#### Four\n##### Five\n###### Six",
++      "html": "<h2 id=\"user-content-two\" data-sourcepos=\"1:1-1:6\" dir=\"auto\">Two<a href=\"#two\" aria-label=\"Link to heading 'Two'\" data-heading-content=\"Two\" class=\"anchor\"></a></h2>\n<h3 id=\"user-content-three\" data-sourcepos=\"2:1-2:9\" dir=\"auto\">Three<a href=\"#three\" aria-label=\"Link to heading 'Three'\" data-heading-content=\"Three\" class=\"anchor\"></a></h3>\n<h4 id=\"user-content-four\" data-sourcepos=\"3:1-3:9\" dir=\"auto\">Four<a href=\"#four\" aria-label=\"Link to heading 'Four'\" data-heading-content=\"Four\" class=\"anchor\"></a></h4>\n<h5 id=\"user-content-five\" data-sourcepos=\"4:1-4:10\" dir=\"auto\">Five<a href=\"#five\" aria-label=\"Link to heading 'Five'\" data-heading-content=\"Five\" class=\"anchor\"></a></h5>\n<h6 id=\"user-content-six\" data-sourcepos=\"5:1-5:10\" dir=\"auto\">Six<a href=\"#six\" aria-label=\"Link to heading 'Six'\" data-heading-content=\"Six\" class=\"anchor\"></a></h6>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "heading",
++          "level": "h2",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Two"
++            }
++          ]
++        },
++        {
++          "kind": "heading",
++          "level": "h3",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Three"
++            }
++          ]
++        },
++        {
++          "kind": "heading",
++          "level": "h4",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Four"
++            }
++          ]
++        },
++        {
++          "kind": "heading",
++          "level": "h5",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Five"
++            }
++          ]
++        },
++        {
++          "kind": "heading",
++          "level": "h6",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Six"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "heading_formatting",
++      "text": "## A *styled* `code` heading",
++      "html": "<h2 id=\"user-content-a-styled-code-heading\" data-sourcepos=\"1:1-1:28\" dir=\"auto\">A <em data-sourcepos=\"1:6-1:13\">styled</em> <code data-sourcepos=\"1:15-1:20\">code</code> heading<a href=\"#a-styled-code-heading\" aria-label=\"Link to heading 'A styled code heading'\" data-heading-content=\"A styled code heading\" class=\"anchor\"></a></h2>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "heading",
++          "level": "h2",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "A "
++            },
++            {
++              "kind": "emphasis",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "styled"
++                }
++              ]
++            },
++            {
++              "kind": "text",
++              "text": " "
++            },
++            {
++              "kind": "code",
++              "text": "code"
++            },
++            {
++              "kind": "text",
++              "text": " heading"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "heading_duplicate",
++      "text": "## Same\n\n## Same",
++      "html": "<h2 id=\"user-content-same\" data-sourcepos=\"1:1-1:7\" dir=\"auto\">Same<a href=\"#same\" aria-label=\"Link to heading 'Same'\" data-heading-content=\"Same\" class=\"anchor\"></a></h2>\n<h2 id=\"user-content-same-1\" data-sourcepos=\"3:1-3:7\" dir=\"auto\">Same<a href=\"#same-1\" aria-label=\"Link to heading 'Same'\" data-heading-content=\"Same\" class=\"anchor\"></a></h2>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "heading",
++          "level": "h2",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Same"
++            }
++          ]
++        },
++        {
++          "kind": "heading",
++          "level": "h2",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Same"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "setext",
++      "text": "Title\n=====\n\nSub\n---",
++      "html": "<h1 id=\"user-content-title\" data-sourcepos=\"1:1-2:5\" dir=\"auto\">Title<a href=\"#title\" aria-label=\"Link to heading 'Title'\" data-heading-content=\"Title\" class=\"anchor\"></a></h1>\n<h2 id=\"user-content-sub\" data-sourcepos=\"4:1-5:3\" dir=\"auto\">Sub<a href=\"#sub\" aria-label=\"Link to heading 'Sub'\" data-heading-content=\"Sub\" class=\"anchor\"></a></h2>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "heading",
++          "level": "h1",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Title"
++            }
++          ]
++        },
++        {
++          "kind": "heading",
++          "level": "h2",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Sub"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "quote",
++      "text": "> quoted text\n> more",
++      "html": "<blockquote data-sourcepos=\"1:1-2:6\" dir=\"auto\">\n<p data-sourcepos=\"1:3-2:6\">quoted text\nmore</p>\n</blockquote>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "quote",
++          "blocks": [
++            {
++              "kind": "paragraph",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "quoted text\nmore"
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "quote_nested",
++      "text": "> outer\n>> inner",
++      "html": "<blockquote data-sourcepos=\"1:1-2:8\" dir=\"auto\">\n<p data-sourcepos=\"1:3-1:7\">outer</p>\n<blockquote data-sourcepos=\"2:2-2:8\">\n<p data-sourcepos=\"2:4-2:8\">inner</p>\n</blockquote>\n</blockquote>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "quote",
++          "blocks": [
++            {
++              "kind": "paragraph",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "outer"
++                }
++              ]
++            },
++            {
++              "kind": "quote",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "inner"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "quote_with_list",
++      "text": "> - a\n> - b",
++      "html": "<blockquote data-sourcepos=\"1:1-2:5\" dir=\"auto\">\n<ul data-sourcepos=\"1:3-2:5\">\n<li data-sourcepos=\"1:3-1:5\">a</li>\n<li data-sourcepos=\"2:3-2:5\">b</li>\n</ul>\n</blockquote>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "quote",
++          "blocks": [
++            {
++              "kind": "list",
++              "numbering": {
++                "kind": "bullets"
++              },
++              "items": [
++                {
++                  "task": "none",
++                  "blocks": [
++                    {
++                      "kind": "paragraph",
++                      "inlines": [
++                        {
++                          "kind": "text",
++                          "text": "a"
++                        }
++                      ]
++                    }
++                  ]
++                },
++                {
++                  "task": "none",
++                  "blocks": [
++                    {
++                      "kind": "paragraph",
++                      "inlines": [
++                        {
++                          "kind": "text",
++                          "text": "b"
++                        }
++                      ]
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "table",
++      "text": "| a | b |\n| --- | --- |\n| 1 | 2 |",
++      "html": "<table data-sourcepos=\"1:1-3:9\" dir=\"auto\">\n<thead>\n<tr data-sourcepos=\"1:1-1:9\">\n<th data-sourcepos=\"1:2-1:4\">a</th>\n<th data-sourcepos=\"1:6-1:8\">b</th>\n</tr>\n</thead>\n<tbody>\n<tr data-sourcepos=\"3:1-3:9\">\n<td data-sourcepos=\"3:2-3:4\">1</td>\n<td data-sourcepos=\"3:6-3:8\">2</td>\n</tr>\n</tbody>\n</table>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "table",
++          "head": [
++            {
++              "cells": [
++                {
++                  "header": true,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "a"
++                    }
++                  ]
++                },
++                {
++                  "header": true,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "b"
++                    }
++                  ]
++                }
++              ]
++            }
++          ],
++          "body": [
++            {
++              "cells": [
++                {
++                  "header": false,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "1"
++                    }
++                  ]
++                },
++                {
++                  "header": false,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "2"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "table_align",
++      "text": "| left | center | right |\n| :--- | :---: | ---: |\n| l | c | r |",
++      "html": "<table data-sourcepos=\"1:1-3:13\" dir=\"auto\">\n<thead>\n<tr data-sourcepos=\"1:1-1:25\">\n<th data-sourcepos=\"1:2-1:7\" align=\"left\">left</th>\n<th data-sourcepos=\"1:9-1:16\" align=\"center\">center</th>\n<th data-sourcepos=\"1:18-1:24\" align=\"right\">right</th>\n</tr>\n</thead>\n<tbody>\n<tr data-sourcepos=\"3:1-3:13\">\n<td data-sourcepos=\"3:2-3:4\" align=\"left\">l</td>\n<td data-sourcepos=\"3:6-3:8\" align=\"center\">c</td>\n<td data-sourcepos=\"3:10-3:12\" align=\"right\">r</td>\n</tr>\n</tbody>\n</table>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "table",
++          "head": [
++            {
++              "cells": [
++                {
++                  "header": true,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "left"
++                    }
++                  ]
++                },
++                {
++                  "header": true,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "center"
++                    }
++                  ]
++                },
++                {
++                  "header": true,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "right"
++                    }
++                  ]
++                }
++              ]
++            }
++          ],
++          "body": [
++            {
++              "cells": [
++                {
++                  "header": false,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "l"
++                    }
++                  ]
++                },
++                {
++                  "header": false,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "c"
++                    }
++                  ]
++                },
++                {
++                  "header": false,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "r"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "table_inline",
++      "text": "| a | b |\n| - | - |\n| `x` | **y** |",
++      "html": "<table data-sourcepos=\"1:1-3:15\" dir=\"auto\">\n<thead>\n<tr data-sourcepos=\"1:1-1:9\">\n<th data-sourcepos=\"1:2-1:4\">a</th>\n<th data-sourcepos=\"1:6-1:8\">b</th>\n</tr>\n</thead>\n<tbody>\n<tr data-sourcepos=\"3:1-3:15\">\n<td data-sourcepos=\"3:2-3:6\"><code data-sourcepos=\"3:3-3:5\">x</code></td>\n<td data-sourcepos=\"3:8-3:14\"><strong data-sourcepos=\"3:9-3:13\">y</strong></td>\n</tr>\n</tbody>\n</table>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "table",
++          "head": [
++            {
++              "cells": [
++                {
++                  "header": true,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "a"
++                    }
++                  ]
++                },
++                {
++                  "header": true,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "b"
++                    }
++                  ]
++                }
++              ]
++            }
++          ],
++          "body": [
++            {
++              "cells": [
++                {
++                  "header": false,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "code",
++                      "text": "x"
++                    }
++                  ]
++                },
++                {
++                  "header": false,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "strong",
++                      "inlines": [
++                        {
++                          "kind": "text",
++                          "text": "y"
++                        }
++                      ]
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "rule_dash",
++      "text": "above\n\n---\n\nbelow",
++      "html": "<p data-sourcepos=\"1:1-1:5\" dir=\"auto\">above</p>\n<hr data-sourcepos=\"3:1-3:3\">\n<p data-sourcepos=\"5:1-5:5\" dir=\"auto\">below</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "above"
++            }
++          ]
++        },
++        {
++          "kind": "rule"
++        },
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "below"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "rule_star",
++      "text": "above\n\n***\n\nbelow",
++      "html": "<p data-sourcepos=\"1:1-1:5\" dir=\"auto\">above</p>\n<hr data-sourcepos=\"3:1-3:3\">\n<p data-sourcepos=\"5:1-5:5\" dir=\"auto\">below</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "above"
++            }
++          ]
++        },
++        {
++          "kind": "rule"
++        },
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "below"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "rule_underscore",
++      "text": "above\n\n___\n\nbelow",
++      "html": "<p data-sourcepos=\"1:1-1:5\" dir=\"auto\">above</p>\n<hr data-sourcepos=\"3:1-3:3\">\n<p data-sourcepos=\"5:1-5:5\" dir=\"auto\">below</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "above"
++            }
++          ]
++        },
++        {
++          "kind": "rule"
++        },
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "below"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "ampersand",
++      "text": "a & b < c > d \"q\" 'x'",
++      "html": "<p data-sourcepos=\"1:1-1:21\" dir=\"auto\">a &amp; b &lt; c &gt; d \"q\" 'x'</p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "a & b < c > d \"q\" 'x'"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "entity",
++      "text": "&amp; &copy; &#35;",
++      "html": "<p data-sourcepos=\"1:1-1:18\" dir=\"auto\">&amp; © #</p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "& © #"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "percent_number",
++      "text": "100% sure, 3 items, v1.2.3",
++      "html": "<p data-sourcepos=\"1:1-1:26\" dir=\"auto\">100% sure, 3 items, v1.2.3</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "100% sure, 3 items, v1.2.3"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "hash_no_ref",
++      "text": "C# and # alone",
++      "html": "<p data-sourcepos=\"1:1-1:14\" dir=\"auto\">C# and # alone</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "C# and # alone"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "hex_short",
++      "text": "abc1234 deadbeef cafe",
++      "html": "<p data-sourcepos=\"1:1-1:21\" dir=\"auto\">abc1234 deadbeef cafe</p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "abc1234 deadbeef cafe"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "hex_word_plain",
++      "text": "added a beef feed",
++      "html": "<p data-sourcepos=\"1:1-1:17\" dir=\"auto\">added a beef feed</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "added a beef feed"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "colon_words",
++      "text": "note: time 10:30",
++      "html": "<p data-sourcepos=\"1:1-1:16\" dir=\"auto\">note: time 10:30</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "note: time 10:30"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "exclaim",
++      "text": "Great! Done!",
++      "html": "<p data-sourcepos=\"1:1-1:12\" dir=\"auto\">Great! Done!</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Great! Done!"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "unicode",
++      "text": "Schöne Grüße — “quotes” ✓ 😀",
++      "html": "<p data-sourcepos=\"1:1-1:41\" dir=\"auto\">Schöne Grüße — “quotes” ✓ <gl-emoji title=\"grinning face\" data-name=\"grinning\" data-unicode-version=\"8.0\">😀</gl-emoji></p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Schöne Grüße — “quotes” ✓ "
++            },
++            {
++              "kind": "text",
++              "text": "😀"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "smart_quotes",
++      "text": "it's \"quoted\" -- dash ... dots",
++      "html": "<p data-sourcepos=\"1:1-1:30\" dir=\"auto\">it's \"quoted\" -- dash ... dots</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "it's \"quoted\" -- dash ... dots"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "trailing_spaces_para",
++      "text": "text   ",
++      "html": "<p data-sourcepos=\"1:1-1:7\" dir=\"auto\">text</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "text"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "mixed_doc",
++      "text": "## Summary\n\nThis **works** with `code`.\n\n- one\n- two\n\n> note\n\n```rust\nlet a = 1;\n```",
++      "html": "<h2 id=\"user-content-summary\" data-sourcepos=\"1:1-1:10\" dir=\"auto\">Summary<a href=\"#summary\" aria-label=\"Link to heading 'Summary'\" data-heading-content=\"Summary\" class=\"anchor\"></a></h2>\n<p data-sourcepos=\"3:1-3:27\" dir=\"auto\">This <strong data-sourcepos=\"3:6-3:14\">works</strong> with <code data-sourcepos=\"3:21-3:26\">code</code>.</p>\n<ul data-sourcepos=\"5:1-6:5\" dir=\"auto\">\n<li data-sourcepos=\"5:1-5:5\">one</li>\n<li data-sourcepos=\"6:1-7:0\">two</li>\n</ul>\n<blockquote data-sourcepos=\"8:1-8:6\" dir=\"auto\">\n<p data-sourcepos=\"8:3-8:6\">note</p>\n</blockquote>\n<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"10:1-12:3\" data-canonical-lang=\"rust\" class=\"code highlight js-syntax-highlight language-rust\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"rust\"><span class=\"k\">let</span> <span class=\"n\">a</span> <span class=\"o\">=</span> <span class=\"mi\">1</span><span class=\"p\">;</span></span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "heading",
++          "level": "h2",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Summary"
++            }
++          ]
++        },
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "This "
++            },
++            {
++              "kind": "strong",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "works"
++                }
++              ]
++            },
++            {
++              "kind": "text",
++              "text": " with "
++            },
++            {
++              "kind": "code",
++              "text": "code"
++            },
++            {
++              "kind": "text",
++              "text": "."
++            }
++          ]
++        },
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "bullets"
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "one"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "two"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        },
++        {
++          "kind": "quote",
++          "blocks": [
++            {
++              "kind": "paragraph",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "note"
++                }
++              ]
++            }
++          ]
++        },
++        {
++          "kind": "code",
++          "language": "rust",
++          "text": "let a = 1;"
++        }
++      ]
++    },
++    {
++      "name": "ref_issue",
++      "text": "see #12",
++      "html": "<p data-sourcepos=\"1:1-1:7\" dir=\"auto\">see #12</p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "see #12"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "mention",
++      "text": "thanks @samubr",
++      "html": "<p data-sourcepos=\"1:1-1:14\" dir=\"auto\">thanks <a href=\"https://gitlab.com/samubr\" title=\"Samuel Braun\" class=\"gfm gfm-project_member js-user-link\" data-user=\"25311683\" data-original=\"@samubr\" data-container=\"body\" data-placement=\"top\" data-reference-type=\"user\">@samubr</a></p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "thanks "
++            },
++            {
++              "kind": "link",
++              "link": {
++                "kind": "page",
++                "page": "https://gitlab.com/samubr"
++              },
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "@samubr"
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "emoji",
++      "text": "nice :thumbsup:",
++      "html": "<p data-sourcepos=\"1:1-1:15\" dir=\"auto\">nice <gl-emoji title=\"thumbs up\" data-name=\"thumbsup\" data-unicode-version=\"6.0\">👍</gl-emoji></p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "nice "
++            },
++            {
++              "kind": "text",
++              "text": "👍"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "url",
++      "text": "see https://example.com",
++      "html": "<p data-sourcepos=\"1:1-1:23\" dir=\"auto\">see <a data-sourcepos=\"1:5-1:23\" href=\"https://example.com\" rel=\"nofollow noreferrer noopener\" target=\"_blank\">https://example.com</a></p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "see "
++            },
++            {
++              "kind": "link",
++              "link": {
++                "kind": "page",
++                "page": "https://example.com/"
++              },
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "https://example.com"
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "link",
++      "text": "[text](https://example.com)",
++      "html": "<p data-sourcepos=\"1:1-1:27\" dir=\"auto\"><a data-sourcepos=\"1:1-1:27\" href=\"https://example.com\" rel=\"nofollow noreferrer noopener\" target=\"_blank\">text</a></p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "link",
++              "link": {
++                "kind": "page",
++                "page": "https://example.com/"
++              },
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "text"
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "task",
++      "text": "- [ ] todo\n- [x] done",
++      "html": "<ul class=\"task-list\" data-sourcepos=\"1:1-2:10\" dir=\"auto\">\n<li class=\"task-list-item\" data-sourcepos=\"1:1-1:10\"><input type=\"checkbox\" data-checkbox-sourcepos=\"1:4-1:4\" class=\"task-list-item-checkbox\" disabled=\"\" aria-label=\"Check option: todo\"> todo</li>\n<li class=\"task-list-item\" data-sourcepos=\"2:1-2:10\"><input type=\"checkbox\" data-checkbox-sourcepos=\"2:4-2:4\" class=\"task-list-item-checkbox\" checked=\"\" disabled=\"\" aria-label=\"Check option: done\"> done</li>\n</ul>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "bullets"
++          },
++          "items": [
++            {
++              "task": "open",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": " todo"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "done",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": " done"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "html",
++      "text": "a <b>b</b> c",
++      "html": "<p data-sourcepos=\"1:1-1:12\" dir=\"auto\">a <b>b</b> c</p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "a "
++            },
++            {
++              "kind": "strong",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "b"
++                }
++              ]
++            },
++            {
++              "kind": "text",
++              "text": " c"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "math_inline",
++      "text": "$`a^2`$",
++      "html": "<p data-sourcepos=\"1:1-1:7\" dir=\"auto\"><code data-math-style=\"inline\" data-sourcepos=\"1:1-1:7\" class=\"js-render-math\">a^2</code></p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "code",
++              "text": "a^2"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "dollar_word",
++      "text": "costs $5",
++      "html": "<p data-sourcepos=\"1:1-1:8\" dir=\"auto\">costs $5</p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "costs $5"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "code_hides_refs",
++      "text": "use `@samubr`, `#1`, `:thumbsup:`, `😀`, `Vec<u8>`, `{x}`, `$5` and `a\\b` here",
++      "html": "<p data-sourcepos=\"1:1-1:80\" dir=\"auto\">use <code data-sourcepos=\"1:5-1:13\">@samubr</code>, <code data-sourcepos=\"1:16-1:19\">#1</code>, <code data-sourcepos=\"1:22-1:33\">:thumbsup:</code>, <code data-sourcepos=\"1:36-1:41\">😀</code>, <code data-sourcepos=\"1:44-1:52\">Vec&lt;u8&gt;</code>, <code data-sourcepos=\"1:55-1:59\">{x}</code>, <code data-sourcepos=\"1:62-1:65\">$5</code> and <code data-sourcepos=\"1:71-1:75\">a\\b</code> here</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "use "
++            },
++            {
++              "kind": "code",
++              "text": "@samubr"
++            },
++            {
++              "kind": "text",
++              "text": ", "
++            },
++            {
++              "kind": "code",
++              "text": "#1"
++            },
++            {
++              "kind": "text",
++              "text": ", "
++            },
++            {
++              "kind": "code",
++              "text": ":thumbsup:"
++            },
++            {
++              "kind": "text",
++              "text": ", "
++            },
++            {
++              "kind": "code",
++              "text": "😀"
++            },
++            {
++              "kind": "text",
++              "text": ", "
++            },
++            {
++              "kind": "code",
++              "text": "Vec<u8>"
++            },
++            {
++              "kind": "text",
++              "text": ", "
++            },
++            {
++              "kind": "code",
++              "text": "{x}"
++            },
++            {
++              "kind": "text",
++              "text": ", "
++            },
++            {
++              "kind": "code",
++              "text": "$5"
++            },
++            {
++              "kind": "text",
++              "text": " and "
++            },
++            {
++              "kind": "code",
++              "text": "a\\b"
++            },
++            {
++              "kind": "text",
++              "text": " here"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "fence_hides_refs",
++      "text": "```rust\nlet who = \"@samubr\"; // #1 :x: [y](z) <b> {c} $d \\n\n```",
++      "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-3:3\" data-canonical-lang=\"rust\" class=\"code highlight js-syntax-highlight language-rust\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"rust\"><span class=\"k\">let</span> <span class=\"n\">who</span> <span class=\"o\">=</span> <span class=\"s\">\"@samubr\"</span><span class=\"p\">;</span> <span class=\"c1\">// #1 :x: [y](z) &lt;b&gt; {c} $d \\n</span></span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "code",
++          "language": "rust",
++          "text": "let who = \"@samubr\"; // #1 :x: [y](z) <b> {c} $d \\n"
++        }
++      ]
++    },
++    {
++      "name": "heading_closing_hashes",
++      "text": "## Title ##",
++      "html": "<h2 id=\"user-content-title\" data-sourcepos=\"1:1-1:11\" dir=\"auto\">Title<a href=\"#title\" aria-label=\"Link to heading 'Title'\" data-heading-content=\"Title\" class=\"anchor\"></a></h2>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "heading",
++          "level": "h2",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Title"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "heading_then_text",
++      "text": "## Title\ntext right after",
++      "html": "<h2 id=\"user-content-title\" data-sourcepos=\"1:1-1:8\" dir=\"auto\">Title<a href=\"#title\" aria-label=\"Link to heading 'Title'\" data-heading-content=\"Title\" class=\"anchor\"></a></h2>\n<p data-sourcepos=\"2:1-2:16\" dir=\"auto\">text right after</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "heading",
++          "level": "h2",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Title"
++            }
++          ]
++        },
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "text right after"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "mixed_bullets",
++      "text": "- a\n* b",
++      "html": "<ul data-sourcepos=\"1:1-1:3\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:3\">a</li>\n</ul>\n<ul data-sourcepos=\"2:1-2:3\" dir=\"auto\">\n<li data-sourcepos=\"2:1-2:3\">b</li>\n</ul>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "bullets"
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "a"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        },
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "bullets"
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "b"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "table_short_row",
++      "text": "| a | b |\n| - | - |\n| 1 |",
++      "html": "<table data-sourcepos=\"1:1-3:5\" dir=\"auto\">\n<thead>\n<tr data-sourcepos=\"1:1-1:9\">\n<th data-sourcepos=\"1:2-1:4\">a</th>\n<th data-sourcepos=\"1:6-1:8\">b</th>\n</tr>\n</thead>\n<tbody>\n<tr data-sourcepos=\"3:1-3:5\">\n<td data-sourcepos=\"3:2-3:4\">1</td>\n<td data-sourcepos=\"3:5-3:5\"></td>\n</tr>\n</tbody>\n</table>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "table",
++          "head": [
++            {
++              "cells": [
++                {
++                  "header": true,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "a"
++                    }
++                  ]
++                },
++                {
++                  "header": true,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "b"
++                    }
++                  ]
++                }
++              ]
++            }
++          ],
++          "body": [
++            {
++              "cells": [
++                {
++                  "header": false,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "1"
++                    }
++                  ]
++                },
++                {
++                  "header": false,
++                  "align": "start",
++                  "inlines": []
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "table_after_paragraph",
++      "text": "text\n| a | b |\n| - | - |\n| 1 | 2 |",
++      "html": "<p data-sourcepos=\"1:1-1:4\" dir=\"auto\">text</p>\n<table data-sourcepos=\"2:1-4:9\" dir=\"auto\">\n<thead>\n<tr data-sourcepos=\"2:1-2:9\">\n<th data-sourcepos=\"2:2-2:4\">a</th>\n<th data-sourcepos=\"2:6-2:8\">b</th>\n</tr>\n</thead>\n<tbody>\n<tr data-sourcepos=\"4:1-4:9\">\n<td data-sourcepos=\"4:2-4:4\">1</td>\n<td data-sourcepos=\"4:6-4:8\">2</td>\n</tr>\n</tbody>\n</table>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "text"
++            }
++          ]
++        },
++        {
++          "kind": "table",
++          "head": [
++            {
++              "cells": [
++                {
++                  "header": true,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "a"
++                    }
++                  ]
++                },
++                {
++                  "header": true,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "b"
++                    }
++                  ]
++                }
++              ]
++            }
++          ],
++          "body": [
++            {
++              "cells": [
++                {
++                  "header": false,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "1"
++                    }
++                  ]
++                },
++                {
++                  "header": false,
++                  "align": "start",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "2"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "quote_lazy",
++      "text": "> a\nb",
++      "html": "<blockquote data-sourcepos=\"1:1-2:1\" dir=\"auto\">\n<p data-sourcepos=\"1:3-2:1\">a\nb</p>\n</blockquote>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "quote",
++          "blocks": [
++            {
++              "kind": "paragraph",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "a\nb"
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "quote_two_paragraphs",
++      "text": "> a\n>\n> b",
++      "html": "<blockquote data-sourcepos=\"1:1-3:3\" dir=\"auto\">\n<p data-sourcepos=\"1:3-1:3\">a</p>\n<p data-sourcepos=\"3:3-3:3\">b</p>\n</blockquote>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "quote",
++          "blocks": [
++            {
++              "kind": "paragraph",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "a"
++                }
++              ]
++            },
++            {
++              "kind": "paragraph",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "b"
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "list_lazy",
++      "text": "- a\ncontinued\n- b",
++      "html": "<ul data-sourcepos=\"1:1-3:3\" dir=\"auto\">\n<li data-sourcepos=\"1:1-2:9\">a\ncontinued</li>\n<li data-sourcepos=\"3:1-3:3\">b</li>\n</ul>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "bullets"
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "a\ncontinued"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "b"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "nested_ordered",
++      "text": "- a\n  1. b\n  2. c",
++      "html": "<ul data-sourcepos=\"1:1-3:6\" dir=\"auto\">\n<li data-sourcepos=\"1:1-3:6\">a\n<ol data-sourcepos=\"2:3-3:6\">\n<li data-sourcepos=\"2:3-2:6\">b</li>\n<li data-sourcepos=\"3:3-3:6\">c</li>\n</ol>\n</li>\n</ul>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "bullets"
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "a\n"
++                    }
++                  ]
++                },
++                {
++                  "kind": "list",
++                  "numbering": {
++                    "kind": "numbers",
++                    "start": 1
++                  },
++                  "items": [
++                    {
++                      "task": "none",
++                      "blocks": [
++                        {
++                          "kind": "paragraph",
++                          "inlines": [
++                            {
++                              "kind": "text",
++                              "text": "b"
++                            }
++                          ]
++                        }
++                      ]
++                    },
++                    {
++                      "task": "none",
++                      "blocks": [
++                        {
++                          "kind": "paragraph",
++                          "inlines": [
++                            {
++                              "kind": "text",
++                              "text": "c"
++                            }
++                          ]
++                        }
++                      ]
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "ordered_para_items",
++      "text": "1. a\n\n   para\n2. b",
++      "html": "<ol data-sourcepos=\"1:1-4:4\" dir=\"auto\">\n<li data-sourcepos=\"1:1-3:7\">\n<p data-sourcepos=\"1:4-1:4\">a</p>\n<p data-sourcepos=\"3:4-3:7\">para</p>\n</li>\n<li data-sourcepos=\"4:1-4:4\">\n<p data-sourcepos=\"4:4-4:4\">b</p>\n</li>\n</ol>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "numbers",
++            "start": 1
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "a"
++                    }
++                  ]
++                },
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "para"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "b"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "ordered_zero_start",
++      "text": "010. ten\n011. eleven",
++      "html": "<ol data-sourcepos=\"1:1-2:11\" start=\"10\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:8\">ten</li>\n<li data-sourcepos=\"2:1-2:11\">eleven</li>\n</ol>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "numbers",
++            "start": 10
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "ten"
++                    }
++                  ]
++                }
++              ]
++            },
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "eleven"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "emphasis_punct",
++      "text": "**bold**. (*it*) and a**\"b\"**",
++      "html": "<p data-sourcepos=\"1:1-1:29\" dir=\"auto\"><strong data-sourcepos=\"1:1-1:8\">bold</strong>. (<em data-sourcepos=\"1:12-1:15\">it</em>) and a**\"b\"**</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "strong",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "bold"
++                }
++              ]
++            },
++            {
++              "kind": "text",
++              "text": ". ("
++            },
++            {
++              "kind": "emphasis",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "it"
++                }
++              ]
++            },
++            {
++              "kind": "text",
++              "text": ") and a**\"b\"**"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "emphasis_nested",
++      "text": "*a **b** c* and **x*y*z**",
++      "html": "<p data-sourcepos=\"1:1-1:25\" dir=\"auto\"><em data-sourcepos=\"1:1-1:11\">a <strong data-sourcepos=\"1:4-1:8\">b</strong> c</em> and <strong data-sourcepos=\"1:17-1:25\">x<em data-sourcepos=\"1:20-1:22\">y</em>z</strong></p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "emphasis",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "a "
++                },
++                {
++                  "kind": "strong",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "b"
++                    }
++                  ]
++                },
++                {
++                  "kind": "text",
++                  "text": " c"
++                }
++              ]
++            },
++            {
++              "kind": "text",
++              "text": " and "
++            },
++            {
++              "kind": "strong",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "x"
++                },
++                {
++                  "kind": "emphasis",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "y"
++                    }
++                  ]
++                },
++                {
++                  "kind": "text",
++                  "text": "z"
++                }
++              ]
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "fence_blank_edges",
++      "text": "```\n\na\n\n```",
++      "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-5:3\" class=\"code highlight js-syntax-highlight language-plaintext\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"plaintext\"></span>\n<span id=\"LC2\" class=\"line\" data-lang=\"plaintext\">a</span>\n<span id=\"LC3\" class=\"line\" data-lang=\"plaintext\"></span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "code",
++          "language": null,
++          "text": "\na"
++        }
++      ]
++    },
++    {
++      "name": "unicode_plain",
++      "text": "Schöne Grüße — “quotes”",
++      "html": "<p data-sourcepos=\"1:1-1:32\" dir=\"auto\">Schöne Grüße — “quotes”</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "Schöne Grüße — “quotes”"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "ampersand_no_angle",
++      "text": "a & b > c \"q\" 'x'",
++      "html": "<p data-sourcepos=\"1:1-1:17\" dir=\"auto\">a &amp; b &gt; c \"q\" 'x'</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "a & b > c \"q\" 'x'"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "hard_break_three_spaces",
++      "text": "a   \nb",
++      "html": "<p data-sourcepos=\"1:1-2:1\" dir=\"auto\">a<br data-sourcepos=\"1:3-1:5\">\nb</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "a"
++            },
++            {
++              "kind": "lineBreak"
++            },
++            {
++              "kind": "text",
++              "text": "\nb"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "rule_after_list",
++      "text": "- a\n\n---\n\nb",
++      "html": "<ul data-sourcepos=\"1:1-1:3\" dir=\"auto\">\n<li data-sourcepos=\"1:1-2:0\">a</li>\n</ul>\n<hr data-sourcepos=\"3:1-3:3\">\n<p data-sourcepos=\"5:1-5:1\" dir=\"auto\">b</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "list",
++          "numbering": {
++            "kind": "bullets"
++          },
++          "items": [
++            {
++              "task": "none",
++              "blocks": [
++                {
++                  "kind": "paragraph",
++                  "inlines": [
++                    {
++                      "kind": "text",
++                      "text": "a"
++                    }
++                  ]
++                }
++              ]
++            }
++          ]
++        },
++        {
++          "kind": "rule"
++        },
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "b"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "star_rule",
++      "text": "a\n\n* * *\n\nb",
++      "html": "<p data-sourcepos=\"1:1-1:1\" dir=\"auto\">a</p>\n<hr data-sourcepos=\"3:1-3:5\">\n<p data-sourcepos=\"5:1-5:1\" dir=\"auto\">b</p>",
++      "local": true,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "a"
++            }
++          ]
++        },
++        {
++          "kind": "rule"
++        },
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "b"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "strike_single_tilde",
++      "text": "a ~(x)~ b",
++      "html": "<p data-sourcepos=\"1:1-1:9\" dir=\"auto\">a <del data-sourcepos=\"1:3-1:7\">(x)</del> b</p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "a "
++            },
++            {
++              "kind": "strike",
++              "inlines": [
++                {
++                  "kind": "text",
++                  "text": "(x)"
++                }
++              ]
++            },
++            {
++              "kind": "text",
++              "text": " b"
++            }
++          ]
++        }
++      ]
++    },
++    {
++      "name": "code_language_upper",
++      "text": "```TS\nconst x = 1;\n```",
++      "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-3:3\" data-canonical-lang=\"TS\" class=\"code highlight js-syntax-highlight language-plaintext\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"plaintext\">const x = 1;</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "code",
++          "language": "TS",
++          "text": "const x = 1;"
++        }
++      ]
++    },
++    {
++      "name": "fence_info_words",
++      "text": "```rust ignore\nlet a = 1;\n```",
++      "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-3:3\" data-canonical-lang=\"rust\" data-lang-params=\"ignore\" class=\"code highlight js-syntax-highlight language-rust\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"rust\"><span class=\"k\">let</span> <span class=\"n\">a</span> <span class=\"o\">=</span> <span class=\"mi\">1</span><span class=\"p\">;</span></span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "code",
++          "language": "rust",
++          "text": "let a = 1;"
++        }
++      ]
++    },
++    {
++      "name": "quick_action",
++      "text": "/label ~bug",
++      "html": "<p data-sourcepos=\"1:1-1:11\" dir=\"auto\">/label ~bug</p>",
++      "local": false,
++      "blocks": [
++        {
++          "kind": "paragraph",
++          "inlines": [
++            {
++              "kind": "text",
++              "text": "/label ~bug"
++            }
++          ]
++        }
++      ]
++    }
++  ]
++}

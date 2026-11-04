@@ -9,6 +9,8 @@ use super::size::{ImageLength, image_length};
 use super::*;
 use crate::PictureAddress;
 
+mod corpus;
+
 const BASE: &str = "https://gitlab.com/taskboard/taskboard/-/merge_requests/52";
 const MERGE_REQUESTS: &str = "https://gitlab.com/taskboard/taskboard/-/merge_requests/";
 const SUB_PATH_BASE: &str = "https://gitlab.example/gitlab/taskboard/taskboard/-/merge_requests/52";
