@@ -1,11 +1,1 @@
-{
-  "MrThreadsDocsR2": {
-    "owned": [
-      "frontend/src/ui/AGENTS.md",
-      "docs/architecture.md",
-      "docs/plan.md",
-      ".omp/skills/risk-register/SKILL.md",
-      ".omp/skills/project-map/**"
-    ]
-  }
-}
+{}
