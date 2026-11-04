@@ -22,16 +22,25 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 Request `docs/slices/request-mr-fast-preview.md` (parts A–B, acceptance, non-goals, reopens); base `49b7912c`.
 Owner's answers: local when safe, else GitLab (#2421); login and project remembered (#2422). Corpus measured by the
 orchestrator: 66 texts against gitlab.com, `.omp/run/notes/PlanFastPreviewCorpus.{md,json}` (a literal Unicode
-emoji becomes `gl-emoji`: a trigger). No product question open.
+emoji becomes `gl-emoji`: a trigger). Design `briefs/mr-fast-preview-design.md` option A: `localPreview(text)` beside
+yamt's parser (`editor/internal/`) decides and builds `Description` blocks, the panel asks it before GitLab; GitLab's
+recorded answers through the one Rust reducer are the fixture both sides test; `GitLabRepository` remembers the project
+(forgotten on 401, "404 Project Not Found", no project, Refresh's `ask_gitlab_again`); proposed plan #186–#188,
+RK74+ (docs keeper). Open for the owner, built as the design's default meanwhile (OR13): logged out while yamt runs on
+a public project keeps reading anonymously until Refresh; table alignment ignored by the reducer (non-goal here).
+Order: corpus ∥ remembered, local after corpus, `just bindings` after remembered, panel (wires the window), docs ∥
+smoke, final.
 
-| row | slice                                                                                     | owner                 | status  | evidence |
-| --- | ----------------------------------------------------------------------------------------- | --------------------- | ------- | -------- |
-| 1   | design: local path and its home, triggers, remembered project and its forgetting          | designer              | running |          |
-| 2   | Rust: the remembered login and project (B1–B3), its callers, fake glab                    | rust-impl             | todo    |          |
-| 3   | local preview: triggers, local blocks, the corpus tests                                   | per design            | todo    |          |
-| 4   | panel: one preview state for both paths, no "Loading…" on the local one; wires the window | web-impl              | todo    |          |
-| 5   | docs keeper; verify: smoke after 4, final `just check`, WebKit, real app                  | docs-keeper, verifier | todo    |          |
-| 6   | owner check on the GitLab playground                                                      | human                 | todo    |          |
+| row | slice                                                                                       | owner                 | status  | evidence                                                                     |
+| --- | ------------------------------------------------------------------------------------------- | --------------------- | ------- | ---------------------------------------------------------------------------- |
+| 1   | design                                                                                      | designer              | done    | `MrFastPreviewDesign`: option A, five briefs. Notes `MrFastPreviewDesign.md` |
+| 2   | corpus (`briefs/mr-fast-preview-corpus.md`): fixture JSON, 25 more recordings, Rust test    | rust-impl             | running |                                                                              |
+| 3   | remembered (`briefs/mr-fast-preview-remembered.md`): B1–B3, callers, fake glab, Refresh cmd | rust-impl             | running |                                                                              |
+| 3b  | `just bindings` after row 3 (`askGitlabAgain`)                                              | orchestrator          | todo    |                                                                              |
+| 4   | local (`briefs/mr-fast-preview-local.md`): `localPreview`, triggers, flanking mode          | web-impl              | todo    |                                                                              |
+| 5   | panel (`briefs/mr-fast-preview-panel.md`): one preview state, Refresh; wires the window     | web-impl              | todo    |                                                                              |
+| 6   | docs keeper; verify (`briefs/mr-fast-preview-verify.md`): smoke after 5, final              | docs-keeper, verifier | todo    |                                                                              |
+| 7   | owner check on the GitLab playground                                                        | human                 | todo    |                                                                              |
 
 ## Threads beside the box (session 50; owner #2329–#2333: "Your turn" only when it is, the whole thread, answering, sized images)
 
