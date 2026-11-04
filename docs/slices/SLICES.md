@@ -55,7 +55,8 @@ Request `docs/slices/request-mr-links.md` (rules 1–6); facts `.omp/run/notes/P
 Design `briefs/mr-links-design.md` option A: `read_links(iid)` reuses the description's fetch and walk, classifies
 pages on the project's https server by GitLab's routes, one aliased CE-only `workItems(iids)` query per hover for
 titles, states and direct parents (measured 50 of 200), commit titles from GitLab's reference title; every line and
-parent page offered before the reply; proposed plan #175–#177, RK68–RK70. No open question. Order: rust, app,
+parent page offered before the reply; proposed plan #175–#177 (recorded as #176–#178: #175 went to the description's
+uploads rule #2280; briefs keep the old numbers), RK68–RK70. No open question. Order: rust, app,
 `just bindings`, state, page (after the description page lands), docs ∥ smoke, final.
 
 | row | slice                                                  | owner                 | status  | evidence                                                         |
