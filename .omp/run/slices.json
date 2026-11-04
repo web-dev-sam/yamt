@@ -1,25 +1,5 @@
 {
-  "MrLinksPageR1": {
-    "owned": [
-      "frontend/src/ui/MergeRequestLinks.vue",
-      "frontend/src/ui/mergeRequestLinkLines.ts",
-      "frontend/src/ui/mergeRequestLinkLines.test.ts",
-      "frontend/src/ui/MergeRequestDiscussions.vue",
-      "frontend/src/ui/MergeRequestPeople.vue",
-      "frontend/src/ui/useHoverBox.ts",
-      "frontend/src/ui/useHoverBox.test.ts",
-      "frontend/src/ui/glab.ts",
-      "frontend/src/ui/glab.test.ts",
-      "frontend/src/ui/mergeRequestDescriptionText.ts",
-      "frontend/src/ui/mergeRequestDescriptionText.test.ts",
-      "frontend/src/ui/AGENTS.md",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ipc/MergeRequestSource.ts"
-    ]
-  },
-  "MrLinksCrateDoc": {
-    "owned": [
-      "crates/merge-requests/AGENTS.md"
-    ]
+  "MrLinksFinal": {
+    "owned": []
   }
 }
