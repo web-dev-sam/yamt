@@ -107,7 +107,9 @@ app-session start-app --name mtv --diff --dir <scratch>/mtv --glab mr-threads`, 
    `{"resolved":true}`; the same with `false`; `POST …/draft_notes/bulk_publish` with `{}` — and no other `--method`
    or `stdin:` line; Preview logs `POST markdown` and counts no post (state file 5 at the end).
 4. The Rust log (`RUST_LOG=info`): one line per write with kind and outcome, no text; the thread read line with counts.
-5. `shot` dark and light.
+5. Review mode on the `mr-review-mode` scenario (`--glab mr-review-mode`): the orders for Me and for Anna, compared with
+   `docs/slices/briefs/mr-review-mode-design.md:218-219`; report the orders seen (the B5 rule may have changed them).
+6. `shot` dark and light.
 
 ## Acceptance
 
