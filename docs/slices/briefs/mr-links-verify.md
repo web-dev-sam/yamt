@@ -107,7 +107,9 @@ and yamt Light (`--settings '{"theme":"light"}'`) unless noted.
    read the links: glab: a deadline line" with Retry.
 5. **Log.** The fake glab log for one hover of !62: `auth status`, the project, `MergeRequestDescription`, one
    `MergeRequestLinks` with fields `path0` to `path5`; no `stdin:`, no `-X`. The app log has one `links_read` line per
-   ask with counts, never a title or an address.
+   ask with counts, never a title or an address. The Rust log (`RUST_LOG=info`) has one "read a merge request's links"
+   line for !62 whose epics, issues and commits counts are 3, 6 and 4 (finding #2311: it pins the crate's field
+   mapping), with its calls and score.
 6. `shot` in dark and light.
 
 ## Acceptance

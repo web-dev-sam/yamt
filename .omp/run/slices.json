@@ -1,9 +1,35 @@
 {
-  "MrLinksApp": {
+  "MrLinksState": {
     "owned": [
-      "src-tauri/src/merge_requests.rs",
-      "src-tauri/src/merge_requests/**",
-      "src-tauri/src/commands.rs"
+      "frontend/src/ipc/MergeRequestSource.ts",
+      "frontend/src/ipc/mergeRequestDomain.ts",
+      "frontend/src/ipc/mergeRequestDomain.test.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/tauriMergeRequests.ts",
+      "frontend/src/ipc/tauriMergeRequests.test.ts",
+      "frontend/src/ipc/fixtureMergeRequests.ts",
+      "frontend/src/ipc/fixtureMergeRequestLinks.ts",
+      "frontend/src/ipc/fixtureMergeRequestLinks.test.ts",
+      "frontend/src/ipc/AGENTS.md",
+      "frontend/src/ui/mergeRequestLinks.ts",
+      "frontend/src/ui/mergeRequestLinks.test.ts",
+      "frontend/src/ui/mergeRequests.ts",
+      "frontend/src/ui/mergeRequests.test.ts",
+      "frontend/src/ui/mergeRequestsList.ts",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts",
+      "frontend/src/",
+      "frontend/src/**/*.test.ts",
+      "frontend/src/ipc/descriptionDomain.ts",
+      "frontend/src/ipc/descriptionDomain.test.ts"
+    ]
+  },
+  "MrLinksRustR1": {
+    "owned": [
+      "crates/merge-requests/src/**",
+      "crates/merge-requests/tests/**",
+      "crates/merge-requests/AGENTS.md"
     ]
   }
 }
