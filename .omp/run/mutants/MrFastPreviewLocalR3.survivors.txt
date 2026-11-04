@@ -1,0 +1,2 @@
+just mutants HEAD → 'mutants: no Rust changes since HEAD / mutants: no TypeScript changes since HEAD' (editor/ is not mutated). Hand mutant `^ {0,3}`→`^ *` (the old form) is killed by both new tests.
+

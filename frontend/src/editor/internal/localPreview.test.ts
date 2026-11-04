@@ -68,6 +68,7 @@ const TRIGGERS: readonly (readonly [rule: string, text: string])[] = [
   ["S5 mixed bullets", "- a\n* b"],
   ["S5 mixed bullets in a quote", "> - a\n> * b"],
   ["S6 multi-line quote", ">>>\nq\n>>>"],
+  ["S6 multi-line quote in a second-level item", "- a\n  - b\n    >>>\n    q\n    >>>"],
   ["S7 front matter", "---\nk: v\n---"],
   ["S7 toml front matter", "+++\nk = 1\n+++"],
   ["S7 front matter with a language", "+++toml\nk = 1\n+++"],
@@ -247,5 +248,19 @@ test("a_table_reads_start_whatever_its_alignment", () => {
         body: [startRow(false, ["1", "2", "3"])],
       },
     ],
+  });
+});
+
+function item(blocks: readonly unknown[]): unknown {
+  return { kind: "list", numbering: { kind: "bullets" }, items: [{ task: "none", blocks }] };
+}
+
+function words(text: string): unknown {
+  return { kind: "paragraph", inlines: [{ kind: "text", text }] };
+}
+
+test("a_rule_in_a_second_level_item_is_drawn_inside_it", () => {
+  expect(localPreview("- a\n  - b\n    - - -")).toEqual({
+    blocks: [item([words("a"), item([words("b"), { kind: "rule" }])])],
   });
 });
