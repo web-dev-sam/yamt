@@ -1,4 +1,4 @@
-use url::Url;
+use url::{Origin, Url};
 
 use crate::WebPage;
 use crate::project::Project;
@@ -40,7 +40,7 @@ pub(crate) enum Target {
 
 /// The project's GitLab: `https://host[:port]` and the sub-path GitLab is installed under (`""` on gitlab.com).
 pub(crate) struct Server {
-    origin: String,
+    origin: Origin,
     sub_path: String,
 }
 
@@ -73,7 +73,7 @@ impl Target {
 impl Server {
     /// None when GitLab is not on https, or the project's web path does not end with its full path.
     pub(crate) fn of(project: &Project) -> Option<Server> {
-        let origin = project.web_origin.clone()?;
+        let origin = Url::parse(project.web_origin.as_deref()?).ok()?.origin();
         let sub_path = project
             .web_path
             .strip_suffix(project.full_path.as_str())?
@@ -88,7 +88,7 @@ impl Server {
 /// `page` as a thing on the project's server: https, the project's origin, under its sub-path; None for any other.
 pub(crate) fn target_of(server: &Server, page: &WebPage) -> Option<Target> {
     let url = Url::parse(page.as_str()).ok()?;
-    if url.origin().ascii_serialization() != server.origin {
+    if url.origin() != server.origin {
         return None;
     }
     let path = url

@@ -307,6 +307,25 @@ fn a_sub_path_install_reads_its_addresses_under_the_sub_path() {
 }
 
 #[test]
+fn a_web_url_with_an_upper_case_host_or_port_443_keeps_every_link() {
+    for web_origin in ["https://GitLab.Example", "https://gitlab.example:443"] {
+        let project = Project {
+            web_origin: Some(web_origin.to_owned()),
+            ..project()
+        };
+        let server = Server::of(&project).unwrap();
+
+        for (path, expected) in counted_items() {
+            assert_eq!(
+                target_of(&server, &at(path)),
+                Some(expected),
+                "{web_origin}{path}"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_merge_requests_own_commit_link_is_that_commit() {
     let server = server();
     for query in [
