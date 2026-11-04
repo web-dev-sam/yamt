@@ -20,11 +20,16 @@ running: leave it alone; never `pkill`/`killall`. Launch everything on a private
 4. **The release binary shows this release's three features**: `scripts/local-conflicts-repo.sh /tmp/yamt-rel68-mr`,
    then `just app-session start-app --name r68-mr --binary target/release/yamt --diff --dir /tmp/yamt-rel68-mr
    --glab mr-links --mr --home /tmp/yamt-rel-0.6.8/home-1`:
-   - the page with its rows at once; !62's people box has the add buttons beside "Assignees" and "Reviewers";
+   - the page with its rows at once;
    - !62's info button opens the description panel, Escape closes it;
    - hovering !62's links button lists Epics 3, Issues 6, Commits 4; the link-line icons sit centred on their line
      (private-display screenshot of the box);
    - no CSP error in the app log. `stop`.
+
+   Then the same with `--name r68-people --glab mr-people --home /tmp/yamt-rel-0.6.8/home-2` (the scenario whose rows
+   carry GitLab's permissions; `mr-links` has none, finding #2327): a row's people box has the add buttons beside
+   "Assignees" and "Reviewers", and a person's "More" menu holds "Remove assignee" / "Remove reviewer". `stop`.
+
 5. After `stop`: no yamt, Xvfb, driver or private bus from this run is left. Remove `/tmp/yamt-rel68-*`.
 
 ## Report
