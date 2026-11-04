@@ -24,8 +24,8 @@ purple when one discussion waits for the viewer; C: Escape never closes the page
 due, most waiting for the reviewer, fewest the reviewer wrote in); base `f93d0020`. Frontend only, no IPC. One
 implementer slice (the four parts share `MergeRequestDiscussions.vue`, the core's turn counts and `ui/AGENTS.md`).
 Fast-preview row 5 (panel, owner #2423) also owns `MergeRequestDiscussions.vue`, `MergeRequestDiscussionsBox.test.ts`
-and `ui/AGENTS.md`: row 1 starts only after that slice's last round is committed, never beside it. Open for the
-owner: Q1 (D3's count: discussions the reviewer wrote in, or all open ones).
+and `ui/AGENTS.md`: row 1 starts only after that slice's last round is committed, never beside it. Owner #2429: D3
+counts the discussions the reviewer wrote in (the brief's default). No question open.
 Order: slice, smoke ∥ both reviews, docs keeper, final.
 
 | row | slice                                                                                                                             | owner                 | status  | evidence |

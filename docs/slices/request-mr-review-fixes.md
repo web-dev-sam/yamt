@@ -49,8 +49,8 @@ For the reviewer review mode speaks for, the shown rows sort by, in this order:
 - **D1.** Due date: rows with a due date first, the soonest on top (an overdue date is sooner than today's, as the
   normal order, plan #156); then the rows without one.
 - **D2.** Then the number of open discussions that are the reviewer's turn (the purple ones): most first.
-- **D3.** Then the number of open discussions the reviewer has written in: fewest first (0: the reviewer has not
-  looked at it yet). **Open question for the owner (Q1 below).**
+- **D3.** Then the number of open discussions the reviewer has written in (started or answered): fewest first (0:
+  the reviewer has not looked at it yet; owner #2429).
 - **D4.** (orchestrator) Ties keep the normal order (newest first). Rows whose discussions have not arrived count 0
   and 0 and move when they arrive; a failed row keeps the whole list in the normal order with the tooltip saying why
   (review-mode rules 6, unchanged).
@@ -62,11 +62,10 @@ For the reviewer review mode speaks for, the shown rows sort by, in this order:
 A due row with nothing waiting now sorts above an undated row with many waiting discussions (D1 before D2, the
 owner's order); today only due rows with the reviewer's turn came first.
 
-## Open question
+## Owner's answers
 
-- **Q1 (D3).** "The reviewer's discussions in total": (a) open discussions the reviewer wrote in — started or answered
-  — (recommended: 0 means they have not looked at it), or (b) every open discussion on the merge request (the number
-  on the row's button).
+- (#2429) Q1, D3's count: "Discussions the reviewer wrote in" (started or answered), chosen over every open
+  discussion on the merge request.
 
 ## Acceptance
 

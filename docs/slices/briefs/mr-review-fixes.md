@@ -1,7 +1,7 @@
 # Slice mr-review-fixes — the author's name, a marked discussions button, no Escape out of the list, review order
 
 Feature: four owner fixes on the merge-request page. Source: request `docs/slices/request-mr-review-fixes.md` parts
-A–D (rules A1–A2, B1–B3, C1–C2, D1–D5) and its Acceptance; the owner's answer to Q1 decides D3 (below). One slice:
+A–D (rules A1–A2, B1–B3, C1–C2, D1–D5) and its Acceptance; D3's count is the owner's answer #2429. One slice:
 the four parts share `MergeRequestDiscussions.vue`, the core's turn counts and `ui/AGENTS.md`, so splitting them
 would make two owners of each. Visions: the turn rule and its words live once in the core (plan #163, #179); one
 writer per state (§0). **This slice wires the window**: its commit starts the smoke pass.
@@ -37,7 +37,7 @@ Fixed; you may add, never change.
 // mergeRequests/internal/discussions.ts
 export type TurnCounts = {
   readonly viewersTurn: number;
-  /** Q1 (a): discussions with a comment (`earlier` or `last`) whose author is the viewer. */
+  /** D3 (owner #2429): discussions with a comment (`earlier` or `last`) whose author is the viewer. */
   readonly viewerWrote: number;
   readonly total: number;
 }; // `authorsTurn` removed (its only reader was the old order)
@@ -51,7 +51,6 @@ export function reviewOrdered<R, F>(rows, reviewer, dueOf, detailsOf): ReviewOrd
 export function reviewSortedText(viewer: Viewer, loading: number): string; // D5 words exactly
 ```
 
-- If the owner answers Q1 with (b), `viewerWrote` is not added and D3 uses `total`; the orchestrator says so in the task.
 - D1–D4 as one comparator after `firstFailed`: `compareDays` of the two due days (dated before undated), then
   `viewersTurn` descending, then `viewerWrote` ascending, then the normal order (`byDueDate`'s newest first). `none` and
   `loading` read as zero counts (`NO_TURNS`).
@@ -62,7 +61,7 @@ export function reviewSortedText(viewer: Viewer, loading: number): string; // D5
 
 ## Change
 
-1. Core: `turnText`'s author, `TurnCounts.viewerWrote` (or Q1 (b)), `authorsTurn` gone, the D1–D4 comparator, D5 words.
+1. Core: `turnText`'s author, `TurnCounts.viewerWrote`, `authorsTurn` gone, the D1–D4 comparator, D5 words.
 2. `MergeRequestDiscussions.vue`: `turnText(turn, viewer.value, props.row.author)` at both calls; the shared counts and
    the mark.
 3. `MergeRequestsView.vue`: Escape as C1/C2.
