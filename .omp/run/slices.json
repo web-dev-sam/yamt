@@ -1,26 +1,4 @@
 {
-  "MrFastPreviewPanel": {
-    "owned": [
-      "frontend/src/ui/mergeRequestPreview.ts",
-      "frontend/src/ui/mergeRequestThread.ts",
-      "frontend/src/ui/mergeRequestThread.test.ts",
-      "frontend/src/ui/MergeRequestThreadPanel.test.ts",
-      "frontend/src/ui/mergeRequests.ts",
-      "frontend/src/ui/mergeRequests.test.ts",
-      "frontend/src/ui/MergeRequestDiscussions.vue",
-      "frontend/src/ui/MergeRequestDiscussionsBox.test.ts",
-      "frontend/src/ipc/MergeRequestSource.ts",
-      "frontend/src/ipc/tauriMergeRequests.ts",
-      "frontend/src/ipc/tauriMergeRequests.test.ts",
-      "frontend/src/ipc/fixtureMergeRequests.ts",
-      "frontend/src/ipc/fixtureMergeRequests.test.ts",
-      "frontend/src/ui/AGENTS.md",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ui/mergeRequestsRefresh.ts",
-      "frontend/src/ui/mergeRequestsRefresh.test.ts",
-      "frontend/src/ui/mergeRequestReload.test.ts"
-    ]
-  },
   "MrFastPreviewRememberedR1": {
     "owned": [
       "crates/merge-requests/src/project.rs",
@@ -57,6 +35,18 @@
       "src-tauri/src/merge_requests/tests.rs",
       "src-tauri/src/merge_requests/tests/**",
       "src-tauri/AGENTS.md"
+    ]
+  },
+  "MrFastPreviewLocalR2": {
+    "owned": [
+      "frontend/src/editor/internal/localPreview.ts",
+      "frontend/src/editor/internal/localPreview.test.ts",
+      "frontend/src/editor/internal/markdownInline.ts",
+      "frontend/src/editor/internal/markdownInline.test.ts",
+      "frontend/src/editor/internal/markdownBlocks.ts",
+      "frontend/src/editor/internal/markdownBlocks.test.ts",
+      "frontend/src/editor/index.ts",
+      "frontend/src/editor/AGENTS.md"
     ]
   }
 }
