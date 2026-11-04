@@ -1,23 +1,4 @@
 {
-  "MrDescriptionDocs": {
-    "owned": [
-      "docs/architecture.md",
-      "docs/plan.md",
-      ".omp/skills/project-map/**",
-      ".omp/skills/ipc-contract/SKILL.md",
-      ".omp/skills/risk-register/SKILL.md",
-      "src-tauri/AGENTS.md",
-      "frontend/src/ipc/AGENTS.md"
-    ]
-  },
-  "MrDescriptionPageR1": {
-    "owned": [
-      "frontend/src/ui/MergeRequestDescription.vue",
-      "frontend/src/ui/MergeRequestsView.vue",
-      "frontend/src/ui/AGENTS.md",
-      "frontend/src/ipc/*.ts"
-    ]
-  },
   "MrLinksRust": {
     "owned": [
       "crates/merge-requests/src/**",
@@ -27,5 +8,8 @@
       "tests/glab/mr-links/**",
       "tests/glab/README.md"
     ]
+  },
+  "MrDescriptionFinal": {
+    "owned": []
   }
 }
