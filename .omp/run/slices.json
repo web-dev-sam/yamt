@@ -2,16 +2,6 @@
   "MrPeopleFinal": {
     "owned": []
   },
-  "MrDescriptionRustR1": {
-    "owned": [
-      "crates/merge-requests/src/**",
-      "crates/merge-requests/tests/**",
-      "crates/merge-requests/AGENTS.md",
-      "scripts/fake-glab/glab",
-      "tests/glab/mr-description/**",
-      "tests/glab/README.md"
-    ]
-  },
   "MrDescriptionState": {
     "owned": [
       "frontend/src/ipc/MergeRequestSource.ts",
@@ -37,6 +27,16 @@
       "frontend/src/ui/problemText.ts",
       "frontend/src/ui/problemText.test.ts",
       "frontend/src/**/*.test.ts"
+    ]
+  },
+  "MrDescriptionRustR2": {
+    "owned": [
+      "crates/merge-requests/src/**",
+      "crates/merge-requests/tests/**",
+      "crates/merge-requests/AGENTS.md",
+      "scripts/fake-glab/glab",
+      "tests/glab/mr-description/**",
+      "tests/glab/README.md"
     ]
   }
 }
