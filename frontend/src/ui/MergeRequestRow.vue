@@ -24,6 +24,7 @@ import { SHOW_DESCRIPTION } from "./mergeRequestDescriptionText";
 import MergeRequestDiscussions from "./MergeRequestDiscussions.vue";
 import MergeRequestDueDate from "./MergeRequestDueDate.vue";
 import MergeRequestLabels from "./MergeRequestLabels.vue";
+import MergeRequestLinks from "./MergeRequestLinks.vue";
 import MergeRequestPeople from "./MergeRequestPeople.vue";
 import MergeRequestPicture from "./MergeRequestPicture.vue";
 import MergeRequestReadiness from "./MergeRequestReadiness.vue";
@@ -195,6 +196,9 @@ function act(): void {
         >
           <Info class="size-4" aria-hidden="true" />
         </button>
+      </span>
+      <span class="flex w-7 shrink-0 justify-center">
+        <MergeRequestLinks v-if="row.hasDescription" :row />
       </span>
       <span class="flex w-7 shrink-0 justify-center">
         <CiStatusBox

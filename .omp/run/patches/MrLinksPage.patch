@@ -1,0 +1,572 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 5cb1994..1d00a03 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -69,3 +69,5 @@ The merge window of a merge request (plan §2 #138–#143): `question.ts` is wha
+ People on a merge request (request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, plan §2 #169, #170): `useMergeRequests()` carries `peopleSearch`/`searchPeople`/`endPeopleSearch` (the window's one search, 250 ms after the last call, newest answer only), `peopleAsks`/`changePeople` (`mergeRequestPeople.ts`: one change at a time per merge request, `queue[0]` running, `notDone` kept until the box closes; `rowPeopleAsks(peopleAsks, iid)` is the one reader of a row's asks, empty for a row with none) and `openPeopleBoxes`/`peopleBoxOpened`/`peopleBoxClosed`: `shownRows` keeps a row whose box is open (rule 9), so `MergeRequestPeople.vue` calls Opened when `useHoverBox`'s `open` turns true and Closed when it turns false or the box unmounts open. On a row with `mayRerequest` the box always shows both groups ("None" when empty; a row with nobody opens it from the dimmed icon), each header with a `user-plus` add button that opens `MergeRequestPeopleSearch.vue` under it (one field per box, `adding`): a `role="combobox"` field over a `role="listbox"` of `mergeRequestPeopleLines.ts` `pickList` (the core's `peopleSuggestions` while empty, else the search's people; "Already an assignee/reviewer" lines `aria-disabled`, a queued add spinning), arrows over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines change (`keptHighlight`), Enter or a click (its `mousedown` prevented) adds, and once that add is answered the field clears unless its text changed meanwhile (not at the pick, so the picked line shows its spinner) and takes focus back only from `document.body`, never from a control the user moved to while waiting; Escape closes the field (focus to its add button), a second Escape the box. Each assignee and reviewer line ends with `MergeRequestPersonMenu.vue` (`ellipsis-vertical`, one `useDropdownMenu<true>` menu with "Remove assignee/reviewer", `position: fixed` inside the box so the hover box holds it; the spinner, `aria-disabled` and no menu while that remove is queued or running). A change GitLab did not make is one `peopleChangeText` sentence (`personState` under the listed person for a remove, else `groupNotices` under the group). Every control of a line carries `data-control`, its key built once on the line (`BoxLine`'s `review.rerequest.control` and `menuControl`, null when not shown) and bound by the template; when a reply removes the focused one (`lineControls` over the same lines), focus moves to the box.
+ 
+ A merge request's description (request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, plan §2 #171–#174): the row's info column (`w-7`, between the approvals and the CI box, always rendered so the column stays) holds a button only when `row.hasDescription`; it calls `toggleDescription({ iid, title })` and carries `data-description-opener="<iid>"`. `MergeRequestsView.vue` renders the window's one `MergeRequestDescription.vue` after the list while `description` is set, keyed by the iid (a replace is a new panel), and closes it when the page unmounts. The panel is a non-modal `role="dialog"` that takes focus on mount; Escape and the close button call `closeDescription` and return focus to the row's opener when it is still listed. Escape is a window `keydown` listener in the bubble phase that acts only on an Escape nothing took (`defaultPrevented`) and not while a question is asked (a modal `dialog`'s cancel is the keydown's default action, so its Escape reaches the window unprevented): a focused field or box (the search field with text, a people box, a job log) handles Escape first, and the page's own listener, registered before the panel's, closes an open filter menu first and otherwise leaves Escape to the panel while `description` is set. A press outside it closes it (`onClickOutside`), ignoring every opener (whose toggle closes or replaces) and every element with `data-refreshes-list` (Refresh and the failed list's Retry: rule 2 keeps the panel over a list refresh, and onClickOutside would close it on their clicks, keyboard ones included); a new refresh trigger carries the attribute. A scroll leaves it open. Its renderers use interpolation only and never `href`, `v-html`, `innerHTML` or `title` (RK66): `MergeRequestDescriptionBlocks.vue` and `MergeRequestDescriptionInlines.vue` each render nested content by referring to themselves, with `editor/theme.css`'s `markdown-*` classes; a link is an `a` with `role="link"`, `tabindex="0"` and no `href`, whose click or Enter calls `openPage("link", page)` for a `page` link (branded in `ipc/descriptionDomain.ts` `toDescriptionReply` by `ipc/domain.ts` `isLinkedPage`, http or https) and does nothing for a `refused` one; task boxes are Lucide icons with `role="img"` and their word; `MergeRequestDescriptionImage.vue` loads `imageAddress(image)` with `referrerpolicy="no-referrer"` and shows the caption (else the `web` address, else "picture") when that is null or the image fails; `MergeRequestDescriptionCode.vue` hosts one `MarkdownView` through `useMarkdownCode`. The words are `mergeRequestDescriptionText.ts`.
++
++A merge request's links (request `docs/slices/request-mr-links.md`, design `docs/slices/briefs/mr-links-design.md` option A, plan §2 #176, #177, RK70): the row's links column (`w-7`, directly after the info column and before the CI box, always rendered so the column stays) holds `MergeRequestLinks.vue` only when `row.hasDescription`: Lucide `link` opening a hover box (`useHoverBox`, the discussions box's rules and look; `@click.stop`, so a click never opens the row's page). Its state is the slice's `links` (`mergeRequestLinks.ts`, written only by its queue: one call at a time, newest ask first, dropped with the list on a refresh); `useRowLinks` asks when the box opens and the row has no entry or a failed one, and Retry calls `askLinks(iid)`. Every word and line is `mergeRequestLinkLines.ts` `linkBox(load, platform)`: "Loading…", the empty sentence, the failure sentence (`linksFailedText`, `problemText` step `links` for a thrown call) with Retry, or the non-empty groups Epics, Issues, Commits; a line (group icon, reference, title and "Closed", or "Not found or no access") calls `openPage("link", page)` and the box stays; an issue GitLab shows with a parent has a second button (Lucide `arrow-up-to-line`, `parentTooltip`) opening the parent's page.
+diff --git a/frontend/src/ui/MergeRequestLinks.vue b/frontend/src/ui/MergeRequestLinks.vue
+new file mode 100644
+index 0000000..b96b7aa
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestLinks.vue
+@@ -0,0 +1,138 @@
++<script setup lang="ts">
++import { computed, useTemplateRef } from "vue";
++import ArrowUpToLine from "~icons/lucide/arrow-up-to-line";
++import CircleDot from "~icons/lucide/circle-dot";
++import GitCommitHorizontal from "~icons/lucide/git-commit-horizontal";
++import Layers from "~icons/lucide/layers";
++import Link from "~icons/lucide/link";
++
++import type { MergeRequestRow, WebPage } from "../ipc";
++import { RETRY } from "./aiText";
++import {
++  CLOSED,
++  linkBox,
++  NOT_SHOWN,
++  SHOW_LINKS,
++  type LinkGroupKind,
++} from "./mergeRequestLinkLines";
++import { useRowLinks } from "./mergeRequestLinks";
++import { useMergeRequests } from "./mergeRequestsStore";
++import { vTooltip } from "./tooltip";
++import { useHoverBox } from "./useHoverBox";
++
++const props = defineProps<{ row: MergeRequestRow }>();
++
++const mergeRequests = useMergeRequests();
++const { askLinks, openPage } = mergeRequests;
++const area = useTemplateRef<HTMLSpanElement>("area");
++const opener = useTemplateRef<HTMLButtonElement>("opener");
++const box = useTemplateRef<HTMLDivElement>("box");
++const { open, placement, on } = useHoverBox({
++  area: () => area.value,
++  opener: () => opener.value,
++  box,
++});
++const load = useRowLinks(
++  mergeRequests,
++  () => props.row.iid,
++  () => open.value,
++);
++const icons: Readonly<Record<LinkGroupKind, typeof Link>> = {
++  epics: Layers,
++  issues: CircleDot,
++  commits: GitCommitHorizontal,
++};
++
++const shown = computed(() => linkBox(load.value, navigator.platform));
++const groups = computed(() => (shown.value.kind === "groups" ? shown.value.groups : []));
++
++function retry(): void {
++  // Retry is removed with the focus, and the focus fixup sends no focusout, so useHoverBox would keep the box held
++  // (HTML "focus fixup rule": https://html.spec.whatwg.org/multipage/interaction.html#focus-fixup-rule).
++  box.value?.focus();
++  askLinks(props.row.iid);
++}
++
++async function openLink(page: WebPage): Promise<void> {
++  await openPage("link", page);
++}
++</script>
++
++<template>
++  <span
++    ref="area"
++    data-row-control
++    class="flex cursor-default"
++    @click.stop
++    @pointerenter="on.pointerenter"
++    @pointerleave="on.pointerleave"
++    @focusin="on.focusin"
++    @focusout="on.focusout"
++    @keydown="on.keydown"
++  >
++    <button
++      ref="opener"
++      type="button"
++      :aria-expanded="open"
++      :aria-label="SHOW_LINKS"
++      class="flex rounded p-1 hover:bg-hover"
++    >
++      <Link class="size-4" aria-hidden="true" />
++    </button>
++    <div
++      v-if="open"
++      ref="box"
++      tabindex="-1"
++      class="fixed z-10 max-h-[60vh] w-max max-w-[30rem] overflow-y-auto rounded-md border border-control-border bg-panel-inline p-1 text-fg shadow-lg outline-none"
++      :style="placement"
++    >
++      <template v-if="shown.kind === 'status'">
++        <p
++          role="status"
++          class="px-2 pt-1 pb-0.5"
++          :class="shown.failed ? 'text-problem-error' : 'text-fg-muted'"
++        >
++          {{ shown.text }}
++        </p>
++        <button
++          v-if="shown.failed"
++          type="button"
++          class="mx-2 my-1 cursor-pointer rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++          @click="retry"
++        >
++          {{ RETRY }}
++        </button>
++      </template>
++      <template v-for="group in groups" :key="group.kind">
++        <p class="px-2 pt-1 pb-0.5 text-fg-muted">{{ group.heading }}</p>
++        <ul :aria-label="group.heading">
++          <li v-for="line in group.lines" :key="line.reference" class="flex items-start">
++            <button
++              type="button"
++              class="flex min-w-0 flex-1 cursor-pointer items-baseline gap-2 rounded px-2 py-1 text-left hover:bg-hover"
++              @click="openLink(line.page)"
++            >
++              <component :is="icons[group.kind]" class="size-4 shrink-0" aria-hidden="true" />
++              <span class="shrink-0 font-mono">{{ line.reference }}</span>
++              <template v-if="line.detail.kind === 'shown'">
++                <span class="wrap-break-word">{{ line.detail.title }}</span>
++                <span v-if="line.detail.closed" class="text-fg-muted">{{ CLOSED }}</span>
++              </template>
++              <span v-else class="text-fg-muted">{{ NOT_SHOWN }}</span>
++            </button>
++            <button
++              v-if="line.parent !== null"
++              v-tooltip="line.parent.tooltip"
++              type="button"
++              :aria-label="line.parent.tooltip"
++              class="shrink-0 cursor-pointer rounded p-1 hover:bg-hover"
++              @click="openLink(line.parent.page)"
++            >
++              <ArrowUpToLine class="size-4" aria-hidden="true" />
++            </button>
++          </li>
++        </ul>
++      </template>
++    </div>
++  </span>
++</template>
+diff --git a/frontend/src/ui/MergeRequestRow.vue b/frontend/src/ui/MergeRequestRow.vue
+index ed4996f..305a721 100644
+--- a/frontend/src/ui/MergeRequestRow.vue
++++ b/frontend/src/ui/MergeRequestRow.vue
+@@ -24,6 +24,7 @@ import { SHOW_DESCRIPTION } from "./mergeRequestDescriptionText";
+ import MergeRequestDiscussions from "./MergeRequestDiscussions.vue";
+ import MergeRequestDueDate from "./MergeRequestDueDate.vue";
+ import MergeRequestLabels from "./MergeRequestLabels.vue";
++import MergeRequestLinks from "./MergeRequestLinks.vue";
+ import MergeRequestPeople from "./MergeRequestPeople.vue";
+ import MergeRequestPicture from "./MergeRequestPicture.vue";
+ import MergeRequestReadiness from "./MergeRequestReadiness.vue";
+@@ -196,6 +197,9 @@ function act(): void {
+           <Info class="size-4" aria-hidden="true" />
+         </button>
+       </span>
++      <span class="flex w-7 shrink-0 justify-center">
++        <MergeRequestLinks v-if="row.hasDescription" :row />
++      </span>
+       <span class="flex w-7 shrink-0 justify-center">
+         <CiStatusBox
+           v-if="row.pipeline !== null"
+diff --git a/frontend/src/ui/mergeRequestLinkLines.test.ts b/frontend/src/ui/mergeRequestLinkLines.test.ts
+new file mode 100644
+index 0000000..273759a
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestLinkLines.test.ts
+@@ -0,0 +1,241 @@
++import { beforeAll, expect, test, vi } from "vitest";
++
++import {
++  createFixtureCompareSource,
++  isMergeRequestIid,
++  log,
++  type DescriptionLinks,
++  type LinkedIssue,
++} from "../ipc";
++import {
++  CLOSED,
++  GROUP_HEADINGS,
++  linkBox,
++  linksFailedText,
++  LINKS_LOADING,
++  NO_LINKS,
++  NOT_SHOWN,
++  parentTooltip,
++  type LinkBox,
++  type LinkDetail,
++  type LinkGroup,
++  type LinkLine,
++} from "./mergeRequestLinkLines";
++import type { LinksLoad } from "./mergeRequestLinks";
++
++const PLATFORM = "Linux x86_64";
++const FIXTURE_PAUSE_MS = 400;
++const RICH_IID = 640;
++const SERVER = "https://gitlab.example";
++const ORIGIN = `${SERVER}/taskboard/taskboard`;
++const NONE: DescriptionLinks = { epics: [], issues: [], commits: [] };
++
++let RICH: DescriptionLinks = NONE;
++
++beforeAll(async () => {
++  if (!isMergeRequestIid(RICH_IID)) {
++    throw new Error("not an iid");
++  }
++  vi.useFakeTimers();
++  const answer = createFixtureCompareSource(log, "", {}).readLinks(RICH_IID);
++  await vi.advanceTimersByTimeAsync(FIXTURE_PAUSE_MS);
++  const result = await answer;
++  vi.useRealTimers();
++  if (!result.ok || result.value.kind !== "read") {
++    throw new Error("the fixture's !640 did not read");
++  }
++  RICH = result.value.links;
++});
++
++function read(links: DescriptionLinks): LinksLoad {
++  return { kind: "read", links };
++}
++
++function groupsOf(box: LinkBox): readonly LinkGroup[] {
++  if (box.kind !== "groups") {
++    throw new Error(`expected groups, got ${box.text}`);
++  }
++  return box.groups;
++}
++
++function lineOf(box: LinkBox, reference: string): LinkLine {
++  const line = groupsOf(box)
++    .flatMap((group) => group.lines)
++    .find((candidate) => candidate.reference === reference);
++  if (line === undefined) {
++    throw new Error(`no line ${reference}`);
++  }
++  return line;
++}
++
++function words({ detail }: { readonly detail: LinkDetail }): string {
++  switch (detail.kind) {
++    case "shown":
++      return detail.closed ? `${detail.title} ${CLOSED}` : detail.title;
++    case "notShown":
++      return NOT_SHOWN;
++    default: {
++      const _exhaustive: never = detail;
++      return _exhaustive;
++    }
++  }
++}
++
++function issuesOnly(issues: readonly LinkedIssue[]): DescriptionLinks {
++  return { ...NONE, issues };
++}
++
++test("groups_come_epics_issues_commits_and_an_empty_group_is_left_out", () => {
++  const rich = groupsOf(linkBox(read(RICH), PLATFORM));
++  expect(rich.map((group) => [group.kind, group.heading])).toEqual([
++    ["epics", "Epics"],
++    ["issues", "Issues"],
++    ["commits", "Commits"],
++  ]);
++  expect(rich.map((group) => group.lines.map((line) => line.reference))).toEqual([
++    ["&3", "&4", "design&2"],
++    ["#12", "#13", "other/lib#5", "secret/vault#9"],
++    ["fa3335f3", "a1b2c3d4…e5f6a7b8", "secret/vault@0badc0de"],
++  ]);
++  expect(GROUP_HEADINGS).toEqual({ epics: "Epics", issues: "Issues", commits: "Commits" });
++
++  const noIssues = groupsOf(linkBox(read({ ...RICH, issues: [] }), PLATFORM));
++  expect(noIssues.map((group) => group.kind)).toEqual(["epics", "commits"]);
++  const onlyCommits = groupsOf(linkBox(read({ ...NONE, commits: RICH.commits }), PLATFORM));
++  expect(onlyCommits.map((group) => group.kind)).toEqual(["commits"]);
++  const onlyEpics = groupsOf(linkBox(read({ ...NONE, epics: RICH.epics }), PLATFORM));
++  expect(onlyEpics.map((group) => group.kind)).toEqual(["epics"]);
++});
++
++test("a_line_keeps_its_reference_title_and_closed", () => {
++  const box = linkBox(read(RICH), PLATFORM);
++  expect(lineOf(box, "&3").detail).toEqual({
++    kind: "shown",
++    title: "Board redesign",
++    closed: false,
++  });
++  expect(lineOf(box, "&4").detail).toEqual({ kind: "shown", title: "Old board", closed: true });
++  expect(lineOf(box, "#13").detail).toEqual({
++    kind: "shown",
++    title: "Write the snooze test",
++    closed: false,
++  });
++  expect(lineOf(box, "other/lib#5").detail).toEqual({
++    kind: "shown",
++    title: "Fix date parsing",
++    closed: true,
++  });
++  expect(lineOf(box, "fa3335f3").detail).toEqual({
++    kind: "shown",
++    title: "Backfill due dates",
++    closed: false,
++  });
++  expect(lineOf(box, "#12").page).toBe(`${ORIGIN}/-/work_items/12`);
++  expect(lineOf(box, "&3").page).toBe(`${SERVER}/groups/taskboard/-/epics/3`);
++  expect(lineOf(box, "fa3335f3").page).toBe(
++    `${ORIGIN}/-/commit/fa3335f304f9482273040a55bc9386ddffc6a59f`,
++  );
++  expect(groupsOf(box).flatMap((group) => group.lines.map(words))).toEqual([
++    "Board redesign",
++    `Old board ${CLOSED}`,
++    NOT_SHOWN,
++    "Snooze a reminder",
++    "Write the snooze test",
++    `Fix date parsing ${CLOSED}`,
++    NOT_SHOWN,
++    "Backfill due dates",
++    "Commits a1b2c3d4 through e5f6a7b8",
++    NOT_SHOWN,
++  ]);
++  expect(CLOSED).toBe("Closed");
++});
++
++test("a_thing_gitlab_did_not_show_says_not_found_or_no_access_and_keeps_its_page", () => {
++  const box = linkBox(read(RICH), PLATFORM);
++  expect(NOT_SHOWN).toBe("Not found or no access");
++  expect(lineOf(box, "design&2")).toEqual({
++    reference: "design&2",
++    detail: { kind: "notShown" },
++    page: `${SERVER}/groups/design/-/epics/2`,
++    parent: null,
++  });
++  expect(lineOf(box, "secret/vault#9")).toEqual({
++    reference: "secret/vault#9",
++    detail: { kind: "notShown" },
++    page: `${SERVER}/secret/vault/-/issues/9`,
++    parent: null,
++  });
++  expect(lineOf(box, "secret/vault@0badc0de")).toEqual({
++    reference: "secret/vault@0badc0de",
++    detail: { kind: "notShown" },
++    page: `${SERVER}/secret/vault/-/commit/0badc0de`,
++    parent: null,
++  });
++});
++
++test("only_an_issue_with_a_parent_gets_the_parent_button_with_its_tooltip", () => {
++  const box = linkBox(read(RICH), PLATFORM);
++  expect(lineOf(box, "#12").parent).toEqual({
++    page: `${SERVER}/groups/taskboard/-/work_items/3`,
++    tooltip: "Open parent: &3 Board redesign",
++  });
++  expect(lineOf(box, "#13").parent).toEqual({
++    page: `${ORIGIN}/-/work_items/12`,
++    tooltip: "Open parent: #12 Snooze a reminder",
++  });
++  const parented = groupsOf(box).flatMap((group) =>
++    group.lines.filter((line) => line.parent !== null).map((line) => line.reference),
++  );
++  expect(parented).toEqual(["#12", "#13"]);
++  const [snooze] = RICH.issues;
++  if (snooze === undefined || snooze.shown === null) {
++    throw new Error("the fixture's #12 is not shown");
++  }
++  const { parent } = snooze.shown;
++  if (parent === null) {
++    throw new Error("the fixture's #12 has no parent");
++  }
++  expect(parentTooltip(parent)).toBe("Open parent: &3 Board redesign");
++  const hidden = linkBox(read(issuesOnly([{ ...snooze, shown: null }])), PLATFORM);
++  expect(lineOf(hidden, "#12").parent).toBeNull();
++});
++
++test("loading_empty_refused_and_failed_have_their_sentence_and_only_failures_retry", () => {
++  expect(linkBox(undefined, PLATFORM)).toEqual({
++    kind: "status",
++    text: LINKS_LOADING,
++    failed: false,
++  });
++  expect(linkBox({ kind: "loading" }, PLATFORM)).toEqual({
++    kind: "status",
++    text: "Loading…",
++    failed: false,
++  });
++  expect(linkBox(read(NONE), PLATFORM)).toEqual({ kind: "status", text: NO_LINKS, failed: false });
++  expect(NO_LINKS).toBe("No linked epics, issues or commits.");
++
++  const refusals: readonly [Extract<LinksLoad, { kind: "refused" }>, string][] = [
++    [
++      { kind: "refused", reply: { kind: "glabMissing" } },
++      "glab is not installed (not found on PATH) — install glab, then Retry.",
++    ],
++    [
++      { kind: "refused", reply: { kind: "notLoggedIn", detail: "gitlab.example: No token" } },
++      "glab is not logged in: gitlab.example: No token — run glab auth login in a terminal, then Retry.",
++    ],
++    [
++      { kind: "refused", reply: { kind: "failed", message: "glab timed out" } },
++      "Could not read the links: glab timed out",
++    ],
++  ];
++  for (const [load, sentence] of refusals) {
++    expect(linksFailedText(load, PLATFORM)).toBe(sentence);
++    expect(linkBox(load, PLATFORM)).toEqual({ kind: "status", text: sentence, failed: true });
++  }
++  const thrown: LinksLoad = { kind: "failed", cause: { kind: "WorkerStopped" } };
++  expect(linkBox(thrown, PLATFORM)).toEqual({
++    kind: "status",
++    text: "Could not read the links: yamt's worker stopped; try again.",
++    failed: true,
++  });
++});
+diff --git a/frontend/src/ui/mergeRequestLinkLines.ts b/frontend/src/ui/mergeRequestLinkLines.ts
+new file mode 100644
+index 0000000..f5ca3f9
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestLinkLines.ts
+@@ -0,0 +1,143 @@
++import type {
++  DescriptionLinks,
++  LinkedCommit,
++  LinkedEpic,
++  LinkedIssue,
++  LinkedParent,
++  WebPage,
++} from "../ipc";
++import { GLAB_MISSING_TEXT, glabNotLoggedInText } from "./glab";
++import type { LinksLoad } from "./mergeRequestLinks";
++import { problemText } from "./problemText";
++
++export const SHOW_LINKS = "Linked epics, issues and commits";
++export const LINKS_LOADING = "Loading…";
++export const NO_LINKS = "No linked epics, issues or commits.";
++export const NOT_SHOWN = "Not found or no access";
++export const CLOSED = "Closed";
++
++export type LinkGroupKind = "epics" | "issues" | "commits";
++
++export const GROUP_HEADINGS: Readonly<Record<LinkGroupKind, string>> = {
++  epics: "Epics",
++  issues: "Issues",
++  commits: "Commits",
++};
++
++export type LinkDetail =
++  | { readonly kind: "shown"; readonly title: string; readonly closed: boolean }
++  | { readonly kind: "notShown" };
++
++export type LinkLine = {
++  readonly reference: string;
++  readonly detail: LinkDetail;
++  readonly page: WebPage;
++  /** Only on an issue GitLab shows with a parent. */
++  readonly parent: { readonly page: WebPage; readonly tooltip: string } | null;
++};
++
++export type LinkGroup = {
++  readonly kind: LinkGroupKind;
++  readonly heading: string;
++  readonly lines: readonly LinkLine[];
++};
++
++export type LinkBox =
++  | { readonly kind: "status"; readonly text: string; readonly failed: boolean }
++  | { readonly kind: "groups"; readonly groups: readonly LinkGroup[] };
++
++const NOT_SHOWN_DETAIL: LinkDetail = { kind: "notShown" };
++
++/** `Open parent: ${reference} ${title}` (rule 4). */
++export function parentTooltip(parent: LinkedParent): string {
++  return `Open parent: ${parent.reference} ${parent.title}`;
++}
++
++function epicLine(epic: LinkedEpic): LinkLine {
++  const detail: LinkDetail =
++    epic.shown === null ? NOT_SHOWN_DETAIL : { kind: "shown", ...epic.shown };
++  return { reference: epic.reference, detail, page: epic.page, parent: null };
++}
++
++function issueLine(issue: LinkedIssue): LinkLine {
++  const { reference, page, shown } = issue;
++  if (shown === null) {
++    return { reference, detail: NOT_SHOWN_DETAIL, page, parent: null };
++  }
++  const detail: LinkDetail = { kind: "shown", title: shown.title, closed: shown.closed };
++  const parent =
++    shown.parent === null
++      ? null
++      : { page: shown.parent.page, tooltip: parentTooltip(shown.parent) };
++  return { reference, detail, page, parent };
++}
++
++function commitLine(commit: LinkedCommit): LinkLine {
++  const detail: LinkDetail =
++    commit.title === null
++      ? NOT_SHOWN_DETAIL
++      : { kind: "shown", title: commit.title, closed: false };
++  return { reference: commit.reference, detail, page: commit.page, parent: null };
++}
++
++function groupsOf(links: DescriptionLinks): readonly LinkGroup[] {
++  const lines: Readonly<Record<LinkGroupKind, readonly LinkLine[]>> = {
++    epics: links.epics.map(epicLine),
++    issues: links.issues.map(issueLine),
++    commits: links.commits.map(commitLine),
++  };
++  const order: readonly LinkGroupKind[] = ["epics", "issues", "commits"];
++  return order
++    .filter((kind) => lines[kind].length > 0)
++    .map((kind) => ({ kind, heading: GROUP_HEADINGS[kind], lines: lines[kind] }));
++}
++
++/** glabMissing → `${GLAB_MISSING_TEXT} — install glab, then Retry.`; notLoggedIn → `${glabNotLoggedInText(detail)} —
++ *  run glab auth login in a terminal, then Retry.`; failed → `Could not read the links: ${message}`; a thrown call →
++ *  problemText({ action: "mergeRequests", step: "links", cause }, platform). */
++export function linksFailedText(
++  load: Extract<LinksLoad, { kind: "refused" | "failed" }>,
++  platform: string,
++): string {
++  if (load.kind === "failed") {
++    return problemText({ action: "mergeRequests", step: "links", cause: load.cause }, platform);
++  }
++  const { reply } = load;
++  switch (reply.kind) {
++    case "glabMissing":
++      return `${GLAB_MISSING_TEXT} — install glab, then Retry.`;
++    case "notLoggedIn":
++      return `${glabNotLoggedInText(reply.detail)} — run glab auth login in a terminal, then Retry.`;
++    case "failed":
++      return `Could not read the links: ${reply.message}`;
++    default: {
++      const _exhaustive: never = reply;
++      return _exhaustive;
++    }
++  }
++}
++
++/** undefined or loading → LINKS_LOADING; read with no line → NO_LINKS; read → the groups Epics, Issues, Commits that
++ *  hold a line; refused or failed → its sentence, failed. */
++export function linkBox(load: LinksLoad | undefined, platform: string): LinkBox {
++  if (load === undefined) {
++    return { kind: "status", text: LINKS_LOADING, failed: false };
++  }
++  switch (load.kind) {
++    case "loading":
++      return { kind: "status", text: LINKS_LOADING, failed: false };
++    case "read": {
++      const groups = groupsOf(load.links);
++      return groups.length === 0
++        ? { kind: "status", text: NO_LINKS, failed: false }
++        : { kind: "groups", groups };
++    }
++    case "refused":
++    case "failed":
++      return { kind: "status", text: linksFailedText(load, platform), failed: true };
++    default: {
++      const _exhaustive: never = load;
++      return _exhaustive;
++    }
++  }
++}

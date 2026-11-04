@@ -1,0 +1,2 @@
+just mutants HEAD: no Rust changes; Stryker on mergeRequestLinkLines.ts: 96 mutants, 92 killed, 0 survived, 4 no coverage, score 95.83% (covered 100%)
+frontend/src/ui/mergeRequestLinkLines.ts:113 and :138: the exhaustive `default: { const _exhaustive: never }` arms emptied (4 NoCoverage) — gate-covered: unreachable, vue-tsc rejects any unhandled kind
