@@ -28,11 +28,11 @@ and `ui/AGENTS.md`: row 1 starts only after that slice's last round is committed
 counts the discussions the reviewer wrote in (the brief's default). No question open.
 Order: slice, smoke ∥ both reviews, docs keeper, final.
 
-| row | slice                                                                                                                             | owner                 | status  | evidence |
-| --- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ------- | -------- |
-| 1   | fixes (`briefs/mr-review-fixes.md`): words, mark, Escape, order; wires the window                                                 | web-impl              | planned |          |
-| 2   | docs keeper (plan #189, #128/#163/#165/#179/#183/#185 amended); verify (`briefs/mr-review-fixes-verify.md`): smoke after 1, final | docs-keeper, verifier | todo    |          |
-| 3   | owner check on the GitLab playground                                                                                              | human                 | todo    |          |
+| row | slice                                                                                                                             | owner                 | status  | evidence                                                                                                                             |
+| --- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | fixes (`briefs/mr-review-fixes.md`): words, mark, Escape, order; wires the window                                                 | web-impl              | running | `MrReviewFixes` from `588228a9` (session 51, owner #2436; brief amended: fast-preview's reload kept, #2466 line, light via Settings) |
+| 2   | docs keeper (plan #189, #128/#163/#165/#179/#183/#185 amended); verify (`briefs/mr-review-fixes-verify.md`): smoke after 1, final | docs-keeper, verifier | todo    |                                                                                                                                      |
+| 3   | owner check on the GitLab playground                                                                                              | human                 | todo    |                                                                                                                                      |
 
 ## Fast comment preview (session 51; owner #2419–#2422: "why does the preview need to load for about a second?")
 

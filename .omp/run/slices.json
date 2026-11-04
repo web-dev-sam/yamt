@@ -1,11 +1,17 @@
 {
-  "MrFastPreviewDocsR1": {
+  "MrReviewFixes": {
     "owned": [
-      "docs/architecture.md",
-      ".omp/skills/project-map/**",
-      ".omp/skills/ipc-contract/SKILL.md",
-      "docs/plan.md",
-      ".omp/skills/risk-register/**"
+      "frontend/src/mergeRequests/internal/discussions.ts",
+      "frontend/src/mergeRequests/internal/discussions.test.ts",
+      "frontend/src/mergeRequests/internal/reviewOrder.ts",
+      "frontend/src/mergeRequests/internal/reviewOrder.test.ts",
+      "frontend/src/mergeRequests/index.ts",
+      "frontend/src/mergeRequests/AGENTS.md",
+      "frontend/src/ui/MergeRequestDiscussions.vue",
+      "frontend/src/ui/MergeRequestDiscussionsBox.test.ts",
+      "frontend/src/ui/MergeRequestsView.vue",
+      "frontend/src/ui/MergeRequestsPage.test.ts",
+      "frontend/src/ui/AGENTS.md"
     ]
   }
 }
