@@ -1,37 +1,33 @@
 {
-  "MrThreadsStateIpc": {
+  "MrThreadsStateUi": {
     "owned": [
-      "frontend/src/ipc/MergeRequestSource.ts",
+      "frontend/src/ui/mergeRequestDiscussions.ts",
+      "frontend/src/ui/mergeRequestDiscussions.test.ts",
+      "frontend/src/ui/mergeRequestThread.ts",
+      "frontend/src/ui/mergeRequestThread.test.ts",
+      "frontend/src/ui/mergeRequestReload.test.ts",
+      "frontend/src/ui/mergeRequests.ts",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts",
       "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/mergeRequestDomain.ts",
-      "frontend/src/ipc/mergeRequestDomain.test.ts",
-      "frontend/src/ipc/descriptionDomain.ts",
-      "frontend/src/ipc/descriptionDomain.test.ts",
-      "frontend/src/ipc/tauriMergeRequests.ts",
-      "frontend/src/ipc/tauriMergeRequests.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestThreads.ts",
-      "frontend/src/ipc/fixtureMergeRequestThreads.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestDiscussions.ts",
-      "frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestDescriptions.ts",
-      "frontend/src/ipc/fixtureMergeRequestDescriptions.test.ts",
-      "frontend/src/ipc/fixtureMergeRequests.ts",
-      "frontend/src/ipc/fixtureMergeRequests.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestData.ts",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ui/mergeRequests.test.ts",
-      "frontend/src/ipc/discussionDomain.ts",
-      "frontend/src/ipc/discussionDomain.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestTurnCases.ts"
+      "frontend/src/ui/mergeRequestDiscussionRows.ts",
+      "frontend/src/ui/mergeRequestDiscussionRows.test.ts",
+      "frontend/src/ui/mergeRequestPreview.ts",
+      "frontend/src/ui/mergeRequestPreview.test.ts"
     ]
   },
-  "MrThreadsAppR1": {
+  "MrThreadsStateIpcR1": {
     "owned": [
-      "src-tauri/src/merge_requests.rs",
-      "src-tauri/src/merge_requests/**",
-      "src-tauri/src/commands.rs",
-      "src-tauri/AGENTS.md"
+      "frontend/src/ipc/fixtureMergeRequestThreads.ts",
+      "frontend/src/ipc/fixtureMergeRequestThreads.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestTurnCases.ts",
+      "frontend/src/ipc/fixtureMergeRequestRendering.ts",
+      "frontend/src/ipc/fixtureMergeRequestDiscussions.ts",
+      "frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts",
+      "frontend/src/ipc/fixtureMergeRequests.ts",
+      "frontend/src/ipc/fixtureMergeRequests.test.ts",
+      "frontend/src/ipc/AGENTS.md"
     ]
   }
 }
