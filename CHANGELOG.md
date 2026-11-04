@@ -22,6 +22,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   load with your GitLab login; images on other sites, and uploads on a self-managed GitLab, load without it (so a
   private self-managed project's uploads show their caption). The description never runs code or loads anything but
   its images. Escape, the close button, a click outside or a second click on the button close it.
+- A merge request's linked epics, issues and commits, one hover away: the links button after a row's info button
+  opens a box listing, under "Epics", "Issues" and "Commits", everything its description links to or references on
+  the same GitLab server, each once, with its title and "Closed" when it is closed; a thing GitLab does not show you
+  says "Not found or no access". A click opens the line in the browser; an issue with a parent epic or issue has a
+  button that opens that parent. The box asks GitLab the first time it opens, and again after Refresh.
 
 ## [0.6.7] - 2026-11-03
 
