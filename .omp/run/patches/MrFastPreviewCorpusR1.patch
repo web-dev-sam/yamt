@@ -1,0 +1,41 @@
+diff --git a/crates/merge-requests/src/description/tests/corpus.rs b/crates/merge-requests/src/description/tests/corpus.rs
+index e3ac368..3e54cf6 100644
+--- a/crates/merge-requests/src/description/tests/corpus.rs
++++ b/crates/merge-requests/src/description/tests/corpus.rs
+@@ -158,6 +158,36 @@ fn a_local_entry_holds_no_link_image_details_or_task_box() {
+     assert_eq!(holding, Vec::<String>::new());
+ }
+ 
++/// The first part of `html` the local preview never renders: an emoji, math, a diagram, a reference, or a link other
++/// than a heading's anchor.
++fn first_remote_markup(html: &str) -> Option<&'static str> {
++    let marker = [
++        "<gl-emoji",
++        "js-render-math",
++        "js-render-mermaid",
++        "data-reference-type",
++    ]
++    .into_iter()
++    .find(|marker| html.contains(marker));
++    let link = html.split("<a ").skip(1).find(|link| {
++        let tag = link.split('>').next().unwrap_or(link);
++        !tag.contains("class=\"anchor\"")
++    });
++    marker.or(link.map(|_| "<a"))
++}
++
++#[test]
++fn a_local_entry_html_holds_no_emoji_math_diagram_reference_or_link() {
++    let holding: Vec<(String, &str)> = corpus()
++        .entries
++        .iter()
++        .filter(|entry| entry.local)
++        .filter_map(|entry| Some((entry.name.clone(), first_remote_markup(&entry.html)?)))
++        .collect();
++
++    assert_eq!(holding, Vec::<(String, &str)>::new());
++}
++
+ #[test]
+ fn the_corpus_holds_each_name_once_and_every_recorded_name() {
+     let corpus = corpus();

@@ -1,0 +1,2 @@
+just mutants HEAD → "no Rust changes since HEAD": the only change is #[cfg(test)] code, which cargo-mutants does not mutate. 0 mutants.
+
