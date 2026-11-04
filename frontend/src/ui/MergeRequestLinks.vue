@@ -110,7 +110,7 @@ async function openLink(page: WebPage): Promise<void> {
               class="flex min-w-0 flex-1 cursor-pointer items-baseline gap-2 rounded px-2 py-1 text-left hover:bg-hover"
               @click="openLink(line.page)"
             >
-              <component :is="icons[group.kind]" class="size-4 shrink-0" aria-hidden="true" />
+              <component :is="icons[group.kind]" class="size-4 shrink-0 self-center" aria-hidden="true" />
               <span class="shrink-0 font-mono">{{ line.reference }}</span>
               <template v-if="line.detail.kind === 'shown'">
                 {{ " " }}<span class="wrap-break-word">{{ line.detail.title }}</span>
