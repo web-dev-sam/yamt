@@ -20,7 +20,10 @@
       "frontend/src/ipc/fixtureMergeRequests.test.ts",
       "frontend/src/ipc/fixtureMergeRequestData.ts",
       "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ui/mergeRequests.test.ts"
+      "frontend/src/ui/mergeRequests.test.ts",
+      "frontend/src/ipc/discussionDomain.ts",
+      "frontend/src/ipc/discussionDomain.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestTurnCases.ts"
     ]
   },
   "MrThreadsAppR1": {
