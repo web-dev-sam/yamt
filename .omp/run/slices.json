@@ -1,13 +1,34 @@
 {
-  "MrThreadsCrate": {
+  "MrThreadsStateIpc": {
     "owned": [
-      "crates/merge-requests/src/*.rs",
-      "crates/merge-requests/src/query/**",
-      "crates/merge-requests/src/discussions/**",
-      "crates/merge-requests/src/discussion_thread/**",
-      "crates/merge-requests/tests/discussions.rs",
-      "crates/merge-requests/tests/threads.rs",
-      "crates/merge-requests/AGENTS.md"
+      "frontend/src/ipc/MergeRequestSource.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/ipc/mergeRequestDomain.ts",
+      "frontend/src/ipc/mergeRequestDomain.test.ts",
+      "frontend/src/ipc/descriptionDomain.ts",
+      "frontend/src/ipc/descriptionDomain.test.ts",
+      "frontend/src/ipc/tauriMergeRequests.ts",
+      "frontend/src/ipc/tauriMergeRequests.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestThreads.ts",
+      "frontend/src/ipc/fixtureMergeRequestThreads.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestDiscussions.ts",
+      "frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestDescriptions.ts",
+      "frontend/src/ipc/fixtureMergeRequestDescriptions.test.ts",
+      "frontend/src/ipc/fixtureMergeRequests.ts",
+      "frontend/src/ipc/fixtureMergeRequests.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestData.ts",
+      "frontend/src/ipc/AGENTS.md",
+      "frontend/src/ui/mergeRequests.test.ts"
+    ]
+  },
+  "MrThreadsAppR1": {
+    "owned": [
+      "src-tauri/src/merge_requests.rs",
+      "src-tauri/src/merge_requests/**",
+      "src-tauri/src/commands.rs",
+      "src-tauri/AGENTS.md"
     ]
   }
 }
