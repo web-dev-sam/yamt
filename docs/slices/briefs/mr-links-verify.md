@@ -34,7 +34,7 @@ only on a private display. Screenshots come only from the session or the private
     reminder" (parent `&3`), `#13` "Write the snooze test" (parent `#12`), `other/lib#5` "Fix date parsing" (closed),
     `secret/vault#9` (not shown); Commits `fa3335f3` "Backfill due dates", `a1b2c3d4…e5f6a7b8` "Commits a1b2c3d4
     through e5f6a7b8", `secret/vault@0badc0de` (not shown).
-  - !636 fails once ("glab: a deadline line"), then reads as !640.
+  - !636 fails once ("glab timed out", the fixtures' one deadline line), then reads as !640.
   - !634 `notLoggedIn` every time.
   - Every other row: no linked epics, issues or commits.
 - Log lines: `mergeRequests.fixture_links { iid }`, `mergeRequests.fixture_page { page }`, `mergeRequests.links_read
@@ -80,7 +80,7 @@ and yamt Light (`--settings '{"theme":"light"}'`) unless noted.
    - No parent button on any epic, any commit, `other/lib#5` or `secret/vault#9`.
 6. **Empty (rule 1).** !639 says "No linked epics, issues or commits."
 7. **Failure (rule 5).**
-   - !636: "Could not read the links: glab: a deadline line" and Retry; Retry shows !640's lines, a second
+   - !636: "Could not read the links: glab timed out" and Retry; Retry shows !640's lines, a second
      `fixture_links { iid: 636 }`.
    - !634: the not-logged-in sentence and Retry; leave and hover again: a new `fixture_links { iid: 634 }`.
 8. **Refresh (rule 5).** Press Refresh and wait for the list; hover !640: "Loading…" first and a new

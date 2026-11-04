@@ -159,7 +159,7 @@ open the merge-requests page.
    `fixture_page` with `https://gitlab.example/groups/taskboard/-/work_items/3`; `#13`'s opens `…/-/work_items/12`;
    epics, commits and `other/lib#5` have none.
 6. **Empty.** !639: "No linked epics, issues or commits."
-7. **Failure (rule 5).** !636: "Could not read the links: glab: a deadline line" with Retry; Retry shows the lines.
+7. **Failure (rule 5).** !636: "Could not read the links: glab timed out" with Retry; Retry shows the lines.
    !634: the not-logged-in sentence with Retry. Close and hover !634 again: a new `fixture_links { iid: 634 }`.
 8. **Refresh (rule 5).** Press Refresh; after the list reloads, hover !640: a new `fixture_links { iid: 640 }` and
    "Loading…" first.
