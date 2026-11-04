@@ -17,6 +17,22 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 | 2   | final run 0.6.9 before tagging (`briefs/release-0.6.9-verify.md`)                                            | verifier     | done        | `Release069Verify` at `9d6cd91e`: `just check`, readmer, licences, `yamt_0.6.9_amd64.deb` Version `0.6.9`, `yamt 0.6.9`, release binary on `mr-threads` (turn words, thread panel, preview, one comment POST, no CSP error) pass. Note `Release069Verify.md` |
 | 3   | push `main`, ci green on all four jobs, tag `v0.6.9`, publish                                                | human        | handed over |                                                                                                                                                                                                                                                              |
 
+## Fast comment preview (session 51; owner #2419–#2422: "why does the preview need to load for about a second?")
+
+Request `docs/slices/request-mr-fast-preview.md` (parts A–B, acceptance, non-goals, reopens); base `49b7912c`.
+Owner's answers: local when safe, else GitLab (#2421); login and project remembered (#2422). Corpus measured by the
+orchestrator: 66 texts against gitlab.com, `.omp/run/notes/PlanFastPreviewCorpus.{md,json}` (a literal Unicode
+emoji becomes `gl-emoji`: a trigger). No product question open.
+
+| row | slice                                                                                     | owner                 | status  | evidence |
+| --- | ----------------------------------------------------------------------------------------- | --------------------- | ------- | -------- |
+| 1   | design: local path and its home, triggers, remembered project and its forgetting          | designer              | running |          |
+| 2   | Rust: the remembered login and project (B1–B3), its callers, fake glab                    | rust-impl             | todo    |          |
+| 3   | local preview: triggers, local blocks, the corpus tests                                   | per design            | todo    |          |
+| 4   | panel: one preview state for both paths, no "Loading…" on the local one; wires the window | web-impl              | todo    |          |
+| 5   | docs keeper; verify: smoke after 4, final `just check`, WebKit, real app                  | docs-keeper, verifier | todo    |          |
+| 6   | owner check on the GitLab playground                                                      | human                 | todo    |          |
+
 ## Threads beside the box (session 50; owner #2329–#2333: "Your turn" only when it is, the whole thread, answering, sized images)
 
 Request `docs/slices/request-mr-threads.md` (parts A–D, acceptance, non-goals, reopens); base `69ab62d0`; facts

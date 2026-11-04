@@ -1,0 +1,250 @@
+{
+ "paragraph": {
+  "text": "Looks good to me.",
+  "html": "<p data-sourcepos=\"1:1-1:17\" dir=\"auto\">Looks good to me.</p>"
+ },
+ "two_paragraphs": {
+  "text": "First paragraph.\n\nSecond paragraph.",
+  "html": "<p data-sourcepos=\"1:1-1:16\" dir=\"auto\">First paragraph.</p>\n<p data-sourcepos=\"3:1-3:17\" dir=\"auto\">Second paragraph.</p>"
+ },
+ "soft_break": {
+  "text": "line one\nline two",
+  "html": "<p data-sourcepos=\"1:1-2:8\" dir=\"auto\">line one\nline two</p>"
+ },
+ "hard_break_spaces": {
+  "text": "line one  \nline two",
+  "html": "<p data-sourcepos=\"1:1-2:8\" dir=\"auto\">line one<br data-sourcepos=\"1:9-1:11\">\nline two</p>"
+ },
+ "hard_break_backslash": {
+  "text": "line one\\\nline two",
+  "html": "<p data-sourcepos=\"1:1-2:8\" dir=\"auto\">line one<br data-sourcepos=\"1:9-1:10\">\nline two</p>"
+ },
+ "emphasis_star": {
+  "text": "this is *important* here",
+  "html": "<p data-sourcepos=\"1:1-1:24\" dir=\"auto\">this is <em data-sourcepos=\"1:9-1:19\">important</em> here</p>"
+ },
+ "emphasis_underscore": {
+  "text": "this is _important_ here",
+  "html": "<p data-sourcepos=\"1:1-1:24\" dir=\"auto\">this is <em data-sourcepos=\"1:9-1:19\">important</em> here</p>"
+ },
+ "intraword_underscore": {
+  "text": "snake_case_name and foo_bar",
+  "html": "<p data-sourcepos=\"1:1-1:27\" dir=\"auto\">snake_case_name and foo_bar</p>"
+ },
+ "strong": {
+  "text": "this is **bold** and __bold__",
+  "html": "<p data-sourcepos=\"1:1-1:29\" dir=\"auto\">this is <strong data-sourcepos=\"1:9-1:16\">bold</strong> and <strong data-sourcepos=\"1:22-1:29\">bold</strong></p>"
+ },
+ "strong_em": {
+  "text": "***both*** words",
+  "html": "<p data-sourcepos=\"1:1-1:16\" dir=\"auto\"><em data-sourcepos=\"1:1-1:10\"><strong data-sourcepos=\"1:2-1:9\">both</strong></em> words</p>"
+ },
+ "strike": {
+  "text": "this is ~~gone~~ now",
+  "html": "<p data-sourcepos=\"1:1-1:20\" dir=\"auto\">this is <del data-sourcepos=\"1:9-1:16\">gone</del> now</p>"
+ },
+ "inline_code": {
+  "text": "call `foo()` here",
+  "html": "<p data-sourcepos=\"1:1-1:17\" dir=\"auto\">call <code data-sourcepos=\"1:6-1:12\">foo()</code> here</p>"
+ },
+ "inline_code_backticks": {
+  "text": "use `` a`b `` here",
+  "html": "<p data-sourcepos=\"1:1-1:18\" dir=\"auto\">use <code data-sourcepos=\"1:5-1:13\">a`b</code> here</p>"
+ },
+ "fenced_plain": {
+  "text": "```\nplain code\n  indented\n```",
+  "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-4:3\" class=\"code highlight js-syntax-highlight language-plaintext\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"plaintext\">plain code</span>\n<span id=\"LC2\" class=\"line\" data-lang=\"plaintext\">  indented</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>"
+ },
+ "fenced_rust": {
+  "text": "```rust\nfn main() { let x = 1; }\n```",
+  "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-3:3\" data-canonical-lang=\"rust\" class=\"code highlight js-syntax-highlight language-rust\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"rust\"><span class=\"k\">fn</span> <span class=\"nf\">main</span><span class=\"p\">()</span> <span class=\"p\">{</span> <span class=\"k\">let</span> <span class=\"n\">x</span> <span class=\"o\">=</span> <span class=\"mi\">1</span><span class=\"p\">;</span> <span class=\"p\">}</span></span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>"
+ },
+ "fenced_ts": {
+  "text": "```ts\nconst x: number = 1;\n```",
+  "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-3:3\" data-canonical-lang=\"ts\" class=\"code highlight js-syntax-highlight language-typescript\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"typescript\"><span class=\"kd\">const</span> <span class=\"nx\">x</span><span class=\"p\">:</span> <span class=\"kr\">number</span> <span class=\"o\">=</span> <span class=\"mi\">1</span><span class=\"p\">;</span></span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>"
+ },
+ "fenced_tilde": {
+  "text": "~~~\ncode\n~~~",
+  "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-3:3\" class=\"code highlight js-syntax-highlight language-plaintext\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"plaintext\">code</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>"
+ },
+ "fenced_mermaid": {
+  "text": "```mermaid\ngraph TD; A-->B;\n```",
+  "html": "<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"1:1-3:3\" data-canonical-lang=\"mermaid\" class=\"code highlight js-syntax-highlight language-mermaid\" v-pre=\"true\"><code class=\"js-render-mermaid\" data-proxied-urls=\"{}\"><span id=\"LC1\" class=\"line\" data-lang=\"mermaid\">graph TD; A--&gt;B;</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>"
+ },
+ "indented_code": {
+  "text": "para\n\n    indented code\n    more",
+  "html": "<p data-sourcepos=\"1:1-1:4\" dir=\"auto\">para</p>\n<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"3:5-4:8\" class=\"code highlight js-syntax-highlight language-plaintext\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"plaintext\">indented code</span>\n<span id=\"LC2\" class=\"line\" data-lang=\"plaintext\">more</span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>"
+ },
+ "bullet_dash": {
+  "text": "- one\n- two\n- three",
+  "html": "<ul data-sourcepos=\"1:1-3:7\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:5\">one</li>\n<li data-sourcepos=\"2:1-2:5\">two</li>\n<li data-sourcepos=\"3:1-3:7\">three</li>\n</ul>"
+ },
+ "bullet_star": {
+  "text": "* one\n* two",
+  "html": "<ul data-sourcepos=\"1:1-2:5\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:5\">one</li>\n<li data-sourcepos=\"2:1-2:5\">two</li>\n</ul>"
+ },
+ "ordered": {
+  "text": "1. one\n2. two\n3. three",
+  "html": "<ol data-sourcepos=\"1:1-3:8\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:6\">one</li>\n<li data-sourcepos=\"2:1-2:6\">two</li>\n<li data-sourcepos=\"3:1-3:8\">three</li>\n</ol>"
+ },
+ "ordered_start": {
+  "text": "3. three\n4. four",
+  "html": "<ol data-sourcepos=\"1:1-2:7\" start=\"3\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:8\">three</li>\n<li data-sourcepos=\"2:1-2:7\">four</li>\n</ol>"
+ },
+ "ordered_paren": {
+  "text": "1) one\n2) two",
+  "html": "<ol data-sourcepos=\"1:1-2:6\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:6\">one</li>\n<li data-sourcepos=\"2:1-2:6\">two</li>\n</ol>"
+ },
+ "nested_list": {
+  "text": "- one\n  - inner\n  - inner two\n- two",
+  "html": "<ul data-sourcepos=\"1:1-4:5\" dir=\"auto\">\n<li data-sourcepos=\"1:1-3:13\">one\n<ul data-sourcepos=\"2:3-3:13\">\n<li data-sourcepos=\"2:3-2:9\">inner</li>\n<li data-sourcepos=\"3:3-3:13\">inner two</li>\n</ul>\n</li>\n<li data-sourcepos=\"4:1-4:5\">two</li>\n</ul>"
+ },
+ "loose_list": {
+  "text": "- one\n\n- two",
+  "html": "<ul data-sourcepos=\"1:1-3:5\" dir=\"auto\">\n<li data-sourcepos=\"1:1-1:5\">\n<p data-sourcepos=\"1:3-1:5\">one</p>\n</li>\n<li data-sourcepos=\"3:1-3:5\">\n<p data-sourcepos=\"3:3-3:5\">two</p>\n</li>\n</ul>"
+ },
+ "list_with_para": {
+  "text": "- item\n\n  continued para",
+  "html": "<ul data-sourcepos=\"1:1-3:16\" dir=\"auto\">\n<li data-sourcepos=\"1:1-3:16\">\n<p data-sourcepos=\"1:3-1:6\">item</p>\n<p data-sourcepos=\"3:3-3:16\">continued para</p>\n</li>\n</ul>"
+ },
+ "h1": {
+  "text": "# Title",
+  "html": "<h1 id=\"user-content-title\" data-sourcepos=\"1:1-1:7\" dir=\"auto\">Title<a href=\"#title\" aria-label=\"Link to heading 'Title'\" data-heading-content=\"Title\" class=\"anchor\"></a></h1>"
+ },
+ "h2_h6": {
+  "text": "## Two\n### Three\n#### Four\n##### Five\n###### Six",
+  "html": "<h2 id=\"user-content-two\" data-sourcepos=\"1:1-1:6\" dir=\"auto\">Two<a href=\"#two\" aria-label=\"Link to heading 'Two'\" data-heading-content=\"Two\" class=\"anchor\"></a></h2>\n<h3 id=\"user-content-three\" data-sourcepos=\"2:1-2:9\" dir=\"auto\">Three<a href=\"#three\" aria-label=\"Link to heading 'Three'\" data-heading-content=\"Three\" class=\"anchor\"></a></h3>\n<h4 id=\"user-content-four\" data-sourcepos=\"3:1-3:9\" dir=\"auto\">Four<a href=\"#four\" aria-label=\"Link to heading 'Four'\" data-heading-content=\"Four\" class=\"anchor\"></a></h4>\n<h5 id=\"user-content-five\" data-sourcepos=\"4:1-4:10\" dir=\"auto\">Five<a href=\"#five\" aria-label=\"Link to heading 'Five'\" data-heading-content=\"Five\" class=\"anchor\"></a></h5>\n<h6 id=\"user-content-six\" data-sourcepos=\"5:1-5:10\" dir=\"auto\">Six<a href=\"#six\" aria-label=\"Link to heading 'Six'\" data-heading-content=\"Six\" class=\"anchor\"></a></h6>"
+ },
+ "heading_formatting": {
+  "text": "## A *styled* `code` heading",
+  "html": "<h2 id=\"user-content-a-styled-code-heading\" data-sourcepos=\"1:1-1:28\" dir=\"auto\">A <em data-sourcepos=\"1:6-1:13\">styled</em> <code data-sourcepos=\"1:15-1:20\">code</code> heading<a href=\"#a-styled-code-heading\" aria-label=\"Link to heading 'A styled code heading'\" data-heading-content=\"A styled code heading\" class=\"anchor\"></a></h2>"
+ },
+ "heading_duplicate": {
+  "text": "## Same\n\n## Same",
+  "html": "<h2 id=\"user-content-same\" data-sourcepos=\"1:1-1:7\" dir=\"auto\">Same<a href=\"#same\" aria-label=\"Link to heading 'Same'\" data-heading-content=\"Same\" class=\"anchor\"></a></h2>\n<h2 id=\"user-content-same-1\" data-sourcepos=\"3:1-3:7\" dir=\"auto\">Same<a href=\"#same-1\" aria-label=\"Link to heading 'Same'\" data-heading-content=\"Same\" class=\"anchor\"></a></h2>"
+ },
+ "setext": {
+  "text": "Title\n=====\n\nSub\n---",
+  "html": "<h1 id=\"user-content-title\" data-sourcepos=\"1:1-2:5\" dir=\"auto\">Title<a href=\"#title\" aria-label=\"Link to heading 'Title'\" data-heading-content=\"Title\" class=\"anchor\"></a></h1>\n<h2 id=\"user-content-sub\" data-sourcepos=\"4:1-5:3\" dir=\"auto\">Sub<a href=\"#sub\" aria-label=\"Link to heading 'Sub'\" data-heading-content=\"Sub\" class=\"anchor\"></a></h2>"
+ },
+ "quote": {
+  "text": "> quoted text\n> more",
+  "html": "<blockquote data-sourcepos=\"1:1-2:6\" dir=\"auto\">\n<p data-sourcepos=\"1:3-2:6\">quoted text\nmore</p>\n</blockquote>"
+ },
+ "quote_nested": {
+  "text": "> outer\n>> inner",
+  "html": "<blockquote data-sourcepos=\"1:1-2:8\" dir=\"auto\">\n<p data-sourcepos=\"1:3-1:7\">outer</p>\n<blockquote data-sourcepos=\"2:2-2:8\">\n<p data-sourcepos=\"2:4-2:8\">inner</p>\n</blockquote>\n</blockquote>"
+ },
+ "quote_with_list": {
+  "text": "> - a\n> - b",
+  "html": "<blockquote data-sourcepos=\"1:1-2:5\" dir=\"auto\">\n<ul data-sourcepos=\"1:3-2:5\">\n<li data-sourcepos=\"1:3-1:5\">a</li>\n<li data-sourcepos=\"2:3-2:5\">b</li>\n</ul>\n</blockquote>"
+ },
+ "table": {
+  "text": "| a | b |\n| --- | --- |\n| 1 | 2 |",
+  "html": "<table data-sourcepos=\"1:1-3:9\" dir=\"auto\">\n<thead>\n<tr data-sourcepos=\"1:1-1:9\">\n<th data-sourcepos=\"1:2-1:4\">a</th>\n<th data-sourcepos=\"1:6-1:8\">b</th>\n</tr>\n</thead>\n<tbody>\n<tr data-sourcepos=\"3:1-3:9\">\n<td data-sourcepos=\"3:2-3:4\">1</td>\n<td data-sourcepos=\"3:6-3:8\">2</td>\n</tr>\n</tbody>\n</table>"
+ },
+ "table_align": {
+  "text": "| left | center | right |\n| :--- | :---: | ---: |\n| l | c | r |",
+  "html": "<table data-sourcepos=\"1:1-3:13\" dir=\"auto\">\n<thead>\n<tr data-sourcepos=\"1:1-1:25\">\n<th data-sourcepos=\"1:2-1:7\" align=\"left\">left</th>\n<th data-sourcepos=\"1:9-1:16\" align=\"center\">center</th>\n<th data-sourcepos=\"1:18-1:24\" align=\"right\">right</th>\n</tr>\n</thead>\n<tbody>\n<tr data-sourcepos=\"3:1-3:13\">\n<td data-sourcepos=\"3:2-3:4\" align=\"left\">l</td>\n<td data-sourcepos=\"3:6-3:8\" align=\"center\">c</td>\n<td data-sourcepos=\"3:10-3:12\" align=\"right\">r</td>\n</tr>\n</tbody>\n</table>"
+ },
+ "table_inline": {
+  "text": "| a | b |\n| - | - |\n| `x` | **y** |",
+  "html": "<table data-sourcepos=\"1:1-3:15\" dir=\"auto\">\n<thead>\n<tr data-sourcepos=\"1:1-1:9\">\n<th data-sourcepos=\"1:2-1:4\">a</th>\n<th data-sourcepos=\"1:6-1:8\">b</th>\n</tr>\n</thead>\n<tbody>\n<tr data-sourcepos=\"3:1-3:15\">\n<td data-sourcepos=\"3:2-3:6\"><code data-sourcepos=\"3:3-3:5\">x</code></td>\n<td data-sourcepos=\"3:8-3:14\"><strong data-sourcepos=\"3:9-3:13\">y</strong></td>\n</tr>\n</tbody>\n</table>"
+ },
+ "rule_dash": {
+  "text": "above\n\n---\n\nbelow",
+  "html": "<p data-sourcepos=\"1:1-1:5\" dir=\"auto\">above</p>\n<hr data-sourcepos=\"3:1-3:3\">\n<p data-sourcepos=\"5:1-5:5\" dir=\"auto\">below</p>"
+ },
+ "rule_star": {
+  "text": "above\n\n***\n\nbelow",
+  "html": "<p data-sourcepos=\"1:1-1:5\" dir=\"auto\">above</p>\n<hr data-sourcepos=\"3:1-3:3\">\n<p data-sourcepos=\"5:1-5:5\" dir=\"auto\">below</p>"
+ },
+ "rule_underscore": {
+  "text": "above\n\n___\n\nbelow",
+  "html": "<p data-sourcepos=\"1:1-1:5\" dir=\"auto\">above</p>\n<hr data-sourcepos=\"3:1-3:3\">\n<p data-sourcepos=\"5:1-5:5\" dir=\"auto\">below</p>"
+ },
+ "ampersand": {
+  "text": "a & b < c > d \"q\" 'x'",
+  "html": "<p data-sourcepos=\"1:1-1:21\" dir=\"auto\">a &amp; b &lt; c &gt; d \"q\" 'x'</p>"
+ },
+ "entity": {
+  "text": "&amp; &copy; &#35;",
+  "html": "<p data-sourcepos=\"1:1-1:18\" dir=\"auto\">&amp; © #</p>"
+ },
+ "percent_number": {
+  "text": "100% sure, 3 items, v1.2.3",
+  "html": "<p data-sourcepos=\"1:1-1:26\" dir=\"auto\">100% sure, 3 items, v1.2.3</p>"
+ },
+ "hash_no_ref": {
+  "text": "C# and # alone",
+  "html": "<p data-sourcepos=\"1:1-1:14\" dir=\"auto\">C# and # alone</p>"
+ },
+ "hex_short": {
+  "text": "abc1234 deadbeef cafe",
+  "html": "<p data-sourcepos=\"1:1-1:21\" dir=\"auto\">abc1234 deadbeef cafe</p>"
+ },
+ "hex_word_plain": {
+  "text": "added a beef feed",
+  "html": "<p data-sourcepos=\"1:1-1:17\" dir=\"auto\">added a beef feed</p>"
+ },
+ "colon_words": {
+  "text": "note: time 10:30",
+  "html": "<p data-sourcepos=\"1:1-1:16\" dir=\"auto\">note: time 10:30</p>"
+ },
+ "exclaim": {
+  "text": "Great! Done!",
+  "html": "<p data-sourcepos=\"1:1-1:12\" dir=\"auto\">Great! Done!</p>"
+ },
+ "unicode": {
+  "text": "Schöne Grüße — “quotes” ✓ 😀",
+  "html": "<p data-sourcepos=\"1:1-1:41\" dir=\"auto\">Schöne Grüße — “quotes” ✓ <gl-emoji title=\"grinning face\" data-name=\"grinning\" data-unicode-version=\"8.0\">😀</gl-emoji></p>"
+ },
+ "smart_quotes": {
+  "text": "it's \"quoted\" -- dash ... dots",
+  "html": "<p data-sourcepos=\"1:1-1:30\" dir=\"auto\">it's \"quoted\" -- dash ... dots</p>"
+ },
+ "trailing_spaces_para": {
+  "text": "text   ",
+  "html": "<p data-sourcepos=\"1:1-1:7\" dir=\"auto\">text</p>"
+ },
+ "mixed_doc": {
+  "text": "## Summary\n\nThis **works** with `code`.\n\n- one\n- two\n\n> note\n\n```rust\nlet a = 1;\n```",
+  "html": "<h2 id=\"user-content-summary\" data-sourcepos=\"1:1-1:10\" dir=\"auto\">Summary<a href=\"#summary\" aria-label=\"Link to heading 'Summary'\" data-heading-content=\"Summary\" class=\"anchor\"></a></h2>\n<p data-sourcepos=\"3:1-3:27\" dir=\"auto\">This <strong data-sourcepos=\"3:6-3:14\">works</strong> with <code data-sourcepos=\"3:21-3:26\">code</code>.</p>\n<ul data-sourcepos=\"5:1-6:5\" dir=\"auto\">\n<li data-sourcepos=\"5:1-5:5\">one</li>\n<li data-sourcepos=\"6:1-7:0\">two</li>\n</ul>\n<blockquote data-sourcepos=\"8:1-8:6\" dir=\"auto\">\n<p data-sourcepos=\"8:3-8:6\">note</p>\n</blockquote>\n<div class=\"gl-relative markdown-code-block js-markdown-code\"><pre data-sourcepos=\"10:1-12:3\" data-canonical-lang=\"rust\" class=\"code highlight js-syntax-highlight language-rust\" v-pre=\"true\"><code><span id=\"LC1\" class=\"line\" data-lang=\"rust\"><span class=\"k\">let</span> <span class=\"n\">a</span> <span class=\"o\">=</span> <span class=\"mi\">1</span><span class=\"p\">;</span></span></code></pre><copy-code></copy-code><insert-code-snippet></insert-code-snippet></div>"
+ },
+ "ref_issue": {
+  "text": "see #12",
+  "html": "<p data-sourcepos=\"1:1-1:7\" dir=\"auto\">see #12</p>"
+ },
+ "mention": {
+  "text": "thanks @samubr",
+  "html": "<p data-sourcepos=\"1:1-1:14\" dir=\"auto\">thanks <a href=\"https://gitlab.com/samubr\" title=\"Samuel Braun\" class=\"gfm gfm-project_member js-user-link\" data-user=\"25311683\" data-original=\"@samubr\" data-container=\"body\" data-placement=\"top\" data-reference-type=\"user\">@samubr</a></p>"
+ },
+ "emoji": {
+  "text": "nice :thumbsup:",
+  "html": "<p data-sourcepos=\"1:1-1:15\" dir=\"auto\">nice <gl-emoji title=\"thumbs up\" data-name=\"thumbsup\" data-unicode-version=\"6.0\">👍</gl-emoji></p>"
+ },
+ "url": {
+  "text": "see https://example.com",
+  "html": "<p data-sourcepos=\"1:1-1:23\" dir=\"auto\">see <a data-sourcepos=\"1:5-1:23\" href=\"https://example.com\" rel=\"nofollow noreferrer noopener\" target=\"_blank\">https://example.com</a></p>"
+ },
+ "link": {
+  "text": "[text](https://example.com)",
+  "html": "<p data-sourcepos=\"1:1-1:27\" dir=\"auto\"><a data-sourcepos=\"1:1-1:27\" href=\"https://example.com\" rel=\"nofollow noreferrer noopener\" target=\"_blank\">text</a></p>"
+ },
+ "task": {
+  "text": "- [ ] todo\n- [x] done",
+  "html": "<ul class=\"task-list\" data-sourcepos=\"1:1-2:10\" dir=\"auto\">\n<li class=\"task-list-item\" data-sourcepos=\"1:1-1:10\"><input type=\"checkbox\" data-checkbox-sourcepos=\"1:4-1:4\" class=\"task-list-item-checkbox\" disabled=\"\" aria-label=\"Check option: todo\"> todo</li>\n<li class=\"task-list-item\" data-sourcepos=\"2:1-2:10\"><input type=\"checkbox\" data-checkbox-sourcepos=\"2:4-2:4\" class=\"task-list-item-checkbox\" checked=\"\" disabled=\"\" aria-label=\"Check option: done\"> done</li>\n</ul>"
+ },
+ "html": {
+  "text": "a <b>b</b> c",
+  "html": "<p data-sourcepos=\"1:1-1:12\" dir=\"auto\">a <b>b</b> c</p>"
+ },
+ "math_inline": {
+  "text": "$`a^2`$",
+  "html": "<p data-sourcepos=\"1:1-1:7\" dir=\"auto\"><code data-math-style=\"inline\" data-sourcepos=\"1:1-1:7\" class=\"js-render-math\">a^2</code></p>"
+ },
+ "dollar_word": {
+  "text": "costs $5",
+  "html": "<p data-sourcepos=\"1:1-1:8\" dir=\"auto\">costs $5</p>"
+ }
+}
