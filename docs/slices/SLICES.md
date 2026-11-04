@@ -319,7 +319,7 @@ the people work (it edits only its briefs); its implementers wait for the people
    in 0.6.9); owner check handed over.
 7. `request-mr-fast-preview.md` (session 50, owner #2419–#2422): an instant local preview when yamt renders the text
    exactly as GitLab does, GitLab otherwise; the login check and the project lookup asked once. Running (session 51).
-8. `request-mr-review-fixes.md` (session 52 request, owner #2425–#2428; owner #2432): started in session 51 right
+8. `request-mr-review-fixes.md` (session 52 request, owner #2425–#2428; owner #2436): started in session 51 right
    after fast-preview closes, no stop between; every open decision taken by the orchestrator (a secure app with a
    great UX), all listed in the final reply.
 9. `request-table-alignment.md` (session 51, owner #2424): table columns aligned as GitLab aligns them, in every
