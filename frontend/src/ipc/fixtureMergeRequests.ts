@@ -33,24 +33,14 @@ import {
 } from "./mergeRequestDomain";
 import type { MergeRequestSource } from "./MergeRequestSource";
 
-export type MergeRequestScript =
-  | "list"
-  | "local"
-  | "slow"
-  | "many"
-  | "empty"
-  | "noGlab"
-  | "loggedOut"
-  | "timeout"
-  | "refused"
-  | "pageFails";
+export type MergeRequestScript = keyof typeof SCRIPTS;
 
 type Scripted = {
   readonly pages: readonly (readonly Generated.MergeRequestRow[])[];
   readonly end: Generated.ListEnd;
 };
 
-const SCRIPTS: Readonly<Record<MergeRequestScript, true>> = {
+const SCRIPTS = {
   list: true,
   local: true,
   slow: true,
@@ -61,7 +51,7 @@ const SCRIPTS: Readonly<Record<MergeRequestScript, true>> = {
   timeout: true,
   refused: true,
   pageFails: true,
-};
+} satisfies Readonly<Record<string, true>>;
 
 const LIST_PAGE = 20;
 const LIST_PAGES = 2;
@@ -85,8 +75,21 @@ function isScript(name: string): name is MergeRequestScript {
   return Object.hasOwn(SCRIPTS, name);
 }
 
-function fixtureProject(script: MergeRequestScript | null): Generated.GitLabProject {
-  return script === null ? { kind: "none" } : { kind: "found", repository: FIXTURE_REPOSITORY };
+function projectScript(
+  log: Log,
+  script: MergeRequestScript | null,
+): Pick<MergeRequestSource, "findGitLabProject" | "askGitLabAgain"> {
+  const project: Generated.GitLabProject =
+    script === null ? { kind: "none" } : { kind: "found", repository: FIXTURE_REPOSITORY };
+  return {
+    async findGitLabProject() {
+      return { ok: true, value: project };
+    },
+    async askGitLabAgain() {
+      log.info("mergeRequests.fixture_ask_again", {});
+      return { ok: true, value: null };
+    },
+  };
 }
 
 function shownScript(log: Log, search: string): MergeRequestScript | null {
@@ -237,9 +240,7 @@ function rerequestScript(log: Log): Pick<MergeRequestSource, "rerequestReview"> 
   };
 }
 
-function pageScript(
-  log: Log,
-): Pick<MergeRequestSource, "openPage" | "readJobLog" | "askGitLabAgain"> {
+function pageScript(log: Log): Pick<MergeRequestSource, "openPage" | "readJobLog"> {
   return {
     async openPage(page) {
       log.info("mergeRequests.fixture_page", { page });
@@ -250,10 +251,6 @@ function pageScript(
       await pause(LOG_PAUSE_MS);
       return { ok: true, value: fixtureJobLog(page, fixtureRows(0, LISTED_ROWS)) };
     },
-    async askGitLabAgain() {
-      log.info("mergeRequests.fixture_ask_again", {});
-      return { ok: true, value: null };
-    },
   };
 }
 
@@ -263,9 +260,7 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
   let loads = 0;
   const discussions = createDiscussionStore(LISTED_ROWS);
   return {
-    async findGitLabProject() {
-      return { ok: true, value: fixtureProject(script) };
-    },
+    ...projectScript(log, script),
     async listMergeRequests(onPage, onChecked) {
       if (script === null) {
         return { ok: true, value: LOADED };

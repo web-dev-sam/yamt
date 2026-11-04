@@ -442,8 +442,8 @@ test.each<ListEnd>([
     await settled();
 
     const retrying = live.slice.refresh();
-    await settled();
     expect(live.slice.listing.value).toEqual({ kind: "loading", first: true });
+    await settled();
     loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(0, 20) });
     expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(0, 20)));
     expect(live.slice.me.value).toBe("sam");
@@ -458,8 +458,8 @@ test("Refresh of a loaded empty list streams its pages (catches the page blank u
   await loaded(live, []);
 
   const refreshing = live.slice.refresh();
-  await settled();
   expect(live.slice.listing.value).toEqual({ kind: "loading", first: true });
+  await settled();
   loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(0, 3) });
   expect(live.slice.rows.value).toHaveLength(3);
   loadAt(live, 1).end(LOADED);
@@ -485,8 +485,8 @@ test.each<[ListEnd, string | null]>([
     expect(live.slice.failure.value).toBe(failure);
 
     const again = live.slice.refresh();
-    await settled();
     expect(live.slice.failure.value).toBeNull();
+    await settled();
     loadAt(live, 1).end(LOADED);
     await again;
   },
@@ -496,10 +496,10 @@ test("one load at a time: Refresh and show while loading start nothing (catches 
   const live = rig();
   live.slice.show();
   const refreshing = live.slice.refresh();
-  await settled();
   vi.setSystemTime(T0 + RECHECK_PAUSE_MS * 2);
   live.slice.show();
   expect(live.loads).toHaveLength(1);
+  expect(live.calls).toEqual(["listMergeRequests"]);
   await refreshing;
 });
 
@@ -532,8 +532,12 @@ test("refresh_asks_gitlab_again_before_listing", async () => {
   });
   await loaded(held);
   const retrying = held.slice.refresh();
+  expect(held.slice.listing.value).toEqual({ kind: "loading", first: false });
   await settled();
   expect(held.loads).toHaveLength(1);
+  expect(held.slice.listing.value).toEqual({ kind: "loading", first: false });
+  await held.slice.refresh();
+  expect(asks).toHaveLength(1);
   asks[0]?.({ ok: false, failure: STOPPED });
   await settled();
   expect(held.loads).toHaveLength(2);

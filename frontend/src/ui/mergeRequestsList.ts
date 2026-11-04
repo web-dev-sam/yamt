@@ -77,7 +77,7 @@ function checked(state: ListState, load: Load, row: CheckedRow): void {
   }
 }
 
-export async function loadList(state: ListState): Promise<void> {
+export async function loadList(state: ListState, askAgain?: () => Promise<void>): Promise<void> {
   const before = state.listing.value;
   if (before.kind === "loading") {
     return;
@@ -89,6 +89,9 @@ export async function loadList(state: ListState): Promise<void> {
   }
   state.listing.value = { kind: "loading", first };
   state.running = running;
+  if (askAgain !== undefined) {
+    await askAgain();
+  }
   const outcome = await attempt(() =>
     state.source.listMergeRequests(
       (page) => received(state, running, page),

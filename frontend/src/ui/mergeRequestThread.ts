@@ -11,7 +11,7 @@ import {
   type ReplyKind,
   type SourceResult,
 } from "../ipc";
-import type { Discussions } from "./mergeRequestDiscussionRows";
+import type { DiscussionQueue } from "./mergeRequestDiscussions";
 import { previewHere, readPreview, type Preview } from "./mergeRequestPreview";
 import { attempt, type Outcome, type ProblemCause } from "./problem";
 
@@ -61,7 +61,7 @@ export type Threads = {
 
 type State = {
   readonly source: MergeRequestSource;
-  readonly discussions: Pick<Discussions, "threadRead" | "reloadDiscussions">;
+  readonly discussions: Pick<DiscussionQueue, "threadRead" | "reloadDiscussions">;
   readonly thread: ShallowRef<Thread | null>;
   readonly replyTexts: ShallowRef<ReadonlyMap<DiscussionId, string>>;
   /** Bumped by every show, close and re-read: an older read's answer reaches only the box. */
@@ -277,7 +277,7 @@ function panelOf(state: State): Omit<Threads, "sendReply" | "setResolved" | "sub
 
 export function createThreads(deps: {
   readonly source: MergeRequestSource;
-  readonly discussions: Pick<Discussions, "threadRead" | "reloadDiscussions">;
+  readonly discussions: Pick<DiscussionQueue, "threadRead" | "reloadDiscussions">;
 }): Threads & { readonly refreshed: (iid: MergeRequestIid | null) => void } {
   const state: State = {
     ...deps,

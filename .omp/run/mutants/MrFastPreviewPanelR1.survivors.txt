@@ -1,0 +1,15 @@
+just mutants HEAD (Stryker, 7 TS files): 1001 killed, 2 timeout, 28 survived, 6 no cov, 3 errors; mergeRequestsRefresh.ts 100%; the new reload/loadList lines have no survivors
+fixtureMergeRequests.ts:43 SCRIPTS={} — wiring: module-level, run once at import under vitest (#732); 'a script finds the project…' expects found
+fixtureMergeRequests.ts:44-53 true→false — equivalent: isScript reads Object.hasOwn, never the values
+fixtureMergeRequests.ts:60,66,67,71,72 module consts — wiring: module-level (#732), lines unchanged
+fixtureMergeRequests.ts:179 kind!=='merging'→false — equivalent: free has no iid, so undefined!==iid is true
+fixtureMergeRequests.ts:146, mergeRequestDiscussionRows.ts:60, mergeRequestDiscussions.ts:175 never-defaults (no cov) — equivalent: unreachable
+mergeRequestDiscussions.ts:89 []→['Stryker'] — equivalent: only checked against numeric iids
+mergeRequestDiscussions.ts:150 []→['Stryker'] — equivalent: a string in unhovered never matches an iid
+mergeRequestDiscussions.ts:141 generation+=1→-=1 — equivalent: generation is only compared for equality
+mergeRequests.ts:139 kind==='done'→true — equivalent: loading has no at (NaN>=x false); notLoaded already loads
+mergeRequests.ts:209 search ''→'Stryker' — equivalent: show() writes '' before the page exists
+mergeRequestsList.ts:110 rowsReplaced([])→['Stryker'] — equivalent: a string row has no openDiscussions
+mergeRequestThread.ts:85 current!==null→true — equivalent: isShown is false when thread is null
+mergeRequestThread.ts:124 current===null→false — equivalent: same isShown
+mergeRequestThread.ts:222 ''→'Stryker' / cond→false — equivalent: no thread, so write() returns; get(undefined)??'' is ''

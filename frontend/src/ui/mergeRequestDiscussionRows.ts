@@ -6,9 +6,10 @@ import type {
   DiscussionsAnswer,
   MergeRequestIid,
   OpenDiscussion,
+  RowDiscussions,
 } from "../ipc";
 import { setRow, useAskedRow } from "./mergeRequestActions";
-import type { ProblemCause } from "./problem";
+import type { Outcome, ProblemCause } from "./problem";
 
 export type DiscussionLoad =
   | { readonly kind: "loading" }
@@ -35,8 +36,6 @@ export type Discussions = {
   /** A count's box opened: with "lazy", asks this row first unless it has an entry; else nothing. */
   askDiscussions(iid: MergeRequestIid): void;
   readonly reloads: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Reload>>>;
-  /** D1: asks GitLab again for `iid` alone, first in the queue; the entry stays as it is until the answer. */
-  reloadDiscussions(iid: MergeRequestIid): void;
   /** A thread's answer (C8.3, C10): `discussion` replaces the entry's discussion with its id (none: nothing);
    *  `resolved` adds or removes its mark. Nothing for an entry that is not `read`. */
   threadRead(iid: MergeRequestIid, discussion: OpenDiscussion, resolved: boolean): void;
@@ -63,6 +62,18 @@ export function answerKind(load: Answered): string {
       return _exhaustive;
     }
   }
+}
+
+export function loggedFields(
+  asked: number,
+  outcome: Outcome<readonly RowDiscussions[]>,
+  ms: number,
+): Record<string, string | number> {
+  if (!outcome.ok) {
+    return { asked, failed: outcome.cause.kind, ms };
+  }
+  const refused = outcome.value.filter((row) => row.answer.kind !== "open").length;
+  return { asked, answered: outcome.value.length, refused, ms };
 }
 
 type Entries = ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>;
@@ -104,7 +115,7 @@ export function boxClosed(
 }
 
 export function useRowDiscussions(
-  discussions: Discussions,
+  discussions: Pick<Discussions, "discussions" | "askDiscussions">,
   iid: () => MergeRequestIid,
   open: () => boolean,
 ): ComputedRef<DiscussionLoad | undefined> {

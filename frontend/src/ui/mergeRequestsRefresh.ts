@@ -1,12 +1,13 @@
 import { log, type MergeRequestIid, type MergeRequestSource } from "../ipc";
-import type { Discussions } from "./mergeRequestDiscussionRows";
+import type { DiscussionQueue } from "./mergeRequestDiscussions";
 import { loadList, type ListState } from "./mergeRequestsList";
 import { attempt } from "./problem";
 
 export type Refreshes = {
-  /** The page's Refresh and its Retry: `askGitLabAgain`, then the list. */
+  /** The page's Refresh and its Retry: loading at once, `askGitLabAgain`, then the list. */
   refresh(): Promise<void>;
-  /** The discussions box's reload button: `askGitLabAgain`, then `reloadDiscussions(iid)`. */
+  /** The discussions box's reload button: the row reloading at once, `askGitLabAgain`, then the row and the shown
+   *  thread read again. */
   refreshDiscussions(iid: MergeRequestIid): void;
 };
 
@@ -17,19 +18,19 @@ async function askAgain(source: MergeRequestSource): Promise<void> {
   }
 }
 
-/** Every explicit refresh button asks GitLab for the login and the project again first (owner decision 2423, plan §2
- *  row 187); a failed ask is logged and the reload runs anyway. Loads no button starts never ask again. */
+/** Owner decision 2423, plan §2 row 187. `show` and a submit's reload do not ask again: no button was pressed. */
 export function createRefreshes(
-  state: ListState & { readonly rowDiscussions: Pick<Discussions, "reloadDiscussions"> },
+  state: ListState & {
+    readonly discussionQueue: Pick<DiscussionQueue, "reloadDiscussions">;
+    readonly threadsRefreshed: (iid: MergeRequestIid) => void;
+  },
 ): Refreshes {
   return {
-    refresh: async () => {
-      await askAgain(state.source);
-      await loadList(state);
-    },
+    refresh: () => loadList(state, () => askAgain(state.source)),
     refreshDiscussions: (iid) => {
-      void askAgain(state.source).then(() => {
-        state.rowDiscussions.reloadDiscussions(iid);
+      state.discussionQueue.reloadDiscussions(iid, async () => {
+        await askAgain(state.source);
+        state.threadsRefreshed(iid);
       });
     },
   };

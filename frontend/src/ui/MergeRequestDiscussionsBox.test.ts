@@ -51,6 +51,8 @@ const THREADS = 637;
 let slice: MergeRequests;
 /** When set, every discussions read after it fails with this message. */
 let failReads: string | null;
+/** The source's `askGitLabAgain`; a test may hold it. */
+let askAgain: MergeRequestSource["askGitLabAgain"];
 
 beforeEach(() => {
   const document = new EventTarget();
@@ -61,8 +63,10 @@ beforeEach(() => {
   vi.spyOn(log, "info").mockImplementation(() => undefined);
   failReads = null;
   const fixture = createFixtureCompareSource(log, "?mr=list", {});
+  askAgain = () => fixture.askGitLabAgain();
   const source: MergeRequestSource = {
     ...fixture,
+    askGitLabAgain: () => askAgain(),
     readDiscussions: async (iids) =>
       failReads === null
         ? fixture.readDiscussions(iids)
@@ -207,14 +211,15 @@ test("a_marked_row_reads_resolved_and_leaves_the_count", async () => {
   expect(closed).toContain('aria-label="12 open discussions"');
 });
 
-test("the_refresh_button_has_its_tip", async () => {
+test("the_refresh_button_has_its_tip_and_spins_at_the_press", async () => {
   await discussionsRead();
   const idle = await box();
   const button = /<button [^>]*aria-label="Reload discussions"[^]*?<\/button>/u.exec(idle)?.[0];
   expect(button).toContain('data-tooltip="Reload discussions"');
   expect(button).not.toContain("animate-spin");
 
-  slice.reloadDiscussions(iid(THREADS));
+  askAgain = () => new Promise(() => undefined);
+  slice.refreshDiscussions(iid(THREADS));
   const running = await box();
   expect(rows(running)).toHaveLength(13);
   expect(running).toMatch(/aria-label="Reload discussions"[^>]*><svg [^>]*animate-spin/u);
@@ -223,7 +228,7 @@ test("the_refresh_button_has_its_tip", async () => {
 test("a_failed_reload_keeps_the_rows", async () => {
   await discussionsRead();
   failReads = "glab timed out";
-  slice.reloadDiscussions(iid(THREADS));
+  slice.refreshDiscussions(iid(THREADS));
   await vi.advanceTimersByTimeAsync(PAUSE_MS);
   const html = await box();
 

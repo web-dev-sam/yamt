@@ -13,6 +13,7 @@ import {
   answerKind,
   boxClosed,
   loadOf,
+  loggedFields,
   threadRead,
   type Answered,
   type DiscussionLoad,
@@ -33,6 +34,9 @@ export type DiscussionQueue = Discussions & {
   listed(rows: readonly MergeRequestRow[]): void;
   /** A refresh replaced the rows: every entry, the queue and any answer in flight dropped; then `listed(rows)`. */
   replaced(rows: readonly MergeRequestRow[]): void;
+  /** D1: reads `iid` again alone, first in the queue; the entry stays as it is until the answer. The row is marked
+   *  at once; `askFirst` (a button press) runs before the read, and a row already marked asks nothing. */
+  reloadDiscussions(iid: MergeRequestIid, askFirst?: () => Promise<void>): void;
 };
 
 type Call = { readonly generation: number; readonly iids: readonly MergeRequestIid[] };
@@ -42,7 +46,8 @@ type Queue = {
   readonly counted: (iid: MergeRequestIid, count: number) => void;
   readonly entries: ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>;
   readonly reloads: ShallowRef<ReadonlyMap<MergeRequestIid, Reload>>;
-  /** Each `loading` entry's and `running` reload's iid in send order; the running call's stay until answered. */
+  /** Each `loading` entry's and `running` reload's iid in send order, a pressed reload's once its ask is answered;
+   *  the running call's stay until answered. */
   queued: readonly MergeRequestIid[];
   /** The running call's iids at a switch to "lazy" not hovered since: dropped unless its answer has them. */
   unhovered: Set<MergeRequestIid>;
@@ -51,18 +56,6 @@ type Queue = {
 };
 
 const LOADING: DiscussionLoad = { kind: "loading" };
-
-function loggedFields(
-  asked: number,
-  outcome: Outcome<readonly RowDiscussions[]>,
-  ms: number,
-): Record<string, string | number> {
-  if (!outcome.ok) {
-    return { asked, failed: outcome.cause.kind, ms };
-  }
-  const refused = outcome.value.filter((row) => row.answer.kind !== "open").length;
-  return { asked, answered: outcome.value.length, refused, ms };
-}
 
 function isReloading(queue: Queue, iid: MergeRequestIid): boolean {
   return queue.reloads.value.get(iid)?.kind === "running";
@@ -206,9 +199,10 @@ function asked(queue: Queue, iid: MergeRequestIid): void {
   sentFirst(queue, iid);
 }
 
-function reload(queue: Queue, iid: MergeRequestIid): void {
+function reload(queue: Queue, iid: MergeRequestIid, askFirst?: () => Promise<void>): void {
   const entry = queue.entries.value.get(iid);
-  if (queue.mode() === "off" || isReloading(queue, iid)) {
+  const pressedAgain = askFirst !== undefined && entry?.kind === "loading";
+  if (queue.mode() === "off" || isReloading(queue, iid) || pressedAgain) {
     return;
   }
   if (entry === undefined) {
@@ -218,10 +212,19 @@ function reload(queue: Queue, iid: MergeRequestIid): void {
   } else {
     setRow(queue.reloads, iid, { kind: "running" });
   }
-  sentFirst(queue, iid);
+  if (askFirst === undefined) {
+    sentFirst(queue, iid);
+    return;
+  }
+  const { generation } = queue;
+  void askFirst().then(() => {
+    if (queue.generation === generation) {
+      sentFirst(queue, iid);
+    }
+  });
 }
 
-export function discussionsOf(queue: DiscussionQueue): Omit<Discussions, "reloadDiscussions"> {
+export function discussionsOf(queue: DiscussionQueue): Discussions {
   const { discussions, discussionDetails, reloads } = queue;
   return {
     discussions,
@@ -239,7 +242,7 @@ export function discussionsOf(queue: DiscussionQueue): Omit<Discussions, "reload
   };
 }
 
-function membersOf(queue: Queue): Discussions {
+function membersOf(queue: Queue): Discussions & Pick<DiscussionQueue, "reloadDiscussions"> {
   return {
     discussions: queue.entries,
     discussionDetails: computed(queue.mode),
@@ -247,8 +250,8 @@ function membersOf(queue: Queue): Discussions {
     askDiscussions: (iid) => {
       asked(queue, iid);
     },
-    reloadDiscussions: (iid) => {
-      reload(queue, iid);
+    reloadDiscussions: (iid, askFirst) => {
+      reload(queue, iid, askFirst);
     },
     threadRead: (iid, discussion, resolved) => {
       threadRead(queue.entries, iid, discussion, resolved);

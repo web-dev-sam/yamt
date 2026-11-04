@@ -715,6 +715,65 @@ test("a_reload_after_a_refresh_is_dropped", async () => {
   expect(callAt(live, 2).iids).toEqual(openIids(ROWS.slice(0, 3)));
 });
 
+function heldAsks(): { readonly asks: (() => void)[]; readonly askFirst: () => Promise<void> } {
+  const asks: (() => void)[] = [];
+  return {
+    asks,
+    askFirst: () =>
+      new Promise((resolve) => {
+        asks.push(resolve);
+      }),
+  };
+}
+
+test("a_pressed_reload_runs_at_once_and_reads_after_its_ask", async () => {
+  const live = rig();
+  await readFirstRows(live);
+  const { asks, askFirst } = heldAsks();
+
+  live.queue.reloadDiscussions(iid(639), askFirst);
+  expect(live.queue.reloads.value.get(iid(639))).toEqual(RUNNING);
+  live.queue.reloadDiscussions(iid(639), askFirst);
+  await settled();
+  expect(asks).toHaveLength(1);
+  expect(live.calls).toHaveLength(1);
+
+  asks[0]?.();
+  await settled();
+  expect(live.calls).toHaveLength(2);
+  expect(callAt(live, 1).iids).toEqual([639]);
+});
+
+test("a_pressed_reload_of_a_row_without_an_entry_loads_at_once_and_asks_once", async () => {
+  const live = rig();
+  const { asks, askFirst } = heldAsks();
+
+  live.queue.reloadDiscussions(iid(640), askFirst);
+  expect(entry(live, 640)).toEqual(LOADING);
+  live.queue.reloadDiscussions(iid(640), askFirst);
+  await settled();
+  expect(asks).toHaveLength(1);
+  expect(live.calls).toHaveLength(0);
+
+  asks[0]?.();
+  await settled();
+  expect(callAt(live, 0).iids).toEqual([640]);
+});
+
+test("a_pressed_reload_dropped_while_its_ask_runs_reads_nothing", async () => {
+  const live = rig();
+  await readFirstRows(live);
+  const { asks, askFirst } = heldAsks();
+
+  live.queue.reloadDiscussions(iid(639), askFirst);
+  live.mode.value = "off";
+  await nextTick();
+  asks[0]?.();
+  await settled();
+  expect(live.calls).toHaveLength(1);
+  expect(live.queue.discussions.value.size).toBe(0);
+});
+
 test("a_resolved_row_stays_until_the_box_closes_then_the_count_drops", async () => {
   const live = rig();
   live.queue.listed(ROWS.slice(0, 3));
