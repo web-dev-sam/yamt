@@ -1,4 +1,4 @@
-import { shallowRef, type ShallowRef } from "vue";
+import { computed, shallowRef, watch, type ComputedRef, type ShallowRef } from "vue";
 
 import type {
   ContinueMergeReply,
@@ -79,6 +79,22 @@ export function claimRow<V extends { readonly kind: string }>(
   }
   setRow(rows, iid, busy);
   return true;
+}
+
+/** A row's box: its row's entry, asked whenever the box opens or loses the entry while open. */
+export function useAskedRow<V>(box: {
+  readonly rows: Readonly<Rows<V>>;
+  readonly ask: (iid: MergeRequestIid) => void;
+  readonly iid: () => MergeRequestIid;
+  readonly open: () => boolean;
+}): ComputedRef<V | undefined> {
+  const load = computed(() => box.rows.value.get(box.iid()));
+  watch([box.open, () => load.value === undefined], ([isOpen]) => {
+    if (isOpen) {
+      box.ask(box.iid());
+    }
+  });
+  return load;
 }
 
 async function checkLocalMerge(state: State): Promise<void> {

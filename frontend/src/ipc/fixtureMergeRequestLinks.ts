@@ -1,8 +1,8 @@
 import type * as Generated from "./bindings";
-import { toLinksReply } from "./descriptionDomain";
 import { pause } from "./fixture";
 import { TIMED_OUT } from "./fixtureGitLab";
 import { LOGGED_OUT_DETAIL, ORIGIN } from "./fixtureMergeRequestData";
+import { toLinksReply } from "./linksDomain";
 import type { Log } from "./log";
 import type { MergeRequestSource } from "./MergeRequestSource";
 

@@ -428,7 +428,7 @@ test("readDescription_throws_on_a_linked_page_that_is_not_http", async () => {
 test("readLinks_calls_the_command_with_the_iid_and_brands_the_pages", async () => {
   const commit: Generated.LinkedCommit = {
     reference: "fa3335f3",
-    page: "http://gitlab.example/g/p/-/commit/fa3335f3",
+    page: "https://gitlab.example/g/p/-/commit/fa3335f3",
     title: null,
   };
   const epic: Generated.LinkedEpic = {
@@ -451,11 +451,11 @@ test("readLinks_calls_the_command_with_the_iid_and_brands_the_pages", async () =
 
   const unbranded: Generated.LinksReply = {
     kind: "read",
-    links: { epics: [], issues: [], commits: [{ ...commit, page: "ftp://x" }] },
+    links: { epics: [], issues: [], commits: [{ ...commit, page: "http://x" }] },
   };
   commands.readLinks.mockResolvedValue({ status: "ok", data: unbranded });
   await expect(source.readLinks(branded(12, isMergeRequestIid, "iid"))).rejects.toThrow(
-    'links.commits[0].page must be an http or https address, got "ftp://x"',
+    'links.commits[0].page must be an https address, got "http://x"',
   );
 });
 

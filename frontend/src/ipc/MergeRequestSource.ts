@@ -1,5 +1,6 @@
-import type { DescriptionReply, LinksReply, UploadKey } from "./descriptionDomain";
+import type { DescriptionReply, UploadKey } from "./descriptionDomain";
 import type { MergeRequestIid, SourceResult, WebPage } from "./domain";
+import type { LinksReply } from "./linksDomain";
 import type {
   CheckedRow,
   ContinueMergeReply,

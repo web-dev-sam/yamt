@@ -175,6 +175,8 @@ function createState(deps: Deps): State {
   );
   const rows = shallowRef<readonly MergeRequestRow[]>([]);
   const mode = deps.discussionDetails;
+  const discussionQueue = createDiscussions({ ...deps, mode, rows: () => rows.value });
+  const linkQueue = createLinks(deps);
   return {
     ...deps,
     project,
@@ -189,8 +191,12 @@ function createState(deps: Deps): State {
     pageProblem: shallowRef<string | null>(null),
     dueDates: createDueDates(repository, deps.storage),
     rowActions: createRowActions(deps),
-    discussionQueue: createDiscussions({ ...deps, mode, rows: () => rows.value }),
-    linkQueue: createLinks(deps),
+    discussionQueue,
+    linkQueue,
+    rowsReplaced: (replaced) => {
+      discussionQueue.replaced(replaced);
+      linkQueue.dropped();
+    },
     shown: null,
     running: null,
   };

@@ -10,7 +10,7 @@ import {
   type OpenDiscussion,
   type RowDiscussions,
 } from "../ipc";
-import { setRow } from "./mergeRequestActions";
+import { setRow, useAskedRow } from "./mergeRequestActions";
 import { attempt, type Outcome, type ProblemCause } from "./problem";
 
 export type DiscussionLoad =
@@ -198,19 +198,19 @@ export function discussionsOf(queue: DiscussionQueue): Discussions {
   };
 }
 
-/** A count's box: its row's entry, asked whenever the box opens or loses the entry while open. */
 export function useRowDiscussions(
   discussions: Discussions,
   iid: () => MergeRequestIid,
   open: () => boolean,
 ): ComputedRef<DiscussionLoad | undefined> {
-  const load = computed(() => discussions.discussions.value.get(iid()));
-  watch([open, () => load.value === undefined], ([isOpen]) => {
-    if (isOpen) {
-      discussions.askDiscussions(iid());
-    }
+  return useAskedRow({
+    rows: discussions.discussions,
+    ask: (asked) => {
+      discussions.askDiscussions(asked);
+    },
+    iid,
+    open,
   });
-  return load;
 }
 
 export function createDiscussions(deps: {

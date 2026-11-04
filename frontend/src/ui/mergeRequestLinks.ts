@@ -1,4 +1,4 @@
-import { computed, shallowRef, watch, type ComputedRef, type ShallowRef } from "vue";
+import { shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import {
   log,
@@ -7,7 +7,7 @@ import {
   type MergeRequestIid,
   type MergeRequestSource,
 } from "../ipc";
-import { setRow } from "./mergeRequestActions";
+import { setRow, useAskedRow } from "./mergeRequestActions";
 import { attempt, type Outcome, type ProblemCause } from "./problem";
 
 export type LinksLoad =
@@ -110,19 +110,19 @@ export function linksOf(queue: LinkQueue): Links {
   };
 }
 
-/** A row's links box: its entry, asked when the box opens and when the entry vanishes while the box is open. */
 export function useRowLinks(
   links: Links,
   iid: () => MergeRequestIid,
   open: () => boolean,
 ): ComputedRef<LinksLoad | undefined> {
-  const load = computed(() => links.links.value.get(iid()));
-  watch([open, () => load.value === undefined], ([isOpen]) => {
-    if (isOpen) {
-      links.askLinks(iid());
-    }
+  return useAskedRow({
+    rows: links.links,
+    ask: (asked) => {
+      links.askLinks(asked);
+    },
+    iid,
+    open,
   });
-  return load;
 }
 
 export function createLinks(deps: { readonly source: MergeRequestSource }): LinkQueue {

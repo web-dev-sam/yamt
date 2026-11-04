@@ -93,7 +93,7 @@ export type PeopleChangeReply =
 
 type UploadedPicture = (username: string) => string;
 
-function toWebPage(text: string, field: string): WebPage {
+export function toWebPage(text: string, field: string): WebPage {
   if (!isWebPage(text)) {
     throw new Error(`${field} must be an https address, got "${text}"`);
   }

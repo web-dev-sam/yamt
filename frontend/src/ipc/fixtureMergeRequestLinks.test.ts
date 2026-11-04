@@ -1,8 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { DescriptionLinks, LinksReply } from "./descriptionDomain";
 import { isMergeRequestIid, type SourceResult } from "./domain";
 import { linksScript } from "./fixtureMergeRequestLinks";
+import type { DescriptionLinks, LinksReply } from "./linksDomain";
 import type { Log } from "./log";
 import type { MergeRequestSource } from "./MergeRequestSource";
 import { branded } from "./validate";

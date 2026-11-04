@@ -1,0 +1,3 @@
+just mutants HEAD: 876 killed, 13 survived, 7 no coverage, score 97.77% (linksDomain.ts and descriptionDomain.ts 100%)
+frontend/src/ui/mergeRequestActions.ts:92 `=== undefined` → `!== undefined` — equivalent: the watch fires whenever that boolean changes, and the ask depends only on isOpen.
+frontend/src/ui/mergeRequestsList.ts:107 rowsReplaced([]) → (["Stryker was here"]) — equivalent: a string has no openDiscussions, so listed() queues nothing, as for []; the links drop ignores rows.

@@ -1,0 +1,644 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index f995b20..259c44a 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -6,7 +6,7 @@ The range window's threads and GitLab (plan §2 #116–#120) come through `Revie
+ 
+ Your own notes until they are on GitLab (plan §2 #123): `editNote(message, text)` and `deleteMessage(message)` answer the new `ThreadList`. `fixtureReview.ts` mirrors Rust's order: `SendRunning` while its send runs, then `UnknownMessage`, `NotANote` (an AI answer), `MessagePending`, and for an edit `EmptyMessage`; an edit of a queued or refused note leaves it `queued` with the new text; a delete drops the note and a thread left empty; ids are never reused.
+ 
+-The GitLab merge-request overview (compare and range windows) comes through `MergeRequestSource` (`MergeRequestSource.ts`: `findGitLabProject`, `listMergeRequests` with a page callback, `openMergeRequest`, `openPage`), which `CompareSource` and `RangeSource` extend: the `MergeRequestIid`/`WebPage` brands in `domain.ts` (a `WebPage` is a failed job's, a merge request's or a note's https page, minted by `isWebPage`/`toWebPage`, plan §2 #137, #162, or a description's link, http or https, minted by `isLinkedPage`, plan §2 #172), the shapes and their conversions in `mergeRequestDomain.ts` (`createdAt` to ms since 1970, a missing commit's `short_id` as `shortId`), the app's in `tauriMergeRequests.ts`: one `Channel<ListMessage>` per load carries every page, then exactly one end, and the load ends on that end message (or the command's IPC failure), never on the command's own answer, since Tauri may deliver a page after it; an unreadable page fails the load; no page reaches the callback after the load ended. Fixture mode's is `fixtureMergeRequests.ts` over `fixtureMergeRequestData.ts`: `?mr=<script>` (`list`, `local`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`, `refused`, `pageFails`) scripts GitLab's answers, every row with its page `<origin>/-/merge_requests/<iid>`, and an opened page logs `mergeRequests.fixture_page`; without `mr` the project is `none`, and an unknown script logs `mergeRequests.fixture_miss` and is `none` too.
++The GitLab merge-request overview (compare and range windows) comes through `MergeRequestSource` (`MergeRequestSource.ts`: `findGitLabProject`, `listMergeRequests` with a page callback, `openMergeRequest`, `openPage`), which `CompareSource` and `RangeSource` extend: the `MergeRequestIid`/`WebPage` brands in `domain.ts` (a `WebPage` is a failed job's, a merge request's, a note's or a links line's https page, minted by `isWebPage`/`toWebPage`, plan §2 #137, #162, or a description's link, http or https, minted by `isLinkedPage`, plan §2 #172), the shapes and their conversions in `mergeRequestDomain.ts` (`createdAt` to ms since 1970, a missing commit's `short_id` as `shortId`), the app's in `tauriMergeRequests.ts`: one `Channel<ListMessage>` per load carries every page, then exactly one end, and the load ends on that end message (or the command's IPC failure), never on the command's own answer, since Tauri may deliver a page after it; an unreadable page fails the load; no page reaches the callback after the load ended. Fixture mode's is `fixtureMergeRequests.ts` over `fixtureMergeRequestData.ts`: `?mr=<script>` (`list`, `local`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`, `refused`, `pageFails`) scripts GitLab's answers, every row with its page `<origin>/-/merge_requests/<iid>`, and an opened page logs `mergeRequests.fixture_page`; without `mr` the project is `none`, and an unknown script logs `mergeRequests.fixture_miss` and is `none` too.
+ 
+ yamt's local conflict check (request `docs/slices/request-local-conflict-check.md`): `listMergeRequests`'s second callback `onChecked` gets a `CheckedRow` (`toCheckedRow`, iid branded) for each `checked` message, which Rust sends after the load's `end` on the same channel, so `tauriMergeRequests.ts` passes it on after the load settled while a late `page` still reaches nobody; the fixture script `?mr=local` is `list`'s rows and end, then, 1,000 ms after the end, !640 and !635 `mergesCleanly` and !638 `conflicts` (every other script sends none).
+ 
+@@ -22,7 +22,7 @@ Each row's open discussions (request `docs/slices/request-mr-discussions.md`, pl
+ 
+ A merge request's description (request `docs/slices/request-mr-description.md`, plan §2 rows 171–175): `readDescription(iid)` → `DescriptionReply` (`read { description }`, the blocks Rust reduced GitLab's rendering to, or `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), asked afresh on every call and converted by `descriptionDomain.ts` `toDescriptionReply`, which brands every link's page at any depth as `WebPage` through `domain.ts` `isLinkedPage` (http or https; anything else throws); the description types live in `descriptionDomain.ts` and `index.ts` re-exports them from there. An `uploaded` image names only an `UploadKey`: `uploadedImage(key)` is the one address its `<img>` loads (in the app `convertFileSrc(key, PICTURE_SCHEME)`, `yamt-picture://localhost/upload~<secret>`, served once a reply offered the key); a `web` image loads its own https address. Fixture mode: `fixtureMergeRequestDescriptions.ts` `descriptionScript(log, listedRows)` (rows' `hasDescription` is false on every 7th row from !638) logs `mergeRequests.fixture_description { iid }` and answers through `toDescriptionReply` after 400 ms: !640 every element of rule 3 (upload `…01` loads a 16×16 PNG, `…02` is broken, the `web` image a `data:` PNG standing in for another site), !639 120 paragraphs, !637 no blocks, !636 `failed` on its first ask and !640's afterwards, !635 paragraphs whose text is planted markup, a row without a description no blocks, every other "Description of !<iid>.".
+ 
+-A merge request's links (request `docs/slices/request-mr-links.md`, plan §2 rows 175–177): `readLinks(iid)` → `LinksReply` (`read { links }`, a `DescriptionLinks` of `epics`, `issues` and `commits`, each group in the order of first mention, each thing once; a `LinkedEpic`/`LinkedIssue` has `shown` null and a `LinkedCommit` `title` null when GitLab did not show it; an issue's `shown.parent` is its direct parent; or `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), converted by `descriptionDomain.ts` `toLinksReply`, which brands every line's and parent's `page` as `WebPage` through `domain.ts` `isLinkedPage`, as a description link's (http or https, as Rust's `WebPage::linked`; anything else throws); the links types live in `descriptionDomain.ts` and `index.ts` re-exports them. Fixture mode (`fixtureMergeRequestLinks.ts` `linksScript(log)`) logs `mergeRequests.fixture_links { iid }`, then answers after 400 ms: !640 every kind of line (epics `&3`, `&4` closed, `design&2` not shown; issues `#12` with parent `&3`, `#13` with parent `#12`, `other/lib#5` closed, `secret/vault#9` not shown; commits `fa3335f3`, the range `a1b2c3d4…e5f6a7b8`, `secret/vault@0badc0de` not shown), !636 `failed` "glab timed out" at its first ask and !640's links after, !634 `notLoggedIn` every time, every other row three empty groups.
++A merge request's links (request `docs/slices/request-mr-links.md`, plan §2 rows 175–177): `readLinks(iid)` → `LinksReply` (`read { links }`, a `DescriptionLinks` of `epics`, `issues` and `commits`, each group in the order of first mention, each thing once; a `LinkedEpic`/`LinkedIssue` has `shown` null and a `LinkedCommit` `title` null when GitLab did not show it; an issue's `shown.parent` is its direct parent; or `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), converted by `linksDomain.ts` `toLinksReply`, which brands every line's and parent's `page` as `WebPage` through `domain.ts` `toWebPage` (https only, the only pages Rust's links lookup sends; anything else throws with its field path); the links types live in `linksDomain.ts` and `index.ts` re-exports them from there. Fixture mode (`fixtureMergeRequestLinks.ts` `linksScript(log)`) logs `mergeRequests.fixture_links { iid }`, then answers after 400 ms: !640 every kind of line (epics `&3`, `&4` closed, `design&2` not shown; issues `#12` with parent `&3`, `#13` with parent `#12`, `other/lib#5` closed, `secret/vault#9` not shown; commits `fa3335f3`, the range `a1b2c3d4…e5f6a7b8`, `secret/vault@0badc0de` not shown), !636 `failed` "glab timed out" at its first ask and !640's links after, !634 `notLoggedIn` every time, every other row three empty groups.
+ 
+ `localMergeDomain.ts` holds the merge window's aliases (MergeView, ReturnTo, Leftover, AbortReply, PushReply) over bindings; domain.ts's Listing and ChunkSource import from it.
+ 
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index c52fd30..480e617 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -1,5 +1,6 @@
+-import type { DescriptionReply, LinksReply, UploadKey } from "./descriptionDomain";
++import type { DescriptionReply, UploadKey } from "./descriptionDomain";
+ import type { MergeRequestIid, SourceResult, WebPage } from "./domain";
++import type { LinksReply } from "./linksDomain";
+ import type {
+   CheckedRow,
+   ContinueMergeReply,
+diff --git a/frontend/src/ipc/descriptionDomain.test.ts b/frontend/src/ipc/descriptionDomain.test.ts
+index 18965ce..59707c0 100644
+--- a/frontend/src/ipc/descriptionDomain.test.ts
++++ b/frontend/src/ipc/descriptionDomain.test.ts
+@@ -1,7 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+-import { toDescriptionReply, toLinksReply } from "./descriptionDomain";
++import { toDescriptionReply } from "./descriptionDomain";
+ 
+ type Inline = Generated.DescriptionInline;
+ type Block = Generated.DescriptionBlock;
+@@ -88,64 +88,3 @@ test("a refusal passes unchanged", () => {
+     expect(toDescriptionReply(reply)).toBe(reply);
+   }
+ });
+-
+-function linksAt(page: (field: string) => string): Generated.LinksReply {
+-  const parent = {
+-    reference: "&3",
+-    title: "Board",
+-    page: page("links.issues[1].shown.parent.page"),
+-  };
+-  return {
+-    kind: "read",
+-    links: {
+-      epics: [{ reference: "&3", page: page("links.epics[0].page"), shown: null }],
+-      issues: [
+-        { reference: "#9", page: page("links.issues[0].page"), shown: null },
+-        {
+-          reference: "#12",
+-          page: page("links.issues[1].page"),
+-          shown: { title: "Snooze", closed: true, parent },
+-        },
+-        {
+-          reference: "#13",
+-          page: page("links.issues[2].page"),
+-          shown: { title: "Test", closed: false, parent: null },
+-        },
+-      ],
+-      commits: [{ reference: "fa3335f3", page: page("links.commits[0].page"), title: "Backfill" }],
+-    },
+-  };
+-}
+-
+-const LINKS_FIELDS = [
+-  "links.epics[0].page",
+-  "links.issues[0].page",
+-  "links.issues[1].page",
+-  "links.issues[1].shown.parent.page",
+-  "links.issues[2].page",
+-  "links.commits[0].page",
+-];
+-
+-test("every_links_page_is_branded_and_a_non_http_one_fails", () => {
+-  const raw = linksAt((field) => `https://gitlab.example/${field}`);
+-  expect(toLinksReply(raw)).toEqual(raw);
+-  const plain = linksAt((field) => `http://gitlab.example/${field}`);
+-  expect(toLinksReply(plain)).toEqual(plain);
+-  for (const bad of LINKS_FIELDS) {
+-    const reply = linksAt((field) => (field === bad ? "ftp://x" : "https://gitlab.example/"));
+-    expect(() => toLinksReply(reply)).toThrow(
+-      `${bad} must be an http or https address, got "ftp://x"`,
+-    );
+-  }
+-});
+-
+-test("a_links_refusal_passes_unchanged", () => {
+-  const replies: Generated.LinksReply[] = [
+-    { kind: "glabMissing" },
+-    { kind: "notLoggedIn", detail: "d" },
+-    { kind: "failed", message: "m" },
+-  ];
+-  for (const reply of replies) {
+-    expect(toLinksReply(reply)).toBe(reply);
+-  }
+-});
+diff --git a/frontend/src/ipc/descriptionDomain.ts b/frontend/src/ipc/descriptionDomain.ts
+index 29d612d..9fea524 100644
+--- a/frontend/src/ipc/descriptionDomain.ts
++++ b/frontend/src/ipc/descriptionDomain.ts
+@@ -53,38 +53,6 @@ export type Description = { readonly blocks: Blocks };
+ export type DescriptionReply =
+   | { readonly kind: "read"; readonly description: Description }
+   | Readonly<Exclude<Generated.DescriptionReply, { kind: "read" }>>;
+-export type LinkedParent = {
+-  readonly reference: string;
+-  readonly title: string;
+-  readonly page: WebPage;
+-};
+-export type LinkedEpic = {
+-  readonly reference: string;
+-  readonly page: WebPage;
+-  readonly shown: { readonly title: string; readonly closed: boolean } | null;
+-};
+-export type LinkedIssue = {
+-  readonly reference: string;
+-  readonly page: WebPage;
+-  readonly shown: {
+-    readonly title: string;
+-    readonly closed: boolean;
+-    readonly parent: LinkedParent | null;
+-  } | null;
+-};
+-export type LinkedCommit = {
+-  readonly reference: string;
+-  readonly page: WebPage;
+-  readonly title: string | null;
+-};
+-export type DescriptionLinks = {
+-  readonly epics: readonly LinkedEpic[];
+-  readonly issues: readonly LinkedIssue[];
+-  readonly commits: readonly LinkedCommit[];
+-};
+-export type LinksReply =
+-  | { readonly kind: "read"; readonly links: DescriptionLinks }
+-  | Readonly<Exclude<Generated.LinksReply, { kind: "read" }>>;
+ 
+ function toLinkedPage(text: string, field: string): WebPage {
+   if (!isLinkedPage(text)) {
+@@ -145,43 +113,3 @@ export function toDescriptionReply(raw: Generated.DescriptionReply): Description
+     ? { kind: "read", description: { blocks: raw.description.blocks.map(toBlock) } }
+     : raw;
+ }
+-
+-function toIssue(raw: Generated.LinkedIssue, field: string): LinkedIssue {
+-  const page = toLinkedPage(raw.page, `${field}.page`);
+-  if (raw.shown === null) {
+-    return { ...raw, page, shown: null };
+-  }
+-  const { parent } = raw.shown;
+-  const parentPage = `${field}.shown.parent.page`;
+-  return {
+-    ...raw,
+-    page,
+-    shown: {
+-      ...raw.shown,
+-      parent: parent === null ? null : { ...parent, page: toLinkedPage(parent.page, parentPage) },
+-    },
+-  };
+-}
+-
+-/** Brands every line's and parent's page as a WebPage on http or https, as Rust's `WebPage::linked` makes it; any
+- *  other throws. */
+-export function toLinksReply(raw: Generated.LinksReply): LinksReply {
+-  if (raw.kind !== "read") {
+-    return raw;
+-  }
+-  const { epics, issues, commits } = raw.links;
+-  return {
+-    kind: "read",
+-    links: {
+-      epics: epics.map((epic, at) => ({
+-        ...epic,
+-        page: toLinkedPage(epic.page, `links.epics[${at}].page`),
+-      })),
+-      issues: issues.map((issue, at) => toIssue(issue, `links.issues[${at}]`)),
+-      commits: commits.map((commit, at) => ({
+-        ...commit,
+-        page: toLinkedPage(commit.page, `links.commits[${at}].page`),
+-      })),
+-    },
+-  };
+-}
+diff --git a/frontend/src/ipc/fixtureMergeRequestLinks.test.ts b/frontend/src/ipc/fixtureMergeRequestLinks.test.ts
+index 9fed66e..f19d430 100644
+--- a/frontend/src/ipc/fixtureMergeRequestLinks.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequestLinks.test.ts
+@@ -1,8 +1,8 @@
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import type { DescriptionLinks, LinksReply } from "./descriptionDomain";
+ import { isMergeRequestIid, type SourceResult } from "./domain";
+ import { linksScript } from "./fixtureMergeRequestLinks";
++import type { DescriptionLinks, LinksReply } from "./linksDomain";
+ import type { Log } from "./log";
+ import type { MergeRequestSource } from "./MergeRequestSource";
+ import { branded } from "./validate";
+diff --git a/frontend/src/ipc/fixtureMergeRequestLinks.ts b/frontend/src/ipc/fixtureMergeRequestLinks.ts
+index 9c19e38..81bc462 100644
+--- a/frontend/src/ipc/fixtureMergeRequestLinks.ts
++++ b/frontend/src/ipc/fixtureMergeRequestLinks.ts
+@@ -1,8 +1,8 @@
+ import type * as Generated from "./bindings";
+-import { toLinksReply } from "./descriptionDomain";
+ import { pause } from "./fixture";
+ import { TIMED_OUT } from "./fixtureGitLab";
+ import { LOGGED_OUT_DETAIL, ORIGIN } from "./fixtureMergeRequestData";
++import { toLinksReply } from "./linksDomain";
+ import type { Log } from "./log";
+ import type { MergeRequestSource } from "./MergeRequestSource";
+ 
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 77aba68..e01c706 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -77,13 +77,15 @@ export type {
+   DescriptionLink,
+   DescriptionReply,
+   DescriptionRow,
++} from "./descriptionDomain";
++export type {
+   DescriptionLinks,
+   LinkedCommit,
+   LinkedEpic,
+   LinkedIssue,
+   LinkedParent,
+   LinksReply,
+-} from "./descriptionDomain";
++} from "./linksDomain";
+ export type {
+   CheckedRow,
+   ContinueMergeReply,
+diff --git a/frontend/src/ipc/linksDomain.test.ts b/frontend/src/ipc/linksDomain.test.ts
+new file mode 100644
+index 0000000..10bff59
+--- /dev/null
++++ b/frontend/src/ipc/linksDomain.test.ts
+@@ -0,0 +1,63 @@
++import { expect, test } from "vitest";
++
++import type * as Generated from "./bindings";
++import { toLinksReply } from "./linksDomain";
++
++function linksAt(page: (field: string) => string): Generated.LinksReply {
++  const parent = {
++    reference: "&3",
++    title: "Board",
++    page: page("links.issues[1].shown.parent.page"),
++  };
++  return {
++    kind: "read",
++    links: {
++      epics: [{ reference: "&3", page: page("links.epics[0].page"), shown: null }],
++      issues: [
++        { reference: "#9", page: page("links.issues[0].page"), shown: null },
++        {
++          reference: "#12",
++          page: page("links.issues[1].page"),
++          shown: { title: "Snooze", closed: true, parent },
++        },
++        {
++          reference: "#13",
++          page: page("links.issues[2].page"),
++          shown: { title: "Test", closed: false, parent: null },
++        },
++      ],
++      commits: [{ reference: "fa3335f3", page: page("links.commits[0].page"), title: "Backfill" }],
++    },
++  };
++}
++
++const LINKS_FIELDS = [
++  "links.epics[0].page",
++  "links.issues[0].page",
++  "links.issues[1].page",
++  "links.issues[1].shown.parent.page",
++  "links.issues[2].page",
++  "links.commits[0].page",
++];
++
++test("every_links_page_is_branded_and_a_non_https_one_fails", () => {
++  const raw = linksAt((field) => `https://gitlab.example/${field}`);
++  expect(toLinksReply(raw)).toEqual(raw);
++  for (const bad of LINKS_FIELDS) {
++    for (const page of ["http://gitlab.example/x", "ftp://x"]) {
++      const reply = linksAt((field) => (field === bad ? page : "https://gitlab.example/"));
++      expect(() => toLinksReply(reply)).toThrow(`${bad} must be an https address, got "${page}"`);
++    }
++  }
++});
++
++test("a_links_refusal_passes_unchanged", () => {
++  const replies: Generated.LinksReply[] = [
++    { kind: "glabMissing" },
++    { kind: "notLoggedIn", detail: "d" },
++    { kind: "failed", message: "m" },
++  ];
++  for (const reply of replies) {
++    expect(toLinksReply(reply)).toBe(reply);
++  }
++});
+diff --git a/frontend/src/ipc/linksDomain.ts b/frontend/src/ipc/linksDomain.ts
+new file mode 100644
+index 0000000..0366e54
+--- /dev/null
++++ b/frontend/src/ipc/linksDomain.ts
+@@ -0,0 +1,76 @@
++import type * as Generated from "./bindings";
++import type { WebPage } from "./domain";
++import { toWebPage } from "./mergeRequestDomain";
++
++export type LinkedParent = {
++  readonly reference: string;
++  readonly title: string;
++  readonly page: WebPage;
++};
++export type LinkedEpic = {
++  readonly reference: string;
++  readonly page: WebPage;
++  readonly shown: { readonly title: string; readonly closed: boolean } | null;
++};
++export type LinkedIssue = {
++  readonly reference: string;
++  readonly page: WebPage;
++  readonly shown: {
++    readonly title: string;
++    readonly closed: boolean;
++    readonly parent: LinkedParent | null;
++  } | null;
++};
++export type LinkedCommit = {
++  readonly reference: string;
++  readonly page: WebPage;
++  readonly title: string | null;
++};
++export type DescriptionLinks = {
++  readonly epics: readonly LinkedEpic[];
++  readonly issues: readonly LinkedIssue[];
++  readonly commits: readonly LinkedCommit[];
++};
++export type LinksReply =
++  | { readonly kind: "read"; readonly links: DescriptionLinks }
++  | Readonly<Exclude<Generated.LinksReply, { kind: "read" }>>;
++
++function toIssue(raw: Generated.LinkedIssue, field: string): LinkedIssue {
++  const page = toWebPage(raw.page, `${field}.page`);
++  if (raw.shown === null) {
++    return { ...raw, page, shown: null };
++  }
++  const { parent } = raw.shown;
++  const parentPage = `${field}.shown.parent.page`;
++  return {
++    ...raw,
++    page,
++    shown: {
++      ...raw.shown,
++      parent: parent === null ? null : { ...parent, page: toWebPage(parent.page, parentPage) },
++    },
++  };
++}
++
++/** Brands every line's and parent's page as an https WebPage, the only kind Rust's links lookup sends; any other
++ *  throws. */
++export function toLinksReply(raw: Generated.LinksReply): LinksReply {
++  if (raw.kind !== "read") {
++    return raw;
++  }
++  const { epics, issues, commits } = raw.links;
++  return {
++    kind: "read",
++    links: {
++      epics: epics.map((epic, at) => ({
++        ...epic,
++        page: toWebPage(epic.page, `links.epics[${at}].page`),
++      })),
++      issues: issues.map((issue, at) => toIssue(issue, `links.issues[${at}]`)),
++      commits: commits.map((commit, at) => ({
++        ...commit,
++        page: toWebPage(commit.page, `links.commits[${at}].page`),
++      })),
++    },
++  };
++}
+diff --git a/frontend/src/ipc/mergeRequestDomain.ts b/frontend/src/ipc/mergeRequestDomain.ts
+index 872af2f..b5d4149 100644
+--- a/frontend/src/ipc/mergeRequestDomain.ts
++++ b/frontend/src/ipc/mergeRequestDomain.ts
+@@ -93,7 +93,7 @@ export type PeopleChangeReply =
+ 
+ type UploadedPicture = (username: string) => string;
+ 
+-function toWebPage(text: string, field: string): WebPage {
++export function toWebPage(text: string, field: string): WebPage {
+   if (!isWebPage(text)) {
+     throw new Error(`${field} must be an https address, got "${text}"`);
+   }
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index 1989202..f78c8d8 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -428,7 +428,7 @@ test("readDescription_throws_on_a_linked_page_that_is_not_http", async () => {
+ test("readLinks_calls_the_command_with_the_iid_and_brands_the_pages", async () => {
+   const commit: Generated.LinkedCommit = {
+     reference: "fa3335f3",
+-    page: "http://gitlab.example/g/p/-/commit/fa3335f3",
++    page: "https://gitlab.example/g/p/-/commit/fa3335f3",
+     title: null,
+   };
+   const epic: Generated.LinkedEpic = {
+@@ -451,11 +451,11 @@ test("readLinks_calls_the_command_with_the_iid_and_brands_the_pages", async () =
+ 
+   const unbranded: Generated.LinksReply = {
+     kind: "read",
+-    links: { epics: [], issues: [], commits: [{ ...commit, page: "ftp://x" }] },
++    links: { epics: [], issues: [], commits: [{ ...commit, page: "http://x" }] },
+   };
+   commands.readLinks.mockResolvedValue({ status: "ok", data: unbranded });
+   await expect(source.readLinks(branded(12, isMergeRequestIid, "iid"))).rejects.toThrow(
+-    'links.commits[0].page must be an http or https address, got "ftp://x"',
++    'links.commits[0].page must be an https address, got "http://x"',
+   );
+ });
+ 
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index cf36346..4beda13 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -1,8 +1,9 @@
+ import { Channel, convertFileSrc } from "@tauri-apps/api/core";
+ 
+ import { commands, type ListMessage } from "./bindings";
+-import { toDescriptionReply, toLinksReply } from "./descriptionDomain";
++import { toDescriptionReply } from "./descriptionDomain";
+ import type { SourceResult } from "./domain";
++import { toLinksReply } from "./linksDomain";
+ import {
+   toCheckedRow,
+   toMergeRequestPage,
+diff --git a/frontend/src/ui/mergeRequestActions.ts b/frontend/src/ui/mergeRequestActions.ts
+index 79731a7..b3f1be0 100644
+--- a/frontend/src/ui/mergeRequestActions.ts
++++ b/frontend/src/ui/mergeRequestActions.ts
+@@ -1,4 +1,4 @@
+-import { shallowRef, type ShallowRef } from "vue";
++import { computed, shallowRef, watch, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import type {
+   ContinueMergeReply,
+@@ -81,6 +81,22 @@ export function claimRow<V extends { readonly kind: string }>(
+   return true;
+ }
+ 
++/** A row's box: its row's entry, asked whenever the box opens or loses the entry while open. */
++export function useAskedRow<V>(box: {
++  readonly rows: Readonly<Rows<V>>;
++  readonly ask: (iid: MergeRequestIid) => void;
++  readonly iid: () => MergeRequestIid;
++  readonly open: () => boolean;
++}): ComputedRef<V | undefined> {
++  const load = computed(() => box.rows.value.get(box.iid()));
++  watch([box.open, () => load.value === undefined], ([isOpen]) => {
++    if (isOpen) {
++      box.ask(box.iid());
++    }
++  });
++  return load;
++}
++
+ async function checkLocalMerge(state: State): Promise<void> {
+   const outcome = await attempt(() => state.source.findLocalMerge());
+   if (outcome.ok) {
+diff --git a/frontend/src/ui/mergeRequestDiscussions.ts b/frontend/src/ui/mergeRequestDiscussions.ts
+index 851ce80..c7d39ae 100644
+--- a/frontend/src/ui/mergeRequestDiscussions.ts
++++ b/frontend/src/ui/mergeRequestDiscussions.ts
+@@ -10,7 +10,7 @@ import {
+   type OpenDiscussion,
+   type RowDiscussions,
+ } from "../ipc";
+-import { setRow } from "./mergeRequestActions";
++import { setRow, useAskedRow } from "./mergeRequestActions";
+ import { attempt, type Outcome, type ProblemCause } from "./problem";
+ 
+ export type DiscussionLoad =
+@@ -198,19 +198,19 @@ export function discussionsOf(queue: DiscussionQueue): Discussions {
+   };
+ }
+ 
+-/** A count's box: its row's entry, asked whenever the box opens or loses the entry while open. */
+ export function useRowDiscussions(
+   discussions: Discussions,
+   iid: () => MergeRequestIid,
+   open: () => boolean,
+ ): ComputedRef<DiscussionLoad | undefined> {
+-  const load = computed(() => discussions.discussions.value.get(iid()));
+-  watch([open, () => load.value === undefined], ([isOpen]) => {
+-    if (isOpen) {
+-      discussions.askDiscussions(iid());
+-    }
++  return useAskedRow({
++    rows: discussions.discussions,
++    ask: (asked) => {
++      discussions.askDiscussions(asked);
++    },
++    iid,
++    open,
+   });
+-  return load;
+ }
+ 
+ export function createDiscussions(deps: {
+diff --git a/frontend/src/ui/mergeRequestLinks.ts b/frontend/src/ui/mergeRequestLinks.ts
+index 1c7153c..ce6e7b1 100644
+--- a/frontend/src/ui/mergeRequestLinks.ts
++++ b/frontend/src/ui/mergeRequestLinks.ts
+@@ -1,4 +1,4 @@
+-import { computed, shallowRef, watch, type ComputedRef, type ShallowRef } from "vue";
++import { shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import {
+   log,
+@@ -7,7 +7,7 @@ import {
+   type MergeRequestIid,
+   type MergeRequestSource,
+ } from "../ipc";
+-import { setRow } from "./mergeRequestActions";
++import { setRow, useAskedRow } from "./mergeRequestActions";
+ import { attempt, type Outcome, type ProblemCause } from "./problem";
+ 
+ export type LinksLoad =
+@@ -110,19 +110,19 @@ export function linksOf(queue: LinkQueue): Links {
+   };
+ }
+ 
+-/** A row's links box: its entry, asked when the box opens and when the entry vanishes while the box is open. */
+ export function useRowLinks(
+   links: Links,
+   iid: () => MergeRequestIid,
+   open: () => boolean,
+ ): ComputedRef<LinksLoad | undefined> {
+-  const load = computed(() => links.links.value.get(iid()));
+-  watch([open, () => load.value === undefined], ([isOpen]) => {
+-    if (isOpen) {
+-      links.askLinks(iid());
+-    }
++  return useAskedRow({
++    rows: links.links,
++    ask: (asked) => {
++      links.askLinks(asked);
++    },
++    iid,
++    open,
+   });
+-  return load;
+ }
+ 
+ export function createLinks(deps: { readonly source: MergeRequestSource }): LinkQueue {
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index ba1b860..883e2a7 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -175,6 +175,8 @@ function createState(deps: Deps): State {
+   );
+   const rows = shallowRef<readonly MergeRequestRow[]>([]);
+   const mode = deps.discussionDetails;
++  const discussionQueue = createDiscussions({ ...deps, mode, rows: () => rows.value });
++  const linkQueue = createLinks(deps);
+   return {
+     ...deps,
+     project,
+@@ -189,8 +191,12 @@ function createState(deps: Deps): State {
+     pageProblem: shallowRef<string | null>(null),
+     dueDates: createDueDates(repository, deps.storage),
+     rowActions: createRowActions(deps),
+-    discussionQueue: createDiscussions({ ...deps, mode, rows: () => rows.value }),
+-    linkQueue: createLinks(deps),
++    discussionQueue,
++    linkQueue,
++    rowsReplaced: (replaced) => {
++      discussionQueue.replaced(replaced);
++      linkQueue.dropped();
++    },
+     shown: null,
+     running: null,
+   };
+diff --git a/frontend/src/ui/mergeRequestsList.ts b/frontend/src/ui/mergeRequestsList.ts
+index e82f33b..0d5c33d 100644
+--- a/frontend/src/ui/mergeRequestsList.ts
++++ b/frontend/src/ui/mergeRequestsList.ts
+@@ -10,7 +10,6 @@ import type {
+ import { merged, rechecked } from "../mergeRequests";
+ import type { DiscussionQueue } from "./mergeRequestDiscussions";
+ import type { DueDates } from "./mergeRequestDueDates";
+-import type { LinkQueue } from "./mergeRequestLinks";
+ import { listFailureText } from "./mergeRequestsText";
+ import { attempt, type Problem } from "./problem";
+ 
+@@ -34,8 +33,8 @@ export type ListState = {
+   readonly listing: ShallowRef<ListLoad>;
+   readonly listedAt: ShallowRef<number | null>;
+   readonly dueDates: Pick<DueDates, "keepOnly">;
+-  readonly discussionQueue: Pick<DiscussionQueue, "listed" | "replaced">;
+-  readonly linkQueue: Pick<LinkQueue, "dropped">;
++  readonly discussionQueue: Pick<DiscussionQueue, "listed">;
++  readonly rowsReplaced: (rows: readonly MergeRequestRow[]) => void;
+   shown: Load | null;
+   running: Load | null;
+ };
+@@ -62,8 +61,7 @@ function ended(state: ListState, load: Load, end: ListEnd): void {
+     state.rows.value = load.buffer;
+     state.me.value = load.me;
+     state.shown = load;
+-    state.discussionQueue.replaced(state.rows.value);
+-    state.linkQueue.dropped();
++    state.rowsReplaced(state.rows.value);
+   }
+   if (end.kind === "loaded") {
+     state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
+@@ -106,8 +104,7 @@ export async function loadList(state: ListState): Promise<void> {
+   if (first) {
+     state.rows.value = [];
+     state.shown = null;
+-    state.discussionQueue.replaced([]);
+-    state.linkQueue.dropped();
++    state.rowsReplaced([]);
+   }
+   state.report({ action: "mergeRequests", step: "list", cause: outcome.cause });
+ }

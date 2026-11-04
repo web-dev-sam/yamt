@@ -53,38 +53,6 @@ export type Description = { readonly blocks: Blocks };
 export type DescriptionReply =
   | { readonly kind: "read"; readonly description: Description }
   | Readonly<Exclude<Generated.DescriptionReply, { kind: "read" }>>;
-export type LinkedParent = {
-  readonly reference: string;
-  readonly title: string;
-  readonly page: WebPage;
-};
-export type LinkedEpic = {
-  readonly reference: string;
-  readonly page: WebPage;
-  readonly shown: { readonly title: string; readonly closed: boolean } | null;
-};
-export type LinkedIssue = {
-  readonly reference: string;
-  readonly page: WebPage;
-  readonly shown: {
-    readonly title: string;
-    readonly closed: boolean;
-    readonly parent: LinkedParent | null;
-  } | null;
-};
-export type LinkedCommit = {
-  readonly reference: string;
-  readonly page: WebPage;
-  readonly title: string | null;
-};
-export type DescriptionLinks = {
-  readonly epics: readonly LinkedEpic[];
-  readonly issues: readonly LinkedIssue[];
-  readonly commits: readonly LinkedCommit[];
-};
-export type LinksReply =
-  | { readonly kind: "read"; readonly links: DescriptionLinks }
-  | Readonly<Exclude<Generated.LinksReply, { kind: "read" }>>;
 
 function toLinkedPage(text: string, field: string): WebPage {
   if (!isLinkedPage(text)) {
@@ -144,44 +112,4 @@ export function toDescriptionReply(raw: Generated.DescriptionReply): Description
   return raw.kind === "read"
     ? { kind: "read", description: { blocks: raw.description.blocks.map(toBlock) } }
     : raw;
-}
-
-function toIssue(raw: Generated.LinkedIssue, field: string): LinkedIssue {
-  const page = toLinkedPage(raw.page, `${field}.page`);
-  if (raw.shown === null) {
-    return { ...raw, page, shown: null };
-  }
-  const { parent } = raw.shown;
-  const parentPage = `${field}.shown.parent.page`;
-  return {
-    ...raw,
-    page,
-    shown: {
-      ...raw.shown,
-      parent: parent === null ? null : { ...parent, page: toLinkedPage(parent.page, parentPage) },
-    },
-  };
-}
-
-/** Brands every line's and parent's page as a WebPage on http or https, as Rust's `WebPage::linked` makes it; any
- *  other throws. */
-export function toLinksReply(raw: Generated.LinksReply): LinksReply {
-  if (raw.kind !== "read") {
-    return raw;
-  }
-  const { epics, issues, commits } = raw.links;
-  return {
-    kind: "read",
-    links: {
-      epics: epics.map((epic, at) => ({
-        ...epic,
-        page: toLinkedPage(epic.page, `links.epics[${at}].page`),
-      })),
-      issues: issues.map((issue, at) => toIssue(issue, `links.issues[${at}]`)),
-      commits: commits.map((commit, at) => ({
-        ...commit,
-        page: toLinkedPage(commit.page, `links.commits[${at}].page`),
-      })),
-    },
-  };
 }

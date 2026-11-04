@@ -1,8 +1,9 @@
 import { Channel, convertFileSrc } from "@tauri-apps/api/core";
 
 import { commands, type ListMessage } from "./bindings";
-import { toDescriptionReply, toLinksReply } from "./descriptionDomain";
+import { toDescriptionReply } from "./descriptionDomain";
 import type { SourceResult } from "./domain";
+import { toLinksReply } from "./linksDomain";
 import {
   toCheckedRow,
   toMergeRequestPage,
