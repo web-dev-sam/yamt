@@ -11,7 +11,9 @@
       "frontend/src/ui/MergeRequestDiscussionsBox.test.ts",
       "frontend/src/ui/MergeRequestsView.vue",
       "frontend/src/ui/MergeRequestsPage.test.ts",
-      "frontend/src/ui/AGENTS.md"
+      "frontend/src/ui/AGENTS.md",
+      "frontend/src/ui/mergeRequests.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts"
     ]
   }
 }
