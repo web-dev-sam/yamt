@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-11-04
+
 ### Added
 
 - Adding and removing assignees and reviewers from the merge-request page: in a row's people box, the add button
@@ -27,6 +29,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the same GitLab server, each once, with its title and "Closed" when it is closed; a thing GitLab does not show you
   says "Not found or no access". A click opens the line in the browser; an issue with a parent epic or issue has a
   button that opens that parent. The box asks GitLab the first time it opens, and again after Refresh.
+
+### Fixed
+
+- Screen readers read a line of the open-discussions box with spaces between the person, the age and the excerpt,
+  instead of one run-together word.
 
 ## [0.6.7] - 2026-11-03
 
@@ -543,7 +550,8 @@ The 0.6 line as a release: everything in 0.6.0-beta.1 and 0.6.0-beta.2 below, wi
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.6.7...HEAD
+[Unreleased]: ../../compare/v0.6.8...HEAD
+[0.6.8]: ../../compare/v0.6.7...v0.6.8
 [0.6.7]: ../../compare/v0.6.6...v0.6.7
 [0.6.6]: ../../compare/v0.6.5...v0.6.6
 [0.6.5]: ../../compare/v0.6.4...v0.6.5
