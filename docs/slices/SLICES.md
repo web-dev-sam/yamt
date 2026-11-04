@@ -272,7 +272,10 @@ the people work (it edits only its briefs); its implementers wait for the people
 5. `request-mr-links.md`: done (section above, session 49); owner check handed over.
 
 6. `request-mr-threads.md` (session 50, owner #2329–#2333): sized description images, "Your turn" only when it is,
-   the whole thread in a Shift panel with reply/draft/submit/resolve, one-row reload. Running (section above).
+   the whole thread in a Shift panel with reply/draft/submit/resolve, one-row reload. Done (section above, released
+   in 0.6.9); owner check handed over.
+7. `request-mr-fast-preview.md` (session 50, owner #2419–#2422): an instant local preview when yamt renders the text
+   exactly as GitLab does, GitLab otherwise; the login check and the project lookup asked once. Todo.
 
 ## Open product questions
 
