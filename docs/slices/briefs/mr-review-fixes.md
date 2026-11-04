@@ -6,9 +6,11 @@ the four parts share `MergeRequestDiscussions.vue`, the core's turn counts and `
 would make two owners of each. Visions: the turn rule and its words live once in the core (plan #163, #179); one
 writer per state (§0). **This slice wires the window**: its commit starts the smoke pass.
 
-Starts once `mr-fast-preview-panel`'s last round is committed: that slice also edits `MergeRequestDiscussions.vue`
-(its reload button calls `refreshDiscussions`), `MergeRequestDiscussionsBox.test.ts` and `ui/AGENTS.md`; keep its
-changes. Line numbers below are of `f93d0020`; re-read before editing.
+Starts once `mr-fast-preview-panel`'s last round is committed (`475b87e3`): that slice also edits
+`MergeRequestDiscussions.vue` (its reload button calls `refreshDiscussions`; with discussions Off the icon spins while
+the shown thread `isBeingRead`), `MergeRequestDiscussionsBox.test.ts` and `ui/AGENTS.md`; keep its changes. Line
+numbers below are of `f93d0020`; re-read before editing. While in `ui/AGENTS.md`, also fix the one line it left stale
+(orchestrator, #2466): the thread re-read is `refreshed(iid, asked?)`, not `refreshed(iid)`.
 
 ## Target
 
@@ -92,7 +94,8 @@ export function reviewSortedText(viewer: Viewer, loading: number): string; // D5
 open the merge-requests page: a box line of the author's turn reads "<name>'s turn"; the purple buttons are exactly
 the rows whose box header says "N of M wait for you" with N ≥ 1; Escape with focus on Back and on the body leaves the
 page shown; Back by Enter closes it. Review mode for Me and for another reviewer: give two rows due dates (the due-date
-box), the order and the tooltip follow D1–D5. `shot` dark and light (`--settings '{"theme":"light"}'`).
+box), the order and the tooltip follow D1–D5. `shot` dark and light (light through Settings → Theme → yamt Light:
+`start-fixture` has no `--settings` option, measured by `MrFastPreviewSmoke`).
 `just app-session stop --name mrf`.
 
 ## Skills
