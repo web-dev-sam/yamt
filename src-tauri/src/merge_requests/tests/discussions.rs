@@ -1,6 +1,6 @@
 use tauri::http::StatusCode;
 
-use super::through_glab::{glab_log, in_this_repository, run_with_fakes};
+use super::through_glab::{glab_log, in_this_repository, open, opens_each, run_with_fakes};
 use super::*;
 use crate::frontend_log::tests::logged;
 use crate::merge_requests::discussions::discussions_reply;
@@ -25,10 +25,6 @@ fn read(window: &MergeRequestWindow, iids: &[u32]) -> Value {
     let iids = iids.iter().map(|&iid| MergeRequestIid(iid)).collect();
     let reply = block_on(read_discussions(window.webview.clone(), iids));
     serde_json::to_value(reply.unwrap()).unwrap()
-}
-
-fn open(window: &MergeRequestWindow, page: &str) -> Value {
-    invoke(window, "open_page", json!({ "page": page })).unwrap()
 }
 
 fn is_offered(window: &MergeRequestWindow, page: &str) -> bool {
@@ -58,11 +54,7 @@ fn note_pages_on_paths_glab() {
     assert!(is_offered(&window, NOTE_103));
     assert_eq!(open(&window, UNLISTED_NOTE), not_offered);
     assert_eq!(open(&window, EVIL_NOTE), not_offered);
-    // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `web_page.rs`), not PATH's fake: it would
-    // open the real browser.
-    if cfg!(not(target_os = "macos")) {
-        assert_eq!(open(&window, NOTE_103), json!({ "kind": "opened" }));
-    }
+    opens_each(&window, &[NOTE_103]);
 }
 
 #[test]

@@ -1,24 +1,28 @@
 use tauri::http::StatusCode;
 
 use super::through_glab::{
-    asked, glab_log, in_this_repository, is_not_found, log_after, open, opened_log, run_with_fakes,
+    asked, glab_log, in_this_repository, is_not_found, open, opened_log, opens_each, run_with_fakes,
 };
 use super::*;
 
 const SCENARIO: &str = "mr-threads";
 const REFUSED_SCENARIO: &str = "mr-threads-refused";
 const THREAD_PAGES_TEST: &str =
-    "merge_requests::tests::thread_commands::thread_pages_on_paths_opener";
+    "merge_requests::tests::discussion_thread::thread_pages_on_paths_opener";
 const PREVIEW_PAGES_TEST: &str =
-    "merge_requests::tests::thread_commands::preview_pages_on_paths_opener";
-const WHOLE_TEST: &str = "merge_requests::tests::thread_commands::a_whole_thread_on_paths_glab";
-const WRITES_TEST: &str = "merge_requests::tests::thread_commands::panel_writes_on_paths_glab";
-const REFUSED_TEST: &str = "merge_requests::tests::thread_commands::refused_writes_on_paths_glab";
-const EMPTY_TEST: &str = "merge_requests::tests::thread_commands::an_empty_reply_on_paths_glab";
-const NOT_HEX_TEST: &str = "merge_requests::tests::thread_commands::a_bad_discussion_on_paths_glab";
+    "merge_requests::tests::discussion_thread::preview_pages_on_paths_opener";
+const WHOLE_TEST: &str = "merge_requests::tests::discussion_thread::a_whole_thread_on_paths_glab";
+const WRITES_TEST: &str = "merge_requests::tests::discussion_thread::panel_writes_on_paths_glab";
+const REFUSED_TEST: &str = "merge_requests::tests::discussion_thread::refused_writes_on_paths_glab";
+const EMPTY_TEST: &str = "merge_requests::tests::discussion_thread::an_empty_reply_on_paths_glab";
+const NOT_HEX_TEST: &str =
+    "merge_requests::tests::discussion_thread::a_bad_discussion_on_paths_glab";
 const UPLOAD: &str = "/upload~903a1b2c3d4e5f60718293a4b5c6d7e8";
 const SHOT: &str =
     "tests/glab/mr-threads/uploads/7/uploads/903a1b2c3d4e5f60718293a4b5c6d7e8/shot.png";
+const DMITRI: &str = "/dmitri";
+const DMITRI_S_AVATAR: &str =
+    "tests/glab/mr-threads/pictures/uploads/-/system/user/avatar/5/avatar.png";
 const D01_PAGES: [&str; 5] = [
     "https://gitlab.com/taskboard/taskboard/-/merge_requests/90#note_901",
     "https://docs.example/board",
@@ -76,17 +80,6 @@ fn posts_counted() -> String {
     std::fs::read_to_string(state).unwrap_or_default()
 }
 
-/// Opens each of `pages` through the command and expects the fake opener to log them in order.
-fn opens_each(window: &MergeRequestWindow, pages: &[&str]) {
-    let mut before = String::new();
-    for page in pages {
-        assert_eq!(open(window, page), json!({ "kind": "opened" }), "{page}");
-        let logged = format!("{before}argv: {page}\n");
-        assert_eq!(log_after(&before), logged);
-        before = logged;
-    }
-}
-
 #[test]
 fn a_threads_pages_and_uploads_are_offered_before_the_reply() {
     run_with_fakes(THREAD_PAGES_TEST, SCENARIO);
@@ -101,6 +94,7 @@ fn thread_pages_on_paths_opener() {
         assert_eq!(open(&window, page), not_offered, "{page}");
     }
     assert!(is_not_found(&asked(&window, UPLOAD)));
+    assert!(is_not_found(&asked(&window, DMITRI)));
 
     assert_eq!(read(&window, "01")["kind"], "read");
 
@@ -110,11 +104,13 @@ fn thread_pages_on_paths_opener() {
         answer.body(),
         &std::fs::read(in_this_repository(SHOT)).unwrap()
     );
-    // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `web_page.rs`), not PATH's fake: it would
-    // open the real browser.
-    if cfg!(not(target_os = "macos")) {
-        opens_each(&window, &D01_PAGES);
-    }
+    let avatar = asked(&window, DMITRI);
+    assert_eq!(avatar.status(), StatusCode::OK);
+    assert_eq!(
+        avatar.body(),
+        &std::fs::read(in_this_repository(DMITRI_S_AVATAR)).unwrap()
+    );
+    opens_each(&window, &D01_PAGES);
 }
 
 #[test]
@@ -133,9 +129,7 @@ fn preview_pages_on_paths_opener() {
 
     assert_eq!(preview["kind"], "read");
     assert_eq!(opened_log(), "");
-    if cfg!(not(target_os = "macos")) {
-        opens_each(&window, &[ANNA_S_PAGE]);
-    }
+    opens_each(&window, &[ANNA_S_PAGE]);
 }
 
 #[test]

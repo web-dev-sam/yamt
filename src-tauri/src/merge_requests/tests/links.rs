@@ -1,4 +1,4 @@
-use super::through_glab::{log_after, open, opened_log, run_with_fakes};
+use super::through_glab::{open, opened_log, opens_each, run_with_fakes};
 use super::*;
 use crate::merge_requests::links::{links_reply, read_links};
 
@@ -33,18 +33,7 @@ fn line_and_parent_pages_on_paths_opener() {
 
     read(&window, 62);
 
-    // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `web_page.rs`), not PATH's fake: it would
-    // open the real browser.
-    if cfg!(target_os = "macos") {
-        return;
-    }
-    let mut before = String::new();
-    for page in [ISSUE_PAGE, PARENT_PAGE] {
-        assert_eq!(open(&window, page), json!({ "kind": "opened" }), "{page}");
-        let logged = format!("{before}argv: {page}\n");
-        assert_eq!(log_after(&before), logged);
-        before = logged;
-    }
+    opens_each(&window, &[ISSUE_PAGE, PARENT_PAGE]);
 }
 
 #[test]
@@ -82,11 +71,7 @@ fn an_unseen_page_on_paths_opener() {
 
     read(&window, 62);
 
-    if cfg!(target_os = "macos") {
-        return;
-    }
-    assert_eq!(open(&window, UNSEEN_PAGE), json!({ "kind": "opened" }));
-    assert_eq!(log_after(""), format!("argv: {UNSEEN_PAGE}\n"));
+    opens_each(&window, &[UNSEEN_PAGE]);
 }
 
 #[test]

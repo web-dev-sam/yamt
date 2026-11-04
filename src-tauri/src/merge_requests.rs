@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::thread::sleep;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use tauri::ipc::Channel;
@@ -20,13 +20,13 @@ use crate::range::range_folder;
 use crate::second_window;
 
 pub(crate) mod description;
+pub(crate) mod discussion_thread;
 mod discussions;
 mod job_logs;
 pub(crate) mod links;
 mod list;
 mod people;
 mod pictures;
-pub(crate) mod thread;
 
 use list::ListMessage;
 
@@ -216,7 +216,7 @@ fn wait_for_window_claim(root: &Path) {
             tracing::warn!(root = %root.display(), "the merge window did not claim its merge in time");
             return;
         }
-        sleep(CLAIM_PROBE_INTERVAL);
+        thread::sleep(CLAIM_PROBE_INTERVAL);
     }
 }
 

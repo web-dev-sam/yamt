@@ -2,7 +2,7 @@ use tauri::http::StatusCode;
 use tauri::http::header::{CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS};
 
 use super::through_glab::{
-    asked, glab_log, in_this_repository, is_not_found, log_after, open, opened_log, run_with_fakes,
+    asked, glab_log, in_this_repository, is_not_found, open, opened_log, opens_each, run_with_fakes,
 };
 use super::*;
 use crate::merge_requests::description::{description_reply, read_description};
@@ -70,18 +70,7 @@ fn described_pages_on_paths_opener() {
 
     read(&window, 52);
 
-    // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `web_page.rs`), not PATH's fake: it would
-    // open the real browser.
-    if cfg!(target_os = "macos") {
-        return;
-    }
-    let mut before = String::new();
-    for page in [DOCS_PAGE, ISSUE_PAGE, PLAIN_PAGE] {
-        assert_eq!(open(&window, page), json!({ "kind": "opened" }), "{page}");
-        let logged = format!("{before}argv: {page}\n");
-        assert_eq!(log_after(&before), logged);
-        before = logged;
-    }
+    opens_each(&window, &[DOCS_PAGE, ISSUE_PAGE, PLAIN_PAGE]);
 }
 
 #[test]

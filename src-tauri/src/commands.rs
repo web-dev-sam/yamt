@@ -87,11 +87,11 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         merge_requests::change_people::<tauri::Wry>,
         merge_requests::description::read_description::<tauri::Wry>,
         merge_requests::links::read_links::<tauri::Wry>,
-        merge_requests::thread::read_discussion_thread::<tauri::Wry>,
-        merge_requests::thread::reply_to_discussion::<tauri::Wry>,
-        merge_requests::thread::resolve_discussion::<tauri::Wry>,
-        merge_requests::thread::submit_review::<tauri::Wry>,
-        merge_requests::thread::preview_markdown::<tauri::Wry>,
+        merge_requests::discussion_thread::read_discussion_thread::<tauri::Wry>,
+        merge_requests::discussion_thread::reply_to_discussion::<tauri::Wry>,
+        merge_requests::discussion_thread::resolve_discussion::<tauri::Wry>,
+        merge_requests::discussion_thread::submit_review::<tauri::Wry>,
+        merge_requests::discussion_thread::preview_markdown::<tauri::Wry>,
     ])
 }
 

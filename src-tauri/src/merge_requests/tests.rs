@@ -1,6 +1,5 @@
 use std::path::Path;
 use std::sync::mpsc;
-use std::thread;
 
 use serde_json::{Value, json};
 use tauri::App;
@@ -139,8 +138,7 @@ mod description;
 mod links;
 
 #[cfg(unix)]
-#[path = "tests/thread.rs"]
-mod thread_commands;
+mod discussion_thread;
 
 mod csp;
 
@@ -296,7 +294,7 @@ mod through_glab {
     }
 
     /// The opener's log once it is no longer `before`.
-    pub(super) fn log_after(before: &str) -> String {
+    fn log_after(before: &str) -> String {
         let deadline = Instant::now() + OPEN_WAIT;
         loop {
             let logged = opened_log();
@@ -305,6 +303,22 @@ mod through_glab {
             }
             assert!(Instant::now() < deadline, "the opener never ran");
             thread::sleep(POLL);
+        }
+    }
+
+    /// Opens each of `pages` through the command and expects the fake opener to log them in order.
+    pub(super) fn opens_each(window: &MergeRequestWindow, pages: &[&str]) {
+        // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `web_page.rs`), not PATH's fake: it would
+        // open the real browser.
+        if cfg!(target_os = "macos") {
+            return;
+        }
+        let mut before = String::new();
+        for page in pages {
+            assert_eq!(open(window, page), json!({ "kind": "opened" }), "{page}");
+            let logged = format!("{before}argv: {page}\n");
+            assert_eq!(log_after(&before), logged);
+            before = logged;
         }
     }
 
@@ -413,18 +427,7 @@ mod through_glab {
         assert_eq!(open(&window, UNLISTED_JOB), not_offered);
         assert_eq!(open(&window, UNLISTED_MERGE_REQUEST), not_offered);
         assert_eq!(opened_log(), "");
-        // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `web_page.rs`), not PATH's fake: it would
-        // open the real browser.
-        if cfg!(target_os = "macos") {
-            return;
-        }
-        let opened = json!({ "kind": "opened" });
-        assert_eq!(open(&window, LISTED_JOB), opened);
-        let job_opened = format!("argv: {LISTED_JOB}\n");
-        assert_eq!(log_after(""), job_opened);
-        assert_eq!(open(&window, LISTED_MERGE_REQUEST), opened);
 
-        let both_opened = format!("{job_opened}argv: {LISTED_MERGE_REQUEST}\n");
-        assert_eq!(log_after(&job_opened), both_opened);
+        opens_each(&window, &[LISTED_JOB, LISTED_MERGE_REQUEST]);
     }
 }
