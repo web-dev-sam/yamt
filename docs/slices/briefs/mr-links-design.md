@@ -129,8 +129,8 @@ call (`crates/gitio/src/glab.rs:10`); the discussions' 20 merge requests per cal
 
 **Calls per hover.** `glab auth status`, the project (`logged_in_project`, `project.rs:38`), the description
 (`fetch_description`, `description.rs:327-336`, the same request the panel makes), then the lookup when the
-description links an issue or an epic. So three or four glab runs; rule 5's "about a second" is to be timed in
-`mr-links-rust` step 1 `[INFERENCE]`.
+description links an issue or an epic. So three or four glab runs; rule 5's "about a second" was timed in
+`mr-links-rust` step 1: it holds for small projects; a lookup with a gitlab-org group part takes 6–7 s per call (plan #176).
 
 ### 1.3 Commits: GitLab's own reference, no query
 
@@ -335,7 +335,7 @@ lists.
 - **After `mr-links-app`, before `mr-links-state`:** `just bindings`. It brings `LinksReply`, `DescriptionLinks`,
   `LinkedEpic`, `ShownEpic`, `LinkedIssue`, `ShownIssue`, `LinkedParent`, `LinkedCommit` and `commands.readLinks(iid)`.
   The frontend type check stays green (a pure addition).
-- Plan rows #175–#177; RK41 (amended), RK68–RK70.
+- Plan rows #176–#178 (recorded so: #175 is the uploads rule); RK41 (amended), RK68–RK70.
 - **Docs keeper (once, after `mr-links-page`):**
   - `docs/architecture.md`: §3.9 a "Links" paragraph beside "Description" (the walk's `commit_titles`, the routes, the
     query and its budget, the offer), the tests line (scenario `mr-links`), the commands list (`read_links`); §4
@@ -351,7 +351,7 @@ lists.
 
 ## 4. Decided without the owner
 
-The owner will not answer this session (#2260). Each item is recorded as row #177 and the owner may veto any:
+The owner will not answer this session (#2260). Each item is recorded as row #178 and the owner may veto any:
 
 1. **What a line opens.** A line opens the address the description used the first time it named the thing: `#12`
    opens issue 12; a link to a comment on an issue opens at that comment; a commit of this merge request opens it in
@@ -386,16 +386,16 @@ The owner will not answer this session (#2260). Each item is recorded as row #17
 
 ## 5. Slice graph
 
-| wave | brief                                                                                                      | owner        | needs                                 | beside                                 |
-| ---- | ---------------------------------------------------------------------------------------------------------- | ------------ | ------------------------------------- | -------------------------------------- |
-| 1    | `mr-links-rust.md` (crate: walk's commit titles, routes, references, lookup, packing; fake glab; scenario) | rust-impl    | this design (rows #175–#177 proposed) | `mr-description-page` (still running)  |
-| 2    | `mr-links-app.md` (command, offers, tests)                                                                 | rust-impl    | rust                                  | —                                      |
-| —    | orchestrator: `just bindings`                                                                              | orchestrator | app                                   | —                                      |
-| 3    | `mr-links-state.md` (source, conversion, fixtures, queue, refresh rule)                                    | web-impl     | app + bindings                        | `mr-description-page` if still running |
-| 4    | `mr-links-page.md` (column, button, box, lines, parent button; wires the window)                           | web-impl     | state, `mr-description-page` landed   | —                                      |
-| 5    | docs keeper                                                                                                | docs-keeper  | page                                  | verify's smoke                         |
-| 5    | `mr-links-verify.md`                                                                                       | verifier     | page (smoke); docs (final)            | docs keeper                            |
-| 6    | owner check on the playground                                                                              | human        | verify                                | —                                      |
+| wave | brief                                                                                                      | owner        | needs                               | beside                                 |
+| ---- | ---------------------------------------------------------------------------------------------------------- | ------------ | ----------------------------------- | -------------------------------------- |
+| 1    | `mr-links-rust.md` (crate: walk's commit titles, routes, references, lookup, packing; fake glab; scenario) | rust-impl    | this design (rows #176–#178)        | `mr-description-page` (still running)  |
+| 2    | `mr-links-app.md` (command, offers, tests)                                                                 | rust-impl    | rust                                | —                                      |
+| —    | orchestrator: `just bindings`                                                                              | orchestrator | app                                 | —                                      |
+| 3    | `mr-links-state.md` (source, conversion, fixtures, queue, refresh rule)                                    | web-impl     | app + bindings                      | `mr-description-page` if still running |
+| 4    | `mr-links-page.md` (column, button, box, lines, parent button; wires the window)                           | web-impl     | state, `mr-description-page` landed | —                                      |
+| 5    | docs keeper                                                                                                | docs-keeper  | page                                | verify's smoke                         |
+| 5    | `mr-links-verify.md`                                                                                       | verifier     | page (smoke); docs (final)          | docs keeper                            |
+| 6    | owner check on the playground                                                                              | human        | verify                              | —                                      |
 
 Owned globs are pairwise disjoint across the four implementer briefs and disjoint from `mr-description-page`'s
 (`MergeRequestRow.vue` is owned by `mr-links-page` only after `mr-description-page` lands). At most two implementers

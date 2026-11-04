@@ -1,7 +1,7 @@
 # Slice mr-links-verify — the gate, the WebKit fixture and the real app for the links box
 
 Design: `docs/slices/briefs/mr-links-design.md` option A. Request acceptance: `docs/slices/request-mr-links.md`
-"Acceptance". Proposed plan §2 #175–#177; RK41 (amended), RK68–RK70. Recipes: `skill://verification`. Windows open
+"Acceptance". Plan §2 #176–#178; RK41 (amended), RK68–RK70. Recipes: `skill://verification`. Windows open
 only on a private display. Screenshots come only from the session or the private display.
 
 ## Target
@@ -126,7 +126,8 @@ on gitlab.com), with the real app logged in as `samubr`:
    - `https://gitlab.com/groups/gitlab-org/-/epics/22956` (a public epic);
    - `#1` (an issue of the playground, if it has one) and a commit of the merge request (its short id);
    - `` `#1` `` inside backticks and a link to `https://docs.gitlab.com/`.
-2. In yamt, hover that merge request's links button: "Loading…" for about a second, then Epics (`gitlab-org&22956`),
+2. In yamt, hover that merge request's links button: "Loading…" for several seconds (a lookup with gitlab-org data
+   took 6–7 s per call, plan #176), then Epics (`gitlab-org&22956`),
    Issues (`gitlab-org/gitlab#630405`, `#1`), Commits (the commit and its first message line). The code and the docs
    link are not listed.
 3. Click the parent button on `gitlab-org/gitlab#630405` ("Open parent: gitlab-org&22961 Add skills to the AI
