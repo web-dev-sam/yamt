@@ -1,16 +1,13 @@
 {
-  "MrThreadsDocsR1": {
+  "MrThreadsBoxR3": {
     "owned": [
-      "docs/architecture.md",
-      "docs/plan.md",
-      ".omp/skills/project-map/**",
-      ".omp/skills/ipc-contract/SKILL.md",
-      ".omp/skills/risk-register/SKILL.md",
-      "CHANGELOG.md",
-      "frontend/src/ui/AGENTS.md",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/mergeRequests/AGENTS.md",
-      "docs/slices/briefs/mr-review-mode-design.md"
+      "frontend/src/ui/MergeRequestThread.vue",
+      "frontend/src/ui/MergeRequestThreadPanel.test.ts",
+      "frontend/src/ui/MergeRequestDiscussions.vue",
+      "frontend/src/ui/MergeRequestDiscussionsBox.test.ts",
+      "frontend/src/ui/MergeRequestRow.vue",
+      "frontend/src/ui/MergeRequestsView.vue",
+      "frontend/src/ui/MergeRequestDescription.vue"
     ]
   }
 }
