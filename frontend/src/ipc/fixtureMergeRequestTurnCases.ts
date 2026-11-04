@@ -1,14 +1,16 @@
 import type * as Generated from "./bindings";
-import { LOCKED_THREADS_IID, ORIGIN, PEOPLE, THREADS_IID } from "./fixtureMergeRequestData";
+import { LOCKED_THREADS_IID, THREADS_IID } from "./fixtureMergeRequestData";
 import { fixtureWebImage, pixels, richDescriptionBlocks } from "./fixtureMergeRequestDescriptions";
+import {
+  inlines,
+  personNamed,
+  textComment,
+  type FixtureComment,
+  type Said,
+} from "./fixtureMergeRequestRendering";
 
-/** Who wrote a comment (null: a deleted user) and its text; the people its `@username`s name are its mentions. */
-type Said = readonly [author: string | null, text: string];
 type Inline = Generated.DescriptionInline;
 
-/** A person note as the fixture keeps it: the thread's comment, and the box's text and mentions. */
-export type FixtureComment = Generated.DiscussionComment &
-  Pick<Generated.DiscussionNote, "text" | "mentions">;
 export type FixtureDiscussion = {
   readonly id: string;
   readonly place: Generated.DiscussionPlace;
@@ -17,13 +19,12 @@ export type FixtureDiscussion = {
   readonly comments: FixtureComment[];
   readonly drafts: Generated.PendingDraft[];
 };
-/** Where a seeded merge request's discussions start: `now` the store's creation, `firstNote` its next note number. */
-type Seed = { readonly iid: number; readonly now: number; readonly firstNote: number };
+/** Where a seeded merge request's discussions start: `now` the store's creation; `takeNote` hands out note numbers. */
+type Seed = { readonly iid: number; readonly now: number; readonly takeNote: () => number };
 
 const HOUR_MS = 3_600_000;
 const HALF_HOUR_MS = 1_800_000;
 const STARTED_HOURS_AGO = 48;
-const HEX = 16;
 const ID_DIGITS = 40;
 const SKETCH_PERCENT = 50;
 const OPTIONS_WIDTH_PX = 160;
@@ -31,11 +32,6 @@ const OPTIONS_HEIGHT_PX = 80;
 const OPTIONS_SERIAL = 1;
 const DUE_SERIAL = 4;
 const COPY_SERIAL = 5;
-const STRONG = "**";
-const PEOPLE_PAGES = "https://gitlab.com";
-const MARKS = /(\*\*[^*]+\*\*|@[\w-]+(?:\.[\w-]+)*)/u;
-const MENTIONS = /@([\w-]+(?:\.[\w-]+)*)/gu;
-const CODE_SPANS = /`[^`]*`/gu;
 const OPTIONS_TEXT = "Two options for the snooze menu, see below. What do you think, @ben?";
 
 /** The turn rule's cases (`docs/slices/briefs/mr-threads-fixtures.md` "!90's discussions"), d01 first. */
@@ -123,59 +119,9 @@ const RICH_CHANGES: readonly ((comment: FixtureComment) => FixtureComment)[] = [
   (comment) => edited(comment, "anna"),
 ];
 
+/** `dNN` of `docs/slices/briefs/mr-threads-fixtures.md`: the decimal serial padded to 40 digits. */
 export function discussionId(serial: number): string {
-  return serial.toString(HEX).padStart(ID_DIGITS, "0");
-}
-
-function personNamed(username: string | null): Generated.Person | null {
-  return PEOPLE.find((person) => person.username === username) ?? null;
-}
-
-function mention(name: string): Inline {
-  const page = `${PEOPLE_PAGES}/${name.slice(1)}`;
-  return { kind: "link", link: { kind: "page", page }, inlines: [{ kind: "text", text: name }] };
-}
-
-function inlines(line: string): Inline[] {
-  return line
-    .split(MARKS)
-    .filter((piece) => piece !== "")
-    .map((piece): Inline => {
-      if (piece.startsWith(STRONG)) {
-        const strong = piece.slice(STRONG.length, -STRONG.length);
-        return { kind: "strong", inlines: [{ kind: "text", text: strong }] };
-      }
-      return piece.startsWith("@") ? mention(piece) : { kind: "text", text: piece };
-    });
-}
-
-/** `text` as the fixture's GitLab renders it: a paragraph per non-empty line, `**x**` strong, `@name` a link to the
- *  person's page. */
-export function renderedText(text: string): Generated.Description {
-  const lines = text.split("\n").filter((line) => line.trim() !== "");
-  return { blocks: lines.map((line) => ({ kind: "paragraph", inlines: inlines(line) })) };
-}
-
-/** GitLab links a person's `@username`, never one in code (design §1.2). */
-function mentionsIn(text: string): Generated.Mention[] {
-  return [...text.replace(CODE_SPANS, "").matchAll(MENTIONS)].flatMap((match) => {
-    const named = personNamed(match[1] ?? null);
-    return named === null ? [] : [{ username: named.username, name: named.name }];
-  });
-}
-
-/** `said` at `time` as a comment on `iid` whose page is note `note`. */
-export function textComment(iid: number, said: Said, time: number, note: number): FixtureComment {
-  const [author, text] = said;
-  return {
-    author: personNamed(author),
-    createdAt: new Date(time).toISOString(),
-    edited: null,
-    body: renderedText(text),
-    page: `${ORIGIN}/-/merge_requests/${iid}#note_${note}`,
-    text,
-    mentions: mentionsIn(text),
-  };
+  return String(serial).padStart(ID_DIGITS, "0");
 }
 
 function edited(comment: FixtureComment, username: string): FixtureComment {
@@ -224,17 +170,15 @@ function scripted(
 ): FixtureDiscussion[] {
   const { iid, now } = seed;
   const started = now - STARTED_HOURS_AGO * HOUR_MS;
-  let note = seed.firstNote;
   return cases.map((said, at) => {
     const id = discussionId(firstSerial + at);
     const last = now - (at + 1) * HOUR_MS;
     const comments = said.map((each, index) => {
       const time = index === said.length - 1 ? last : started + index * HOUR_MS;
-      const comment = textComment(iid, each, time, note + index);
+      const comment = textComment({ iid, said: each, time, note: seed.takeNote() });
       const change = id === discussionId(OPTIONS_SERIAL) ? RICH_CHANGES[index] : undefined;
       return change === undefined ? comment : change(comment);
     });
-    note += comments.length;
     const draft = DRAFTS[id];
     return {
       id,

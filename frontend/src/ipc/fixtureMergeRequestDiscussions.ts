@@ -8,17 +8,14 @@ import {
   LOGGED_OUT_DETAIL,
   ORIGIN,
 } from "./fixtureMergeRequestData";
-import {
-  discussionId,
-  turnCases,
-  type FixtureComment,
-  type FixtureDiscussion,
-} from "./fixtureMergeRequestTurnCases";
+import type { FixtureComment } from "./fixtureMergeRequestRendering";
+import { discussionId, turnCases, type FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
 import type { Log } from "./log";
 import type { MergeRequestSource } from "./MergeRequestSource";
 
 type Position = { readonly index: number; readonly at: 0 | 1 };
-/** One source's discussions, seeded per merge request at its first ask and changed by the thread script's writes. */
+/** One source's discussions, seeded per merge request at its first ask and changed by the thread script's writes;
+ *  `nextNote` is read and advanced only by `takeNote`. */
 export type DiscussionStore = {
   readonly listedRows: number;
   readonly createdAt: number;
@@ -35,7 +32,6 @@ const HOUR_MS = 3_600_000;
 const REPLY_HOURS = 3;
 const FIRST_LINE = 10;
 const FIRST_NOTE = 7000;
-const FIRST_STORED_NOTE = 9000;
 const NOTES_PER_ROW = 10;
 const IDS_PER_ROW = 100;
 const MARKUP_EVERY = 4;
@@ -106,10 +102,16 @@ function discussions(row: Generated.MergeRequestRow, index: number): FixtureDisc
   }));
 }
 
+/** The next free note number, above every listed row's notes. */
+export function takeNote(store: DiscussionStore): number {
+  const note = store.nextNote;
+  store.nextNote += 1;
+  return note;
+}
+
 function seeded(store: DiscussionStore, iid: number): FixtureDiscussion[] | null {
-  const scripted = turnCases({ iid, now: store.createdAt, firstNote: store.nextNote });
+  const scripted = turnCases({ iid, now: store.createdAt, takeNote: () => takeNote(store) });
   if (scripted !== null) {
-    store.nextNote += scripted.reduce((sum, each) => sum + each.comments.length, 0);
     return scripted;
   }
   const listed = fixtureRows(0, store.listedRows);
@@ -119,7 +121,8 @@ function seeded(store: DiscussionStore, iid: number): FixtureDiscussion[] | null
 }
 
 export function createDiscussionStore(listedRows: number): DiscussionStore {
-  return { listedRows, createdAt: Date.now(), discussions: new Map(), nextNote: FIRST_STORED_NOTE };
+  const nextNote = FIRST_NOTE + NOTES_PER_ROW * listedRows;
+  return { listedRows, createdAt: Date.now(), discussions: new Map(), nextNote };
 }
 
 /** Merge request `iid`'s discussions, resolved ones too, seeded at the first ask; null when no listed row has it. */

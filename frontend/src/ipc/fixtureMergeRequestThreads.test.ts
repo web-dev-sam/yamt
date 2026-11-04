@@ -12,6 +12,7 @@ import {
   discussionsScript,
   type DiscussionStore,
 } from "./fixtureMergeRequestDiscussions";
+import { renderedText, textComment } from "./fixtureMergeRequestRendering";
 import { threadsScript } from "./fixtureMergeRequestThreads";
 import type { Log } from "./log";
 import type { MergeRequestSource } from "./MergeRequestSource";
@@ -59,7 +60,7 @@ function iid(value: number): MergeRequestIid {
 }
 
 function d(serial: number): DiscussionId {
-  const id = serial.toString(16).padStart(40, "0");
+  const id = String(serial).padStart(40, "0");
   if (!isDiscussionId(id)) {
     throw new Error(`not an id: ${id}`);
   }
@@ -203,6 +204,22 @@ test("comments_are_an_hour_apart_and_every_note_page_is_new", async () => {
   );
 });
 
+function noteOf(comment: { readonly page: string | null } | undefined): number {
+  return Number(comment?.page?.split("#note_")[1]);
+}
+
+test("a_written_note_takes_the_next_number_above_every_listed_rows_notes", async () => {
+  const live = rig(createDiscussionStore(500));
+  const first = await threadOf(live, 637, 1);
+  expect(noteOf(first.comments[0])).toBe(7000 + 10 * 500);
+
+  await wrote(live.source.replyToDiscussion(iid(637), d(2), "comment", "Thanks."));
+  expect(noteOf((await threadOf(live, 637, 2)).comments.at(-1))).toBe(12_027);
+  await wrote(live.source.submitReview(iid(637)));
+  const submitted = await Promise.all([1, 5].map((serial) => threadOf(live, 637, serial)));
+  expect(submitted.map((thread) => noteOf(thread.comments.at(-1)))).toEqual([12_028, 12_029]);
+});
+
 test("another_listed_discussion_reads_as_one_paragraph_comments", async () => {
   const live = rig();
   const thread = await threadOf(live, 637, 5);
@@ -241,6 +258,14 @@ test("636_is_locked_and_its_first_discussion_may_not_be_resolved", async () => {
     ok: true,
     value: { kind: "refused", reason: "403 Forbidden" },
   });
+  for (const kind of ["comment", "draft"] as const) {
+    expect(await wrote(live.source.replyToDiscussion(iid(636), d(15), kind, "Fine."))).toEqual({
+      ok: true,
+      value: { kind: "refused", reason: "403 Forbidden" },
+    });
+  }
+  const unchanged = await threadOf(live, 636, 15);
+  expect([unchanged.comments.length, unchanged.drafts.length]).toEqual([2, 0]);
   expect((await openOf(live, 636)).map((discussion) => discussion.id)).toEqual([
     d(14),
     d(15),
@@ -455,4 +480,42 @@ test("each_source_has_its_own_store", async () => {
   await wrote(first.source.resolveDiscussion(iid(637), d(1), true));
   expect(await openOf(first, 637)).toHaveLength(12);
   expect(await openOf(rig(), 637)).toHaveLength(13);
+});
+
+test("a_rendered_mention_is_a_page_link_to_the_person_and_strong_text_is_strong", () => {
+  expect(renderedText("**Look** @anna\n\n  \nthen 2**")).toEqual({
+    blocks: [
+      {
+        kind: "paragraph",
+        inlines: [
+          { kind: "strong", inlines: [{ kind: "text", text: "Look" }] },
+          { kind: "text", text: " " },
+          {
+            kind: "link",
+            link: { kind: "page", page: "https://gitlab.com/anna" },
+            inlines: [{ kind: "text", text: "@anna" }],
+          },
+        ],
+      },
+      { kind: "paragraph", inlines: [{ kind: "text", text: "then 2**" }] },
+    ],
+  });
+});
+
+test("a_text_comment_mentions_listed_people_outside_code_on_its_note_page", () => {
+  const said = "@sam see `@anna`, @all and @nobody, @chiara";
+  const comment = textComment({ iid: 637, said: ["ben", said], time: NOW, note: 12_027 });
+  expect(comment.author?.username).toBe("ben");
+  expect([comment.createdAt, comment.edited, comment.text]).toEqual([
+    "2026-11-04T12:00:00.000Z",
+    null,
+    said,
+  ]);
+  expect(comment.page).toBe(
+    "https://gitlab.example/taskboard/taskboard/-/merge_requests/637#note_12027",
+  );
+  expect(comment.mentions).toEqual([
+    { username: "sam", name: "Sam Weller" },
+    { username: "chiara", name: "Chiara Rossi" },
+  ]);
 });

@@ -11,14 +11,11 @@ import { FIXTURE_ME, fixtureUploadedPicture, LOCKED_THREADS_IID } from "./fixtur
 import {
   openDiscussion,
   storedDiscussions,
+  takeNote,
   type DiscussionStore,
 } from "./fixtureMergeRequestDiscussions";
-import {
-  renderedText,
-  textComment,
-  type FixtureComment,
-  type FixtureDiscussion,
-} from "./fixtureMergeRequestTurnCases";
+import { renderedText, textComment, type FixtureComment } from "./fixtureMergeRequestRendering";
+import type { FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
 import type { Log } from "./log";
 import type { MergeRequestSource } from "./MergeRequestSource";
 
@@ -82,21 +79,27 @@ function scriptedRefusal(text: string): Generated.DiscussionWriteReply | null {
 }
 
 function samSays(store: DiscussionStore, iid: number, text: string): FixtureComment {
-  store.nextNote += 1;
-  return textComment(iid, [FIXTURE_ME, text], Date.now(), store.nextNote);
+  const note = takeNote(store);
+  return textComment({ iid, said: [FIXTURE_ME, text], time: Date.now(), note });
 }
 
 function replied(
   store: DiscussionStore,
-  iid: number,
-  discussion: string,
-  kind: Generated.ReplyKind,
-  text: string,
+  reply: {
+    readonly iid: number;
+    readonly discussion: string;
+    readonly kind: Generated.ReplyKind;
+    readonly text: string;
+  },
 ): Generated.DiscussionWriteReply {
+  const { iid, discussion, kind, text } = reply;
   const found = discussionOf(store, iid, discussion);
   const refusal = scriptedRefusal(text);
   if (refusal !== null || found === undefined) {
     return refusal ?? { kind: "refused", reason: NOT_FOUND };
+  }
+  if (iid === LOCKED_THREADS_IID) {
+    return { kind: "refused", reason: FORBIDDEN };
   }
   if (kind === "comment") {
     found.comments.push(samSays(store, iid, text));
@@ -174,7 +177,7 @@ export function threadsScript(
     },
     replyToDiscussion(iid, discussion, kind, text) {
       return written(log, { kind, iid, discussion }, () =>
-        replied(store, iid, discussion, kind, text),
+        replied(store, { iid, discussion, kind, text }),
       );
     },
     resolveDiscussion(iid, discussion, resolve) {

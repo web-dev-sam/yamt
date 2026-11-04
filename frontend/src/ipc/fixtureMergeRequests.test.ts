@@ -511,7 +511,7 @@ test("discussions_answer_a_prefix_of_ten_after_400_ms_and_log_the_ask", async ()
     kind: "open",
     discussions: [
       {
-        id: "f99c".padStart(40, "0"),
+        id: "63900".padStart(40, "0"),
         place: { kind: "file", path: "src/board/card.ts", line: 11 },
         earlier: [],
         last: {

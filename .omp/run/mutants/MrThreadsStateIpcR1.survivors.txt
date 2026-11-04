@@ -1,0 +1,5 @@
+just mutants HEAD: 4 TS files, 601 mutants: 429 killed, 168 survived, 4 no coverage (no Rust changes)
+fixtureMergeRequestRendering.ts:12-16 string/regex constants (19) — gate-covered: module-level constants, never re-evaluated by the vitest runner (#732); the rendering tests check their output
+fixtureMergeRequestRendering.ts:49 replace(CODE_SPANS, "")→"Stryker was here!" — equivalent: differs only when a code span is glued to an @name, which no text does
+fixtureMergeRequestTurnCases.ts:30-120 case/draft/place/RICH_CHANGES literals — gate-covered: module-level constants (#732), unchanged this round
+fixtureMergeRequestThreads.ts:28-31 NOTHING_TO_SEND/FORBIDDEN/NOT_FOUND/SENT — gate-covered: module-level constants (#732)

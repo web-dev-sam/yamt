@@ -118,7 +118,7 @@ test("the_markup_text_and_a_pageless_discussion_exist", () => {
     "https://gitlab.example/taskboard/taskboard/-/merge_requests/638#note_7021",
   ]);
   expect(openOf(638).map((discussion) => discussion.id)).toEqual(
-    [63800, 63801].map((serial) => serial.toString(16).padStart(40, "0")),
+    ["63800", "63801"].map((serial) => serial.padStart(40, "0")),
   );
   expect(openOf(638).map((discussion) => discussion.place)).toEqual([
     { kind: "overview" },
@@ -177,8 +177,9 @@ test("the_b_cases_answer_on_637_and_636", () => {
     "chiara | @chiara",
   ]);
   expect(cases.map((discussion) => discussion.id)).toEqual(
-    Array.from({ length: 13 }, (_, at) => (at + 1).toString(16).padStart(40, "0")),
+    Array.from({ length: 13 }, (_, at) => String(at + 1).padStart(40, "0")),
   );
+  expect(cases[9]?.id).toBe("0000000000000000000000000000000000000010");
   expect(cases[0]?.earlier[0]?.mentions).toEqual([{ username: "ben", name: "Ben Okafor" }]);
   expect(cases[3]?.earlier[0]?.mentions).toEqual([{ username: "sam", name: "Sam Weller" }]);
   expect(cases[4]?.earlier[0]?.mentions).toEqual([{ username: "sam", name: "Sam Weller" }]);
@@ -186,10 +187,10 @@ test("the_b_cases_answer_on_637_and_636", () => {
   expect(cases[3]?.place).toEqual({ kind: "file", path: "src/due.ts", line: 4 });
   expect(cases[1]?.place).toEqual({ kind: "overview" });
   expect(openOf(636, store).map(said)).toEqual(["anna sam", "sam sam", "anna anna"]);
-  expect(openOf(636, store).map((discussion) => discussion.id.slice(-2))).toEqual([
-    "0e",
-    "0f",
-    "10",
+  expect(openOf(636, store).map((discussion) => discussion.id)).toEqual([
+    "0000000000000000000000000000000000000014",
+    "0000000000000000000000000000000000000015",
+    "0000000000000000000000000000000000000016",
   ]);
 });
 
