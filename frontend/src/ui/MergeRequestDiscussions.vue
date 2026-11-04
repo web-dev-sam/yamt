@@ -20,6 +20,7 @@ import {
 } from "../mergeRequests";
 import { useRowDiscussions, type DiscussionLoad } from "./mergeRequestDiscussions";
 import MergeRequestPicture from "./MergeRequestPicture.vue";
+import { isBeingRead } from "./mergeRequestsRefresh";
 import { useMergeRequests } from "./mergeRequestsStore";
 import {
   discussionsFailedText,
@@ -68,6 +69,13 @@ const boxed = computed(
   () => (discussionDetails.value !== "off" && count.value > 0) || shownId.value !== null,
 );
 const reload = computed(() => reloads.value.get(props.row.iid));
+const spinning = computed(() => {
+  if (discussionDetails.value !== "off") {
+    return reload.value?.kind === "running";
+  }
+  const shown = thread.value;
+  return shownId.value !== null && shown !== null && isBeingRead(shown.load);
+});
 const header = computed(() => headerOf(load.value));
 const lines = computed(() => {
   const shown = load.value;
@@ -267,11 +275,7 @@ function threadClosed(): void {
           class="shrink-0 rounded p-0.5 hover:bg-hover"
           @click="mergeRequests.refreshDiscussions(row.iid)"
         >
-          <RefreshCw
-            class="size-4"
-            :class="{ 'animate-spin': reload?.kind === 'running' }"
-            aria-hidden="true"
-          />
+          <RefreshCw class="size-4" :class="{ 'animate-spin': spinning }" aria-hidden="true" />
         </button>
       </div>
       <ul :aria-label="DISCUSSIONS_LABEL" class="min-h-0 overflow-y-auto">

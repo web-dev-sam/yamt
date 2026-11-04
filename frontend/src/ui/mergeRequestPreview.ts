@@ -19,10 +19,13 @@ export type Preview =
     }
   | { readonly kind: "failed"; readonly cause: ProblemCause };
 
-/** `text` drawn by yamt itself when `localPreview` renders it as GitLab would (plan §2 row 186): a read at once, no
- *  call; null when GitLab must. Logs `mergeRequests.preview_local { iid, blocks }` (counts only, never the text).
- *  The caller words a blank text. */
+/** `text` drawn by yamt itself: `empty` when blank, else read when `localPreview` renders it as GitLab would (plan §2
+ *  row 186), at once with no call; null when GitLab must. Logs `mergeRequests.preview_local { iid, blocks }` (counts
+ *  only, never the text). */
 export function previewHere(iid: MergeRequestIid, text: string): Preview | null {
+  if (text.trim() === "") {
+    return { kind: "empty" };
+  }
   const preview = localPreview(text);
   if (preview === null) {
     return null;

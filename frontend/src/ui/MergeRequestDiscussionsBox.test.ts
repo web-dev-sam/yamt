@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createSSRApp, h, shallowRef } from "vue";
+import { createSSRApp, h, shallowRef, type ShallowRef } from "vue";
 import { renderToString } from "vue/server-renderer";
 
 import {
@@ -7,6 +7,7 @@ import {
   isDiscussionId,
   isMergeRequestIid,
   log,
+  type DiscussionDetails,
   type DiscussionId,
   type MergeRequestIid,
   type MergeRequestRow,
@@ -47,12 +48,14 @@ const NOW = Date.parse("2026-11-04T12:00:00Z");
 const PAUSE_MS = 400;
 const WRITE_MS = 300;
 const THREADS = 637;
+const SPINS = /aria-label="Reload discussions"[^>]*><svg [^>]*animate-spin/u;
 
 let slice: MergeRequests;
 /** When set, every discussions read after it fails with this message. */
 let failReads: string | null;
 /** The source's `askGitLabAgain`; a test may hold it. */
 let askAgain: MergeRequestSource["askGitLabAgain"];
+let mode: ShallowRef<DiscussionDetails>;
 
 beforeEach(() => {
   const document = new EventTarget();
@@ -62,6 +65,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   vi.spyOn(log, "info").mockImplementation(() => undefined);
   failReads = null;
+  mode = shallowRef<DiscussionDetails>("lazy");
   const fixture = createFixtureCompareSource(log, "?mr=list", {});
   askAgain = () => fixture.askGitLabAgain();
   const source: MergeRequestSource = {
@@ -82,7 +86,7 @@ beforeEach(() => {
     source,
     screen: shallowRef<Screen>({ kind: "mergeRequests" }),
     report: () => undefined,
-    discussionDetails: () => "lazy",
+    discussionDetails: () => mode.value,
   });
   registerMergeRequests(slice);
 });
@@ -222,7 +226,21 @@ test("the_refresh_button_has_its_tip_and_spins_at_the_press", async () => {
   slice.refreshDiscussions(iid(THREADS));
   const running = await box();
   expect(rows(running)).toHaveLength(13);
-  expect(running).toMatch(/aria-label="Reload discussions"[^>]*><svg [^>]*animate-spin/u);
+  expect(running).toMatch(SPINS);
+});
+
+test("with_discussions_off_the_shown_threads_reload_spins_at_the_press", async () => {
+  await discussionsRead();
+  slice.showThread(iid(THREADS), d(2));
+  await vi.advanceTimersByTimeAsync(PAUSE_MS);
+  mode.value = "off";
+  await vi.advanceTimersByTimeAsync(0);
+  expect(slice.discussions.value.size).toBe(0);
+  expect(await box()).not.toMatch(SPINS);
+
+  askAgain = () => new Promise(() => undefined);
+  slice.refreshDiscussions(iid(THREADS));
+  expect(await box()).toMatch(SPINS);
 });
 
 test("a_failed_reload_keeps_the_rows", async () => {

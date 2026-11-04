@@ -1,0 +1,4 @@
+just mutants HEAD (Stryker, 4 TS files): 452 killed, 0 timeout, 7 survived, 0 no cov, 3 errors; mergeRequestPreview.ts 100%, mergeRequestsRefresh.ts 97.56%
+mergeRequestsRefresh.ts:17 load.kind==='read'→true — equivalent: only a read load has `refreshing`, so on any other load `load.refreshing` is undefined (falsy)
+mergeRequestThread.ts:123 current!==null→true — equivalent: isShown is false when thread is null (same as R1's :85/:124)
+mergeRequestThread.ts:84, :223 (x2), mergeRequests.ts:139, :209 — unchanged lines, kept with R1's reasons

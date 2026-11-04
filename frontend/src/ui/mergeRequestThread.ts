@@ -73,7 +73,6 @@ type State = {
 const LOADING: ThreadLoad = { kind: "loading" };
 const IDLE: Sending = { kind: "idle" };
 const WRITING: Preview = { kind: "writing" };
-const EMPTY: Preview = { kind: "empty" };
 
 function isShown(state: State, shown: ShownThread): boolean {
   const current = state.thread.value?.shown;
@@ -119,19 +118,21 @@ async function read(state: State, shown: ShownThread, generation: number | null)
   }
 }
 
-function reread(state: State, shown: ShownThread): void {
+async function reread(state: State, shown: ShownThread, asked?: Promise<void>): Promise<void> {
   const current = state.thread.value;
-  if (current === null || !isShown(state, shown)) {
-    void read(state, shown, null);
-    return;
+  const inPanel = current !== null && isShown(state, shown);
+  if (inPanel) {
+    state.generation += 1;
+    state.thread.value = {
+      ...current,
+      load: current.load.kind === "read" ? { ...current.load, refreshing: true } : LOADING,
+    };
   }
-  const { load } = current;
-  state.generation += 1;
-  state.thread.value = {
-    ...current,
-    load: load.kind === "read" ? { ...load, refreshing: true } : LOADING,
-  };
-  void read(state, shown, state.generation);
+  const generation = inPanel ? state.generation : null;
+  if (asked !== undefined) {
+    await asked;
+  }
+  await read(state, shown, generation);
 }
 
 function show(state: State, shown: ShownThread): void {
@@ -188,7 +189,7 @@ async function write(
     setText(state, shown.discussion, "");
   }
   if (failure?.kind !== "refused") {
-    reread(state, shown);
+    void reread(state, shown);
   }
   if (failure === null && what === "submit") {
     state.discussions.reloadDiscussions(shown.iid);
@@ -202,7 +203,7 @@ async function preview(state: State): Promise<void> {
   }
   const { shown } = current;
   const text = state.replyTexts.value.get(shown.discussion) ?? "";
-  const atOnce = text.trim() === "" ? EMPTY : previewHere(shown.iid, text);
+  const atOnce = previewHere(shown.iid, text);
   if (atOnce !== null) {
     patch(state, shown, { preview: atOnce });
     return;
@@ -278,7 +279,7 @@ function panelOf(state: State): Omit<Threads, "sendReply" | "setResolved" | "sub
 export function createThreads(deps: {
   readonly source: MergeRequestSource;
   readonly discussions: Pick<DiscussionQueue, "threadRead" | "reloadDiscussions">;
-}): Threads & { readonly refreshed: (iid: MergeRequestIid | null) => void } {
+}): Threads & { readonly refreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void } {
   const state: State = {
     ...deps,
     thread: shallowRef<Thread | null>(null),
@@ -289,10 +290,10 @@ export function createThreads(deps: {
   return {
     ...panelOf(state),
     ...writesOf(state),
-    refreshed: (iid) => {
+    refreshed: (iid, asked) => {
       const shown = state.thread.value?.shown;
       if (shown !== undefined && (iid === null || iid === shown.iid)) {
-        reread(state, shown);
+        void reread(state, shown, asked);
       }
     },
   };

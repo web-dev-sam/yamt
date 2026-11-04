@@ -97,7 +97,7 @@ type State = Deps &
     readonly discussionQueue: DiscussionQueue;
     readonly linkQueue: LinkQueue;
     readonly threads: Threads;
-    readonly threadsRefreshed: (iid: MergeRequestIid | null) => void;
+    readonly threadsRefreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void;
   };
 
 type RowPatch = Partial<Pick<MergeRequestRow, "assignees" | "reviewers" | "openDiscussions">>;

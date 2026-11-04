@@ -1,0 +1,403 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index c208c09..4c739ac 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -62,7 +62,7 @@ The box's thread side (request `docs/slices/request-mr-threads.md` B4, C1, C2, C
+ 
+ The thread panel (request `docs/slices/request-mr-threads.md` C1–C11, plan §2 #180–#183, #185, RK33, RK72, RK73): `mergeRequestThread.ts` `createThreads`, spread into the slice by `discussingOf`, owns `thread` — the window's one shown thread (`ThreadLoad` loading | read { thread, refreshing } | refused | failed, its `sending`, its `preview`; a read's answer lands only for the latest generation, which every show, close and re-read raises) — and `replyTexts` by `DiscussionId` for the window's life (cleared only by a write GitLab took whose text is still the one sent); `showThread` (the shown one: nothing), `closeThread`, `retryThread`, one write at a time in the window (`sendReply(kind)`, `setResolved(resolve)`, `submitReview()`), `showPreview`/`showWrite`; `refreshed(iid)` re-reads the shown thread at its row's reload or a list swap. `MergeRequestThread.vue` is a non-modal `role="dialog"` placed by `useBesidePlacement` that takes focus on mount: header (place, turn words or "Resolved", "Open on GitLab", "Submit review" with the pending count, "Close"), the comments through `MergeRequestThreadComment.vue`, the viewer's drafts under "Pending", or Loading, a refusal or a failure with Retry. `MergeRequestReplyField.vue` is its bottom: Write / Preview, the field (`replyTexts` through `setReplyText`, 3 to 12 lines by its measured `scrollHeight`, `boxKeydown`: Mod-Enter adds the comment, Escape closes the panel), "Add review", "Add comment", "Resolve thread"/"Unresolve thread", each off while not writable, blank or not allowed (the reason as tip), a failed send's sentence under the row. Focus stays in the panel across a send and Retry: a pressed button that turns disabled, or Retry removed by the read, drops WebKit's focus to the body without a `focusout` (the HTML focus fixup rule), and the next Escape would reach the page; so the add and resolve buttons focus the field first, or in Preview (the field hidden) emit `focusPanel`, and Submit review (`publish`) and Retry (`retry`) focus the panel before they call. Escape while a thread is shown is the panel's: `MergeRequestsView.vue`'s `escapePressed` leaves it alone while `thread` is set (as while `description` is), the panel's element `keydown` takes an Escape inside it (so `useHoverBox`'s area keydown never closes the box under it), and a window `keydown` listener for the component's life closes it on any Escape nothing took (`defaultPrevented`) while its thread is shown, focus on the body included. That listener does nothing while a question is open (`asking`, passed View → Row → Discussions → Thread, as the description gets it) or while `description` is set (window listeners run in mount order, so the panel's would run before a later description's): that Escape is the question's or the description's, and the next one closes the panel. The close focuses the row's line, the next Escape closes the box, the one after leaves the page. Every word is `mergeRequestThreadText.ts`.
+ 
+-The instant preview and the explicit refreshes (request `docs/slices/request-mr-fast-preview.md` A1–A4, B2, plan §2 #186, #187, owner #2423): `preview` words a blank text `empty`, then asks `mergeRequestPreview.ts` `previewHere(iid, text)` — `localPreview` from `editor/index.ts`, the one owner of "renders as GitLab would" — whose non-null answer is the same `{ kind: "read", preview }` GitLab's becomes, set at once with no `loading` and no call (so the reply field never draws "Loading…"), logged `mergeRequests.preview_local { iid, blocks }` (counts only); null goes to `readPreview` as before (`loading`, `previewMarkdown`, `preview_read`), and a late GitLab answer lands only while its own `loading` is still shown, so it never replaces a later local read. `mergeRequestsRefresh.ts` `createRefreshes` (spread into the slice) holds the buttons that ask GitLab for the login and the project again first, and each shows its work at the press, before the ask: `refresh` (the page's Refresh and its Retry) is `loadList(state, askAgain)`, which sets `listing` loading (the button disabled and spinning; a press while loading does nothing), then awaits `askGitLabAgain` through `attempt`, then lists; `refreshDiscussions(iid)` (the discussions box's reload button) is the queue's `reloadDiscussions(iid, askFirst)`, which marks the row (`reloads` `running`, or a `loading` entry) at once, then runs `askFirst` (the ask, then the shown thread's re-read) and sends the row's read only after it, unless a refresh or "Off" dropped the queue meanwhile; a press on a marked row asks nothing. A failed ask logs `mergeRequests.ask_again_failed { kind }` and the reload runs anyway. The window's slice has no reload without the ask: `discussionsOf` gives it the queue's `Discussions` only. `show` (the first load, the 30 s stale reload) and the reload a submit triggers (`mergeRequestThread.ts`, the queue's `reloadDiscussions(iid)` with no `askFirst`) never ask again: no button was pressed.
++The instant preview and the explicit refreshes (request `docs/slices/request-mr-fast-preview.md` A1–A4, B2, plan §2 #186, #187, owner #2423): `preview` asks `mergeRequestPreview.ts` `previewHere(iid, text)` — `empty` for a blank text, else `localPreview` from `editor/index.ts`, the one owner of "renders as GitLab would" — whose non-null answer (a local read is the same `{ kind: "read", preview }` GitLab's becomes) is set at once with no `loading` and no call (so the reply field never draws "Loading…"), a local read logged `mergeRequests.preview_local { iid, blocks }` (counts only); null goes to `readPreview` as before (`loading`, `previewMarkdown`, `preview_read`), and a late GitLab answer lands only while its own `loading` is still shown, so it never replaces a later local read. `mergeRequestsRefresh.ts` `createRefreshes` (spread into the slice) holds the buttons that ask GitLab for the login and the project again first, and each shows its work at the press, before the ask: `refresh` (the page's Refresh and its Retry) is `loadList(state, askAgain)`, which sets `listing` loading (the button disabled and spinning; a press while loading does nothing), then awaits `askGitLabAgain` through `attempt`, then lists; `refreshDiscussions(iid)` (the discussions box's reload button) is the queue's `reloadDiscussions(iid, askFirst)`, which marks the row (`reloads` `running`, or a `loading` entry) at once, then runs `askFirst` (the ask, then the shown thread's re-read) and sends the row's read only after it, unless a refresh or "Off" dropped the queue meanwhile; a press on a marked row asks nothing. With "Off" the queue reads nothing and the box stays only for a shown thread, so the press is that thread's alone: `threadsRefreshed(iid, asked)` marks it refreshing at once (the button spins while `isBeingRead`), awaits the ask, then reads it; a press while it `isBeingRead` (loading or refreshing) asks nothing. A failed ask logs `mergeRequests.ask_again_failed { kind }` and the reload runs anyway. The window's slice has no reload without the ask: `discussionsOf` gives it the queue's `Discussions` only. `show` (the first load, the 30 s stale reload) and the reload a submit triggers (`mergeRequestThread.ts`, the queue's `reloadDiscussions(iid)` with no `askFirst`) never ask again: no button was pressed.
+ 
+ Review mode (request `docs/slices/request-mr-review-mode.md`, design `docs/slices/briefs/mr-review-mode-design.md` option A, plan §2 #165, #166): it is `filters.review`, a field of the remembered filters. `mergeRequestFilters.ts` `createRememberedFilters(repository, reviewable, storage)` is the gate (RK62): `review` reads null while `!reviewable()` (details not "full"), and turning false with a stored review writes the entry once without it, keeping Reviewer and Draft. `review(who)` writes `reviewing(who)` (Reviewer = who, Ready, the other filters off); "Clear filters" (`clearAll`, `NO_FILTERS`) is the only way out. `MergeRequestReviewMode.vue` is the button (Lucide `user-round-search`, `vTooltip` and name `REVIEW_MODE`, a set filter's `border-primary` while on), shown only while `discussionDetails === "full"`, after the three filters; its picker is a `menuitemradio` list of `choices.review` (Me, then the Reviewer list's people, no None; `MENU_ITEMS` steps radio items too) in the filters' `MergeRequestMenu.vue`, named Reviewer; a pick calls `review(value)` and closes the menu with the focus back on the button. `MergeRequestReviewSort.vue` is the sort icon (Lucide `arrow-down-wide-narrow`, a `role="img"` span with `vTooltip` and `aria-label`), shown while `reviewSort` is not null: `text-primary` with `reviewSortedText(viewer, loading)` when sorted, `text-problem-error` with `reviewFailedText(viewer, iid, discussionsFailedText(…))` when a shown row's details failed (RK63: the list keeps the normal order).
+ 
+diff --git a/frontend/src/ui/MergeRequestDiscussions.vue b/frontend/src/ui/MergeRequestDiscussions.vue
+index 5740f45..595bf1b 100644
+--- a/frontend/src/ui/MergeRequestDiscussions.vue
++++ b/frontend/src/ui/MergeRequestDiscussions.vue
+@@ -20,6 +20,7 @@ import {
+ } from "../mergeRequests";
+ import { useRowDiscussions, type DiscussionLoad } from "./mergeRequestDiscussions";
+ import MergeRequestPicture from "./MergeRequestPicture.vue";
++import { isBeingRead } from "./mergeRequestsRefresh";
+ import { useMergeRequests } from "./mergeRequestsStore";
+ import {
+   discussionsFailedText,
+@@ -68,6 +69,13 @@ const boxed = computed(
+   () => (discussionDetails.value !== "off" && count.value > 0) || shownId.value !== null,
+ );
+ const reload = computed(() => reloads.value.get(props.row.iid));
++const spinning = computed(() => {
++  if (discussionDetails.value !== "off") {
++    return reload.value?.kind === "running";
++  }
++  const shown = thread.value;
++  return shownId.value !== null && shown !== null && isBeingRead(shown.load);
++});
+ const header = computed(() => headerOf(load.value));
+ const lines = computed(() => {
+   const shown = load.value;
+@@ -267,11 +275,7 @@ function threadClosed(): void {
+           class="shrink-0 rounded p-0.5 hover:bg-hover"
+           @click="mergeRequests.refreshDiscussions(row.iid)"
+         >
+-          <RefreshCw
+-            class="size-4"
+-            :class="{ 'animate-spin': reload?.kind === 'running' }"
+-            aria-hidden="true"
+-          />
++          <RefreshCw class="size-4" :class="{ 'animate-spin': spinning }" aria-hidden="true" />
+         </button>
+       </div>
+       <ul :aria-label="DISCUSSIONS_LABEL" class="min-h-0 overflow-y-auto">
+diff --git a/frontend/src/ui/MergeRequestDiscussionsBox.test.ts b/frontend/src/ui/MergeRequestDiscussionsBox.test.ts
+index 53ba3b6..9d526b0 100644
+--- a/frontend/src/ui/MergeRequestDiscussionsBox.test.ts
++++ b/frontend/src/ui/MergeRequestDiscussionsBox.test.ts
+@@ -1,5 +1,5 @@
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+-import { createSSRApp, h, shallowRef } from "vue";
++import { createSSRApp, h, shallowRef, type ShallowRef } from "vue";
+ import { renderToString } from "vue/server-renderer";
+ 
+ import {
+@@ -7,6 +7,7 @@ import {
+   isDiscussionId,
+   isMergeRequestIid,
+   log,
++  type DiscussionDetails,
+   type DiscussionId,
+   type MergeRequestIid,
+   type MergeRequestRow,
+@@ -47,12 +48,14 @@ const NOW = Date.parse("2026-11-04T12:00:00Z");
+ const PAUSE_MS = 400;
+ const WRITE_MS = 300;
+ const THREADS = 637;
++const SPINS = /aria-label="Reload discussions"[^>]*><svg [^>]*animate-spin/u;
+ 
+ let slice: MergeRequests;
+ /** When set, every discussions read after it fails with this message. */
+ let failReads: string | null;
+ /** The source's `askGitLabAgain`; a test may hold it. */
+ let askAgain: MergeRequestSource["askGitLabAgain"];
++let mode: ShallowRef<DiscussionDetails>;
+ 
+ beforeEach(() => {
+   const document = new EventTarget();
+@@ -62,6 +65,7 @@ beforeEach(() => {
+   vi.setSystemTime(NOW);
+   vi.spyOn(log, "info").mockImplementation(() => undefined);
+   failReads = null;
++  mode = shallowRef<DiscussionDetails>("lazy");
+   const fixture = createFixtureCompareSource(log, "?mr=list", {});
+   askAgain = () => fixture.askGitLabAgain();
+   const source: MergeRequestSource = {
+@@ -82,7 +86,7 @@ beforeEach(() => {
+     source,
+     screen: shallowRef<Screen>({ kind: "mergeRequests" }),
+     report: () => undefined,
+-    discussionDetails: () => "lazy",
++    discussionDetails: () => mode.value,
+   });
+   registerMergeRequests(slice);
+ });
+@@ -222,7 +226,21 @@ test("the_refresh_button_has_its_tip_and_spins_at_the_press", async () => {
+   slice.refreshDiscussions(iid(THREADS));
+   const running = await box();
+   expect(rows(running)).toHaveLength(13);
+-  expect(running).toMatch(/aria-label="Reload discussions"[^>]*><svg [^>]*animate-spin/u);
++  expect(running).toMatch(SPINS);
++});
++
++test("with_discussions_off_the_shown_threads_reload_spins_at_the_press", async () => {
++  await discussionsRead();
++  slice.showThread(iid(THREADS), d(2));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  mode.value = "off";
++  await vi.advanceTimersByTimeAsync(0);
++  expect(slice.discussions.value.size).toBe(0);
++  expect(await box()).not.toMatch(SPINS);
++
++  askAgain = () => new Promise(() => undefined);
++  slice.refreshDiscussions(iid(THREADS));
++  expect(await box()).toMatch(SPINS);
+ });
+ 
+ test("a_failed_reload_keeps_the_rows", async () => {
+diff --git a/frontend/src/ui/mergeRequestPreview.ts b/frontend/src/ui/mergeRequestPreview.ts
+index cdabc5b..1d00777 100644
+--- a/frontend/src/ui/mergeRequestPreview.ts
++++ b/frontend/src/ui/mergeRequestPreview.ts
+@@ -19,10 +19,13 @@ export type Preview =
+     }
+   | { readonly kind: "failed"; readonly cause: ProblemCause };
+ 
+-/** `text` drawn by yamt itself when `localPreview` renders it as GitLab would (plan §2 row 186): a read at once, no
+- *  call; null when GitLab must. Logs `mergeRequests.preview_local { iid, blocks }` (counts only, never the text).
+- *  The caller words a blank text. */
++/** `text` drawn by yamt itself: `empty` when blank, else read when `localPreview` renders it as GitLab would (plan §2
++ *  row 186), at once with no call; null when GitLab must. Logs `mergeRequests.preview_local { iid, blocks }` (counts
++ *  only, never the text). */
+ export function previewHere(iid: MergeRequestIid, text: string): Preview | null {
++  if (text.trim() === "") {
++    return { kind: "empty" };
++  }
+   const preview = localPreview(text);
+   if (preview === null) {
+     return null;
+diff --git a/frontend/src/ui/mergeRequestReload.test.ts b/frontend/src/ui/mergeRequestReload.test.ts
+index ac985fb..e952334 100644
+--- a/frontend/src/ui/mergeRequestReload.test.ts
++++ b/frontend/src/ui/mergeRequestReload.test.ts
+@@ -1,10 +1,11 @@
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+-import { shallowRef } from "vue";
++import { shallowRef, type ShallowRef } from "vue";
+ 
+ import {
+   createFixtureCompareSource,
+   isMergeRequestIid,
+   log,
++  type DiscussionDetails,
+   type DiscussionId,
+   type ListEnd,
+   type MergeRequestIid,
+@@ -53,7 +54,10 @@ function iid(value: number): MergeRequestIid {
+   return value;
+ }
+ 
+-function rig(askedAgain: SourceResult<null> = { ok: true, value: null }): Rig {
++function rig(
++  askedAgain: SourceResult<null> = { ok: true, value: null },
++  mode: ShallowRef<DiscussionDetails> = shallowRef("lazy"),
++): Rig {
+   const fixture = createFixtureCompareSource(log, "?mr=list", {});
+   const threadReads: MergeRequestIid[] = [];
+   const calls: string[] = [];
+@@ -96,7 +100,7 @@ function rig(askedAgain: SourceResult<null> = { ok: true, value: null }): Rig {
+     source,
+     screen: shallowRef<Screen>({ kind: "files" }),
+     report: () => undefined,
+-    discussionDetails: () => "lazy",
++    discussionDetails: () => mode.value,
+   });
+   return { slice, source, threadReads, calls, asks, held };
+ }
+@@ -283,6 +287,58 @@ test("a_failed_ask_still_reloads_the_discussions", async () => {
+   });
+ });
+ 
++test("with_discussions_off_the_reload_button_asks_then_rereads_the_shown_thread", async () => {
++  const mode = shallowRef<DiscussionDetails>("lazy");
++  const live = rig(undefined, mode);
++  await threadShown(live);
++  mode.value = "off";
++  await vi.advanceTimersByTimeAsync(0);
++  expect(live.slice.discussions.value.size).toBe(0);
++  expect(live.calls).toEqual(["askGitLabAgain", "readDiscussions"]);
++  live.slice.refreshDiscussions(iid(QUIET));
++  await vi.advanceTimersByTimeAsync(0);
++  expect(live.calls).toEqual(["askGitLabAgain", "readDiscussions"]);
++
++  live.asks.hold = true;
++  live.slice.refreshDiscussions(iid(THREADS));
++  expect(live.slice.thread.value?.load).toMatchObject({ kind: "read", refreshing: true });
++  live.slice.refreshDiscussions(iid(THREADS));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  expect(live.calls.slice(2)).toEqual(["askGitLabAgain"]);
++  expect(live.threadReads).toEqual([THREADS]);
++
++  live.asks.held[0]?.({ ok: true, value: null });
++  await vi.advanceTimersByTimeAsync(0);
++  expect(live.threadReads).toEqual([THREADS, THREADS]);
++  live.slice.refreshDiscussions(iid(THREADS));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  expect(live.calls.slice(2)).toEqual(["askGitLabAgain"]);
++  expect(live.threadReads).toEqual([THREADS, THREADS]);
++  expect(live.slice.thread.value?.load).toMatchObject({ kind: "read", refreshing: false });
++  expect(live.slice.reloads.value.size).toBe(0);
++});
++
++test("with_discussions_off_a_reload_while_the_thread_loads_or_none_is_shown_asks_nothing", async () => {
++  const mode = shallowRef<DiscussionDetails>("lazy");
++  const live = rig(undefined, mode);
++  await threadShown(live);
++  const [, other] = readIds(live, THREADS);
++  if (other === undefined) {
++    throw new Error(`!${THREADS} has one discussion`);
++  }
++  mode.value = "off";
++  await vi.advanceTimersByTimeAsync(0);
++
++  live.slice.showThread(iid(THREADS), other);
++  expect(live.slice.thread.value?.load.kind).toBe("loading");
++  live.slice.refreshDiscussions(iid(THREADS));
++  live.slice.closeThread();
++  live.slice.refreshDiscussions(iid(THREADS));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  expect(live.calls).toEqual(["askGitLabAgain", "readDiscussions"]);
++  expect(live.threadReads).toEqual([THREADS, THREADS]);
++});
++
+ test("the_window_slice_offers_no_reload_that_skips_the_ask", () => {
+   const live = rig();
+   expect(Object.keys(live.slice)).toContain("refreshDiscussions");
+diff --git a/frontend/src/ui/mergeRequestThread.ts b/frontend/src/ui/mergeRequestThread.ts
+index be672ea..4879ddb 100644
+--- a/frontend/src/ui/mergeRequestThread.ts
++++ b/frontend/src/ui/mergeRequestThread.ts
+@@ -73,7 +73,6 @@ type State = {
+ const LOADING: ThreadLoad = { kind: "loading" };
+ const IDLE: Sending = { kind: "idle" };
+ const WRITING: Preview = { kind: "writing" };
+-const EMPTY: Preview = { kind: "empty" };
+ 
+ function isShown(state: State, shown: ShownThread): boolean {
+   const current = state.thread.value?.shown;
+@@ -119,19 +118,21 @@ async function read(state: State, shown: ShownThread, generation: number | null)
+   }
+ }
+ 
+-function reread(state: State, shown: ShownThread): void {
++async function reread(state: State, shown: ShownThread, asked?: Promise<void>): Promise<void> {
+   const current = state.thread.value;
+-  if (current === null || !isShown(state, shown)) {
+-    void read(state, shown, null);
+-    return;
++  const inPanel = current !== null && isShown(state, shown);
++  if (inPanel) {
++    state.generation += 1;
++    state.thread.value = {
++      ...current,
++      load: current.load.kind === "read" ? { ...current.load, refreshing: true } : LOADING,
++    };
+   }
+-  const { load } = current;
+-  state.generation += 1;
+-  state.thread.value = {
+-    ...current,
+-    load: load.kind === "read" ? { ...load, refreshing: true } : LOADING,
+-  };
+-  void read(state, shown, state.generation);
++  const generation = inPanel ? state.generation : null;
++  if (asked !== undefined) {
++    await asked;
++  }
++  await read(state, shown, generation);
+ }
+ 
+ function show(state: State, shown: ShownThread): void {
+@@ -188,7 +189,7 @@ async function write(
+     setText(state, shown.discussion, "");
+   }
+   if (failure?.kind !== "refused") {
+-    reread(state, shown);
++    void reread(state, shown);
+   }
+   if (failure === null && what === "submit") {
+     state.discussions.reloadDiscussions(shown.iid);
+@@ -202,7 +203,7 @@ async function preview(state: State): Promise<void> {
+   }
+   const { shown } = current;
+   const text = state.replyTexts.value.get(shown.discussion) ?? "";
+-  const atOnce = text.trim() === "" ? EMPTY : previewHere(shown.iid, text);
++  const atOnce = previewHere(shown.iid, text);
+   if (atOnce !== null) {
+     patch(state, shown, { preview: atOnce });
+     return;
+@@ -278,7 +279,7 @@ function panelOf(state: State): Omit<Threads, "sendReply" | "setResolved" | "sub
+ export function createThreads(deps: {
+   readonly source: MergeRequestSource;
+   readonly discussions: Pick<DiscussionQueue, "threadRead" | "reloadDiscussions">;
+-}): Threads & { readonly refreshed: (iid: MergeRequestIid | null) => void } {
++}): Threads & { readonly refreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void } {
+   const state: State = {
+     ...deps,
+     thread: shallowRef<Thread | null>(null),
+@@ -289,10 +290,10 @@ export function createThreads(deps: {
+   return {
+     ...panelOf(state),
+     ...writesOf(state),
+-    refreshed: (iid) => {
++    refreshed: (iid, asked) => {
+       const shown = state.thread.value?.shown;
+       if (shown !== undefined && (iid === null || iid === shown.iid)) {
+-        reread(state, shown);
++        void reread(state, shown, asked);
+       }
+     },
+   };
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 07f7282..ba11d1e 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -97,7 +97,7 @@ type State = Deps &
+     readonly discussionQueue: DiscussionQueue;
+     readonly linkQueue: LinkQueue;
+     readonly threads: Threads;
+-    readonly threadsRefreshed: (iid: MergeRequestIid | null) => void;
++    readonly threadsRefreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void;
+   };
+ 
+ type RowPatch = Partial<Pick<MergeRequestRow, "assignees" | "reviewers" | "openDiscussions">>;
+diff --git a/frontend/src/ui/mergeRequestsRefresh.ts b/frontend/src/ui/mergeRequestsRefresh.ts
+index a0edfe8..d4c8f11 100644
+--- a/frontend/src/ui/mergeRequestsRefresh.ts
++++ b/frontend/src/ui/mergeRequestsRefresh.ts
+@@ -1,16 +1,22 @@
+-import { log, type MergeRequestIid, type MergeRequestSource } from "../ipc";
++import { log, type DiscussionDetails, type MergeRequestIid, type MergeRequestSource } from "../ipc";
+ import type { DiscussionQueue } from "./mergeRequestDiscussions";
+ import { loadList, type ListState } from "./mergeRequestsList";
++import type { ThreadLoad, Threads } from "./mergeRequestThread";
+ import { attempt } from "./problem";
+ 
+ export type Refreshes = {
+   /** The page's Refresh and its Retry: loading at once, `askGitLabAgain`, then the list. */
+   refresh(): Promise<void>;
+   /** The discussions box's reload button: the row reloading at once, `askGitLabAgain`, then the row and the shown
+-   *  thread read again. */
++   *  thread read again. With discussions "off" only the shown thread: refreshing at once, the ask, then its read. */
+   refreshDiscussions(iid: MergeRequestIid): void;
+ };
+ 
++/** The thread is being read (shown or read again): its reload button asks nothing. */
++export function isBeingRead(load: ThreadLoad): boolean {
++  return load.kind === "loading" || (load.kind === "read" && load.refreshing);
++}
++
+ async function askAgain(source: MergeRequestSource): Promise<void> {
+   const outcome = await attempt(() => source.askGitLabAgain());
+   if (!outcome.ok) {
+@@ -21,17 +27,26 @@ async function askAgain(source: MergeRequestSource): Promise<void> {
+ /** Owner decision 2423, plan §2 row 187. `show` and a submit's reload do not ask again: no button was pressed. */
+ export function createRefreshes(
+   state: ListState & {
++    readonly discussionDetails: () => DiscussionDetails;
+     readonly discussionQueue: Pick<DiscussionQueue, "reloadDiscussions">;
+-    readonly threadsRefreshed: (iid: MergeRequestIid) => void;
++    readonly threads: Pick<Threads, "thread">;
++    readonly threadsRefreshed: (iid: MergeRequestIid, asked?: Promise<void>) => void;
+   },
+ ): Refreshes {
+   return {
+     refresh: () => loadList(state, () => askAgain(state.source)),
+     refreshDiscussions: (iid) => {
+-      state.discussionQueue.reloadDiscussions(iid, async () => {
+-        await askAgain(state.source);
+-        state.threadsRefreshed(iid);
+-      });
++      if (state.discussionDetails() !== "off") {
++        state.discussionQueue.reloadDiscussions(iid, async () => {
++          await askAgain(state.source);
++          state.threadsRefreshed(iid);
++        });
++        return;
++      }
++      const shown = state.threads.thread.value;
++      if (shown?.shown.iid === iid && !isBeingRead(shown.load)) {
++        state.threadsRefreshed(iid, askAgain(state.source));
++      }
+     },
+   };
+ }

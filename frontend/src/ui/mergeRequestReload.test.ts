@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { shallowRef } from "vue";
+import { shallowRef, type ShallowRef } from "vue";
 
 import {
   createFixtureCompareSource,
   isMergeRequestIid,
   log,
+  type DiscussionDetails,
   type DiscussionId,
   type ListEnd,
   type MergeRequestIid,
@@ -53,7 +54,10 @@ function iid(value: number): MergeRequestIid {
   return value;
 }
 
-function rig(askedAgain: SourceResult<null> = { ok: true, value: null }): Rig {
+function rig(
+  askedAgain: SourceResult<null> = { ok: true, value: null },
+  mode: ShallowRef<DiscussionDetails> = shallowRef("lazy"),
+): Rig {
   const fixture = createFixtureCompareSource(log, "?mr=list", {});
   const threadReads: MergeRequestIid[] = [];
   const calls: string[] = [];
@@ -96,7 +100,7 @@ function rig(askedAgain: SourceResult<null> = { ok: true, value: null }): Rig {
     source,
     screen: shallowRef<Screen>({ kind: "files" }),
     report: () => undefined,
-    discussionDetails: () => "lazy",
+    discussionDetails: () => mode.value,
   });
   return { slice, source, threadReads, calls, asks, held };
 }
@@ -281,6 +285,58 @@ test("a_failed_ask_still_reloads_the_discussions", async () => {
   expect(log.info).toHaveBeenCalledWith("mergeRequests.ask_again_failed", {
     kind: "WorkerStopped",
   });
+});
+
+test("with_discussions_off_the_reload_button_asks_then_rereads_the_shown_thread", async () => {
+  const mode = shallowRef<DiscussionDetails>("lazy");
+  const live = rig(undefined, mode);
+  await threadShown(live);
+  mode.value = "off";
+  await vi.advanceTimersByTimeAsync(0);
+  expect(live.slice.discussions.value.size).toBe(0);
+  expect(live.calls).toEqual(["askGitLabAgain", "readDiscussions"]);
+  live.slice.refreshDiscussions(iid(QUIET));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(live.calls).toEqual(["askGitLabAgain", "readDiscussions"]);
+
+  live.asks.hold = true;
+  live.slice.refreshDiscussions(iid(THREADS));
+  expect(live.slice.thread.value?.load).toMatchObject({ kind: "read", refreshing: true });
+  live.slice.refreshDiscussions(iid(THREADS));
+  await vi.advanceTimersByTimeAsync(PAUSE_MS);
+  expect(live.calls.slice(2)).toEqual(["askGitLabAgain"]);
+  expect(live.threadReads).toEqual([THREADS]);
+
+  live.asks.held[0]?.({ ok: true, value: null });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(live.threadReads).toEqual([THREADS, THREADS]);
+  live.slice.refreshDiscussions(iid(THREADS));
+  await vi.advanceTimersByTimeAsync(PAUSE_MS);
+  expect(live.calls.slice(2)).toEqual(["askGitLabAgain"]);
+  expect(live.threadReads).toEqual([THREADS, THREADS]);
+  expect(live.slice.thread.value?.load).toMatchObject({ kind: "read", refreshing: false });
+  expect(live.slice.reloads.value.size).toBe(0);
+});
+
+test("with_discussions_off_a_reload_while_the_thread_loads_or_none_is_shown_asks_nothing", async () => {
+  const mode = shallowRef<DiscussionDetails>("lazy");
+  const live = rig(undefined, mode);
+  await threadShown(live);
+  const [, other] = readIds(live, THREADS);
+  if (other === undefined) {
+    throw new Error(`!${THREADS} has one discussion`);
+  }
+  mode.value = "off";
+  await vi.advanceTimersByTimeAsync(0);
+
+  live.slice.showThread(iid(THREADS), other);
+  expect(live.slice.thread.value?.load.kind).toBe("loading");
+  live.slice.refreshDiscussions(iid(THREADS));
+  live.slice.closeThread();
+  live.slice.refreshDiscussions(iid(THREADS));
+  await vi.advanceTimersByTimeAsync(PAUSE_MS);
+  expect(live.calls).toEqual(["askGitLabAgain", "readDiscussions"]);
+  expect(live.threadReads).toEqual([THREADS, THREADS]);
 });
 
 test("the_window_slice_offers_no_reload_that_skips_the_ask", () => {
