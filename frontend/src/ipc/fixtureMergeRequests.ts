@@ -14,6 +14,7 @@ import {
   REFUSED_MESSAGE,
   REFUSING_REVIEWER,
 } from "./fixtureMergeRequestData";
+import { descriptionScript } from "./fixtureMergeRequestDescriptions";
 import { discussionsScript } from "./fixtureMergeRequestDiscussions";
 import { fixtureJobLog } from "./fixtureMergeRequestLogs";
 import { peopleScript } from "./fixtureMergeRequestPeople";
@@ -282,5 +283,6 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
     ...pageScript(log),
     ...discussionsScript(log, LISTED_ROWS),
     ...peopleScript(log, LISTED_ROWS),
+    ...descriptionScript(log, LISTED_ROWS),
   };
 }

@@ -1,0 +1,5 @@
+just mutants HEAD: 12 TS files, 1736 mutants: 1407 killed, 177 survived, 21 no coverage. Afterwards the two fixture survivors were killed (stryker on lines 89, 154-160: 21/21 killed)
+src/ipc/fixtureMergeRequestDescriptions.ts:16-21,28,31 StringLiteral/ArrayDeclaration (module-level consts) — gate-covered: module-level mutants are not re-evaluated under vitest (#732, justfile mutants note); the test pins each literal
+src/ipc/fixtureMergeRequestData.ts:41 BROKEN_PICTURE "" — gate-covered: module-level const (#732); my test pins its literal
+src/ui/mergeRequestDescriptions.ts:82 exhaustive default (NoCoverage) — equivalent: unreachable `never` arm
+Other survivors (fixtureMergeRequestData.ts rows, fixtureMergeRequests.ts 51-80/137/170, index.ts 186-190, tauriMergeRequests.ts:21, mergeRequests.ts:130/182, problemText.ts:173) are on lines I did not change

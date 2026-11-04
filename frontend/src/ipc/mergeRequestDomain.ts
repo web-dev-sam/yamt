@@ -90,6 +90,20 @@ export type PeopleChangeReply =
   | { readonly kind: "changed"; readonly people: MergeRequestPeople }
   | { readonly kind: "unchanged"; readonly people: MergeRequestPeople }
   | Readonly<Exclude<Generated.PeopleChangeReply, { kind: "changed" | "unchanged" }>>;
+export type DescriptionReply = Readonly<Generated.DescriptionReply>;
+export type Description = Readonly<Generated.Description>;
+export type DescriptionBlock = Readonly<Generated.DescriptionBlock>;
+export type DescriptionInline = Readonly<Generated.DescriptionInline>;
+export type DescriptionItem = Readonly<Generated.DescriptionItem>;
+export type DescriptionRow = Readonly<Generated.DescriptionRow>;
+export type DescriptionCell = Readonly<Generated.DescriptionCell>;
+export type DescriptionLink = Readonly<Generated.DescriptionLink>;
+export type DescriptionImage = Readonly<Generated.DescriptionImage>;
+export type HeadingLevel = Generated.HeadingLevel;
+export type ListNumbering = Readonly<Generated.ListNumbering>;
+export type TaskBox = Generated.TaskBox;
+export type CellAlign = Generated.CellAlign;
+export type UploadKey = Generated.UploadKey;
 
 type UploadedPicture = (username: string) => string;
 

@@ -1,0 +1,1390 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index f91af5c..9212716 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -20,6 +20,8 @@ A failed job's log (request `docs/slices/request-ci-job-log.md`, plan §2 row 15
+ 
+ Each row's open discussions (request `docs/slices/request-mr-discussions.md`, plan §2 rows 162–164): `readDiscussions(iids)` → `RowDiscussions[]` (a non-empty prefix of at most Rust's `DISCUSSION_BATCH` distinct iids, in order, for a non-empty ask; the caller asks again for the rest), converted by `mergeRequestDomain.ts` `toRowDiscussions(raw, index, uploadedPicture)`: the iid branded, an `open` answer's notes with `createdAt` in milliseconds, `author` the domain `Person` (its picture as `toMergeRequestPage` makes it) and `page` through `toWebPage`; the refusals `glabMissing`, `notLoggedIn { detail }`, `failed { message }` as sent; a bad iid, time or page throws. `DiscussionPlace` and `DiscussionNote` stay module-local; `OpenDiscussion`, `DiscussionsAnswer` and `RowDiscussions` are exported from `index.ts`. Fixture mode: `fixtureMergeRequestDiscussions.ts` `discussionsScript(log, listedRows)`, spread into `createFixtureMergeRequests`, logs `mergeRequests.fixture_discussions { iids }` (comma-joined) and answers after `DISCUSSIONS_PAUSE_MS` (400 ms) the first `FIXTURE_ANSWERED` (10) distinct iids by `fixtureDiscussions(iid, listed)`: each row's `openDiscussions` open ones — discussion 0's last comment by the next row's author, discussion 1's (newer) by the row's first reviewer, so both turns occur for `sam` and another reviewer waits (review mode's orders, pinned by `the_review_orders_the_smoke_expects`) —, a markup text, !638's 400-character line, pageless notes on every sixth row; !615 (`DISCUSSIONS_FAILED_IID`, reviewed by chiara, none of sam's) `failed`, !629 (`DISCUSSIONS_LOGGED_OUT_IID`) `notLoggedIn`, an iid no row has `failed`. The setting: `setDiscussionDetails(current, details)` on `ChunkSource`/`SettingsSource` as `setAntialiasing`, in `tauri.ts` and `fixtureSettings.ts`; `DiscussionDetails` (`"full" | "lazy" | "off"`) aliases the generated type in `domain.ts`.
+ 
++A merge request's description (request `docs/slices/request-mr-description.md`, plan §2 rows 171, 174): `readDescription(iid)` → `DescriptionReply` (`read { description }`, the blocks Rust reduced GitLab's rendering to, or `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), asked afresh on every call and passed through unchanged by `tauriMergeRequests.ts`; the description types are aliases of the generated ones in `mergeRequestDomain.ts`. An `uploaded` image names only an `UploadKey`: `uploadedImage(key)` is the one address its `<img>` loads (in the app `convertFileSrc(key, PICTURE_SCHEME)`, `yamt-picture://localhost/upload~<secret>`, served once a reply offered the key); a `web` image loads its own https address. Fixture mode: `fixtureMergeRequestDescriptions.ts` `descriptionScript(log, listedRows)` (rows' `hasDescription` is false on every 7th row from !638) logs `mergeRequests.fixture_description { iid }` and answers after 400 ms: !640 every element of rule 3 (upload `…01` loads a 16×16 PNG, `…02` is broken, the `web` image a `data:` PNG standing in for another site), !639 120 paragraphs, !637 no blocks, !636 `failed` on its first ask and !640's afterwards, !635 paragraphs whose text is planted markup, a row without a description no blocks, every other "Description of !<iid>.".
++
+ `localMergeDomain.ts` holds the merge window's aliases (MergeView, ReturnTo, Leftover, AbortReply, PushReply) over bindings; domain.ts's Listing and ChunkSource import from it.
+ 
+ `tauri.ts` `readClipboard(selection)` reads the clipboard through the shell, never through WebKit (plan §2 #99): GTK's text request, `null` for unreadable or no text; `main.ts` hands it to `ui/linuxPaste.ts` `takeLinuxPastes` on Linux. The fence (PM8, `scripts/clipboardFence.ts`) is on WebKit's clipboard reads: `clipboardData` and `navigator.clipboard.read`/`readText` outside `ui/linuxPaste.ts`. `keys.ts` holds both platform tests: `isMac` (CodeMirror's `Mod`) and `isLinux` (the one Linux rule, also behind `showsAntialiasing`).
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index d76d2bc..47ba6ed 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -2,6 +2,7 @@ import type { MergeRequestIid, SourceResult, WebPage } from "./domain";
+ import type {
+   CheckedRow,
+   ContinueMergeReply,
++  DescriptionReply,
+   GitLabProject,
+   JobLogReply,
+   ListEnd,
+@@ -15,6 +16,7 @@ import type {
+   RerequestReply,
+   ResolveReply,
+   RowDiscussions,
++  UploadKey,
+ } from "./mergeRequestDomain";
+ 
+ export interface MergeRequestSource {
+@@ -47,4 +49,9 @@ export interface MergeRequestSource {
+     iid: MergeRequestIid,
+     change: PeopleChange,
+   ): Promise<SourceResult<PeopleChangeReply>>;
++  /** A merge request's description as GitLab renders it, reduced by Rust; asked afresh on every call (plan §2 row 171). */
++  readDescription(iid: MergeRequestIid): Promise<SourceResult<DescriptionReply>>;
++  /** The address the window loads an uploaded description image from (the app: `convertFileSrc(key, PICTURE_SCHEME)`,
++   *  `yamt-picture://localhost/<key>`; served only once a reply offered it). */
++  uploadedImage(key: UploadKey): string;
+ }
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.ts b/frontend/src/ipc/fixtureMergeRequestData.ts
+index 7a75238..7cc1ab7 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.ts
+@@ -34,9 +34,11 @@ const STACK_AT = 2;
+ const STACK_REVIEWERS = 3;
+ const NO_REREQUEST_EVERY = 9;
+ const APPROVERS_CYCLE = 4;
++const NO_DESCRIPTION_EVERY = 7;
++const NO_DESCRIPTION_AT = 2;
+ const PNG_DATA =
+   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+-const BROKEN_PICTURE = "data:image/png;base64,AAAA";
++export const BROKEN_PICTURE = "data:image/png;base64,AAAA";
+ 
+ const TITLES = [
+   "Snooze a reminder",
+@@ -221,6 +223,7 @@ function row(index: number): Generated.MergeRequestRow {
+   return {
+     iid,
+     title: draft ? `Draft: ${title}` : title,
++    hasDescription: index % NO_DESCRIPTION_EVERY !== NO_DESCRIPTION_AT,
+     createdAt: new Date(NEWEST_CREATED - index * index * CREATED_STEP_MS).toISOString(),
+     draft,
+     author: cycled(PEOPLE, index + 1),
+diff --git a/frontend/src/ipc/fixtureMergeRequestDescriptions.test.ts b/frontend/src/ipc/fixtureMergeRequestDescriptions.test.ts
+new file mode 100644
+index 0000000..3c98972
+--- /dev/null
++++ b/frontend/src/ipc/fixtureMergeRequestDescriptions.test.ts
+@@ -0,0 +1,289 @@
++import { afterEach, expect, test, vi } from "vitest";
++
++import type * as Generated from "./bindings";
++import { isMergeRequestIid } from "./domain";
++import { fixtureRows } from "./fixtureMergeRequestData";
++import {
++  descriptionScript,
++  fixtureDescription,
++  fixtureUploadedImage,
++} from "./fixtureMergeRequestDescriptions";
++import type { Log } from "./log";
++import type { MergeRequestSource } from "./MergeRequestSource";
++import { branded } from "./validate";
++
++const LISTED_ROWS = 500;
++const PAUSE_MS = 400;
++const LOADING_UPLOAD = "upload~00000000000000000000000000000001";
++const BROKEN_UPLOAD = "upload~00000000000000000000000000000002";
++const SCRIPTED: ReadonlySet<number> = new Set([640, 639, 637, 636, 635]);
++
++afterEach(() => {
++  vi.useRealTimers();
++});
++
++function listed(): Generated.MergeRequestRow[] {
++  return fixtureRows(0, LISTED_ROWS);
++}
++
++function quietLog(lines: string[]): Log {
++  function keep(event: string, fields: Record<string, string | number | boolean> = {}): void {
++    lines.push(`${event} ${JSON.stringify(fields)}`);
++  }
++  return { debug: keep, info: keep, warn: keep, error: keep };
++}
++
++function target(link: Generated.DescriptionLink): string {
++  switch (link.kind) {
++    case "page":
++      return `page ${link.page}`;
++    case "refused":
++      return `refused ${link.address}`;
++  }
++}
++
++function source(image: Generated.DescriptionImage): string {
++  switch (image.kind) {
++    case "uploaded":
++      return `uploaded ${image.key}`;
++    case "web":
++      return image.address.startsWith("data:image/png;base64,iVBOR") ? "web png" : "web other";
++    case "refused":
++      return "refused";
++  }
++}
++
++function inlineMarks(inline: Generated.DescriptionInline): string[] {
++  switch (inline.kind) {
++    case "text":
++      return [`"${inline.text}"`];
++    case "emphasis":
++    case "strong":
++    case "strike":
++      return [inline.kind, ...inline.inlines.flatMap(inlineMarks)];
++    case "code":
++      return [`code ${inline.text}`];
++    case "lineBreak":
++      return ["lineBreak"];
++    case "link":
++      return [`link ${target(inline.link)}`, ...inline.inlines.flatMap(inlineMarks)];
++    case "image":
++      return [`image ${source(inline.image)} ${inline.caption}`];
++  }
++}
++
++function itemMarks(item: Generated.DescriptionItem): string[] {
++  const task = item.task === "none" ? [] : [`task ${item.task}`];
++  return [...task, ...item.blocks.flatMap(blockMarks)];
++}
++
++function rowMarks(row: Generated.DescriptionRow): string[] {
++  return row.cells.flatMap((cell) => [
++    `${cell.header ? "th" : "td"} ${cell.align}`,
++    ...cell.inlines.flatMap(inlineMarks),
++  ]);
++}
++
++function blockMarks(block: Generated.DescriptionBlock): string[] {
++  switch (block.kind) {
++    case "paragraph":
++      return block.inlines.flatMap(inlineMarks);
++    case "heading":
++      return [block.level, ...block.inlines.flatMap(inlineMarks)];
++    case "code":
++      return [`code block ${block.language ?? "none"}: ${block.text}`];
++    case "list": {
++      const numbering = block.numbering;
++      const kind =
++        numbering.kind === "numbers" ? `numbers from ${numbering.start}` : numbering.kind;
++      return [kind, ...block.items.flatMap(itemMarks)];
++    }
++    case "quote":
++      return ["quote", ...block.blocks.flatMap(blockMarks)];
++    case "rule":
++      return ["rule"];
++    case "table":
++      return ["table", ...block.head.flatMap(rowMarks), "body", ...block.body.flatMap(rowMarks)];
++    case "details":
++      return [
++        `details ${block.open ? "open" : "closed"}`,
++        ...block.summary.flatMap(inlineMarks),
++        ...block.blocks.flatMap(blockMarks),
++      ];
++  }
++}
++
++function blocksOf(reply: Generated.DescriptionReply): readonly Generated.DescriptionBlock[] {
++  if (reply.kind !== "read") {
++    throw new Error(`not read: ${reply.kind}`);
++  }
++  return reply.description.blocks;
++}
++
++function marksOf(reply: Generated.DescriptionReply): string[] {
++  return blocksOf(reply).flatMap(blockMarks);
++}
++
++function script(lines: string[] = []): Pick<MergeRequestSource, "readDescription"> {
++  return descriptionScript(quietLog(lines), LISTED_ROWS);
++}
++
++async function asked(
++  described: Pick<MergeRequestSource, "readDescription">,
++  iid: number,
++): Promise<unknown> {
++  const answer = described.readDescription(branded(iid, isMergeRequestIid, "iid"));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  return answer;
++}
++
++test("the_rich_description_holds_every_element_of_rule_3", () => {
++  expect(marksOf(fixtureDescription(640, true, listed()))).toEqual([
++    "h1",
++    '"Snooze a reminder"',
++    "h2",
++    '"What changes"',
++    "h3",
++    '"Details"',
++    '"Plain, "',
++    "emphasis",
++    '"emphasis"',
++    '", "',
++    "strong",
++    '"strong"',
++    '", "',
++    "strike",
++    '"struck"',
++    '" and "',
++    "code snooze(card)",
++    "lineBreak",
++    '"after a line break."',
++    "code block ruby: def snooze(card)\n  card.update!(due: 1.day.from_now)\nend",
++    "code block none: plain text\n  indented",
++    "code block mermaid: graph TD\n  A --> B",
++    "bullets",
++    '"One"',
++    '"Two"',
++    "numbers from 3",
++    '"Third"',
++    '"Fourth"',
++    "bullets",
++    "task done",
++    '"Done task"',
++    "task open",
++    '"Open task"',
++    "task inapplicable",
++    '"Dropped task"',
++    "table",
++    "th start",
++    '"Card"',
++    "th center",
++    '"State"',
++    "th end",
++    '"Days"',
++    "body",
++    "td start",
++    '"Login"',
++    "td center",
++    '"open"',
++    "td end",
++    '"3"',
++    "td start",
++    '"Board"',
++    "td center",
++    '"done"',
++    "td end",
++    '"12"',
++    "quote",
++    '"A quoted line."',
++    "rule",
++    "details closed",
++    '"More"',
++    '"Hidden until opened."',
++    "link page https://gitlab.example/taskboard/taskboard/-/issues/12",
++    '"#12"',
++    '" "',
++    "link page https://docs.example/x",
++    '"the docs"',
++    '" "',
++    "link refused mailto:anna@example.com",
++    '"mail Anna"',
++    '" "',
++    "link refused javascript:window.yamtPlanted=true",
++    '"planted"',
++    `image uploaded ${LOADING_UPLOAD} screenshot`,
++    `image uploaded ${BROKEN_UPLOAD} broken screenshot`,
++    "image web png outside picture",
++    "image refused refused picture",
++  ]);
++  expect(fixtureUploadedImage(LOADING_UPLOAD)).toMatch(/^data:image\/png;base64,iVBOR.{40}/u);
++  expect(fixtureUploadedImage(BROKEN_UPLOAD)).toBe("data:image/png;base64,AAAA");
++});
++
++test("the_long_empty_and_planted_rows_answer_as_scripted", () => {
++  const long = marksOf(fixtureDescription(639, true, listed()));
++
++  expect(long).toHaveLength(120);
++  expect([long[0], long[119]]).toEqual(['"Paragraph 1."', '"Paragraph 120."']);
++  expect(blocksOf(fixtureDescription(637, true, listed()))).toEqual([]);
++  expect(marksOf(fixtureDescription(635, true, listed()))).toEqual([
++    '"<script>window.yamtPlanted = true</script>"',
++    '"<img src=x onerror="window.yamtPlanted = true">"',
++    '"<iframe src="https://evil.example/">"',
++  ]);
++});
++
++test("the_failing_row_fails_once_then_reads", async () => {
++  vi.useFakeTimers();
++  const described = script();
++
++  expect(await asked(described, 636)).toEqual({
++    ok: true,
++    value: { kind: "failed", message: "glab timed out" },
++  });
++  const rich = { ok: true, value: fixtureDescription(640, true, listed()) };
++  expect(await asked(described, 636)).toEqual(rich);
++  expect(await asked(described, 636)).toEqual(rich);
++  expect(await asked(described, 640)).toEqual(rich);
++  expect(await asked(script(), 636)).toMatchObject({ value: { kind: "failed" } });
++});
++
++test("an_ask_is_logged_at_once_and_answered_after_400_ms", async () => {
++  vi.useFakeTimers();
++  const lines: string[] = [];
++  let answer: unknown = null;
++  void script(lines)
++    .readDescription(branded(637, isMergeRequestIid, "iid"))
++    .then((result) => {
++      answer = result;
++    });
++
++  expect(lines).toEqual(['mergeRequests.fixture_description {"iid":637}']);
++  await vi.advanceTimersByTimeAsync(PAUSE_MS - 1);
++  expect(answer).toBeNull();
++  await vi.advanceTimersByTimeAsync(1);
++  expect(answer).toEqual({ ok: true, value: { kind: "read", description: { blocks: [] } } });
++});
++
++test("every_listed_row_with_a_description_answers", () => {
++  const rows = listed();
++  const described = rows.filter((row) => row.hasDescription && !SCRIPTED.has(row.iid));
++
++  expect(described.length).toBeGreaterThan(LISTED_ROWS / 2);
++  for (const row of described) {
++    expect(marksOf(fixtureDescription(row.iid, true, rows))).toEqual([
++      `"Description of !${row.iid}."`,
++    ]);
++  }
++});
++
++test("a_row_without_a_description_is_scripted_as_such", () => {
++  const rows = listed();
++  const withoutOne = rows.filter((row) => !row.hasDescription).map((row) => row.iid);
++
++  expect(withoutOne.slice(0, 3)).toEqual([638, 631, 624]);
++  for (const iid of withoutOne) {
++    expect(blocksOf(fixtureDescription(iid, true, rows))).toEqual([]);
++  }
++  expect(marksOf(fixtureDescription(1, true, rows))).toEqual(['"Description of !1."']);
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequestDescriptions.ts b/frontend/src/ipc/fixtureMergeRequestDescriptions.ts
+new file mode 100644
+index 0000000..658a6bc
+--- /dev/null
++++ b/frontend/src/ipc/fixtureMergeRequestDescriptions.ts
+@@ -0,0 +1,231 @@
++import type * as Generated from "./bindings";
++import { pause } from "./fixture";
++import { TIMED_OUT } from "./fixtureGitLab";
++import { BROKEN_PICTURE, fixtureRows, ORIGIN } from "./fixtureMergeRequestData";
++import type { Log } from "./log";
++import type { MergeRequestSource } from "./MergeRequestSource";
++
++type Block = Generated.DescriptionBlock;
++type Inline = Generated.DescriptionInline;
++
++const RICH_DESCRIPTION_IID = 640;
++const LONG_DESCRIPTION_IID = 639;
++const EMPTY_DESCRIPTION_IID = 637;
++const FAILS_ONCE_IID = 636;
++const PLANTED_IID = 635;
++const LOADING_UPLOAD = "upload~00000000000000000000000000000001";
++const BROKEN_UPLOAD = "upload~00000000000000000000000000000002";
++const PLANTED_TEXTS = [
++  "<script>window.yamtPlanted = true</script>",
++  '<img src=x onerror="window.yamtPlanted = true">',
++  '<iframe src="https://evil.example/">',
++];
++
++const DESCRIPTION_PAUSE_MS = 400;
++const LONG_PARAGRAPHS = 120;
++const FIRST_NUMBER = 3;
++const BLUE_SQUARE =
++  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGUlEQVQoz2O0bvrGQApgIkn1qIZRDUNKAwBkagHTBOkobgAAAABJRU5ErkJggg==";
++// Stands in for another site's https image: a `data:` address keeps the fixture offline.
++const GREEN_BANNER =
++  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAYCAIAAAAzn+mLAAAAMklEQVRIx+3OQQEAIAwEIGcUg9l2vWyx8wEJqNN3/WSnA0JCQkLpgJCQkFA6ICQkNO0BlBgBdWb1BiAAAAAASUVORK5CYII=";
++
++function text(words: string): Inline {
++  return { kind: "text", text: words };
++}
++
++function paragraph(...inlines: Inline[]): Block {
++  return { kind: "paragraph", inlines };
++}
++
++function item(task: Generated.TaskBox, words: string): Generated.DescriptionItem {
++  return { task, blocks: [paragraph(text(words))] };
++}
++
++function cell(
++  header: boolean,
++  align: Generated.CellAlign,
++  words: string,
++): Generated.DescriptionCell {
++  return { header, align, inlines: [text(words)] };
++}
++
++function headingsAndText(): Block[] {
++  return [
++    { kind: "heading", level: "h1", inlines: [text("Snooze a reminder")] },
++    { kind: "heading", level: "h2", inlines: [text("What changes")] },
++    { kind: "heading", level: "h3", inlines: [text("Details")] },
++    paragraph(
++      text("Plain, "),
++      { kind: "emphasis", inlines: [text("emphasis")] },
++      text(", "),
++      { kind: "strong", inlines: [text("strong")] },
++      text(", "),
++      { kind: "strike", inlines: [text("struck")] },
++      text(" and "),
++      { kind: "code", text: "snooze(card)" },
++      { kind: "lineBreak" },
++      text("after a line break."),
++    ),
++  ];
++}
++
++function codeAndLists(): Block[] {
++  return [
++    {
++      kind: "code",
++      language: "ruby",
++      text: "def snooze(card)\n  card.update!(due: 1.day.from_now)\nend",
++    },
++    { kind: "code", language: null, text: "plain text\n  indented" },
++    { kind: "code", language: "mermaid", text: "graph TD\n  A --> B" },
++    {
++      kind: "list",
++      numbering: { kind: "bullets" },
++      items: [item("none", "One"), item("none", "Two")],
++    },
++    {
++      kind: "list",
++      numbering: { kind: "numbers", start: FIRST_NUMBER },
++      items: [item("none", "Third"), item("none", "Fourth")],
++    },
++    {
++      kind: "list",
++      numbering: { kind: "bullets" },
++      items: [
++        item("done", "Done task"),
++        item("open", "Open task"),
++        item("inapplicable", "Dropped task"),
++      ],
++    },
++  ];
++}
++
++function tableAndContainers(): Block[] {
++  return [
++    {
++      kind: "table",
++      head: [
++        {
++          cells: [
++            cell(true, "start", "Card"),
++            cell(true, "center", "State"),
++            cell(true, "end", "Days"),
++          ],
++        },
++      ],
++      body: [
++        {
++          cells: [
++            cell(false, "start", "Login"),
++            cell(false, "center", "open"),
++            cell(false, "end", "3"),
++          ],
++        },
++        {
++          cells: [
++            cell(false, "start", "Board"),
++            cell(false, "center", "done"),
++            cell(false, "end", "12"),
++          ],
++        },
++      ],
++    },
++    { kind: "quote", blocks: [paragraph(text("A quoted line."))] },
++    { kind: "rule" },
++    {
++      kind: "details",
++      open: false,
++      summary: [text("More")],
++      blocks: [paragraph(text("Hidden until opened."))],
++    },
++  ];
++}
++
++function linksAndImages(): Block[] {
++  function link(target: Generated.DescriptionLink, words: string): Inline {
++    return { kind: "link", link: target, inlines: [text(words)] };
++  }
++  function image(source: Generated.DescriptionImage, caption: string): Inline {
++    return { kind: "image", image: source, caption };
++  }
++  return [
++    paragraph(
++      link({ kind: "page", page: `${ORIGIN}/-/issues/12` }, "#12"),
++      text(" "),
++      link({ kind: "page", page: "https://docs.example/x" }, "the docs"),
++      text(" "),
++      link({ kind: "refused", address: "mailto:anna@example.com" }, "mail Anna"),
++      text(" "),
++      link({ kind: "refused", address: "javascript:window.yamtPlanted=true" }, "planted"),
++    ),
++    paragraph(
++      image({ kind: "uploaded", key: LOADING_UPLOAD }, "screenshot"),
++      image({ kind: "uploaded", key: BROKEN_UPLOAD }, "broken screenshot"),
++      image({ kind: "web", address: GREEN_BANNER }, "outside picture"),
++      image({ kind: "refused" }, "refused picture"),
++    ),
++  ];
++}
++
++function read(blocks: Block[]): Generated.DescriptionReply {
++  return { kind: "read", description: { blocks } };
++}
++
++function rich(): Generated.DescriptionReply {
++  return read([
++    ...headingsAndText(),
++    ...codeAndLists(),
++    ...tableAndContainers(),
++    ...linksAndImages(),
++  ]);
++}
++
++/** The fixture's answer for `iid`, `firstAsk` when this window never asked it before; a listed row without a
++ *  description reads empty. */
++export function fixtureDescription(
++  iid: number,
++  firstAsk: boolean,
++  listed: readonly Generated.MergeRequestRow[],
++): Generated.DescriptionReply {
++  switch (iid) {
++    case RICH_DESCRIPTION_IID:
++      return rich();
++    case LONG_DESCRIPTION_IID:
++      return read(
++        Array.from({ length: LONG_PARAGRAPHS }, (_, at) => paragraph(text(`Paragraph ${at + 1}.`))),
++      );
++    case EMPTY_DESCRIPTION_IID:
++      return read([]);
++    case FAILS_ONCE_IID:
++      return firstAsk ? { kind: "failed", message: TIMED_OUT } : rich();
++    case PLANTED_IID:
++      return read(PLANTED_TEXTS.map((words) => paragraph(text(words))));
++    default:
++      return listed.find((row) => row.iid === iid)?.hasDescription === false
++        ? read([])
++        : read([paragraph(text(`Description of !${iid}.`))]);
++  }
++}
++
++/** Stands in for `convertFileSrc` over the picture scheme: the first upload loads, any other does not (Rust's 404). */
++export function fixtureUploadedImage(key: string): string {
++  return key === LOADING_UPLOAD ? BLUE_SQUARE : BROKEN_PICTURE;
++}
++
++export function descriptionScript(
++  log: Log,
++  listedRows: number,
++): Pick<MergeRequestSource, "readDescription" | "uploadedImage"> {
++  const asked = new Set<number>();
++  return {
++    async readDescription(iid) {
++      log.info("mergeRequests.fixture_description", { iid });
++      const firstAsk = !asked.has(iid);
++      asked.add(iid);
++      await pause(DESCRIPTION_PAUSE_MS);
++      return { ok: true, value: fixtureDescription(iid, firstAsk, fixtureRows(0, listedRows)) };
++    },
++    uploadedImage: fixtureUploadedImage,
++  };
++}
+diff --git a/frontend/src/ipc/fixtureMergeRequests.ts b/frontend/src/ipc/fixtureMergeRequests.ts
+index d028a04..d1082e3 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.ts
+@@ -14,6 +14,7 @@ import {
+   REFUSED_MESSAGE,
+   REFUSING_REVIEWER,
+ } from "./fixtureMergeRequestData";
++import { descriptionScript } from "./fixtureMergeRequestDescriptions";
+ import { discussionsScript } from "./fixtureMergeRequestDiscussions";
+ import { fixtureJobLog } from "./fixtureMergeRequestLogs";
+ import { peopleScript } from "./fixtureMergeRequestPeople";
+@@ -282,5 +283,6 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
+     ...pageScript(log),
+     ...discussionsScript(log, LISTED_ROWS),
+     ...peopleScript(log, LISTED_ROWS),
++    ...descriptionScript(log, LISTED_ROWS),
+   };
+ }
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 3a40220..a6c15dc 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -68,12 +68,24 @@ export { agentSessionId, isAgentSessionId, isMergeRequestIid, nextColumnVersion
+ export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
+ export type { AbortReply, Leftover, MergeView, PushReply, ReturnTo } from "./localMergeDomain";
+ export type {
++  CellAlign,
+   CheckedRow,
+   ContinueMergeReply,
++  Description,
++  DescriptionBlock,
++  DescriptionCell,
++  DescriptionImage,
++  DescriptionInline,
++  DescriptionItem,
++  DescriptionLink,
++  DescriptionReply,
++  DescriptionRow,
+   DiscussionsAnswer,
+   GitLabProject,
++  HeadingLevel,
+   JobLogReply,
+   ListEnd,
++  ListNumbering,
+   LocalMerge,
+   Label,
+   MergeRequestPage,
+@@ -95,6 +107,8 @@ export type {
+   Reviewer,
+   RowDiscussions,
+   Started,
++  TaskBox,
++  UploadKey,
+ } from "./mergeRequestDomain";
+ export type { MergeRequestSource } from "./MergeRequestSource";
+ export type {
+diff --git a/frontend/src/ipc/mergeRequestDomain.test.ts b/frontend/src/ipc/mergeRequestDomain.test.ts
+index 838b05b..d7138d3 100644
+--- a/frontend/src/ipc/mergeRequestDomain.test.ts
++++ b/frontend/src/ipc/mergeRequestDomain.test.ts
+@@ -23,6 +23,7 @@ function uploadedPicture(username: string): string {
+ const ROW: Generated.MergeRequestRow = {
+   iid: 13,
+   title: "Snooze a reminder",
++  hasDescription: true,
+   createdAt: "2026-10-28T09:30:00Z",
+   draft: false,
+   author: null,
+diff --git a/frontend/src/ipc/mergeRequestDomain.ts b/frontend/src/ipc/mergeRequestDomain.ts
+index 872af2f..db334d4 100644
+--- a/frontend/src/ipc/mergeRequestDomain.ts
++++ b/frontend/src/ipc/mergeRequestDomain.ts
+@@ -90,6 +90,20 @@ export type PeopleChangeReply =
+   | { readonly kind: "changed"; readonly people: MergeRequestPeople }
+   | { readonly kind: "unchanged"; readonly people: MergeRequestPeople }
+   | Readonly<Exclude<Generated.PeopleChangeReply, { kind: "changed" | "unchanged" }>>;
++export type DescriptionReply = Readonly<Generated.DescriptionReply>;
++export type Description = Readonly<Generated.Description>;
++export type DescriptionBlock = Readonly<Generated.DescriptionBlock>;
++export type DescriptionInline = Readonly<Generated.DescriptionInline>;
++export type DescriptionItem = Readonly<Generated.DescriptionItem>;
++export type DescriptionRow = Readonly<Generated.DescriptionRow>;
++export type DescriptionCell = Readonly<Generated.DescriptionCell>;
++export type DescriptionLink = Readonly<Generated.DescriptionLink>;
++export type DescriptionImage = Readonly<Generated.DescriptionImage>;
++export type HeadingLevel = Generated.HeadingLevel;
++export type ListNumbering = Readonly<Generated.ListNumbering>;
++export type TaskBox = Generated.TaskBox;
++export type CellAlign = Generated.CellAlign;
++export type UploadKey = Generated.UploadKey;
+ 
+ type UploadedPicture = (username: string) => string;
+ 
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index 8016db9..862ec8d 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -16,6 +16,7 @@ const commands = vi.hoisted(() => ({
+   readDiscussions: vi.fn(),
+   searchPeople: vi.fn(),
+   changePeople: vi.fn(),
++  readDescription: vi.fn(),
+ }));
+ 
+ vi.mock("./bindings", () => ({ commands }));
+@@ -32,6 +33,7 @@ type MessageChannel = { onmessage: (message: Generated.ListMessage) => void };
+ const ROW: Generated.MergeRequestRow = {
+   iid: 12,
+   title: "Show overdue cards in red",
++  hasDescription: true,
+   createdAt: "2026-10-29T08:00:00Z",
+   draft: false,
+   author: null,
+@@ -55,6 +57,7 @@ const ROW: Generated.MergeRequestRow = {
+ 
+ const STOPPED = { kind: "WorkerStopped" };
+ const JOB_PAGE = "https://gitlab.example/x/-/jobs/9000";
++const UPLOAD = "upload~00000000000000000000000000000001";
+ const MICROTASKS = 10;
+ 
+ function jobPage(): WebPage {
+@@ -372,6 +375,33 @@ test("readJobLog_calls_the_command_with_the_page_and_returns_its_reply", async (
+   expect(commands.readJobLog).toHaveBeenCalledWith(page);
+ });
+ 
++test("readDescription_calls_the_command_with_the_iid_and_passes_the_reply_through", async () => {
++  const reply: Generated.DescriptionReply = {
++    kind: "read",
++    description: {
++      blocks: [
++        { kind: "paragraph", inlines: [{ kind: "text", text: "Hello" }] },
++        {
++          kind: "paragraph",
++          inlines: [{ kind: "image", image: { kind: "uploaded", key: UPLOAD }, caption: "shot" }],
++        },
++      ],
++    },
++  };
++  commands.readDescription.mockResolvedValue({ status: "ok", data: reply });
++
++  expect(
++    await createTauriMergeRequests().readDescription(branded(12, isMergeRequestIid, "iid")),
++  ).toEqual({ ok: true, value: reply });
++  expect(commands.readDescription).toHaveBeenCalledWith(12);
++});
++
++test("uploadedImage_is_the_picture_scheme_address_of_the_key", () => {
++  expect(createTauriMergeRequests().uploadedImage(UPLOAD)).toBe(
++    `${PICTURE_SCHEME}://localhost/${UPLOAD}`,
++  );
++});
++
+ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", async () => {
+   const note = "https://gitlab.example/x/-/merge_requests/12#note_7001";
+   const rows: Generated.RowDiscussions[] = [
+@@ -493,6 +523,7 @@ test.each([
+   ["readDiscussions", { kind: "WorkerStopped" }],
+   ["searchPeople", { kind: "WorkerStopped" }],
+   ["changePeople", { kind: "WorkerStopped" }],
++  ["readDescription", { kind: "WorkerStopped" }],
+ ] as const)("a %s failure comes back unchanged", async (name, failure) => {
+   commands[name].mockResolvedValue({ status: "error", error: failure });
+   const source = createTauriMergeRequests();
+@@ -509,6 +540,7 @@ test.each([
+         action: "remove",
+         username: "anna",
+       }),
++    readDescription: () => source.readDescription(branded(1, isMergeRequestIid, "iid")),
+   };
+   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
+ });
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index 70df3b5..eec02d3 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -20,8 +20,8 @@ import { converted, toResult } from "./tauri";
+ // Rust's `PICTURE_SCHEME` in src-tauri/src/merge_requests/pictures.rs registers this scheme.
+ export const PICTURE_SCHEME = "yamt-picture";
+ 
+-function uploadedPicture(username: string): string {
+-  return convertFileSrc(username, PICTURE_SCHEME);
++function uploadedPicture(key: string): string {
++  return convertFileSrc(key, PICTURE_SCHEME);
+ }
+ 
+ function listed(
+@@ -80,6 +80,15 @@ function peopleCalls(): Pick<MergeRequestSource, "searchPeople" | "changePeople"
+   };
+ }
+ 
++function descriptionCalls(): Pick<MergeRequestSource, "readDescription" | "uploadedImage"> {
++  return {
++    async readDescription(iid) {
++      return toResult(await commands.readDescription(iid));
++    },
++    uploadedImage: uploadedPicture,
++  };
++}
++
+ export function createTauriMergeRequests(): MergeRequestSource {
+   return {
+     async findGitLabProject() {
+@@ -115,5 +124,6 @@ export function createTauriMergeRequests(): MergeRequestSource {
+       );
+     },
+     ...peopleCalls(),
++    ...descriptionCalls(),
+   };
+ }
+diff --git a/frontend/src/ui/mergeRequestDescriptions.test.ts b/frontend/src/ui/mergeRequestDescriptions.test.ts
+new file mode 100644
+index 0000000..01fb7fa
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestDescriptions.test.ts
+@@ -0,0 +1,254 @@
++import { afterEach, expect, test, vi } from "vitest";
++
++import {
++  createFixtureCompareSource,
++  isMergeRequestIid,
++  log,
++  type Description,
++  type DescriptionReply,
++  type MergeRequestIid,
++  type MergeRequestSource,
++  type SourceFailure,
++  type SourceResult,
++} from "../ipc";
++import {
++  createDescriptions,
++  type DescribedRow,
++  type DescriptionLoad,
++  type Descriptions,
++  type ShownDescription,
++} from "./mergeRequestDescriptions";
++
++type Ask = {
++  readonly iid: MergeRequestIid;
++  readonly answer: (result: SourceResult<DescriptionReply>) => void;
++  readonly fail: (error: unknown) => void;
++};
++
++type Rig = { readonly descriptions: Descriptions; readonly asks: Ask[] };
++
++const STOPPED: SourceFailure = { kind: "WorkerStopped" };
++const LOADING: DescriptionLoad = { kind: "loading" };
++const SECRET = "the secret words of the description";
++const HELLO: Description = {
++  blocks: [{ kind: "paragraph", inlines: [{ kind: "text", text: SECRET }] }],
++};
++const TWO_BLOCKS: Description = { blocks: [...HELLO.blocks, { kind: "rule" }] };
++const UPLOAD = "upload~00000000000000000000000000000001";
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function iid(number: number): MergeRequestIid {
++  if (!isMergeRequestIid(number)) {
++    throw new Error(`${number} is not an iid`);
++  }
++  return number;
++}
++
++const SNOOZE: DescribedRow = { iid: iid(640), title: "Snooze a reminder" };
++const BOARD: DescribedRow = { iid: iid(639), title: "Show the board" };
++
++function rig(): Rig {
++  const asks: Ask[] = [];
++  const source: MergeRequestSource = {
++    ...createFixtureCompareSource(log, "", {}),
++    readDescription: (asked) =>
++      new Promise((resolve, reject) => {
++        asks.push({ iid: asked, answer: resolve, fail: reject });
++      }),
++    uploadedImage: (key) => `yamt-picture://localhost/${key}`,
++  };
++  return { descriptions: createDescriptions({ source }), asks };
++}
++
++function askAt(live: Rig, index: number): Ask {
++  const ask = live.asks[index];
++  if (ask === undefined) {
++    throw new Error(`no ask ${index}; ${live.asks.length} made`);
++  }
++  return ask;
++}
++
++function read(description: Description): SourceResult<DescriptionReply> {
++  return { ok: true, value: { kind: "read", description } };
++}
++
++function shownOf(live: Rig): ShownDescription | null {
++  return live.descriptions.description.value;
++}
++
++test("opening_shows_loading_then_the_reply", async () => {
++  const live = rig();
++  expect(shownOf(live)).toBeNull();
++  const opening = live.descriptions.toggleDescription(SNOOZE);
++  expect(shownOf(live)).toEqual({ row: SNOOZE, load: LOADING });
++  expect(live.asks.map((ask) => ask.iid)).toEqual([SNOOZE.iid]);
++
++  askAt(live, 0).answer(read(HELLO));
++  await opening;
++  expect(shownOf(live)).toEqual({ row: SNOOZE, load: { kind: "shown", description: HELLO } });
++});
++
++test("each_open_asks_gitlab_again", async () => {
++  const live = rig();
++  const first = live.descriptions.toggleDescription(SNOOZE);
++  askAt(live, 0).answer(read(HELLO));
++  await first;
++  live.descriptions.closeDescription();
++  expect(shownOf(live)).toBeNull();
++
++  const second = live.descriptions.toggleDescription(SNOOZE);
++  expect(shownOf(live)).toEqual({ row: SNOOZE, load: LOADING });
++  askAt(live, 1).answer(read(TWO_BLOCKS));
++  await second;
++  expect(live.asks.map((ask) => ask.iid)).toEqual([SNOOZE.iid, SNOOZE.iid]);
++  expect(shownOf(live)).toEqual({ row: SNOOZE, load: { kind: "shown", description: TWO_BLOCKS } });
++});
++
++test("a_second_toggle_of_the_same_row_closes", async () => {
++  const live = rig();
++  const opening = live.descriptions.toggleDescription(SNOOZE);
++  askAt(live, 0).answer(read(HELLO));
++  await opening;
++
++  await live.descriptions.toggleDescription(SNOOZE);
++  expect(shownOf(live)).toBeNull();
++  expect(live.asks).toHaveLength(1);
++
++  void live.descriptions.toggleDescription(SNOOZE);
++  await live.descriptions.toggleDescription(SNOOZE);
++  expect(shownOf(live)).toBeNull();
++  expect(live.asks).toHaveLength(2);
++});
++
++test("another_rows_toggle_replaces_the_panel_and_asks_afresh", async () => {
++  const live = rig();
++  const first = live.descriptions.toggleDescription(SNOOZE);
++  askAt(live, 0).answer(read(HELLO));
++  await first;
++
++  const second = live.descriptions.toggleDescription(BOARD);
++  expect(shownOf(live)).toEqual({ row: BOARD, load: LOADING });
++  expect(live.asks.map((ask) => ask.iid)).toEqual([SNOOZE.iid, BOARD.iid]);
++  askAt(live, 1).answer(read(TWO_BLOCKS));
++  await second;
++  expect(shownOf(live)).toEqual({ row: BOARD, load: { kind: "shown", description: TWO_BLOCKS } });
++});
++
++test("an_answer_for_a_closed_or_replaced_panel_is_dropped", async () => {
++  const live = rig();
++  const info = vi.spyOn(log, "info");
++  const closed = live.descriptions.toggleDescription(SNOOZE);
++  live.descriptions.closeDescription();
++  askAt(live, 0).answer(read(HELLO));
++  await closed;
++  expect(shownOf(live)).toBeNull();
++
++  const replaced = live.descriptions.toggleDescription(SNOOZE);
++  const replacing = live.descriptions.toggleDescription(BOARD);
++  askAt(live, 1).answer(read(HELLO));
++  await replaced;
++  expect(shownOf(live)).toEqual({ row: BOARD, load: LOADING });
++
++  const reopened = live.descriptions.toggleDescription(SNOOZE);
++  askAt(live, 2).answer(read(TWO_BLOCKS));
++  await replacing;
++  expect(shownOf(live)).toEqual({ row: SNOOZE, load: LOADING });
++  expect(info).not.toHaveBeenCalled();
++
++  askAt(live, 3).answer(read(HELLO));
++  await reopened;
++  expect(shownOf(live)).toEqual({ row: SNOOZE, load: { kind: "shown", description: HELLO } });
++});
++
++test("retry_asks_again_and_shows_the_new_answer", async () => {
++  const live = rig();
++  const failing = live.descriptions.toggleDescription(SNOOZE);
++  askAt(live, 0).answer({ ok: true, value: { kind: "failed", message: "glab timed out" } });
++  await failing;
++
++  const retrying = live.descriptions.retryDescription();
++  expect(shownOf(live)).toEqual({ row: SNOOZE, load: LOADING });
++  expect(live.asks.map((ask) => ask.iid)).toEqual([SNOOZE.iid, SNOOZE.iid]);
++
++  const newer = live.descriptions.retryDescription();
++  askAt(live, 1).answer(read(TWO_BLOCKS));
++  await retrying;
++  expect(shownOf(live)).toEqual({ row: SNOOZE, load: LOADING });
++  askAt(live, 2).answer(read(HELLO));
++  await newer;
++  expect(shownOf(live)).toEqual({ row: SNOOZE, load: { kind: "shown", description: HELLO } });
++});
++
++test("retry_with_no_panel_asks_nothing", async () => {
++  const live = rig();
++  await live.descriptions.retryDescription();
++  expect(live.asks).toEqual([]);
++  expect(shownOf(live)).toBeNull();
++});
++
++test.each<Exclude<DescriptionReply, { readonly kind: "read" }>>([
++  { kind: "glabMissing" },
++  { kind: "notLoggedIn", detail: "gitlab.example" },
++  { kind: "failed", message: "no such merge request" },
++])("a_refusal_is_refused_and_a_thrown_call_is_failed_with_its_cause: %j", async (reply) => {
++  const live = rig();
++  const refusing = live.descriptions.toggleDescription(SNOOZE);
++  askAt(live, 0).answer({ ok: true, value: reply });
++  await refusing;
++  expect(shownOf(live)).toEqual({ row: SNOOZE, load: { kind: "refused", reply } });
++
++  const stopping = live.descriptions.retryDescription();
++  askAt(live, 1).answer({ ok: false, failure: STOPPED });
++  await stopping;
++  expect(shownOf(live)).toEqual({ row: SNOOZE, load: { kind: "failed", cause: STOPPED } });
++
++  const throwing = live.descriptions.retryDescription();
++  askAt(live, 2).fail(new Error("ipc gone"));
++  await throwing;
++  expect(shownOf(live)).toEqual({
++    row: SNOOZE,
++    load: { kind: "failed", cause: { kind: "Unexpected", message: "ipc gone" } },
++  });
++});
++
++test("image_address_is_the_scheme_for_an_upload_its_own_for_another_site_and_null_when_refused", () => {
++  const { descriptions } = rig();
++  expect(descriptions.imageAddress({ kind: "uploaded", key: UPLOAD })).toBe(
++    `yamt-picture://localhost/${UPLOAD}`,
++  );
++  expect(descriptions.imageAddress({ kind: "web", address: "https://other.example/a.png" })).toBe(
++    "https://other.example/a.png",
++  );
++  expect(descriptions.imageAddress({ kind: "refused" })).toBeNull();
++});
++
++test("the_log_line_names_the_kind_and_counts_never_text", async () => {
++  const live = rig();
++  const info = vi.spyOn(log, "info");
++  vi.spyOn(performance, "now")
++    .mockReturnValueOnce(1000)
++    .mockReturnValueOnce(1250.4)
++    .mockReturnValueOnce(2000)
++    .mockReturnValueOnce(2007.6)
++    .mockReturnValueOnce(3000)
++    .mockReturnValueOnce(3001);
++  const shown = live.descriptions.toggleDescription(SNOOZE);
++  askAt(live, 0).answer(read(TWO_BLOCKS));
++  await shown;
++  const refused = live.descriptions.toggleDescription(BOARD);
++  askAt(live, 1).answer({ ok: true, value: { kind: "failed", message: SECRET } });
++  await refused;
++  const failed = live.descriptions.retryDescription();
++  askAt(live, 2).answer({ ok: false, failure: STOPPED });
++  await failed;
++
++  expect(info.mock.calls).toEqual([
++    ["mergeRequests.description_shown", { iid: 640, kind: "shown", blocks: 2, ms: 250 }],
++    ["mergeRequests.description_shown", { iid: 639, kind: "refused", ms: 8 }],
++    ["mergeRequests.description_shown", { iid: 639, kind: "failed", ms: 1 }],
++  ]);
++  expect(JSON.stringify(info.mock.calls)).not.toContain(SECRET);
++});
+diff --git a/frontend/src/ui/mergeRequestDescriptions.ts b/frontend/src/ui/mergeRequestDescriptions.ts
+new file mode 100644
+index 0000000..76806fa
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestDescriptions.ts
+@@ -0,0 +1,111 @@
++import { shallowRef, type ShallowRef } from "vue";
++
++import {
++  log,
++  type Description,
++  type DescriptionImage,
++  type DescriptionReply,
++  type MergeRequestIid,
++  type MergeRequestSource,
++} from "../ipc";
++import { attempt, type Outcome, type ProblemCause } from "./problem";
++
++export type DescribedRow = { readonly iid: MergeRequestIid; readonly title: string };
++export type DescriptionLoad =
++  | { readonly kind: "loading" }
++  | { readonly kind: "shown"; readonly description: Description }
++  | {
++      readonly kind: "refused";
++      readonly reply: Exclude<DescriptionReply, { readonly kind: "read" }>;
++    }
++  | { readonly kind: "failed"; readonly cause: ProblemCause };
++export type ShownDescription = { readonly row: DescribedRow; readonly load: DescriptionLoad };
++export type Descriptions = {
++  /** The window's one description panel: null when none is open. */
++  readonly description: Readonly<ShallowRef<ShownDescription | null>>;
++  /** Opens `row`'s panel and asks GitLab afresh; closes it when `row` is the one open (a second click on its
++   *  button); another row's replaces it. */
++  toggleDescription(row: DescribedRow): Promise<void>;
++  /** Asks again for the open panel's row (Retry): loading, then the reply; nothing when none is open. */
++  retryDescription(): Promise<void>;
++  closeDescription(): void;
++  /** What an image loads: the picture scheme's address for an upload, its own for another site's, null when refused. */
++  imageAddress(image: DescriptionImage): string | null;
++};
++
++type Shown = ShallowRef<ShownDescription | null>;
++
++function settledLoad(outcome: Outcome<DescriptionReply>): DescriptionLoad {
++  if (!outcome.ok) {
++    return { kind: "failed", cause: outcome.cause };
++  }
++  const reply = outcome.value;
++  return reply.kind === "read"
++    ? { kind: "shown", description: reply.description }
++    : { kind: "refused", reply };
++}
++
++function loggedFields(
++  iid: MergeRequestIid,
++  load: DescriptionLoad,
++  ms: number,
++): Record<string, string | number | boolean> {
++  return load.kind === "shown"
++    ? { iid, kind: load.kind, blocks: load.description.blocks.length, ms }
++    : { iid, kind: load.kind, ms };
++}
++
++async function ask(shown: Shown, source: MergeRequestSource, row: DescribedRow): Promise<void> {
++  const entry: ShownDescription = { row, load: { kind: "loading" } };
++  shown.value = entry;
++  const asked = performance.now();
++  const outcome = await attempt(() => source.readDescription(row.iid));
++  if (shown.value !== entry) {
++    return;
++  }
++  const load = settledLoad(outcome);
++  shown.value = { row, load };
++  log.info(
++    "mergeRequests.description_shown",
++    loggedFields(row.iid, load, Math.round(performance.now() - asked)),
++  );
++}
++
++function imageAddress(source: MergeRequestSource, image: DescriptionImage): string | null {
++  switch (image.kind) {
++    case "uploaded":
++      return source.uploadedImage(image.key);
++    case "web":
++      return image.address;
++    case "refused":
++      return null;
++    default: {
++      const _exhaustive: never = image;
++      return _exhaustive;
++    }
++  }
++}
++
++export function createDescriptions(deps: { readonly source: MergeRequestSource }): Descriptions {
++  const shown: Shown = shallowRef<ShownDescription | null>(null);
++  return {
++    description: shown,
++    toggleDescription: async (row) => {
++      if (shown.value?.row.iid === row.iid) {
++        shown.value = null;
++        return;
++      }
++      await ask(shown, deps.source, row);
++    },
++    retryDescription: async () => {
++      const current = shown.value;
++      if (current !== null) {
++        await ask(shown, deps.source, current.row);
++      }
++    },
++    closeDescription: () => {
++      shown.value = null;
++    },
++    imageAddress: (image) => imageAddress(deps.source, image),
++  };
++}
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index 67d0d29..fd75f07 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -8,6 +8,7 @@ import {
+   log,
+   type CheckedRow,
+   type ContinueMergeReply,
++  type DescriptionReply,
+   type DiscussionDetails,
+   type ListEnd,
+   type LocalMerge,
+@@ -200,6 +201,11 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+       new Promise((resolve) => {
+         peopleChanges.push({ iid: asked, answer: resolve });
+       }),
++    readDescription: async () => ({
++      ok: true,
++      value: { kind: "read", description: { blocks: [] } },
++    }),
++    uploadedImage: (key) => key,
+     ...edit,
+   };
+   const screen = shallowRef<Screen>({ kind: "files" });
+@@ -1463,6 +1469,41 @@ test("the slice shows a job's log through its source and remembers job searches
+   expect(live.storage.items.get("yamt.mergeRequests.jobSearches")).toBe('{"test:unit":"fail"}');
+ });
+ 
++test("a_refresh_keeps_the_open_description", async () => {
++  const answers: ((result: SourceResult<DescriptionReply>) => void)[] = [];
++  const live = rig({
++    readDescription: () =>
++      new Promise((resolve) => {
++        answers.push(resolve);
++      }),
++  });
++  await loaded(live);
++  const [first, second] = ROWS;
++  if (first === undefined || second === undefined) {
++    throw new Error("the fixture lists fewer than two rows");
++  }
++  const opening = live.slice.toggleDescription(first);
++  const refreshing = live.slice.refresh();
++  loadAt(live, live.loads.length - 1).send({ me: "sam", rows: [first, second] });
++  loadAt(live, live.loads.length - 1).end(LOADED);
++  await refreshing;
++  expect(live.slice.description.value).toEqual({ row: first, load: { kind: "loading" } });
++  answers[0]?.({ ok: true, value: { kind: "read", description: { blocks: [{ kind: "rule" }] } } });
++  await opening;
++  const shown = live.slice.description.value;
++  expect(shown).toEqual({
++    row: first,
++    load: { kind: "shown", description: { blocks: [{ kind: "rule" }] } },
++  });
++
++  const again = live.slice.refresh();
++  loadAt(live, live.loads.length - 1).send({ me: "sam", rows: [second] });
++  loadAt(live, live.loads.length - 1).end(LOADED);
++  await again;
++  expect(iids(live.slice.rows.value)).toEqual([second.iid]);
++  expect(live.slice.description.value).toBe(shown);
++});
++
+ const FILTERS_KEY = "yamt.mergeRequests.filters";
+ const ANNA = { kind: "person", username: "anna" } as const;
+ 
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 63091ad..3ed0ae4 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -14,6 +14,7 @@ import type {
+ import type { CalendarDay } from "../mergeRequests";
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
++import { createDescriptions, type Descriptions } from "./mergeRequestDescriptions";
+ import {
+   createDiscussions,
+   discussionsOf,
+@@ -47,6 +48,7 @@ export type Opening =
+ export type MergeRequests = RowActions &
+   Rerequests &
+   JobLogs &
++  Descriptions &
+   Discussions &
+   Shown &
+   PeopleChanges & {
+@@ -199,6 +201,18 @@ function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setD
+   };
+ }
+ 
++function pageOpenerOf(
++  state: State,
++): Pick<MergeRequests, "pageProblem" | "openPage" | "dismissPageProblem"> {
++  return {
++    pageProblem: state.pageProblem,
++    openPage: (clicked, page) => openPage(state, clicked, page),
++    dismissPageProblem: () => {
++      state.pageProblem.value = null;
++    },
++  };
++}
++
+ export function createMergeRequests(deps: Deps): MergeRequests {
+   const state = createState(deps);
+   const { me, rows, search } = state;
+@@ -219,7 +233,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     },
+     ...dueDatesOf(state),
+     openings: state.openings,
+-    pageProblem: state.pageProblem,
++    ...pageOpenerOf(state),
+     findProject: () => findProject(state),
+     show: () => {
+       show(state);
+@@ -229,13 +243,10 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     },
+     refresh: () => loadList(state),
+     openChanges: (iid) => openChanges(state, iid),
+-    openPage: (clicked, page) => openPage(state, clicked, page),
+-    dismissPageProblem: () => {
+-      state.pageProblem.value = null;
+-    },
+     ...state.rowActions,
+     ...people,
+     ...createJobLogs(deps),
++    ...createDescriptions(deps),
+     ...discussionsOf(state.discussionQueue),
+   };
+ }
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index 89388a1..080362f 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -224,6 +224,7 @@ test.each<[PageOpened, PageKind, string | null]>([
+     "discussion",
+     "This comment's page was not listed by GitLab, so yamt did not open it.",
+   ],
++  [{ kind: "notOffered" }, "link", "This link was not listed by GitLab, so yamt did not open it."],
+   [
+     { kind: "failed", message: "xdg-open: not found" },
+     "mergeRequest",
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index c0ac44b..35ce9fb 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -14,7 +14,7 @@ import type { NotDone, PeopleSearch } from "./mergeRequestPeople";
+ import { problemText } from "./problemText";
+ import { counted } from "./serverText";
+ 
+-export type PageKind = "job" | "mergeRequest" | "discussion";
++export type PageKind = "job" | "mergeRequest" | "discussion" | "link";
+ 
+ export const PAGE_TITLE = "Merge requests";
+ export const LIST_LABEL = "Open merge requests";
+@@ -258,6 +258,7 @@ const NOT_OFFERED: Readonly<Record<PageKind, string>> = {
+   job: "This job's page was not listed by GitLab, so yamt did not open it.",
+   mergeRequest: "This merge request's page was not listed by GitLab, so yamt did not open it.",
+   discussion: "This comment's page was not listed by GitLab, so yamt did not open it.",
++  link: "This link was not listed by GitLab, so yamt did not open it.",
+ };
+ 
+ export function pageProblemText(opened: PageOpened, clicked: PageKind): string | null {
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 379eb0b..f9bf99d 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -50,7 +50,9 @@ export type MergeRequestStep =
+   | "discussions"
+   | "discussion"
+   | "searchPeople"
+-  | "changePeople";
++  | "changePeople"
++  | "description"
++  | "link";
+ 
+ export type Problem =
+   | { readonly action: "list"; readonly cause: ProblemCause }
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index da01f82..ba3cabb 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -332,6 +332,8 @@ test.each([
+     "changePeople",
+     "Could not change the merge request's people: yamt's worker stopped; try again.",
+   ],
++  ["description", "Could not read the description: yamt's worker stopped; try again."],
++  ["link", "Could not open the link: yamt's worker stopped; try again."],
+ ] as const)("a failed merge-request call at %s says what failed", (step, words) => {
+   expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
+ });
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 0253d36..a59f715 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -85,6 +85,8 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
+   discussion: "Could not open the comment's page",
+   searchPeople: "Could not search people",
+   changePeople: "Could not change the merge request's people",
++  description: "Could not read the description",
++  link: "Could not open the link",
+ };
+ 
+ const FIXED_ATTEMPT_WORDS: Readonly<

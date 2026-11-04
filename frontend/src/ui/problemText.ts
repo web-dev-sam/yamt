@@ -85,6 +85,8 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
   discussion: "Could not open the comment's page",
   searchPeople: "Could not search people",
   changePeople: "Could not change the merge request's people",
+  description: "Could not read the description",
+  link: "Could not open the link",
 };
 
 const FIXED_ATTEMPT_WORDS: Readonly<

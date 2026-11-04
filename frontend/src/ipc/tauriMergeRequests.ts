@@ -20,8 +20,8 @@ import { converted, toResult } from "./tauri";
 // Rust's `PICTURE_SCHEME` in src-tauri/src/merge_requests/pictures.rs registers this scheme.
 export const PICTURE_SCHEME = "yamt-picture";
 
-function uploadedPicture(username: string): string {
-  return convertFileSrc(username, PICTURE_SCHEME);
+function uploadedPicture(key: string): string {
+  return convertFileSrc(key, PICTURE_SCHEME);
 }
 
 function listed(
@@ -80,6 +80,15 @@ function peopleCalls(): Pick<MergeRequestSource, "searchPeople" | "changePeople"
   };
 }
 
+function descriptionCalls(): Pick<MergeRequestSource, "readDescription" | "uploadedImage"> {
+  return {
+    async readDescription(iid) {
+      return toResult(await commands.readDescription(iid));
+    },
+    uploadedImage: uploadedPicture,
+  };
+}
+
 export function createTauriMergeRequests(): MergeRequestSource {
   return {
     async findGitLabProject() {
@@ -115,5 +124,6 @@ export function createTauriMergeRequests(): MergeRequestSource {
       );
     },
     ...peopleCalls(),
+    ...descriptionCalls(),
   };
 }

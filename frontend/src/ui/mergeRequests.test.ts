@@ -8,6 +8,7 @@ import {
   log,
   type CheckedRow,
   type ContinueMergeReply,
+  type DescriptionReply,
   type DiscussionDetails,
   type ListEnd,
   type LocalMerge,
@@ -200,6 +201,11 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
       new Promise((resolve) => {
         peopleChanges.push({ iid: asked, answer: resolve });
       }),
+    readDescription: async () => ({
+      ok: true,
+      value: { kind: "read", description: { blocks: [] } },
+    }),
+    uploadedImage: (key) => key,
     ...edit,
   };
   const screen = shallowRef<Screen>({ kind: "files" });
@@ -1461,6 +1467,41 @@ test("the slice shows a job's log through its source and remembers job searches 
   live.slice.setJobSearch("test:unit", "fail");
   expect(live.slice.jobSearch("test:unit")).toBe("fail");
   expect(live.storage.items.get("yamt.mergeRequests.jobSearches")).toBe('{"test:unit":"fail"}');
+});
+
+test("a_refresh_keeps_the_open_description", async () => {
+  const answers: ((result: SourceResult<DescriptionReply>) => void)[] = [];
+  const live = rig({
+    readDescription: () =>
+      new Promise((resolve) => {
+        answers.push(resolve);
+      }),
+  });
+  await loaded(live);
+  const [first, second] = ROWS;
+  if (first === undefined || second === undefined) {
+    throw new Error("the fixture lists fewer than two rows");
+  }
+  const opening = live.slice.toggleDescription(first);
+  const refreshing = live.slice.refresh();
+  loadAt(live, live.loads.length - 1).send({ me: "sam", rows: [first, second] });
+  loadAt(live, live.loads.length - 1).end(LOADED);
+  await refreshing;
+  expect(live.slice.description.value).toEqual({ row: first, load: { kind: "loading" } });
+  answers[0]?.({ ok: true, value: { kind: "read", description: { blocks: [{ kind: "rule" }] } } });
+  await opening;
+  const shown = live.slice.description.value;
+  expect(shown).toEqual({
+    row: first,
+    load: { kind: "shown", description: { blocks: [{ kind: "rule" }] } },
+  });
+
+  const again = live.slice.refresh();
+  loadAt(live, live.loads.length - 1).send({ me: "sam", rows: [second] });
+  loadAt(live, live.loads.length - 1).end(LOADED);
+  await again;
+  expect(iids(live.slice.rows.value)).toEqual([second.iid]);
+  expect(live.slice.description.value).toBe(shown);
 });
 
 const FILTERS_KEY = "yamt.mergeRequests.filters";

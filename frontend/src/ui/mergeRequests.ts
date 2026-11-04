@@ -14,6 +14,7 @@ import type {
 import type { CalendarDay } from "../mergeRequests";
 import { RECHECK_PAUSE_MS } from "./glab";
 import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
+import { createDescriptions, type Descriptions } from "./mergeRequestDescriptions";
 import {
   createDiscussions,
   discussionsOf,
@@ -47,6 +48,7 @@ export type Opening =
 export type MergeRequests = RowActions &
   Rerequests &
   JobLogs &
+  Descriptions &
   Discussions &
   Shown &
   PeopleChanges & {
@@ -199,6 +201,18 @@ function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setD
   };
 }
 
+function pageOpenerOf(
+  state: State,
+): Pick<MergeRequests, "pageProblem" | "openPage" | "dismissPageProblem"> {
+  return {
+    pageProblem: state.pageProblem,
+    openPage: (clicked, page) => openPage(state, clicked, page),
+    dismissPageProblem: () => {
+      state.pageProblem.value = null;
+    },
+  };
+}
+
 export function createMergeRequests(deps: Deps): MergeRequests {
   const state = createState(deps);
   const { me, rows, search } = state;
@@ -219,7 +233,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     },
     ...dueDatesOf(state),
     openings: state.openings,
-    pageProblem: state.pageProblem,
+    ...pageOpenerOf(state),
     findProject: () => findProject(state),
     show: () => {
       show(state);
@@ -229,13 +243,10 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     },
     refresh: () => loadList(state),
     openChanges: (iid) => openChanges(state, iid),
-    openPage: (clicked, page) => openPage(state, clicked, page),
-    dismissPageProblem: () => {
-      state.pageProblem.value = null;
-    },
     ...state.rowActions,
     ...people,
     ...createJobLogs(deps),
+    ...createDescriptions(deps),
     ...discussionsOf(state.discussionQueue),
   };
 }

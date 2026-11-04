@@ -2,6 +2,7 @@ import type { MergeRequestIid, SourceResult, WebPage } from "./domain";
 import type {
   CheckedRow,
   ContinueMergeReply,
+  DescriptionReply,
   GitLabProject,
   JobLogReply,
   ListEnd,
@@ -15,6 +16,7 @@ import type {
   RerequestReply,
   ResolveReply,
   RowDiscussions,
+  UploadKey,
 } from "./mergeRequestDomain";
 
 export interface MergeRequestSource {
@@ -47,4 +49,9 @@ export interface MergeRequestSource {
     iid: MergeRequestIid,
     change: PeopleChange,
   ): Promise<SourceResult<PeopleChangeReply>>;
+  /** A merge request's description as GitLab renders it, reduced by Rust; asked afresh on every call (plan §2 row 171). */
+  readDescription(iid: MergeRequestIid): Promise<SourceResult<DescriptionReply>>;
+  /** The address the window loads an uploaded description image from (the app: `convertFileSrc(key, PICTURE_SCHEME)`,
+   *  `yamt-picture://localhost/<key>`; served only once a reply offered it). */
+  uploadedImage(key: UploadKey): string;
 }

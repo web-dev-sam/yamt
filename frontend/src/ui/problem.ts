@@ -50,7 +50,9 @@ export type MergeRequestStep =
   | "discussions"
   | "discussion"
   | "searchPeople"
-  | "changePeople";
+  | "changePeople"
+  | "description"
+  | "link";
 
 export type Problem =
   | { readonly action: "list"; readonly cause: ProblemCause }

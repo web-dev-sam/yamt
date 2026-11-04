@@ -224,6 +224,7 @@ test.each<[PageOpened, PageKind, string | null]>([
     "discussion",
     "This comment's page was not listed by GitLab, so yamt did not open it.",
   ],
+  [{ kind: "notOffered" }, "link", "This link was not listed by GitLab, so yamt did not open it."],
   [
     { kind: "failed", message: "xdg-open: not found" },
     "mergeRequest",

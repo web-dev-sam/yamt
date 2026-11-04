@@ -16,6 +16,7 @@ const commands = vi.hoisted(() => ({
   readDiscussions: vi.fn(),
   searchPeople: vi.fn(),
   changePeople: vi.fn(),
+  readDescription: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -32,6 +33,7 @@ type MessageChannel = { onmessage: (message: Generated.ListMessage) => void };
 const ROW: Generated.MergeRequestRow = {
   iid: 12,
   title: "Show overdue cards in red",
+  hasDescription: true,
   createdAt: "2026-10-29T08:00:00Z",
   draft: false,
   author: null,
@@ -55,6 +57,7 @@ const ROW: Generated.MergeRequestRow = {
 
 const STOPPED = { kind: "WorkerStopped" };
 const JOB_PAGE = "https://gitlab.example/x/-/jobs/9000";
+const UPLOAD = "upload~00000000000000000000000000000001";
 const MICROTASKS = 10;
 
 function jobPage(): WebPage {
@@ -372,6 +375,33 @@ test("readJobLog_calls_the_command_with_the_page_and_returns_its_reply", async (
   expect(commands.readJobLog).toHaveBeenCalledWith(page);
 });
 
+test("readDescription_calls_the_command_with_the_iid_and_passes_the_reply_through", async () => {
+  const reply: Generated.DescriptionReply = {
+    kind: "read",
+    description: {
+      blocks: [
+        { kind: "paragraph", inlines: [{ kind: "text", text: "Hello" }] },
+        {
+          kind: "paragraph",
+          inlines: [{ kind: "image", image: { kind: "uploaded", key: UPLOAD }, caption: "shot" }],
+        },
+      ],
+    },
+  };
+  commands.readDescription.mockResolvedValue({ status: "ok", data: reply });
+
+  expect(
+    await createTauriMergeRequests().readDescription(branded(12, isMergeRequestIid, "iid")),
+  ).toEqual({ ok: true, value: reply });
+  expect(commands.readDescription).toHaveBeenCalledWith(12);
+});
+
+test("uploadedImage_is_the_picture_scheme_address_of_the_key", () => {
+  expect(createTauriMergeRequests().uploadedImage(UPLOAD)).toBe(
+    `${PICTURE_SCHEME}://localhost/${UPLOAD}`,
+  );
+});
+
 test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", async () => {
   const note = "https://gitlab.example/x/-/merge_requests/12#note_7001";
   const rows: Generated.RowDiscussions[] = [
@@ -493,6 +523,7 @@ test.each([
   ["readDiscussions", { kind: "WorkerStopped" }],
   ["searchPeople", { kind: "WorkerStopped" }],
   ["changePeople", { kind: "WorkerStopped" }],
+  ["readDescription", { kind: "WorkerStopped" }],
 ] as const)("a %s failure comes back unchanged", async (name, failure) => {
   commands[name].mockResolvedValue({ status: "error", error: failure });
   const source = createTauriMergeRequests();
@@ -509,6 +540,7 @@ test.each([
         action: "remove",
         username: "anna",
       }),
+    readDescription: () => source.readDescription(branded(1, isMergeRequestIid, "iid")),
   };
   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
 });

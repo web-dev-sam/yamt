@@ -23,6 +23,7 @@ function uploadedPicture(username: string): string {
 const ROW: Generated.MergeRequestRow = {
   iid: 13,
   title: "Snooze a reminder",
+  hasDescription: true,
   createdAt: "2026-10-28T09:30:00Z",
   draft: false,
   author: null,

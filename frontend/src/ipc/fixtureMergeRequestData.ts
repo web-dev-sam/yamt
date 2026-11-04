@@ -34,9 +34,11 @@ const STACK_AT = 2;
 const STACK_REVIEWERS = 3;
 const NO_REREQUEST_EVERY = 9;
 const APPROVERS_CYCLE = 4;
+const NO_DESCRIPTION_EVERY = 7;
+const NO_DESCRIPTION_AT = 2;
 const PNG_DATA =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
-const BROKEN_PICTURE = "data:image/png;base64,AAAA";
+export const BROKEN_PICTURE = "data:image/png;base64,AAAA";
 
 const TITLES = [
   "Snooze a reminder",
@@ -221,6 +223,7 @@ function row(index: number): Generated.MergeRequestRow {
   return {
     iid,
     title: draft ? `Draft: ${title}` : title,
+    hasDescription: index % NO_DESCRIPTION_EVERY !== NO_DESCRIPTION_AT,
     createdAt: new Date(NEWEST_CREATED - index * index * CREATED_STEP_MS).toISOString(),
     draft,
     author: cycled(PEOPLE, index + 1),

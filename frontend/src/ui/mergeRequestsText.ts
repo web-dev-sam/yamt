@@ -14,7 +14,7 @@ import type { NotDone, PeopleSearch } from "./mergeRequestPeople";
 import { problemText } from "./problemText";
 import { counted } from "./serverText";
 
-export type PageKind = "job" | "mergeRequest" | "discussion";
+export type PageKind = "job" | "mergeRequest" | "discussion" | "link";
 
 export const PAGE_TITLE = "Merge requests";
 export const LIST_LABEL = "Open merge requests";
@@ -258,6 +258,7 @@ const NOT_OFFERED: Readonly<Record<PageKind, string>> = {
   job: "This job's page was not listed by GitLab, so yamt did not open it.",
   mergeRequest: "This merge request's page was not listed by GitLab, so yamt did not open it.",
   discussion: "This comment's page was not listed by GitLab, so yamt did not open it.",
+  link: "This link was not listed by GitLab, so yamt did not open it.",
 };
 
 export function pageProblemText(opened: PageOpened, clicked: PageKind): string | null {
