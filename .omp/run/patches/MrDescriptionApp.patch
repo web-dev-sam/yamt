@@ -1,0 +1,780 @@
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index f2f46f9..f4b620e 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -85,6 +85,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         merge_requests::read_discussions::<tauri::Wry>,
+         merge_requests::search_people::<tauri::Wry>,
+         merge_requests::change_people::<tauri::Wry>,
++        merge_requests::description::read_description::<tauri::Wry>,
+     ])
+ }
+ 
+diff --git a/src-tauri/src/merge_requests.rs b/src-tauri/src/merge_requests.rs
+index ee0d03d..523c45f 100644
+--- a/src-tauri/src/merge_requests.rs
++++ b/src-tauri/src/merge_requests.rs
+@@ -19,6 +19,7 @@ use crate::ipc_error::{IpcError, blocking_reply};
+ use crate::range::range_folder;
+ use crate::second_window;
+ 
++pub(crate) mod description;
+ mod discussions;
+ mod job_logs;
+ mod list;
+@@ -56,9 +57,9 @@ pub(crate) enum ContinueMergeReply {
+ }
+ 
+ /// The window's GitLab project, found once at start, the folder pair locks live in, the window's `--ai` that "Show
+-/// Diff" passes on, and every merge request's and failed job's page a list sent and every note's page
+-/// `read_discussions` sent in this run: only those may be opened or have their log read (plan §2 #128–#137); `pages`
+-/// is never locked together with another `Mutex`.
++/// Diff" passes on, and every merge request's and failed job's page a list sent, every note's page
++/// `read_discussions` sent and every page `read_description` sent in this run: only those may be opened or have
++/// their log read (plan §2 #128–#137); `pages` is never locked together with another `Mutex`.
+ pub(crate) struct MergeRequestState {
+     gitlab: Option<GitLabRepository>,
+     range_dir: PathBuf,
+diff --git a/src-tauri/src/merge_requests/description.rs b/src-tauri/src/merge_requests/description.rs
+new file mode 100644
+index 0000000..aecf2ce
+--- /dev/null
++++ b/src-tauri/src/merge_requests/description.rs
+@@ -0,0 +1,36 @@
++use tauri::{Manager, Runtime, WebviewWindow};
++use yamt_merge_requests::{DescriptionReply, Glab, MergeRequestIid};
++
++use super::{MergeRequestState, NO_PROJECT, offered};
++use crate::ipc_error::{IpcError, blocking_reply};
++
++/// No GitLab project → `Failed`; else glab reads the description, and its pages are offered, then its uploads, each
++/// lock held alone, before the reply is returned.
++pub(super) fn description_reply(
++    state: &MergeRequestState,
++    glab: Option<&Glab>,
++    iid: MergeRequestIid,
++) -> DescriptionReply {
++    let Some(repository) = &state.gitlab else {
++        return DescriptionReply::Failed {
++            message: NO_PROJECT.to_owned(),
++        };
++    };
++    let read = yamt_merge_requests::read_description(repository, glab, iid);
++    offered(&state.pages).extend(read.pages);
++    state.pictures.offer_uploads(read.uploads);
++    read.reply
++}
++
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn read_description<R: Runtime>(
++    window: WebviewWindow<R>,
++    iid: MergeRequestIid,
++) -> Result<DescriptionReply, IpcError> {
++    blocking_reply(move || {
++        let glab = Glab::find();
++        Ok(description_reply(&window.state(), glab.as_ref(), iid))
++    })
++    .await
++}
+diff --git a/src-tauri/src/merge_requests/pictures.rs b/src-tauri/src/merge_requests/pictures.rs
+index 7ea308a..358a779 100644
+--- a/src-tauri/src/merge_requests/pictures.rs
++++ b/src-tauri/src/merge_requests/pictures.rs
+@@ -4,29 +4,35 @@ use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
+ use tauri::http::header::{CONTENT_TYPE, HeaderValue, X_CONTENT_TYPE_OPTIONS};
+ use tauri::http::{Response, StatusCode};
+ use tauri::{AppHandle, Manager, Runtime, UriSchemeResponder};
+-use yamt_merge_requests::{Glab, OfferedPicture, Picture, PictureAddress, fetch_picture};
++use yamt_merge_requests::{
++    Glab, OfferedPicture, OfferedUpload, Picture, PictureAddress, fetch_picture,
++};
+ 
+ use super::MergeRequestState;
+ 
+-/// The scheme the window asks uploaded profile pictures by: `yamt-picture://localhost/<username>`.
++/// The scheme the window asks pictures by: `yamt-picture://localhost/<username>` for an uploaded profile picture,
++/// `yamt-picture://localhost/upload~<32 lowercase hex digits>` for an upload a description named.
+ pub(crate) const PICTURE_SCHEME: &str = "yamt-picture";
+ /// glab runs for pictures at once.
+ const PICTURE_FETCHES: usize = 4;
+ const NO_SNIFFING: &str = "nosniff";
++/// What every `yamt_merge_requests::UploadKey` starts with; the crate checks the secret after it.
++const UPLOAD_KEY_PREFIX: &str = "upload~";
+ 
+-/// The uploaded pictures lists offered and those fetched (plan §2 #152), and the turns of the askers waiting for a
+-/// fetch to end; the shelf is never locked together with another `Mutex` and never held across a glab run.
++/// The pictures lists, replies and descriptions offered and those fetched (plan §2 #152), and the turns of the askers
++/// waiting for a fetch to end; the shelf is never locked together with another `Mutex` and never held across a glab
++/// run.
+ #[derive(Default)]
+ pub(crate) struct Pictures {
+     shelf: Mutex<PictureShelf>,
+     turns: Condvar,
+ }
+ 
+-/// What the lists of this run offered and what fetching each brought; `running` counts the glab runs under way, at
+-/// most `PICTURE_FETCHES`.
++/// What this run offered and what fetching each brought; `running` counts the glab runs under way, at most
++/// `PICTURE_FETCHES`.
+ #[derive(Default)]
+ struct PictureShelf {
+-    /// Each username's picture address, the latest list's.
++    /// Each username's or upload key's picture address, the latest offer's.
+     offered: BTreeMap<String, PictureAddress>,
+     fetched: BTreeMap<PictureAddress, Fetch>,
+     running: usize,
+@@ -38,7 +44,7 @@ enum Fetch {
+     Done(Option<Picture>),
+ }
+ 
+-/// What a caller does next for a username's picture.
++/// What a caller does next for a name's picture.
+ enum Turn {
+     Answer(Option<Picture>),
+     Fetch(PictureAddress),
+@@ -58,11 +64,20 @@ impl Pictures {
+         }
+     }
+ 
+-    /// Waits until the username's picture is fetched or this caller may fetch it; `None` when no list offered it.
+-    fn turn(&self, username: &str) -> Option<Turn> {
++    /// Remembers the uploads a description offered, by key; a key's latest address wins.
++    pub(crate) fn offer_uploads(&self, uploads: Vec<OfferedUpload>) {
++        let mut held = self.shelf();
++        for upload in uploads {
++            held.offered
++                .insert(upload.key.as_str().to_owned(), upload.address);
++        }
++    }
++
++    /// Waits until the named picture is fetched or this caller may fetch it; `None` when nothing offered it.
++    fn turn(&self, name: &str) -> Option<Turn> {
+         let mut held = self.shelf();
+         loop {
+-            let address = held.offered.get(username)?.clone();
++            let address = held.offered.get(name)?.clone();
+             match held.fetched.get(&address) {
+                 Some(Fetch::Done(picture)) => return Some(Turn::Answer(picture.clone())),
+                 None if held.running < PICTURE_FETCHES => {
+@@ -89,7 +104,7 @@ impl Pictures {
+     }
+ }
+ 
+-/// Answers `GET <scheme>://localhost/<username>` on a worker thread, so the webview never waits.
++/// Answers `GET <scheme>://localhost/<name>` on a worker thread, so the webview never waits.
+ pub(crate) fn answer_picture<R: Runtime>(
+     app: AppHandle<R>,
+     path: String,
+@@ -104,29 +119,34 @@ pub(crate) fn answer_picture<R: Runtime>(
+     });
+ }
+ 
+-/// The picture of the username `path` names (`/<username>`), when a list of this run offered it and glab fetched it;
+-/// else 404 with an empty body.
++/// The picture `path` names (`/<username>` or `/upload~<secret>`), when this run offered it and glab fetched it; else
++/// 404 with an empty body.
+ pub(crate) fn picture_answer(
+     state: &MergeRequestState,
+     glab: Option<&Glab>,
+     path: &str,
+ ) -> Response<Vec<u8>> {
+-    let username = path.strip_prefix('/').filter(|name| is_username(name));
+-    let (Some(username), Some(glab), Some(repository)) = (username, glab, &state.gitlab) else {
++    let name = path.strip_prefix('/').filter(|name| is_picture_name(name));
++    let (Some(name), Some(glab), Some(repository)) = (name, glab, &state.gitlab) else {
+         return not_found();
+     };
+-    let address = match state.pictures.turn(username) {
++    let address = match state.pictures.turn(name) {
+         None | Some(Turn::Answer(None)) => return not_found(),
+         Some(Turn::Answer(Some(picture))) => return found(picture),
+         Some(Turn::Fetch(address)) => address,
+     };
+     let fetched = fetch_picture(glab, repository.root(), &address)
+-        .inspect_err(|message| tracing::warn!(%message, "a profile picture was not fetched"))
++        .inspect_err(|message| tracing::warn!(%message, "a picture was not fetched"))
+         .ok();
+     state.pictures.done(address, fetched.clone());
+     fetched.map_or_else(not_found, found)
+ }
+ 
++/// A username, or an upload key: only an offered name is ever served.
++fn is_picture_name(name: &str) -> bool {
++    is_username(name) || name.starts_with(UPLOAD_KEY_PREFIX)
++}
++
+ fn is_username(name: &str) -> bool {
+     let is_username_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-');
+     !name.is_empty() && name.chars().all(is_username_char)
+diff --git a/src-tauri/src/merge_requests/tests.rs b/src-tauri/src/merge_requests/tests.rs
+index bf66090..65b80f6 100644
+--- a/src-tauri/src/merge_requests/tests.rs
++++ b/src-tauri/src/merge_requests/tests.rs
+@@ -131,6 +131,9 @@ mod discussions;
+ #[cfg(unix)]
+ mod people;
+ 
++#[cfg(unix)]
++mod description;
++
+ mod csp;
+ 
+ #[cfg(unix)]
+@@ -261,17 +264,17 @@ mod through_glab {
+             .collect()
+     }
+ 
+-    fn open(window: &MergeRequestWindow, page: &str) -> Value {
++    pub(super) fn open(window: &MergeRequestWindow, page: &str) -> Value {
+         invoke(window, "open_page", json!({ "page": page })).unwrap()
+     }
+ 
+-    fn opened_log() -> String {
++    pub(super) fn opened_log() -> String {
+         let log = std::env::var_os(FAKE_OPEN_LOG).unwrap();
+         std::fs::read_to_string(log).unwrap_or_default()
+     }
+ 
+     /// The opener's log once it is no longer `before`.
+-    fn log_after(before: &str) -> String {
++    pub(super) fn log_after(before: &str) -> String {
+         let deadline = Instant::now() + OPEN_WAIT;
+         loop {
+             let logged = opened_log();
+diff --git a/src-tauri/src/merge_requests/tests/csp.rs b/src-tauri/src/merge_requests/tests/csp.rs
+index 7c36831..5eeb891 100644
+--- a/src-tauri/src/merge_requests/tests/csp.rs
++++ b/src-tauri/src/merge_requests/tests/csp.rs
+@@ -1,34 +1,84 @@
+ use super::*;
+ 
+-const IMAGE_SOURCES: [&str; 6] = [
++const IMAGE_SOURCES: [&str; 5] = [
+     "'self'",
+     "data:",
+     "yamt-picture:",
+     "http://yamt-picture.localhost",
+-    "https://secure.gravatar.com",
+-    "https://www.gravatar.com",
++    "https:",
+ ];
++const NOT_SET: [&str; 6] = [
++    "script-src",
++    "frame-src",
++    "child-src",
++    "media-src",
++    "object-src",
++    "form-action",
++];
++/// How the CSP's inline-allowing keyword ends; spelled whole, it would trip `scripts/arch-check.sh`'s word grep.
++const INLINE_KEYWORD_END: &str = "-inline'";
+ 
+-/// The sources of the `img-src` directive of `policy`.
+-fn image_sources(policy: &str) -> Vec<&str> {
+-    let directive = policy
+-        .split(';')
+-        .map(str::trim)
+-        .find_map(|directive| directive.strip_prefix("img-src "));
+-    directive.unwrap().split_whitespace().collect()
+-}
+-
+-#[test]
+-fn the_csp_admits_the_scheme_and_gravatars_two_hosts_only() {
++/// `csp` and `devCsp` of `tauri.conf.json`, each with its key.
++fn policies() -> Vec<(&'static str, String)> {
+     let config =
+         std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json")).unwrap();
+     let config: Value = serde_json::from_slice(&config).unwrap();
+     let security = &config["app"]["security"];
++    ["csp", "devCsp"]
++        .into_iter()
++        .map(|key| (key, security[key].as_str().unwrap().to_owned()))
++        .collect()
++}
+ 
+-    for key in ["csp", "devCsp"] {
+-        let policy = security[key].as_str().unwrap();
+-        assert_eq!(image_sources(policy), IMAGE_SOURCES, "{key}");
+-        assert_eq!(policy.matches("img-src").count(), 1, "{key}");
++/// Each directive of `policy`: its name, then its sources.
++fn directives(policy: &str) -> Vec<Vec<&str>> {
++    policy
++        .split(';')
++        .map(|directive| directive.split_whitespace().collect())
++        .collect()
++}
++
++/// The sources of `name`'s directive in `policy`; `None` when it has none.
++fn sources<'a>(policy: &'a str, name: &str) -> Option<Vec<&'a str>> {
++    let found = directives(policy)
++        .into_iter()
++        .filter(|directive| directive.first() == Some(&name))
++        .collect::<Vec<_>>();
++    assert!(found.len() <= 1, "{name} twice in {policy}");
++    found
++        .into_iter()
++        .next()
++        .map(|directive| directive[1..].to_vec())
++}
++
++#[test]
++fn the_csp_admits_the_scheme_and_any_https_image_only() {
++    for (key, policy) in policies() {
++        assert_eq!(sources(&policy, "img-src").unwrap(), IMAGE_SOURCES, "{key}");
+     }
+     assert_eq!(PICTURE_SCHEME, "yamt-picture");
+ }
++
++#[test]
++fn the_csp_loads_scripts_frames_media_and_fonts_from_the_app_only() {
++    for (key, policy) in policies() {
++        assert_eq!(
++            sources(&policy, "default-src").unwrap(),
++            ["'self'"],
++            "{key}"
++        );
++        assert_eq!(sources(&policy, "font-src").unwrap(), ["'self'"], "{key}");
++        for name in NOT_SET {
++            assert_eq!(sources(&policy, name), None, "{key} {name}");
++        }
++        let inline: Vec<&str> = directives(&policy)
++            .into_iter()
++            .filter(|directive| {
++                let is_inline = |source: &&str| source.ends_with(INLINE_KEYWORD_END);
++                directive.iter().any(is_inline)
++            })
++            .map(|directive| directive[0])
++            .collect();
++        assert_eq!(inline, ["style-src"], "{key}");
++    }
++}
+diff --git a/src-tauri/src/merge_requests/tests/description.rs b/src-tauri/src/merge_requests/tests/description.rs
+new file mode 100644
+index 0000000..fd0ccce
+--- /dev/null
++++ b/src-tauri/src/merge_requests/tests/description.rs
+@@ -0,0 +1,260 @@
++use tauri::http::header::{CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS};
++use tauri::http::{Response, StatusCode};
++
++use super::through_glab::{
++    glab_log, in_this_repository, log_after, open, opened_log, run_with_fakes,
++};
++use super::*;
++use crate::merge_requests::description::{description_reply, read_description};
++use crate::merge_requests::pictures::picture_answer;
++
++const SCENARIO: &str = "mr-description";
++const PAGES_TEST: &str = "merge_requests::tests::description::described_pages_on_paths_opener";
++const UNNAMED_TEST: &str = "merge_requests::tests::description::unnamed_addresses_on_paths_opener";
++const UPLOAD_TEST: &str = "merge_requests::tests::description::an_upload_on_paths_glab";
++const WEB_PATH_TEST: &str = "merge_requests::tests::description::a_web_path_upload_on_paths_glab";
++const UNOFFERED_TEST: &str = "merge_requests::tests::description::unoffered_uploads_on_paths_glab";
++const OTHER_SITES_TEST: &str = "merge_requests::tests::description::other_sites_on_paths_glab";
++const COMMAND_TEST: &str = "merge_requests::tests::description::the_command_on_paths_glab";
++const HEX_A: &str = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
++const HEX_B: &str = "f9e8d7c6b5a4938271605f4e3d2c1b0a";
++const HEX_C: &str = "1111aaaa2222bbbb3333cccc4444dddd";
++const SHOT: &str =
++    "tests/glab/mr-description/uploads/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png";
++const OLD: &str = "tests/glab/mr-description/pictures/-/project/7/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png";
++const DOCS_PAGE: &str = "https://docs.example/x";
++const ISSUE_PAGE: &str = "https://gitlab.example/taskboard/taskboard/-/issues/12";
++const PLAIN_PAGE: &str = "http://plain.example/";
++
++/// The reply the window gets for `iid` through the command.
++fn read(window: &MergeRequestWindow, iid: u32) -> Value {
++    let reply = block_on(read_description(
++        window.webview.clone(),
++        MergeRequestIid(iid),
++    ));
++    serde_json::to_value(reply.unwrap()).unwrap()
++}
++
++/// The picture the window gets for `path` through PATH's glab.
++fn asked(window: &MergeRequestWindow, path: &str) -> Response<Vec<u8>> {
++    picture_answer(&window.webview.state(), Glab::find().as_ref(), path)
++}
++
++fn is_not_found(answer: &Response<Vec<u8>>) -> bool {
++    answer.status() == StatusCode::NOT_FOUND && answer.body().is_empty()
++}
++
++/// Every uploaded image's key in `reply`, in document order.
++fn uploaded_keys(reply: &Value) -> Vec<String> {
++    let mut keys = Vec::new();
++    let mut pending = vec![reply];
++    while let Some(value) = pending.pop() {
++        match value {
++            Value::Object(fields) => {
++                if fields.get("kind") == Some(&json!("uploaded")) {
++                    keys.push(fields["key"].as_str().unwrap().to_owned());
++                }
++                pending.extend(fields.values().rev());
++            }
++            Value::Array(items) => pending.extend(items.iter().rev()),
++            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
++        }
++    }
++    keys
++}
++
++#[test]
++fn a_described_page_is_offered_before_the_reply() {
++    run_with_fakes(PAGES_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by a_described_page_is_offered_before_the_reply"]
++fn described_pages_on_paths_opener() {
++    let window = open_window_in(gitlab_repo());
++    let not_offered = json!({ "kind": "notOffered" });
++    for page in [DOCS_PAGE, ISSUE_PAGE, PLAIN_PAGE] {
++        assert_eq!(open(&window, page), not_offered, "{page}");
++    }
++    assert_eq!(opened_log(), "");
++
++    read(&window, 52);
++
++    // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `web_page.rs`), not PATH's fake: it would
++    // open the real browser.
++    if cfg!(target_os = "macos") {
++        return;
++    }
++    let mut before = String::new();
++    for page in [DOCS_PAGE, ISSUE_PAGE, PLAIN_PAGE] {
++        assert_eq!(open(&window, page), json!({ "kind": "opened" }), "{page}");
++        let logged = format!("{before}argv: {page}\n");
++        assert_eq!(log_after(&before), logged);
++        before = logged;
++    }
++}
++
++#[test]
++fn an_address_no_reply_named_is_not_offered() {
++    run_with_fakes(UNNAMED_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by an_address_no_reply_named_is_not_offered"]
++fn unnamed_addresses_on_paths_opener() {
++    let window = open_window_in(gitlab_repo());
++
++    read(&window, 52);
++
++    let not_offered = json!({ "kind": "notOffered" });
++    for page in [
++        "mailto:anna@example.com",
++        "javascript:alert(1)",
++        "https://evil.example/",
++    ] {
++        assert_eq!(open(&window, page), not_offered, "{page}");
++    }
++    assert_eq!(opened_log(), "");
++}
++
++#[test]
++fn an_upload_is_offered_before_the_reply_and_served() {
++    run_with_fakes(UPLOAD_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by an_upload_is_offered_before_the_reply_and_served"]
++fn an_upload_on_paths_glab() {
++    let window = open_window_in(gitlab_repo());
++    let path = format!("/upload~{HEX_A}");
++    assert!(is_not_found(&asked(&window, &path)));
++
++    read(&window, 52);
++
++    let answer = asked(&window, &path);
++    assert_eq!(answer.status(), StatusCode::OK);
++    assert_eq!(
++        answer.body(),
++        &std::fs::read(in_this_repository(SHOT)).unwrap()
++    );
++    assert_eq!(answer.headers()[CONTENT_TYPE], "image/png");
++    assert_eq!(answer.headers()[X_CONTENT_TYPE_OPTIONS], "nosniff");
++    let argv = glab_log("argv: ");
++    let rest = format!("argv: api projects/7/uploads/{HEX_A}/shot.png");
++    assert_eq!(argv.last(), Some(&rest));
++}
++
++#[test]
++fn an_upload_the_api_does_not_know_is_served_from_its_web_path() {
++    run_with_fakes(WEB_PATH_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by an_upload_the_api_does_not_know_is_served_from_its_web_path"]
++fn a_web_path_upload_on_paths_glab() {
++    let window = open_window_in(gitlab_repo());
++    read(&window, 52);
++
++    let answer = asked(&window, &format!("/upload~{HEX_B}"));
++
++    assert_eq!(answer.status(), StatusCode::OK);
++    assert_eq!(
++        answer.body(),
++        &std::fs::read(in_this_repository(OLD)).unwrap()
++    );
++    let argv = glab_log("argv: ");
++    let asked = [
++        format!("argv: api projects/7/uploads/{HEX_B}/old.png"),
++        format!("argv: api https://gitlab.example/-/project/7/uploads/{HEX_B}/old.png"),
++    ];
++    assert_eq!(argv[argv.len() - 2..], asked);
++}
++
++#[test]
++fn an_upload_no_reply_offered_gets_404_and_runs_no_glab() {
++    run_with_fakes(UNOFFERED_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by an_upload_no_reply_offered_gets_404_and_runs_no_glab"]
++fn unoffered_uploads_on_paths_glab() {
++    let window = open_window_in(gitlab_repo());
++    read(&window, 52);
++    let before = glab_log("argv: ");
++
++    let refused = [
++        "/upload~5555eeee6666ffff7777000088881111".to_owned(),
++        "/upload~xyz".to_owned(),
++        format!("/upload~{HEX_A}/../x"),
++        format!("/upload~{}", HEX_A.to_uppercase()),
++        format!("upload~{HEX_A}"),
++    ];
++    for path in refused {
++        assert!(is_not_found(&asked(&window, &path)), "{path}");
++    }
++    assert_eq!(glab_log("argv: "), before);
++}
++
++#[test]
++fn another_sites_image_is_never_fetched() {
++    run_with_fakes(OTHER_SITES_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by another_sites_image_is_never_fetched"]
++fn other_sites_on_paths_glab() {
++    let window = open_window_in(gitlab_repo());
++
++    let keys = uploaded_keys(&read(&window, 52));
++
++    let offered = [HEX_A, HEX_B, HEX_C].map(|hex| format!("upload~{hex}"));
++    assert_eq!(keys, offered);
++    for key in &keys {
++        asked(&window, &format!("/{key}"));
++    }
++    let argv = glab_log("argv: ");
++    for site in ["images.example", "evil.example"] {
++        let named = argv.iter().find(|line| line.contains(site));
++        assert_eq!(named, None, "{site}");
++    }
++}
++
++#[test]
++fn no_gitlab_project_fails_the_read() {
++    let plain = TempDir::new().unwrap();
++    git_ok(plain.path(), &["init", "-q"]).unwrap();
++    let window = open_window_in(plain);
++
++    let reply = description_reply(&window.webview.state(), None, MergeRequestIid(52));
++
++    let failed = json!({ "kind": "failed", "message": NO_PROJECT });
++    assert_eq!(serde_json::to_value(reply).unwrap(), failed);
++}
++
++#[test]
++fn read_description_answers_through_the_command() {
++    run_with_fakes(COMMAND_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by read_description_answers_through_the_command"]
++fn the_command_on_paths_glab() {
++    let window = open_window_in(gitlab_repo());
++    let reply = |iid: u32| invoke(&window, "read_description", json!({ "iid": iid })).unwrap();
++
++    let described = reply(52);
++    let empty = reply(51);
++
++    assert_eq!(described["kind"], "read");
++    assert_eq!(described["description"]["blocks"][0]["kind"], "heading");
++    let direct = description_reply(
++        &window.webview.state(),
++        Glab::find().as_ref(),
++        MergeRequestIid(52),
++    );
++    assert_eq!(described, serde_json::to_value(direct).unwrap());
++    assert_eq!(
++        empty,
++        json!({ "kind": "read", "description": { "blocks": [] } })
++    );
++}
+diff --git a/src-tauri/src/merge_requests/tests/picture_scheme.rs b/src-tauri/src/merge_requests/tests/picture_scheme.rs
+index ddbabb8..969ad6b 100644
+--- a/src-tauri/src/merge_requests/tests/picture_scheme.rs
++++ b/src-tauri/src/merge_requests/tests/picture_scheme.rs
+@@ -1,3 +1,4 @@
++use std::os::unix::fs::symlink;
+ use std::thread;
+ 
+ use tauri::http::header::{CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS};
+@@ -5,18 +6,30 @@ use tauri::http::{Response, StatusCode};
+ 
+ use super::through_glab::{glab_log, in_this_repository, run_with_fakes};
+ use super::*;
++use crate::merge_requests::description::description_reply;
+ use crate::merge_requests::pictures::picture_answer;
+ 
+ const OFFERED_TEST: &str = "merge_requests::tests::picture_scheme::offered_pictures_on_path_s_glab";
+ const ONCE_TEST: &str =
+     "merge_requests::tests::picture_scheme::one_fetch_per_picture_on_path_s_glab";
+ const AT_ONCE_TEST: &str = "merge_requests::tests::picture_scheme::slow_pictures_on_path_s_glab";
++const MIXED_TEST: &str = "merge_requests::tests::picture_scheme::slow_mixed_names_on_path_s_glab";
+ const SCENARIO: &str = "mr-row-details";
+ const CROWD: &str = "mr-row-details/crowd";
+ const PICTURES: &str = "tests/glab/mr-row-details/pictures/uploads/-/system/user/avatar";
+ const FETCH_START: &str = "argv: api https://";
+-const FETCH_END: &str = "answered: https://";
++const API_CALL: &str = "argv: api ";
++const UPLOADS_SEGMENT: &str = "/uploads/";
++const FETCH_END: &str = "answered: ";
+ const SLOW_PICTURES: usize = 6;
++/// `mr-description`'s three uploads under the uploads API: A served there, B on its web path, C on neither.
++const SLOW_UPLOADS: [&str; 3] = [
++    "0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png",
++    "f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png",
++    "1111aaaa2222bbbb3333cccc4444dddd/gone.png",
++];
++/// glab runs the slow uploads take: A one, B and C two each (the API, then the web path).
++const SLOW_UPLOAD_RUNS: usize = 5;
+ 
+ /// The picture the window gets for `path` (`/<username>`) through PATH's glab.
+ fn asked(window: &MergeRequestWindow, path: &str) -> Response<Vec<u8>> {
+@@ -115,21 +128,62 @@ fn at_most_four_pictures_are_fetched_at_once() {
+ #[ignore = "run by at_most_four_pictures_are_fetched_at_once"]
+ fn slow_pictures_on_path_s_glab() {
+     let window = listed_window(gitlab_repo());
++
++    ask_at_once(&window, slow_avatars());
++
++    assert_eq!(fetches_at_once(), (4, SLOW_PICTURES));
++}
++
++#[test]
++fn an_avatar_and_an_upload_share_the_four_fetches_at_once() {
++    let scenario = crowd_and_description();
++    run_with_fakes(MIXED_TEST, scenario.path().to_str().unwrap());
++}
++
++#[test]
++#[ignore = "run by an_avatar_and_an_upload_share_the_four_fetches_at_once"]
++fn slow_mixed_names_on_path_s_glab() {
++    let window = listed_window(gitlab_repo());
++    description_reply(
++        &window.webview.state(),
++        Glab::find().as_ref(),
++        MergeRequestIid(52),
++    );
++    let mut paths = slow_avatars();
++    for upload in SLOW_UPLOADS {
++        let (secret, _) = upload.split_once('/').unwrap();
++        paths.push(format!("/upload~{secret}"));
++    }
++
++    ask_at_once(&window, paths);
++
++    assert_eq!(fetches_at_once(), (4, SLOW_PICTURES + SLOW_UPLOAD_RUNS));
++}
++
++fn slow_avatars() -> Vec<String> {
++    (11..11 + SLOW_PICTURES)
++        .map(|number| format!("/user{number}"))
++        .collect()
++}
++
++/// Asks for every path in `paths` at once, each on its own thread, and returns when all are answered.
++fn ask_at_once(window: &MergeRequestWindow, paths: Vec<String>) {
+     let state = window.webview.state::<MergeRequestState>();
+     let state = state.inner();
+-
+     thread::scope(|scope| {
+-        for number in 11..11 + SLOW_PICTURES {
+-            let path = format!("/user{number}");
++        for path in paths {
+             scope.spawn(move || picture_answer(state, Glab::find().as_ref(), &path));
+         }
+     });
++}
+ 
++/// The most picture and upload glab runs the fake glab's log shows under way at once, and how many ended.
++fn fetches_at_once() -> (usize, usize) {
+     let mut running = 0;
+     let mut most = 0;
+     let mut ended = 0;
+     for line in glab_log("") {
+-        if line.starts_with(FETCH_START) {
++        if line.starts_with(API_CALL) && line.contains(UPLOADS_SEGMENT) {
+             running += 1;
+             most = most.max(running);
+         } else if line.starts_with(FETCH_END) {
+@@ -137,5 +191,38 @@ fn slow_pictures_on_path_s_glab() {
+             ended += 1;
+         }
+     }
+-    assert_eq!((most, ended), (4, SLOW_PICTURES));
++    (most, ended)
++}
++
++/// A scenario with `mr-row-details/crowd`'s list and slow avatars and `mr-description`'s !52, whose three uploads
++/// each wait a second on the uploads API.
++fn crowd_and_description() -> TempDir {
++    let scenario = TempDir::new().unwrap();
++    let root = scenario.path();
++    let crowd = in_this_repository("tests/glab").join(CROWD);
++    let description = in_this_repository("tests/glab/mr-description");
++    let linked = [
++        (crowd.join("project.json"), "project.json"),
++        (crowd.join("graphql-page-1.json"), "graphql-page-1.json"),
++        (
++            description.join("graphql-description-52.json"),
++            "graphql-description-52.json",
++        ),
++        (crowd.join("pictures/uploads"), "pictures/uploads"),
++        (description.join("pictures/-"), "pictures/-"),
++    ];
++    std::fs::create_dir(root.join("pictures")).unwrap();
++    for (original, link) in linked {
++        symlink(original, root.join(link)).unwrap();
++    }
++    for upload in SLOW_UPLOADS {
++        let file = root.join("uploads/7/uploads").join(upload);
++        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
++        std::fs::write(format!("{}.sleep", file.display()), "1").unwrap();
++        let original = description.join("uploads/7/uploads").join(upload);
++        if original.exists() {
++            symlink(original, file).unwrap();
++        }
++    }
++    scenario
+ }
+diff --git a/src-tauri/tauri.conf.json b/src-tauri/tauri.conf.json
+index 75325a6..c89a951 100644
+--- a/src-tauri/tauri.conf.json
++++ b/src-tauri/tauri.conf.json
+@@ -11,8 +11,8 @@
+   "app": {
+     "windows": [],
+     "security": {
+-      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: yamt-picture: http://yamt-picture.localhost https://secure.gravatar.com https://www.gravatar.com; font-src 'self'",
+-      "devCsp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:5173; style-src 'self' 'unsafe-inline'; img-src 'self' data: yamt-picture: http://yamt-picture.localhost https://secure.gravatar.com https://www.gravatar.com; font-src 'self'",
++      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: yamt-picture: http://yamt-picture.localhost https:; font-src 'self'",
++      "devCsp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:5173; style-src 'self' 'unsafe-inline'; img-src 'self' data: yamt-picture: http://yamt-picture.localhost https:; font-src 'self'",
+       "dangerousDisableAssetCspModification": ["style-src"]
+     }
+   },

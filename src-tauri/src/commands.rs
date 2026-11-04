@@ -85,6 +85,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         merge_requests::read_discussions::<tauri::Wry>,
         merge_requests::search_people::<tauri::Wry>,
         merge_requests::change_people::<tauri::Wry>,
+        merge_requests::description::read_description::<tauri::Wry>,
     ])
 }
 

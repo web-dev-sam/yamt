@@ -19,6 +19,7 @@ use crate::ipc_error::{IpcError, blocking_reply};
 use crate::range::range_folder;
 use crate::second_window;
 
+pub(crate) mod description;
 mod discussions;
 mod job_logs;
 mod list;
@@ -56,9 +57,9 @@ pub(crate) enum ContinueMergeReply {
 }
 
 /// The window's GitLab project, found once at start, the folder pair locks live in, the window's `--ai` that "Show
-/// Diff" passes on, and every merge request's and failed job's page a list sent and every note's page
-/// `read_discussions` sent in this run: only those may be opened or have their log read (plan §2 #128–#137); `pages`
-/// is never locked together with another `Mutex`.
+/// Diff" passes on, and every merge request's and failed job's page a list sent, every note's page
+/// `read_discussions` sent and every page `read_description` sent in this run: only those may be opened or have
+/// their log read (plan §2 #128–#137); `pages` is never locked together with another `Mutex`.
 pub(crate) struct MergeRequestState {
     gitlab: Option<GitLabRepository>,
     range_dir: PathBuf,

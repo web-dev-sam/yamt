@@ -87,6 +87,7 @@ export const commands = {
 	readDiscussions: (iids: MergeRequestIid[]) => typedError<RowDiscussions[], IpcError>(__TAURI_INVOKE("read_discussions", { iids })),
 	searchPeople: (text: string) => typedError<PeopleSearchReply, IpcError>(__TAURI_INVOKE("search_people", { text })),
 	changePeople: (iid: MergeRequestIid, change: PeopleChange) => typedError<PeopleChangeReply, IpcError>(__TAURI_INVOKE("change_people", { iid, change })),
+	readDescription: (iid: MergeRequestIid) => typedError<DescriptionReply, IpcError>(__TAURI_INVOKE("read_description", { iid })),
 };
 
 /* Types */
@@ -173,6 +174,15 @@ status: string };
 export type BranchBefore = { kind: "created" } | 
 /**  `id`: the first 7 hex characters of the commit it was fast-forwarded from. */
 { kind: "movedFrom"; id: string } | { kind: "unchanged" };
+
+/**  A table cell's alignment. */
+export type CellAlign = 
+/**  Left, the default. */
+"start" | 
+/**  Centred. */
+"center" | 
+/**  Right. */
+"end";
 
 /**  How much a merge request changes, GitLab's counts. */
 export type ChangeSize = {
@@ -288,6 +298,162 @@ export type ContinueMergeReply = { kind: "opened"; branch: string; target: strin
  *  pushed, or git stopped at another stop.
  */
 export type ContinueReply = { kind: "Finished" } | { kind: "ReadyToPush"; branch: string } | { kind: "Stopped"; message: string };
+
+/**  A merge request's description: GitLab's rendering, reduced to what yamt shows. */
+export type Description = {
+	/**  Its blocks, in order. */
+	blocks: DescriptionBlock[],
+};
+
+/**  A block of a description. */
+export type DescriptionBlock = 
+/**  A paragraph. */
+{ kind: "paragraph"; 
+/**  Its content. */
+inlines: DescriptionInline[] } | 
+/**  A heading. */
+{ kind: "heading"; 
+/**  Its level. */
+level: HeadingLevel; 
+/**  Its content. */
+inlines: DescriptionInline[] } | 
+/**  A code block. Mermaid, math and other undrawn diagrams are code too. */
+{ kind: "code"; 
+/**  GitLab's `data-canonical-lang` on the `<pre>` (else its `lang`); None when neither or empty. */
+language: string | null; 
+/**  The `<pre>`'s text, one final "\n" removed. */
+text: string } | 
+/**  A list. */
+{ kind: "list"; 
+/**  Bullets or numbers. */
+numbering: ListNumbering; 
+/**  Its items. */
+items: DescriptionItem[] } | 
+/**  A block quote. */
+{ kind: "quote"; 
+/**  Its content. */
+blocks: DescriptionBlock[] } | 
+/**  A horizontal rule. */
+{ kind: "rule" } | 
+/**  A table. */
+{ kind: "table"; 
+/**  The rows of its head. */
+head: DescriptionRow[]; 
+/**  The rows of its body. */
+body: DescriptionRow[] } | 
+/**  A collapsible section. */
+{ kind: "details"; 
+/**  Whether it starts open. */
+open: boolean; 
+/**  What shows while it is closed. */
+summary: DescriptionInline[]; 
+/**  What opening it shows. */
+blocks: DescriptionBlock[] };
+
+/**
+ *  A cell of a table: `header` for a `th`; `align` from `style="text-align: left|center|right"` exactly as GitLab
+ *  keeps it, else Start.
+ */
+export type DescriptionCell = {
+	/**  Whether it is a header cell. */
+	header: boolean,
+	/**  Its alignment. */
+	align: CellAlign,
+	/**  Its content. */
+	inlines: DescriptionInline[],
+};
+
+/**  Where an image loads from. */
+export type DescriptionImage = 
+/**  Uploaded to the project's GitLab: the window asks the picture scheme by `key` (offered with the reply). */
+{ kind: "uploaded"; 
+/**  The upload's key. */
+key: UploadKey } | 
+/**  Any other https address (`url`'s serialisation): the window loads it itself, without the login. */
+{ kind: "web"; 
+/**  The address. */
+address: string } | 
+/**  http, data, file, anything else or unreadable: nothing loads, the caption shows. */
+{ kind: "refused" };
+
+/**  A piece of a paragraph, heading, cell or summary. */
+export type DescriptionInline = 
+/**  Text as GitLab wrote it. */
+{ kind: "text"; 
+/**  The text. */
+text: string } | 
+/**  `<em>` or `<i>`. */
+{ kind: "emphasis"; 
+/**  Its content. */
+inlines: DescriptionInline[] } | 
+/**  `<strong>` or `<b>`. */
+{ kind: "strong"; 
+/**  Its content. */
+inlines: DescriptionInline[] } | 
+/**  `<del>`, `<s>` or `<strike>`. */
+{ kind: "strike"; 
+/**  Its content. */
+inlines: DescriptionInline[] } | 
+/**  `<code>` outside a `<pre>`, inline math too. */
+{ kind: "code"; 
+/**  The code. */
+text: string } | 
+/**  Never holds an Image: an image inside a link is lifted out after it; a link left with no inline is dropped. */
+{ kind: "link"; 
+/**  Where it leads. */
+link: DescriptionLink; 
+/**  Its content. */
+inlines: DescriptionInline[] } | 
+/**  An image. */
+{ kind: "image"; 
+/**  Where it loads from. */
+image: DescriptionImage; 
+/**  alt, else title, else the address as written (empty when there is none). */
+caption: string } | 
+/**  `<br>`. */
+{ kind: "lineBreak" };
+
+/**  An item of a list. */
+export type DescriptionItem = {
+	/**  Its task box. */
+	task: TaskBox,
+	/**  Its content. */
+	blocks: DescriptionBlock[],
+};
+
+/**  Where a link leads. */
+export type DescriptionLink = 
+/**  An http or https address, absolute or resolved against the merge request's GitLab page. */
+{ kind: "page"; 
+/**  The page the opener may open. */
+page: WebPage } | 
+/**  Any other address, or one yamt cannot read: as written, for the tooltip; opens nothing. */
+{ kind: "refused"; 
+/**  The address as written. */
+address: string };
+
+/**  How reading a merge request's description ended. */
+export type DescriptionReply = 
+/**  GitLab's rendering of the description as yamt shows it; no blocks for an empty one. */
+{ kind: "read"; 
+/**  The description. */
+description: Description } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first line, which names the instance. */
+detail: string } | 
+/**  glab's or GitLab's words; `page.rs` `NO_MERGE_REQUEST` when GitLab names no such merge request. */
+{ kind: "failed"; 
+/**  What went wrong. */
+message: string };
+
+/**  A row of a table. */
+export type DescriptionRow = {
+	/**  Its cells. */
+	cells: DescriptionCell[],
+};
 
 /**
  *  A line of the diff as GitLab's one-column view lists it: an unchanged line once, a change's removed lines, then its
@@ -460,6 +626,21 @@ repository: string };
  */
 export type GravatarAddress = string;
 
+/**  A heading's level, `<h1>` to `<h6>`. */
+export type HeadingLevel = 
+/**  `<h1>`. */
+"h1" | 
+/**  `<h2>`. */
+"h2" | 
+/**  `<h3>`. */
+"h3" | 
+/**  `<h4>`. */
+"h4" | 
+/**  `<h5>`. */
+"h5" | 
+/**  `<h6>`. */
+"h6";
+
 /**  What a running server sends the window; `Exited` comes once, last. */
 export type HostEvent = { kind: "Message"; text: string } | { kind: "Log"; line: string } | { kind: "Exited"; code: number | null };
 
@@ -609,6 +790,15 @@ message: string };
  */
 export type ListMessage = { kind: "page"; page: MergeRequestPage } | { kind: "end"; end: ListEnd } | { kind: "checked"; row: CheckedRow };
 
+/**  How a list numbers its items. */
+export type ListNumbering = 
+/**  `<ul>`. */
+{ kind: "bullets" } | 
+/**  `<ol>`. */
+{ kind: "numbers"; 
+/**  The first item's number: `<ol start>`, else 1. */
+start: number };
+
 /**  The files of the stop as git sees them, or `MovedOn`: git is at another stop, the next list opens it. */
 export type Listing = { kind: "Files"; files: FileEntry[]; disk_changes: DiskChange[]; operation: OperationView | null; sides: SideNames; 
 /**  The merge yamt started at this stop, from its record; `None` for any other stop. */
@@ -683,6 +873,8 @@ export type MergeRequestRow = {
 	iid: MergeRequestIid,
 	/**  Its title, GitLab's "Draft: " prefix included. */
 	title: string,
+	/**  GitLab's description holds more than white space. */
+	hasDescription: boolean,
 	/**  GitLab's ISO 8601 time, as sent. */
 	createdAt: string,
 	/**  Whether it is a draft. */
@@ -1363,6 +1555,20 @@ export type TabTexts = {
 	comparison: Comparison,
 };
 
+/**
+ *  GitLab's task box: `input.task-list-item-checkbox` first in the item; `data-inapplicable` → Inapplicable,
+ *  `checked` → Done, else Open; no such input → None.
+ */
+export type TaskBox = 
+/**  No task box: a plain item. */
+"none" | 
+/**  A task not done. */
+"open" | 
+/**  A task done. */
+"done" | 
+/**  A task GitLab marks not applicable. */
+"inapplicable";
+
 export type Theme = "dark" | "light" | "webstorm-dark" | "webstorm-light" | "vscode-dark" | "vscode-light" | "zed-dark" | "zed-light" | "atom-dark" | "atom-light";
 
 /**  A thread on lines of one file of the range. */
@@ -1432,6 +1638,12 @@ export type ThreadPlace = {
 
 export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
 
+/**
+ *  `upload~<the upload's 32 hex digit secret>`; `~` is in no username, so it never names an avatar. Only
+ *  `description/address.rs` makes one.
+ */
+export type UploadKey = string;
+
 /**  What Save writes for this change while a side of it still waits (plan §2 #69). */
 export type Waiting = 
 /**  One side changed these lines, or both the same way: written applied, as git wrote it. */
@@ -1451,8 +1663,9 @@ export type Waiting =
 { kind: "Remembered" };
 
 /**
- *  The address of a page on the project's GitLab that this window may open in the browser: a failed job's log, a
- *  merge request or a note on one; only `WebPage::job`, `WebPage::merge_request` and `WebPage::note` make one.
+ *  The address of a page this window may open in the browser: a failed job's log, a merge request or a note on one,
+ *  on the project's GitLab, or a link in a description; only `WebPage::job`, `::merge_request`, `::note` and
+ *  `::linked` make one.
  */
 export type WebPage = string;
 

@@ -131,6 +131,9 @@ mod discussions;
 #[cfg(unix)]
 mod people;
 
+#[cfg(unix)]
+mod description;
+
 mod csp;
 
 #[cfg(unix)]
@@ -261,17 +264,17 @@ mod through_glab {
             .collect()
     }
 
-    fn open(window: &MergeRequestWindow, page: &str) -> Value {
+    pub(super) fn open(window: &MergeRequestWindow, page: &str) -> Value {
         invoke(window, "open_page", json!({ "page": page })).unwrap()
     }
 
-    fn opened_log() -> String {
+    pub(super) fn opened_log() -> String {
         let log = std::env::var_os(FAKE_OPEN_LOG).unwrap();
         std::fs::read_to_string(log).unwrap_or_default()
     }
 
     /// The opener's log once it is no longer `before`.
-    fn log_after(before: &str) -> String {
+    pub(super) fn log_after(before: &str) -> String {
         let deadline = Instant::now() + OPEN_WAIT;
         loop {
             let logged = opened_log();
