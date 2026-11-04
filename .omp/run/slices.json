@@ -1,13 +1,42 @@
 {
-  "MrDescriptionApp": {
-    "owned": [
-      "src-tauri/src/merge_requests.rs",
-      "src-tauri/src/merge_requests/**",
-      "src-tauri/src/commands.rs",
-      "src-tauri/tauri.conf.json"
-    ]
-  },
   "MrPeopleFinal": {
     "owned": []
+  },
+  "MrDescriptionRustR1": {
+    "owned": [
+      "crates/merge-requests/src/**",
+      "crates/merge-requests/tests/**",
+      "crates/merge-requests/AGENTS.md",
+      "scripts/fake-glab/glab",
+      "tests/glab/mr-description/**",
+      "tests/glab/README.md"
+    ]
+  },
+  "MrDescriptionState": {
+    "owned": [
+      "frontend/src/ipc/MergeRequestSource.ts",
+      "frontend/src/ipc/mergeRequestDomain.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/tauriMergeRequests.ts",
+      "frontend/src/ipc/tauriMergeRequests.test.ts",
+      "frontend/src/ipc/fixtureMergeRequests.ts",
+      "frontend/src/ipc/fixtureMergeRequests.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestData.ts",
+      "frontend/src/ipc/fixtureMergeRequestData.test.ts",
+      "frontend/src/ipc/fixtureMergeRequestDescriptions.ts",
+      "frontend/src/ipc/fixtureMergeRequestDescriptions.test.ts",
+      "frontend/src/ipc/mergeRequestDomain.test.ts",
+      "frontend/src/ipc/AGENTS.md",
+      "frontend/src/ui/mergeRequestDescriptions.ts",
+      "frontend/src/ui/mergeRequestDescriptions.test.ts",
+      "frontend/src/ui/mergeRequests.ts",
+      "frontend/src/ui/mergeRequests.test.ts",
+      "frontend/src/ui/mergeRequestsText.ts",
+      "frontend/src/ui/mergeRequestsText.test.ts",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts",
+      "frontend/src/**/*.test.ts"
+    ]
   }
 }
