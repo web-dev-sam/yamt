@@ -55,6 +55,6 @@ export interface MergeRequestSource {
    *  `yamt-picture://localhost/<key>`; served only once a reply offered it). */
   uploadedImage(key: UploadKey): string;
   /** The epics, issues and commits a merge request's description links to, with titles, states and parents; asked
-   *  on a row's first hover (plan §2 rows 175–176). */
+   *  on a row's first hover (plan §2 rows 176–177). */
   readLinks(iid: MergeRequestIid): Promise<SourceResult<LinksReply>>;
 }

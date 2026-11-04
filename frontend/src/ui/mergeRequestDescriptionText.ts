@@ -1,5 +1,5 @@
 import type { DescriptionReply } from "../ipc";
-import { GLAB_MISSING_TEXT, glabNotLoggedInText } from "./glab";
+import { glabRetryText } from "./glab";
 
 export const SHOW_DESCRIPTION = "Show description";
 export const CLOSE_DESCRIPTION = "Close";
@@ -16,9 +16,8 @@ export function descriptionRefusalText(
 ): string {
   switch (reply.kind) {
     case "glabMissing":
-      return `${GLAB_MISSING_TEXT} — install glab, then Retry.`;
     case "notLoggedIn":
-      return `${glabNotLoggedInText(reply.detail)} — run glab auth login in a terminal, then Retry.`;
+      return glabRetryText(reply);
     case "failed":
       return `Could not read the description: ${reply.message}`;
     default: {

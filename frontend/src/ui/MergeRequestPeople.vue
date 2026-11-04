@@ -91,7 +91,7 @@ const {
 const area = useTemplateRef<HTMLSpanElement>("area");
 const opener = useTemplateRef<HTMLButtonElement>("opener");
 const box = useTemplateRef<HTMLDivElement>("box");
-const { open, placement, on } = useHoverBox({
+const { open, placement, on, keepFocus } = useHoverBox({
   area: () => area.value,
   opener: () => opener.value,
   box,
@@ -180,11 +180,11 @@ function lineControls(line: BoxLine): string[] {
 function keepFocusInBox(kept: ReadonlySet<string>): void {
   const focused = document.activeElement;
   const control =
-    focused instanceof HTMLElement && box.value?.contains(focused) === true
+    focused instanceof HTMLElement
       ? focused.closest<HTMLElement>("[data-control]")?.dataset.control
       : undefined;
   if (control !== undefined && !kept.has(control)) {
-    box.value?.focus();
+    keepFocus();
   }
 }
 

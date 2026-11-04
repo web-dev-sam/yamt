@@ -1,5 +1,5 @@
 import { useEventListener } from "@vueuse/core";
-import { shallowRef, type ComputedRef, type MaybeRefOrGetter, type ShallowRef } from "vue";
+import { shallowRef, toValue, type ComputedRef, type MaybeRefOrGetter, type ShallowRef } from "vue";
 
 import type { Point } from "./menuPosition";
 import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
@@ -28,6 +28,8 @@ export type HoverBox = {
     readonly keydown: (event: KeyboardEvent) => void;
   };
   readonly close: () => void;
+  /** Call before removing a control that may hold focus: focus inside the box moves to the box itself. */
+  readonly keepFocus: () => void;
 };
 
 function show(held: Held): void {
@@ -51,6 +53,15 @@ function contains(area: HTMLElement | null, target: EventTarget | null): boolean
 function close(held: Held): void {
   held.focusInside = document.activeElement === held.opener();
   held.open.value = false;
+}
+
+function keepFocus(held: Held): void {
+  const box = toValue(held.box);
+  // A removed control's focus goes to the body without a focusout, so focusInside would stay true for good
+  // (HTML "focus fixup rule": https://html.spec.whatwg.org/multipage/interaction.html#focus-fixup-rule).
+  if (box?.contains(document.activeElement) === true) {
+    box.focus();
+  }
 }
 
 function focusEntered(held: Held, event: FocusEvent): void {
@@ -129,6 +140,9 @@ export function useHoverBox(parts: HoverBoxParts): HoverBox {
     on: areaListeners(held),
     close: () => {
       close(held);
+    },
+    keepFocus: () => {
+      keepFocus(held);
     },
   };
 }

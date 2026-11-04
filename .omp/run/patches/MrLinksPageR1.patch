@@ -1,0 +1,343 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index 259c44a..c1562f5 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -22,7 +22,7 @@ Each row's open discussions (request `docs/slices/request-mr-discussions.md`, pl
+ 
+ A merge request's description (request `docs/slices/request-mr-description.md`, plan §2 rows 171–175): `readDescription(iid)` → `DescriptionReply` (`read { description }`, the blocks Rust reduced GitLab's rendering to, or `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), asked afresh on every call and converted by `descriptionDomain.ts` `toDescriptionReply`, which brands every link's page at any depth as `WebPage` through `domain.ts` `isLinkedPage` (http or https; anything else throws); the description types live in `descriptionDomain.ts` and `index.ts` re-exports them from there. An `uploaded` image names only an `UploadKey`: `uploadedImage(key)` is the one address its `<img>` loads (in the app `convertFileSrc(key, PICTURE_SCHEME)`, `yamt-picture://localhost/upload~<secret>`, served once a reply offered the key); a `web` image loads its own https address. Fixture mode: `fixtureMergeRequestDescriptions.ts` `descriptionScript(log, listedRows)` (rows' `hasDescription` is false on every 7th row from !638) logs `mergeRequests.fixture_description { iid }` and answers through `toDescriptionReply` after 400 ms: !640 every element of rule 3 (upload `…01` loads a 16×16 PNG, `…02` is broken, the `web` image a `data:` PNG standing in for another site), !639 120 paragraphs, !637 no blocks, !636 `failed` on its first ask and !640's afterwards, !635 paragraphs whose text is planted markup, a row without a description no blocks, every other "Description of !<iid>.".
+ 
+-A merge request's links (request `docs/slices/request-mr-links.md`, plan §2 rows 175–177): `readLinks(iid)` → `LinksReply` (`read { links }`, a `DescriptionLinks` of `epics`, `issues` and `commits`, each group in the order of first mention, each thing once; a `LinkedEpic`/`LinkedIssue` has `shown` null and a `LinkedCommit` `title` null when GitLab did not show it; an issue's `shown.parent` is its direct parent; or `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), converted by `linksDomain.ts` `toLinksReply`, which brands every line's and parent's `page` as `WebPage` through `domain.ts` `toWebPage` (https only, the only pages Rust's links lookup sends; anything else throws with its field path); the links types live in `linksDomain.ts` and `index.ts` re-exports them from there. Fixture mode (`fixtureMergeRequestLinks.ts` `linksScript(log)`) logs `mergeRequests.fixture_links { iid }`, then answers after 400 ms: !640 every kind of line (epics `&3`, `&4` closed, `design&2` not shown; issues `#12` with parent `&3`, `#13` with parent `#12`, `other/lib#5` closed, `secret/vault#9` not shown; commits `fa3335f3`, the range `a1b2c3d4…e5f6a7b8`, `secret/vault@0badc0de` not shown), !636 `failed` "glab timed out" at its first ask and !640's links after, !634 `notLoggedIn` every time, every other row three empty groups.
++A merge request's links (request `docs/slices/request-mr-links.md`, plan §2 rows 176–178): `readLinks(iid)` → `LinksReply` (`read { links }`, a `DescriptionLinks` of `epics`, `issues` and `commits`, each group in the order of first mention, each thing once; a `LinkedEpic`/`LinkedIssue` has `shown` null and a `LinkedCommit` `title` null when GitLab did not show it; an issue's `shown.parent` is its direct parent; or `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), converted by `linksDomain.ts` `toLinksReply`, which brands every line's and parent's `page` as `WebPage` through `mergeRequestDomain.ts` `toWebPage` (https only, the only pages Rust's links lookup sends; anything else throws with its field path); the links types live in `linksDomain.ts` and `index.ts` re-exports them from there. Fixture mode (`fixtureMergeRequestLinks.ts` `linksScript(log)`) logs `mergeRequests.fixture_links { iid }`, then answers after 400 ms: !640 every kind of line (epics `&3`, `&4` closed, `design&2` not shown; issues `#12` with parent `&3`, `#13` with parent `#12`, `other/lib#5` closed, `secret/vault#9` not shown; commits `fa3335f3`, the range `a1b2c3d4…e5f6a7b8`, `secret/vault@0badc0de` not shown), !636 `failed` "glab timed out" at its first ask and !640's links after, !634 `notLoggedIn` every time, every other row three empty groups.
+ 
+ `localMergeDomain.ts` holds the merge window's aliases (MergeView, ReturnTo, Leftover, AbortReply, PushReply) over bindings; domain.ts's Listing and ChunkSource import from it.
+ 
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index 480e617..d4aab41 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -55,6 +55,6 @@ export interface MergeRequestSource {
+    *  `yamt-picture://localhost/<key>`; served only once a reply offered it). */
+   uploadedImage(key: UploadKey): string;
+   /** The epics, issues and commits a merge request's description links to, with titles, states and parents; asked
+-   *  on a row's first hover (plan §2 rows 175–176). */
++   *  on a row's first hover (plan §2 rows 176–177). */
+   readLinks(iid: MergeRequestIid): Promise<SourceResult<LinksReply>>;
+ }
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 1d00a03..e1f767a 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -68,6 +68,8 @@ The merge window of a merge request (plan §2 #138–#143): `question.ts` is wha
+ 
+ People on a merge request (request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, plan §2 #169, #170): `useMergeRequests()` carries `peopleSearch`/`searchPeople`/`endPeopleSearch` (the window's one search, 250 ms after the last call, newest answer only), `peopleAsks`/`changePeople` (`mergeRequestPeople.ts`: one change at a time per merge request, `queue[0]` running, `notDone` kept until the box closes; `rowPeopleAsks(peopleAsks, iid)` is the one reader of a row's asks, empty for a row with none) and `openPeopleBoxes`/`peopleBoxOpened`/`peopleBoxClosed`: `shownRows` keeps a row whose box is open (rule 9), so `MergeRequestPeople.vue` calls Opened when `useHoverBox`'s `open` turns true and Closed when it turns false or the box unmounts open. On a row with `mayRerequest` the box always shows both groups ("None" when empty; a row with nobody opens it from the dimmed icon), each header with a `user-plus` add button that opens `MergeRequestPeopleSearch.vue` under it (one field per box, `adding`): a `role="combobox"` field over a `role="listbox"` of `mergeRequestPeopleLines.ts` `pickList` (the core's `peopleSuggestions` while empty, else the search's people; "Already an assignee/reviewer" lines `aria-disabled`, a queued add spinning), arrows over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines change (`keptHighlight`), Enter or a click (its `mousedown` prevented) adds, and once that add is answered the field clears unless its text changed meanwhile (not at the pick, so the picked line shows its spinner) and takes focus back only from `document.body`, never from a control the user moved to while waiting; Escape closes the field (focus to its add button), a second Escape the box. Each assignee and reviewer line ends with `MergeRequestPersonMenu.vue` (`ellipsis-vertical`, one `useDropdownMenu<true>` menu with "Remove assignee/reviewer", `position: fixed` inside the box so the hover box holds it; the spinner, `aria-disabled` and no menu while that remove is queued or running). A change GitLab did not make is one `peopleChangeText` sentence (`personState` under the listed person for a remove, else `groupNotices` under the group). Every control of a line carries `data-control`, its key built once on the line (`BoxLine`'s `review.rerequest.control` and `menuControl`, null when not shown) and bound by the template; when a reply removes the focused one (`lineControls` over the same lines), focus moves to the box.
+ 
+-A merge request's description (request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, plan §2 #171–#174): the row's info column (`w-7`, between the approvals and the CI box, always rendered so the column stays) holds a button only when `row.hasDescription`; it calls `toggleDescription({ iid, title })` and carries `data-description-opener="<iid>"`. `MergeRequestsView.vue` renders the window's one `MergeRequestDescription.vue` after the list while `description` is set, keyed by the iid (a replace is a new panel), and closes it when the page unmounts. The panel is a non-modal `role="dialog"` that takes focus on mount; Escape and the close button call `closeDescription` and return focus to the row's opener when it is still listed. Escape is a window `keydown` listener in the bubble phase that acts only on an Escape nothing took (`defaultPrevented`) and not while a question is asked (a modal `dialog`'s cancel is the keydown's default action, so its Escape reaches the window unprevented): a focused field or box (the search field with text, a people box, a job log) handles Escape first, and the page's own listener, registered before the panel's, closes an open filter menu first and otherwise leaves Escape to the panel while `description` is set. A press outside it closes it (`onClickOutside`), ignoring every opener (whose toggle closes or replaces) and every element with `data-refreshes-list` (Refresh and the failed list's Retry: rule 2 keeps the panel over a list refresh, and onClickOutside would close it on their clicks, keyboard ones included); a new refresh trigger carries the attribute. A scroll leaves it open. Its renderers use interpolation only and never `href`, `v-html`, `innerHTML` or `title` (RK66): `MergeRequestDescriptionBlocks.vue` and `MergeRequestDescriptionInlines.vue` each render nested content by referring to themselves, with `editor/theme.css`'s `markdown-*` classes; a link is an `a` with `role="link"`, `tabindex="0"` and no `href`, whose click or Enter calls `openPage("link", page)` for a `page` link (branded in `ipc/descriptionDomain.ts` `toDescriptionReply` by `ipc/domain.ts` `isLinkedPage`, http or https) and does nothing for a `refused` one; task boxes are Lucide icons with `role="img"` and their word; `MergeRequestDescriptionImage.vue` loads `imageAddress(image)` with `referrerpolicy="no-referrer"` and shows the caption (else the `web` address, else "picture") when that is null or the image fails; `MergeRequestDescriptionCode.vue` hosts one `MarkdownView` through `useMarkdownCode`. The words are `mergeRequestDescriptionText.ts`.
++A merge request's description (request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, plan §2 #171–#174): the row's info column (`w-7`, between the approvals and the links column, always rendered so the column stays) holds a button only when `row.hasDescription`; it calls `toggleDescription({ iid, title })` and carries `data-description-opener="<iid>"`. `MergeRequestsView.vue` renders the window's one `MergeRequestDescription.vue` after the list while `description` is set, keyed by the iid (a replace is a new panel), and closes it when the page unmounts. The panel is a non-modal `role="dialog"` that takes focus on mount; Escape and the close button call `closeDescription` and return focus to the row's opener when it is still listed. Escape is a window `keydown` listener in the bubble phase that acts only on an Escape nothing took (`defaultPrevented`) and not while a question is asked (a modal `dialog`'s cancel is the keydown's default action, so its Escape reaches the window unprevented): a focused field or box (the search field with text, a people box, a job log) handles Escape first, and the page's own listener, registered before the panel's, closes an open filter menu first and otherwise leaves Escape to the panel while `description` is set. A press outside it closes it (`onClickOutside`), ignoring every opener (whose toggle closes or replaces) and every element with `data-refreshes-list` (Refresh and the failed list's Retry: rule 2 keeps the panel over a list refresh, and onClickOutside would close it on their clicks, keyboard ones included); a new refresh trigger carries the attribute. A scroll leaves it open. Its renderers use interpolation only and never `href`, `v-html`, `innerHTML` or `title` (RK66): `MergeRequestDescriptionBlocks.vue` and `MergeRequestDescriptionInlines.vue` each render nested content by referring to themselves, with `editor/theme.css`'s `markdown-*` classes; a link is an `a` with `role="link"`, `tabindex="0"` and no `href`, whose click or Enter calls `openPage("link", page)` for a `page` link (branded in `ipc/descriptionDomain.ts` `toDescriptionReply` by `ipc/domain.ts` `isLinkedPage`, http or https) and does nothing for a `refused` one; task boxes are Lucide icons with `role="img"` and their word; `MergeRequestDescriptionImage.vue` loads `imageAddress(image)` with `referrerpolicy="no-referrer"` and shows the caption (else the `web` address, else "picture") when that is null or the image fails; `MergeRequestDescriptionCode.vue` hosts one `MarkdownView` through `useMarkdownCode`. The words are `mergeRequestDescriptionText.ts`.
+ 
+-A merge request's links (request `docs/slices/request-mr-links.md`, design `docs/slices/briefs/mr-links-design.md` option A, plan §2 #176, #177, RK70): the row's links column (`w-7`, directly after the info column and before the CI box, always rendered so the column stays) holds `MergeRequestLinks.vue` only when `row.hasDescription`: Lucide `link` opening a hover box (`useHoverBox`, the discussions box's rules and look; `@click.stop`, so a click never opens the row's page). Its state is the slice's `links` (`mergeRequestLinks.ts`, written only by its queue: one call at a time, newest ask first, dropped with the list on a refresh); `useRowLinks` asks when the box opens and the row has no entry or a failed one, and Retry calls `askLinks(iid)`. Every word and line is `mergeRequestLinkLines.ts` `linkBox(load, platform)`: "Loading…", the empty sentence, the failure sentence (`linksFailedText`, `problemText` step `links` for a thrown call) with Retry, or the non-empty groups Epics, Issues, Commits; a line (group icon, reference, title and "Closed", or "Not found or no access") calls `openPage("link", page)` and the box stays; an issue GitLab shows with a parent has a second button (Lucide `arrow-up-to-line`, `parentTooltip`) opening the parent's page.
++A merge request's links (request `docs/slices/request-mr-links.md`, design `docs/slices/briefs/mr-links-design.md` option A, plan §2 #176, #177, RK70): the row's links column (`w-7`, directly after the info column and before the CI box, always rendered so the column stays) holds `MergeRequestLinks.vue` only when `row.hasDescription`: Lucide `link` opening a hover box (`useHoverBox`, the discussions box's rules and look; `@click.stop`, so a click never opens the row's page). Its state is the slice's `links` (`mergeRequestLinks.ts`, written only by its queue: one call at a time, newest ask first, dropped with the list on a refresh); `useRowLinks` asks when the box opens and the row has no entry or a failed one, and Retry calls `keepFocus()` (below), then `askLinks(iid)`. Every word and line is `mergeRequestLinkLines.ts` `linkBox(load, platform)`: "Loading…", the empty sentence, the failure sentence (`linksFailedText`, `problemText` step `links` for a thrown call; the glab Retry sentences are `glab.ts` `glabRetryText`, shared with the description panel) with Retry, or the non-empty groups Epics, Issues, Commits; a line (group icon, reference, title and "Closed", or "Not found or no access") calls `openPage("link", page)` and the box stays; an issue GitLab shows with a parent has a second button (Lucide `arrow-up-to-line`, `parentTooltip`) opening the parent's page.
++
++A hover box control the page removes while it may hold focus (the links box's Retry, a people line's re-request or menu after a reply) is preceded by `useHoverBox`'s `keepFocus()`: focus inside the box moves to the box, because the HTML focus fixup after a removal sends no focusout and the box would stay held. The spans of a box line button (links, discussions) are separated by a `{{ " " }}` text node, so its accessible name reads "#12 Snooze a reminder Closed"; `gap` keeps the visual spacing (Vue's whitespace condensing drops the template's own line breaks between them).
+diff --git a/frontend/src/ui/MergeRequestDiscussions.vue b/frontend/src/ui/MergeRequestDiscussions.vue
+index 57a8961..4a84174 100644
+--- a/frontend/src/ui/MergeRequestDiscussions.vue
++++ b/frontend/src/ui/MergeRequestDiscussions.vue
+@@ -151,15 +151,18 @@ async function openLine(page: WebPage | null): Promise<void> {
+             <span class="flex items-center gap-2">
+               <MergeRequestPicture :person="line.author" size="box" aria-hidden="true" />
+               <span>{{ line.name }}</span>
+-              <span class="text-fg-muted">{{ line.ago }}</span>
+-              <span
++              {{ " " }}<span class="text-fg-muted">{{ line.ago }}</span> {{ " "
++              }}<span
+                 class="ml-auto pl-4"
+                 :class="line.viewersTurn ? 'font-semibold text-primary' : 'text-fg-muted'"
+                 >{{ line.turn }}</span
+               >
+             </span>
+-            <span class="block wrap-break-word text-fg-muted">{{ line.place }}</span>
+-            <span class="line-clamp-3 wrap-break-word whitespace-pre-line">{{ line.excerpt }}</span>
++            {{ " " }}<span class="block wrap-break-word text-fg-muted">{{ line.place }}</span>
++            {{ " "
++            }}<span class="line-clamp-3 wrap-break-word whitespace-pre-line">{{
++              line.excerpt
++            }}</span>
+           </component>
+         </li>
+       </ul>
+diff --git a/frontend/src/ui/MergeRequestLinks.vue b/frontend/src/ui/MergeRequestLinks.vue
+index b96b7aa..1da89fc 100644
+--- a/frontend/src/ui/MergeRequestLinks.vue
++++ b/frontend/src/ui/MergeRequestLinks.vue
+@@ -27,7 +27,7 @@ const { askLinks, openPage } = mergeRequests;
+ const area = useTemplateRef<HTMLSpanElement>("area");
+ const opener = useTemplateRef<HTMLButtonElement>("opener");
+ const box = useTemplateRef<HTMLDivElement>("box");
+-const { open, placement, on } = useHoverBox({
++const { open, placement, on, keepFocus } = useHoverBox({
+   area: () => area.value,
+   opener: () => opener.value,
+   box,
+@@ -47,9 +47,7 @@ const shown = computed(() => linkBox(load.value, navigator.platform));
+ const groups = computed(() => (shown.value.kind === "groups" ? shown.value.groups : []));
+ 
+ function retry(): void {
+-  // Retry is removed with the focus, and the focus fixup sends no focusout, so useHoverBox would keep the box held
+-  // (HTML "focus fixup rule": https://html.spec.whatwg.org/multipage/interaction.html#focus-fixup-rule).
+-  box.value?.focus();
++  keepFocus();
+   askLinks(props.row.iid);
+ }
+ 
+@@ -115,10 +113,14 @@ async function openLink(page: WebPage): Promise<void> {
+               <component :is="icons[group.kind]" class="size-4 shrink-0" aria-hidden="true" />
+               <span class="shrink-0 font-mono">{{ line.reference }}</span>
+               <template v-if="line.detail.kind === 'shown'">
+-                <span class="wrap-break-word">{{ line.detail.title }}</span>
+-                <span v-if="line.detail.closed" class="text-fg-muted">{{ CLOSED }}</span>
++                {{ " " }}<span class="wrap-break-word">{{ line.detail.title }}</span>
++                <template v-if="line.detail.closed">
++                  {{ " " }}<span class="text-fg-muted">{{ CLOSED }}</span>
++                </template>
++              </template>
++              <template v-else>
++                {{ " " }}<span class="text-fg-muted">{{ NOT_SHOWN }}</span>
+               </template>
+-              <span v-else class="text-fg-muted">{{ NOT_SHOWN }}</span>
+             </button>
+             <button
+               v-if="line.parent !== null"
+diff --git a/frontend/src/ui/MergeRequestPeople.vue b/frontend/src/ui/MergeRequestPeople.vue
+index c547caa..d14f509 100644
+--- a/frontend/src/ui/MergeRequestPeople.vue
++++ b/frontend/src/ui/MergeRequestPeople.vue
+@@ -91,7 +91,7 @@ const {
+ const area = useTemplateRef<HTMLSpanElement>("area");
+ const opener = useTemplateRef<HTMLButtonElement>("opener");
+ const box = useTemplateRef<HTMLDivElement>("box");
+-const { open, placement, on } = useHoverBox({
++const { open, placement, on, keepFocus } = useHoverBox({
+   area: () => area.value,
+   opener: () => opener.value,
+   box,
+@@ -180,11 +180,11 @@ function lineControls(line: BoxLine): string[] {
+ function keepFocusInBox(kept: ReadonlySet<string>): void {
+   const focused = document.activeElement;
+   const control =
+-    focused instanceof HTMLElement && box.value?.contains(focused) === true
++    focused instanceof HTMLElement
+       ? focused.closest<HTMLElement>("[data-control]")?.dataset.control
+       : undefined;
+   if (control !== undefined && !kept.has(control)) {
+-    box.value?.focus();
++    keepFocus();
+   }
+ }
+ 
+diff --git a/frontend/src/ui/glab.ts b/frontend/src/ui/glab.ts
+index 37d3a5c..1f94cb1 100644
+--- a/frontend/src/ui/glab.ts
++++ b/frontend/src/ui/glab.ts
+@@ -9,3 +9,20 @@ export function glabNotLoggedInText(detail: string): string {
+ export function glabFailedText(message: string): string {
+   return `glab failed: ${message}`;
+ }
++
++export function glabRetryText(
++  refusal:
++    | { readonly kind: "glabMissing" }
++    | { readonly kind: "notLoggedIn"; readonly detail: string },
++): string {
++  switch (refusal.kind) {
++    case "glabMissing":
++      return `${GLAB_MISSING_TEXT} — install glab, then Retry.`;
++    case "notLoggedIn":
++      return `${glabNotLoggedInText(refusal.detail)} — run glab auth login in a terminal, then Retry.`;
++    default: {
++      const _exhaustive: never = refusal;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/mergeRequestDescriptionText.ts b/frontend/src/ui/mergeRequestDescriptionText.ts
+index 8ea3a85..7da87fb 100644
+--- a/frontend/src/ui/mergeRequestDescriptionText.ts
++++ b/frontend/src/ui/mergeRequestDescriptionText.ts
+@@ -1,5 +1,5 @@
+ import type { DescriptionReply } from "../ipc";
+-import { GLAB_MISSING_TEXT, glabNotLoggedInText } from "./glab";
++import { glabRetryText } from "./glab";
+ 
+ export const SHOW_DESCRIPTION = "Show description";
+ export const CLOSE_DESCRIPTION = "Close";
+@@ -16,9 +16,8 @@ export function descriptionRefusalText(
+ ): string {
+   switch (reply.kind) {
+     case "glabMissing":
+-      return `${GLAB_MISSING_TEXT} — install glab, then Retry.`;
+     case "notLoggedIn":
+-      return `${glabNotLoggedInText(reply.detail)} — run glab auth login in a terminal, then Retry.`;
++      return glabRetryText(reply);
+     case "failed":
+       return `Could not read the description: ${reply.message}`;
+     default: {
+diff --git a/frontend/src/ui/mergeRequestLinkLines.ts b/frontend/src/ui/mergeRequestLinkLines.ts
+index f5ca3f9..1758c69 100644
+--- a/frontend/src/ui/mergeRequestLinkLines.ts
++++ b/frontend/src/ui/mergeRequestLinkLines.ts
+@@ -6,7 +6,7 @@ import type {
+   LinkedParent,
+   WebPage,
+ } from "../ipc";
+-import { GLAB_MISSING_TEXT, glabNotLoggedInText } from "./glab";
++import { glabRetryText } from "./glab";
+ import type { LinksLoad } from "./mergeRequestLinks";
+ import { problemText } from "./problemText";
+ 
+@@ -92,8 +92,7 @@ function groupsOf(links: DescriptionLinks): readonly LinkGroup[] {
+     .map((kind) => ({ kind, heading: GROUP_HEADINGS[kind], lines: lines[kind] }));
+ }
+ 
+-/** glabMissing → `${GLAB_MISSING_TEXT} — install glab, then Retry.`; notLoggedIn → `${glabNotLoggedInText(detail)} —
+- *  run glab auth login in a terminal, then Retry.`; failed → `Could not read the links: ${message}`; a thrown call →
++/** glabMissing or notLoggedIn → glabRetryText(reply); failed → `Could not read the links: ${message}`; a thrown call →
+  *  problemText({ action: "mergeRequests", step: "links", cause }, platform). */
+ export function linksFailedText(
+   load: Extract<LinksLoad, { kind: "refused" | "failed" }>,
+@@ -105,9 +104,8 @@ export function linksFailedText(
+   const { reply } = load;
+   switch (reply.kind) {
+     case "glabMissing":
+-      return `${GLAB_MISSING_TEXT} — install glab, then Retry.`;
+     case "notLoggedIn":
+-      return `${glabNotLoggedInText(reply.detail)} — run glab auth login in a terminal, then Retry.`;
++      return glabRetryText(reply);
+     case "failed":
+       return `Could not read the links: ${reply.message}`;
+     default: {
+diff --git a/frontend/src/ui/useHoverBox.test.ts b/frontend/src/ui/useHoverBox.test.ts
+index c94f865..8e77801 100644
+--- a/frontend/src/ui/useHoverBox.test.ts
++++ b/frontend/src/ui/useHoverBox.test.ts
+@@ -42,6 +42,7 @@ const page: { focused: unknown; window: EventTarget } = {
+ let scope: EffectScope;
+ let area: FakeNode;
+ let opener: FakeNode;
++let boxNode: FakeNode;
+ let item: FakeNode;
+ let outside: FakeNode;
+ let openerShown: boolean;
+@@ -61,10 +62,10 @@ beforeEach(() => {
+   });
+   area = new FakeNode();
+   opener = Object.assign(new FakeNode(), { left: 10, bottom: 40 });
+-  const box = new FakeNode();
++  boxNode = new FakeNode();
+   item = new FakeNode();
+-  box.children.push(item);
+-  area.children.push(opener, box);
++  boxNode.children.push(item);
++  area.children.push(opener, boxNode);
+   outside = new FakeNode();
+   page.focused = outside;
+   openerShown = true;
+@@ -84,12 +85,12 @@ function asElement(fake: FakeNode): HTMLElement {
+   throw new Error("HTMLElement is not the stub");
+ }
+ 
+-function hoverBox(): HoverBox {
++function hoverBox(box: FakeNode | null = null): HoverBox {
+   const made = scope.run(() =>
+     useHoverBox({
+       area: () => (areaShown ? asElement(area) : null),
+       opener: () => (openerShown ? asElement(opener) : null),
+-      box: null,
++      box: box === null ? null : asElement(box),
+     }),
+   );
+   if (made === undefined) {
+@@ -344,3 +345,39 @@ test("Escape after the opener went closes the box and leaves focus alone", () =>
+ 
+   expect([box.open.value, page.focused]).toEqual([false, item]);
+ });
++
++test("keepFocus moves focus in the box to the box, so the box still closes once focus leaves after the control went", () => {
++  const box = hoverBox(boxNode);
++  box.on.pointerenter();
++  page.focused = item;
++  box.on.focusin(focusEvent("focusin", outside));
++
++  box.keepFocus();
++  boxNode.children.splice(0);
++  box.on.pointerleave();
++  expect([page.focused, box.open.value]).toEqual([boxNode, true]);
++  box.on.focusout(focusEvent("focusout", outside));
++
++  expect(box.open.value).toBe(false);
++});
++
++test("keepFocus leaves focus outside the box where it is, the opener included", () => {
++  const box = hoverBox(boxNode);
++  box.on.pointerenter();
++
++  box.keepFocus();
++  expect(page.focused).toBe(outside);
++  page.focused = opener;
++  box.keepFocus();
++
++  expect(page.focused).toBe(opener);
++});
++
++test("keepFocus without a box leaves focus where it is", () => {
++  const box = hoverBox();
++  page.focused = item;
++
++  box.keepFocus();
++
++  expect(page.focused).toBe(item);
++});
+diff --git a/frontend/src/ui/useHoverBox.ts b/frontend/src/ui/useHoverBox.ts
+index 8c27414..6b5a0ba 100644
+--- a/frontend/src/ui/useHoverBox.ts
++++ b/frontend/src/ui/useHoverBox.ts
+@@ -1,5 +1,5 @@
+ import { useEventListener } from "@vueuse/core";
+-import { shallowRef, type ComputedRef, type MaybeRefOrGetter, type ShallowRef } from "vue";
++import { shallowRef, toValue, type ComputedRef, type MaybeRefOrGetter, type ShallowRef } from "vue";
+ 
+ import type { Point } from "./menuPosition";
+ import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
+@@ -28,6 +28,8 @@ export type HoverBox = {
+     readonly keydown: (event: KeyboardEvent) => void;
+   };
+   readonly close: () => void;
++  /** Call before removing a control that may hold focus: focus inside the box moves to the box itself. */
++  readonly keepFocus: () => void;
+ };
+ 
+ function show(held: Held): void {
+@@ -53,6 +55,15 @@ function close(held: Held): void {
+   held.open.value = false;
+ }
+ 
++function keepFocus(held: Held): void {
++  const box = toValue(held.box);
++  // A removed control's focus goes to the body without a focusout, so focusInside would stay true for good
++  // (HTML "focus fixup rule": https://html.spec.whatwg.org/multipage/interaction.html#focus-fixup-rule).
++  if (box?.contains(document.activeElement) === true) {
++    box.focus();
++  }
++}
++
+ function focusEntered(held: Held, event: FocusEvent): void {
+   if (!contains(held.area(), event.relatedTarget)) {
+     held.focusInside = true;
+@@ -130,5 +141,8 @@ export function useHoverBox(parts: HoverBoxParts): HoverBox {
+     close: () => {
+       close(held);
+     },
++    keepFocus: () => {
++      keepFocus(held);
++    },
+   };
+ }

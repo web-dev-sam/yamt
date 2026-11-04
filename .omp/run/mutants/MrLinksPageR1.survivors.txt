@@ -1,0 +1,3 @@
+just mutants HEAD: 222 mutants; 213 killed, 1 survived, 8 no coverage (95.95%); glab.ts 11/0/2, mergeRequestDescriptionText.ts 7/0/2, mergeRequestLinkLines.ts 89/0/4, useHoverBox.ts 106/1/0
+frontend/src/ui/useHoverBox.ts:128 shallowRef({x:0,y:0}) → shallowRef({}) — equivalent: line unchanged (moved by the import edit); show() writes `at` before open turns true, so the start value is never read
+glab.ts, mergeRequestDescriptionText.ts, mergeRequestLinkLines.ts default `never` arms (8 NoCoverage) — gate-covered: no input reaches them, vue-tsc proves the switch exhaustive

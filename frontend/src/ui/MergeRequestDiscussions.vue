@@ -151,15 +151,18 @@ async function openLine(page: WebPage | null): Promise<void> {
             <span class="flex items-center gap-2">
               <MergeRequestPicture :person="line.author" size="box" aria-hidden="true" />
               <span>{{ line.name }}</span>
-              <span class="text-fg-muted">{{ line.ago }}</span>
-              <span
+              {{ " " }}<span class="text-fg-muted">{{ line.ago }}</span> {{ " "
+              }}<span
                 class="ml-auto pl-4"
                 :class="line.viewersTurn ? 'font-semibold text-primary' : 'text-fg-muted'"
                 >{{ line.turn }}</span
               >
             </span>
-            <span class="block wrap-break-word text-fg-muted">{{ line.place }}</span>
-            <span class="line-clamp-3 wrap-break-word whitespace-pre-line">{{ line.excerpt }}</span>
+            {{ " " }}<span class="block wrap-break-word text-fg-muted">{{ line.place }}</span>
+            {{ " "
+            }}<span class="line-clamp-3 wrap-break-word whitespace-pre-line">{{
+              line.excerpt
+            }}</span>
           </component>
         </li>
       </ul>

@@ -6,7 +6,7 @@ import type {
   LinkedParent,
   WebPage,
 } from "../ipc";
-import { GLAB_MISSING_TEXT, glabNotLoggedInText } from "./glab";
+import { glabRetryText } from "./glab";
 import type { LinksLoad } from "./mergeRequestLinks";
 import { problemText } from "./problemText";
 
@@ -92,8 +92,7 @@ function groupsOf(links: DescriptionLinks): readonly LinkGroup[] {
     .map((kind) => ({ kind, heading: GROUP_HEADINGS[kind], lines: lines[kind] }));
 }
 
-/** glabMissing → `${GLAB_MISSING_TEXT} — install glab, then Retry.`; notLoggedIn → `${glabNotLoggedInText(detail)} —
- *  run glab auth login in a terminal, then Retry.`; failed → `Could not read the links: ${message}`; a thrown call →
+/** glabMissing or notLoggedIn → glabRetryText(reply); failed → `Could not read the links: ${message}`; a thrown call →
  *  problemText({ action: "mergeRequests", step: "links", cause }, platform). */
 export function linksFailedText(
   load: Extract<LinksLoad, { kind: "refused" | "failed" }>,
@@ -105,9 +104,8 @@ export function linksFailedText(
   const { reply } = load;
   switch (reply.kind) {
     case "glabMissing":
-      return `${GLAB_MISSING_TEXT} — install glab, then Retry.`;
     case "notLoggedIn":
-      return `${glabNotLoggedInText(reply.detail)} — run glab auth login in a terminal, then Retry.`;
+      return glabRetryText(reply);
     case "failed":
       return `Could not read the links: ${reply.message}`;
     default: {

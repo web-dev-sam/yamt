@@ -42,6 +42,7 @@ const page: { focused: unknown; window: EventTarget } = {
 let scope: EffectScope;
 let area: FakeNode;
 let opener: FakeNode;
+let boxNode: FakeNode;
 let item: FakeNode;
 let outside: FakeNode;
 let openerShown: boolean;
@@ -61,10 +62,10 @@ beforeEach(() => {
   });
   area = new FakeNode();
   opener = Object.assign(new FakeNode(), { left: 10, bottom: 40 });
-  const box = new FakeNode();
+  boxNode = new FakeNode();
   item = new FakeNode();
-  box.children.push(item);
-  area.children.push(opener, box);
+  boxNode.children.push(item);
+  area.children.push(opener, boxNode);
   outside = new FakeNode();
   page.focused = outside;
   openerShown = true;
@@ -84,12 +85,12 @@ function asElement(fake: FakeNode): HTMLElement {
   throw new Error("HTMLElement is not the stub");
 }
 
-function hoverBox(): HoverBox {
+function hoverBox(box: FakeNode | null = null): HoverBox {
   const made = scope.run(() =>
     useHoverBox({
       area: () => (areaShown ? asElement(area) : null),
       opener: () => (openerShown ? asElement(opener) : null),
-      box: null,
+      box: box === null ? null : asElement(box),
     }),
   );
   if (made === undefined) {
@@ -343,4 +344,40 @@ test("Escape after the opener went closes the box and leaves focus alone", () =>
   box.on.keydown(key("Escape"));
 
   expect([box.open.value, page.focused]).toEqual([false, item]);
+});
+
+test("keepFocus moves focus in the box to the box, so the box still closes once focus leaves after the control went", () => {
+  const box = hoverBox(boxNode);
+  box.on.pointerenter();
+  page.focused = item;
+  box.on.focusin(focusEvent("focusin", outside));
+
+  box.keepFocus();
+  boxNode.children.splice(0);
+  box.on.pointerleave();
+  expect([page.focused, box.open.value]).toEqual([boxNode, true]);
+  box.on.focusout(focusEvent("focusout", outside));
+
+  expect(box.open.value).toBe(false);
+});
+
+test("keepFocus leaves focus outside the box where it is, the opener included", () => {
+  const box = hoverBox(boxNode);
+  box.on.pointerenter();
+
+  box.keepFocus();
+  expect(page.focused).toBe(outside);
+  page.focused = opener;
+  box.keepFocus();
+
+  expect(page.focused).toBe(opener);
+});
+
+test("keepFocus without a box leaves focus where it is", () => {
+  const box = hoverBox();
+  page.focused = item;
+
+  box.keepFocus();
+
+  expect(page.focused).toBe(item);
 });

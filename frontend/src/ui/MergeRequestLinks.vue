@@ -27,7 +27,7 @@ const { askLinks, openPage } = mergeRequests;
 const area = useTemplateRef<HTMLSpanElement>("area");
 const opener = useTemplateRef<HTMLButtonElement>("opener");
 const box = useTemplateRef<HTMLDivElement>("box");
-const { open, placement, on } = useHoverBox({
+const { open, placement, on, keepFocus } = useHoverBox({
   area: () => area.value,
   opener: () => opener.value,
   box,
@@ -47,9 +47,7 @@ const shown = computed(() => linkBox(load.value, navigator.platform));
 const groups = computed(() => (shown.value.kind === "groups" ? shown.value.groups : []));
 
 function retry(): void {
-  // Retry is removed with the focus, and the focus fixup sends no focusout, so useHoverBox would keep the box held
-  // (HTML "focus fixup rule": https://html.spec.whatwg.org/multipage/interaction.html#focus-fixup-rule).
-  box.value?.focus();
+  keepFocus();
   askLinks(props.row.iid);
 }
 
@@ -115,10 +113,14 @@ async function openLink(page: WebPage): Promise<void> {
               <component :is="icons[group.kind]" class="size-4 shrink-0" aria-hidden="true" />
               <span class="shrink-0 font-mono">{{ line.reference }}</span>
               <template v-if="line.detail.kind === 'shown'">
-                <span class="wrap-break-word">{{ line.detail.title }}</span>
-                <span v-if="line.detail.closed" class="text-fg-muted">{{ CLOSED }}</span>
+                {{ " " }}<span class="wrap-break-word">{{ line.detail.title }}</span>
+                <template v-if="line.detail.closed">
+                  {{ " " }}<span class="text-fg-muted">{{ CLOSED }}</span>
+                </template>
               </template>
-              <span v-else class="text-fg-muted">{{ NOT_SHOWN }}</span>
+              <template v-else>
+                {{ " " }}<span class="text-fg-muted">{{ NOT_SHOWN }}</span>
+              </template>
             </button>
             <button
               v-if="line.parent !== null"
