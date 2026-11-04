@@ -4,10 +4,10 @@ import ChevronUp from "~icons/lucide/chevron-up";
 
 import type { RangeEntry } from "../ipc";
 import AiTurn from "./AiTurn.vue";
+import { boxKeydown } from "./boxKeys";
 import type { AskFrom } from "./rangeAi";
 import { answering, liveTurn } from "./rangeAiView";
 import { isBlank } from "./rangeDrafts";
-import { boxKeydown } from "./rangeKeys";
 import RangeMessage from "./RangeMessage.vue";
 import { useRangeStore } from "./rangeStore";
 import {

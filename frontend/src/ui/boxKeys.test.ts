@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { boxKeydown } from "./rangeKeys";
+import { boxKeydown } from "./boxKeys";
 
 const LINUX = "Linux x86_64";
 const MAC = "MacIntel";

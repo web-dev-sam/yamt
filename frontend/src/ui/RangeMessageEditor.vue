@@ -2,8 +2,8 @@
 import { computed, onMounted, useTemplateRef } from "vue";
 
 import type { MessageId } from "../ipc";
+import { boxKeydown } from "./boxKeys";
 import { isBlank } from "./rangeDrafts";
-import { boxKeydown } from "./rangeKeys";
 import { useRangeStore } from "./rangeStore";
 import {
   CANCEL_LABEL,

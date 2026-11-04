@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, useTemplateRef, watch } from "vue";
 
 import type { DescriptionBlock } from "../ipc";
+import { boxKeydown } from "./boxKeys";
 import MergeRequestDescriptionBlocks from "./MergeRequestDescriptionBlocks.vue";
 import type { Preview } from "./mergeRequestPreview";
 import { useMergeRequests } from "./mergeRequestsStore";
@@ -21,7 +22,6 @@ import {
   WRITE,
   writeFailureText,
 } from "./mergeRequestThreadText";
-import { boxKeydown } from "./rangeKeys";
 import { vTooltip } from "./tooltip";
 
 type Shown =

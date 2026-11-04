@@ -1,0 +1,69 @@
+diff --git a/frontend/src/ui/MergeRequestReplyField.vue b/frontend/src/ui/MergeRequestReplyField.vue
+index c8b1c1f..0befc92 100644
+--- a/frontend/src/ui/MergeRequestReplyField.vue
++++ b/frontend/src/ui/MergeRequestReplyField.vue
+@@ -2,6 +2,7 @@
+ import { computed, nextTick, onMounted, useTemplateRef, watch } from "vue";
+ 
+ import type { DescriptionBlock } from "../ipc";
++import { boxKeydown } from "./boxKeys";
+ import MergeRequestDescriptionBlocks from "./MergeRequestDescriptionBlocks.vue";
+ import type { Preview } from "./mergeRequestPreview";
+ import { useMergeRequests } from "./mergeRequestsStore";
+@@ -21,7 +22,6 @@ import {
+   WRITE,
+   writeFailureText,
+ } from "./mergeRequestThreadText";
+-import { boxKeydown } from "./rangeKeys";
+ import { vTooltip } from "./tooltip";
+ 
+ type Shown =
+diff --git a/frontend/src/ui/RangeMessageEditor.vue b/frontend/src/ui/RangeMessageEditor.vue
+index 00d6abf..b2eb686 100644
+--- a/frontend/src/ui/RangeMessageEditor.vue
++++ b/frontend/src/ui/RangeMessageEditor.vue
+@@ -2,8 +2,8 @@
+ import { computed, onMounted, useTemplateRef } from "vue";
+ 
+ import type { MessageId } from "../ipc";
++import { boxKeydown } from "./boxKeys";
+ import { isBlank } from "./rangeDrafts";
+-import { boxKeydown } from "./rangeKeys";
+ import { useRangeStore } from "./rangeStore";
+ import {
+   CANCEL_LABEL,
+diff --git a/frontend/src/ui/RangeThreadBox.vue b/frontend/src/ui/RangeThreadBox.vue
+index aa3a91b..5867326 100644
+--- a/frontend/src/ui/RangeThreadBox.vue
++++ b/frontend/src/ui/RangeThreadBox.vue
+@@ -4,10 +4,10 @@ import ChevronUp from "~icons/lucide/chevron-up";
+ 
+ import type { RangeEntry } from "../ipc";
+ import AiTurn from "./AiTurn.vue";
++import { boxKeydown } from "./boxKeys";
+ import type { AskFrom } from "./rangeAi";
+ import { answering, liveTurn } from "./rangeAiView";
+ import { isBlank } from "./rangeDrafts";
+-import { boxKeydown } from "./rangeKeys";
+ import RangeMessage from "./RangeMessage.vue";
+ import { useRangeStore } from "./rangeStore";
+ import {
+diff --git a/frontend/src/ui/rangeKeys.test.ts b/frontend/src/ui/boxKeys.test.ts
+similarity index 98%
+rename from frontend/src/ui/rangeKeys.test.ts
+rename to frontend/src/ui/boxKeys.test.ts
+index 6e422b8..33ab213 100644
+--- a/frontend/src/ui/rangeKeys.test.ts
++++ b/frontend/src/ui/boxKeys.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { boxKeydown } from "./rangeKeys";
++import { boxKeydown } from "./boxKeys";
+ 
+ const LINUX = "Linux x86_64";
+ const MAC = "MacIntel";
+diff --git a/frontend/src/ui/rangeKeys.ts b/frontend/src/ui/boxKeys.ts
+similarity index 100%
+rename from frontend/src/ui/rangeKeys.ts
+rename to frontend/src/ui/boxKeys.ts
