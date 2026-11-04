@@ -143,9 +143,11 @@ mod through_glab {
     use std::thread;
     use std::time::{Duration, Instant};
 
+    use tauri::http::{Response, StatusCode};
     use yamt_conflict_repo::run_ignored_in_child;
 
     use super::*;
+    use crate::merge_requests::pictures::picture_answer;
 
     const FAKE_OPEN_LOG: &str = "YAMT_FAKE_OPEN_LOG";
     const LIST_TEST: &str = "merge_requests::tests::through_glab::a_list_on_path_s_glab";
@@ -227,6 +229,11 @@ mod through_glab {
     /// Runs `test` in a child whose PATH starts with the committed fake glab on the scenario `tests/glab/<scenario>`
     /// and the fake xdg-open, their logs in a folder of this test's.
     pub(super) fn run_with_fakes(test: &str, scenario: &str) {
+        run_with_fakes_in(test, &in_this_repository("tests/glab").join(scenario));
+    }
+
+    /// As `run_with_fakes`, on the scenario folder `scenario` wherever it is.
+    pub(super) fn run_with_fakes_in(test: &str, scenario: &Path) {
         let fake = TempDir::new().unwrap();
         let inherited = std::env::var_os("PATH").unwrap_or_default();
         let mut folders = vec![
@@ -235,8 +242,6 @@ mod through_glab {
         ];
         folders.extend(std::env::split_paths(&inherited));
         let path = std::env::join_paths(folders).unwrap();
-        let scenario = in_this_repository("tests/glab").join(scenario);
-
         let ran = run_ignored_in_child(&[test], |child| {
             child
                 .env("PATH", path)
@@ -271,6 +276,15 @@ mod through_glab {
     pub(super) fn opened_log() -> String {
         let log = std::env::var_os(FAKE_OPEN_LOG).unwrap();
         std::fs::read_to_string(log).unwrap_or_default()
+    }
+
+    /// The picture the window gets for `path` (`/<username>` or `/upload~<secret>`) through PATH's glab.
+    pub(super) fn asked(window: &MergeRequestWindow, path: &str) -> Response<Vec<u8>> {
+        picture_answer(&window.webview.state(), Glab::find().as_ref(), path)
+    }
+
+    pub(super) fn is_not_found(answer: &Response<Vec<u8>>) -> bool {
+        answer.status() == StatusCode::NOT_FOUND && answer.body().is_empty()
     }
 
     /// The opener's log once it is no longer `before`.

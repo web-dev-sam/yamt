@@ -1,12 +1,11 @@
+use tauri::http::StatusCode;
 use tauri::http::header::{CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS};
-use tauri::http::{Response, StatusCode};
 
 use super::through_glab::{
-    glab_log, in_this_repository, log_after, open, opened_log, run_with_fakes,
+    asked, glab_log, in_this_repository, is_not_found, log_after, open, opened_log, run_with_fakes,
 };
 use super::*;
 use crate::merge_requests::description::{description_reply, read_description};
-use crate::merge_requests::pictures::picture_answer;
 
 const SCENARIO: &str = "mr-description";
 const PAGES_TEST: &str = "merge_requests::tests::description::described_pages_on_paths_opener";
@@ -23,7 +22,7 @@ const SHOT: &str =
     "tests/glab/mr-description/uploads/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png";
 const OLD: &str = "tests/glab/mr-description/pictures/-/project/7/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png";
 const DOCS_PAGE: &str = "https://docs.example/x";
-const ISSUE_PAGE: &str = "https://gitlab.example/taskboard/taskboard/-/issues/12";
+const ISSUE_PAGE: &str = "https://gitlab.com/taskboard/taskboard/-/issues/12";
 const PLAIN_PAGE: &str = "http://plain.example/";
 
 /// The reply the window gets for `iid` through the command.
@@ -33,15 +32,6 @@ fn read(window: &MergeRequestWindow, iid: u32) -> Value {
         MergeRequestIid(iid),
     ));
     serde_json::to_value(reply.unwrap()).unwrap()
-}
-
-/// The picture the window gets for `path` through PATH's glab.
-fn asked(window: &MergeRequestWindow, path: &str) -> Response<Vec<u8>> {
-    picture_answer(&window.webview.state(), Glab::find().as_ref(), path)
-}
-
-fn is_not_found(answer: &Response<Vec<u8>>) -> bool {
-    answer.status() == StatusCode::NOT_FOUND && answer.body().is_empty()
 }
 
 /// Every uploaded image's key in `reply`, in document order.
@@ -165,7 +155,7 @@ fn a_web_path_upload_on_paths_glab() {
     let argv = glab_log("argv: ");
     let asked = [
         format!("argv: api projects/7/uploads/{HEX_B}/old.png"),
-        format!("argv: api https://gitlab.example/-/project/7/uploads/{HEX_B}/old.png"),
+        format!("argv: api https://gitlab.com/-/project/7/uploads/{HEX_B}/old.png"),
     ];
     assert_eq!(argv[argv.len() - 2..], asked);
 }

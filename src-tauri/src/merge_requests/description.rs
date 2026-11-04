@@ -1,7 +1,7 @@
 use tauri::{Manager, Runtime, WebviewWindow};
 use yamt_merge_requests::{DescriptionReply, Glab, MergeRequestIid};
 
-use super::{MergeRequestState, NO_PROJECT, offered};
+use super::{MergeRequestState, NO_PROJECT, offer_described};
 use crate::ipc_error::{IpcError, blocking_reply};
 
 /// No GitLab project → `Failed`; else glab reads the description, and its pages are offered, then its uploads, each
@@ -17,8 +17,7 @@ pub(super) fn description_reply(
         };
     };
     let read = yamt_merge_requests::read_description(repository, glab, iid);
-    offered(&state.pages).extend(read.pages);
-    state.pictures.offer_uploads(read.uploads);
+    offer_described(state, read.pages, read.uploads);
     read.reply
 }
 

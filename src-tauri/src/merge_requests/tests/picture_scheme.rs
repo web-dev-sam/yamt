@@ -1,10 +1,12 @@
 use std::os::unix::fs::symlink;
 use std::thread;
 
+use tauri::http::StatusCode;
 use tauri::http::header::{CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS};
-use tauri::http::{Response, StatusCode};
 
-use super::through_glab::{glab_log, in_this_repository, run_with_fakes};
+use super::through_glab::{
+    asked, glab_log, in_this_repository, is_not_found, run_with_fakes, run_with_fakes_in,
+};
 use super::*;
 use crate::merge_requests::description::description_reply;
 use crate::merge_requests::pictures::picture_answer;
@@ -30,15 +32,6 @@ const SLOW_UPLOADS: [&str; 3] = [
 ];
 /// glab runs the slow uploads take: A one, B and C two each (the API, then the web path).
 const SLOW_UPLOAD_RUNS: usize = 5;
-
-/// The picture the window gets for `path` (`/<username>`) through PATH's glab.
-fn asked(window: &MergeRequestWindow, path: &str) -> Response<Vec<u8>> {
-    picture_answer(&window.webview.state(), Glab::find().as_ref(), path)
-}
-
-fn is_not_found(answer: &Response<Vec<u8>>) -> bool {
-    answer.status() == StatusCode::NOT_FOUND && answer.body().is_empty()
-}
 
 fn listed_window(scenario_repo: TempDir) -> MergeRequestWindow {
     let window = open_window_in(scenario_repo);
@@ -137,7 +130,7 @@ fn slow_pictures_on_path_s_glab() {
 #[test]
 fn an_avatar_and_an_upload_share_the_four_fetches_at_once() {
     let scenario = crowd_and_description();
-    run_with_fakes(MIXED_TEST, scenario.path().to_str().unwrap());
+    run_with_fakes_in(MIXED_TEST, scenario.path());
 }
 
 #[test]
@@ -194,15 +187,15 @@ fn fetches_at_once() -> (usize, usize) {
     (most, ended)
 }
 
-/// A scenario with `mr-row-details/crowd`'s list and slow avatars and `mr-description`'s !52, whose three uploads
-/// each wait a second on the uploads API.
+/// A scenario with `mr-row-details/crowd`'s list and slow avatars and `mr-description`'s project on gitlab.com and
+/// its !52, whose three uploads each wait a second on the uploads API.
 fn crowd_and_description() -> TempDir {
     let scenario = TempDir::new().unwrap();
     let root = scenario.path();
     let crowd = in_this_repository("tests/glab").join(CROWD);
     let description = in_this_repository("tests/glab/mr-description");
     let linked = [
-        (crowd.join("project.json"), "project.json"),
+        (description.join("project.json"), "project.json"),
         (crowd.join("graphql-page-1.json"), "graphql-page-1.json"),
         (
             description.join("graphql-description-52.json"),

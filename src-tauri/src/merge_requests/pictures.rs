@@ -5,7 +5,7 @@ use tauri::http::header::{CONTENT_TYPE, HeaderValue, X_CONTENT_TYPE_OPTIONS};
 use tauri::http::{Response, StatusCode};
 use tauri::{AppHandle, Manager, Runtime, UriSchemeResponder};
 use yamt_merge_requests::{
-    Glab, OfferedPicture, OfferedUpload, Picture, PictureAddress, fetch_picture,
+    Glab, OfferedPicture, OfferedUpload, Picture, PictureAddress, UploadKey, fetch_picture,
 };
 
 use super::MergeRequestState;
@@ -16,8 +16,6 @@ pub(crate) const PICTURE_SCHEME: &str = "yamt-picture";
 /// glab runs for pictures at once.
 const PICTURE_FETCHES: usize = 4;
 const NO_SNIFFING: &str = "nosniff";
-/// What every `yamt_merge_requests::UploadKey` starts with; the crate checks the secret after it.
-const UPLOAD_KEY_PREFIX: &str = "upload~";
 
 /// The pictures lists, replies and descriptions offered and those fetched (plan §2 #152), and the turns of the askers
 /// waiting for a fetch to end; the shelf is never locked together with another `Mutex` and never held across a glab
@@ -144,7 +142,7 @@ pub(crate) fn picture_answer(
 
 /// A username, or an upload key: only an offered name is ever served.
 fn is_picture_name(name: &str) -> bool {
-    is_username(name) || name.starts_with(UPLOAD_KEY_PREFIX)
+    is_username(name) || UploadKey::is_key(name)
 }
 
 fn is_username(name: &str) -> bool {

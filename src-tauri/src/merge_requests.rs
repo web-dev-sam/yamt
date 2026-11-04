@@ -9,9 +9,9 @@ use tauri::{App, Manager, Runtime, State, WebviewWindow};
 use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
 use yamt_merge_requests::{
     GitLabProject, GitLabRepository, Glab, JobLogReply, MergeRequestIid, MergedPairs,
-    OfferedPicture, OpenReply, PageOpened, PeopleChange, PeopleChangeReply, PeopleSearchReply,
-    RerequestReply, ResolveRefusal, RowDiscussions, WebPage, gitlab_repository, prepare_open,
-    prepare_resolve,
+    OfferedPicture, OfferedUpload, OpenReply, PageOpened, PeopleChange, PeopleChangeReply,
+    PeopleSearchReply, RerequestReply, ResolveRefusal, RowDiscussions, WebPage, gitlab_repository,
+    prepare_open, prepare_resolve,
 };
 
 use crate::args::Ai;
@@ -98,6 +98,12 @@ fn offer(
 ) {
     offered(&state.pages).extend(pages);
     state.pictures.offer(pictures);
+}
+
+/// Remembers a description's `pages`, then its `uploads`, as offered; the same two locks as `offer`, one after the other.
+fn offer_described(state: &MergeRequestState, pages: Vec<WebPage>, uploads: Vec<OfferedUpload>) {
+    offered(&state.pages).extend(pages);
+    state.pictures.offer_uploads(uploads);
 }
 
 fn opened(state: &MergeRequestState, glab: Option<&Glab>, iid: MergeRequestIid) -> OpenReply {

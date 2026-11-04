@@ -1,0 +1,253 @@
+diff --git a/src-tauri/src/merge_requests.rs b/src-tauri/src/merge_requests.rs
+index 523c45f..a151cc7 100644
+--- a/src-tauri/src/merge_requests.rs
++++ b/src-tauri/src/merge_requests.rs
+@@ -9,9 +9,9 @@ use tauri::{App, Manager, Runtime, State, WebviewWindow};
+ use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
+ use yamt_merge_requests::{
+     GitLabProject, GitLabRepository, Glab, JobLogReply, MergeRequestIid, MergedPairs,
+-    OfferedPicture, OpenReply, PageOpened, PeopleChange, PeopleChangeReply, PeopleSearchReply,
+-    RerequestReply, ResolveRefusal, RowDiscussions, WebPage, gitlab_repository, prepare_open,
+-    prepare_resolve,
++    OfferedPicture, OfferedUpload, OpenReply, PageOpened, PeopleChange, PeopleChangeReply,
++    PeopleSearchReply, RerequestReply, ResolveRefusal, RowDiscussions, WebPage, gitlab_repository,
++    prepare_open, prepare_resolve,
+ };
+ 
+ use crate::args::Ai;
+@@ -100,6 +100,12 @@ fn offer(
+     state.pictures.offer(pictures);
+ }
+ 
++/// Remembers a description's `pages`, then its `uploads`, as offered; the same two locks as `offer`, one after the other.
++fn offer_described(state: &MergeRequestState, pages: Vec<WebPage>, uploads: Vec<OfferedUpload>) {
++    offered(&state.pages).extend(pages);
++    state.pictures.offer_uploads(uploads);
++}
++
+ fn opened(state: &MergeRequestState, glab: Option<&Glab>, iid: MergeRequestIid) -> OpenReply {
+     let Some(repository) = &state.gitlab else {
+         return OpenReply::Failed {
+diff --git a/src-tauri/src/merge_requests/description.rs b/src-tauri/src/merge_requests/description.rs
+index aecf2ce..3171a62 100644
+--- a/src-tauri/src/merge_requests/description.rs
++++ b/src-tauri/src/merge_requests/description.rs
+@@ -1,7 +1,7 @@
+ use tauri::{Manager, Runtime, WebviewWindow};
+ use yamt_merge_requests::{DescriptionReply, Glab, MergeRequestIid};
+ 
+-use super::{MergeRequestState, NO_PROJECT, offered};
++use super::{MergeRequestState, NO_PROJECT, offer_described};
+ use crate::ipc_error::{IpcError, blocking_reply};
+ 
+ /// No GitLab project → `Failed`; else glab reads the description, and its pages are offered, then its uploads, each
+@@ -17,8 +17,7 @@ pub(super) fn description_reply(
+         };
+     };
+     let read = yamt_merge_requests::read_description(repository, glab, iid);
+-    offered(&state.pages).extend(read.pages);
+-    state.pictures.offer_uploads(read.uploads);
++    offer_described(state, read.pages, read.uploads);
+     read.reply
+ }
+ 
+diff --git a/src-tauri/src/merge_requests/pictures.rs b/src-tauri/src/merge_requests/pictures.rs
+index 358a779..6676eb4 100644
+--- a/src-tauri/src/merge_requests/pictures.rs
++++ b/src-tauri/src/merge_requests/pictures.rs
+@@ -5,7 +5,7 @@ use tauri::http::header::{CONTENT_TYPE, HeaderValue, X_CONTENT_TYPE_OPTIONS};
+ use tauri::http::{Response, StatusCode};
+ use tauri::{AppHandle, Manager, Runtime, UriSchemeResponder};
+ use yamt_merge_requests::{
+-    Glab, OfferedPicture, OfferedUpload, Picture, PictureAddress, fetch_picture,
++    Glab, OfferedPicture, OfferedUpload, Picture, PictureAddress, UploadKey, fetch_picture,
+ };
+ 
+ use super::MergeRequestState;
+@@ -16,8 +16,6 @@ pub(crate) const PICTURE_SCHEME: &str = "yamt-picture";
+ /// glab runs for pictures at once.
+ const PICTURE_FETCHES: usize = 4;
+ const NO_SNIFFING: &str = "nosniff";
+-/// What every `yamt_merge_requests::UploadKey` starts with; the crate checks the secret after it.
+-const UPLOAD_KEY_PREFIX: &str = "upload~";
+ 
+ /// The pictures lists, replies and descriptions offered and those fetched (plan §2 #152), and the turns of the askers
+ /// waiting for a fetch to end; the shelf is never locked together with another `Mutex` and never held across a glab
+@@ -144,7 +142,7 @@ pub(crate) fn picture_answer(
+ 
+ /// A username, or an upload key: only an offered name is ever served.
+ fn is_picture_name(name: &str) -> bool {
+-    is_username(name) || name.starts_with(UPLOAD_KEY_PREFIX)
++    is_username(name) || UploadKey::is_key(name)
+ }
+ 
+ fn is_username(name: &str) -> bool {
+diff --git a/src-tauri/src/merge_requests/tests.rs b/src-tauri/src/merge_requests/tests.rs
+index 65b80f6..6187c05 100644
+--- a/src-tauri/src/merge_requests/tests.rs
++++ b/src-tauri/src/merge_requests/tests.rs
+@@ -143,9 +143,11 @@ mod through_glab {
+     use std::thread;
+     use std::time::{Duration, Instant};
+ 
++    use tauri::http::{Response, StatusCode};
+     use yamt_conflict_repo::run_ignored_in_child;
+ 
+     use super::*;
++    use crate::merge_requests::pictures::picture_answer;
+ 
+     const FAKE_OPEN_LOG: &str = "YAMT_FAKE_OPEN_LOG";
+     const LIST_TEST: &str = "merge_requests::tests::through_glab::a_list_on_path_s_glab";
+@@ -227,6 +229,11 @@ mod through_glab {
+     /// Runs `test` in a child whose PATH starts with the committed fake glab on the scenario `tests/glab/<scenario>`
+     /// and the fake xdg-open, their logs in a folder of this test's.
+     pub(super) fn run_with_fakes(test: &str, scenario: &str) {
++        run_with_fakes_in(test, &in_this_repository("tests/glab").join(scenario));
++    }
++
++    /// As `run_with_fakes`, on the scenario folder `scenario` wherever it is.
++    pub(super) fn run_with_fakes_in(test: &str, scenario: &Path) {
+         let fake = TempDir::new().unwrap();
+         let inherited = std::env::var_os("PATH").unwrap_or_default();
+         let mut folders = vec![
+@@ -235,8 +242,6 @@ mod through_glab {
+         ];
+         folders.extend(std::env::split_paths(&inherited));
+         let path = std::env::join_paths(folders).unwrap();
+-        let scenario = in_this_repository("tests/glab").join(scenario);
+-
+         let ran = run_ignored_in_child(&[test], |child| {
+             child
+                 .env("PATH", path)
+@@ -273,6 +278,15 @@ mod through_glab {
+         std::fs::read_to_string(log).unwrap_or_default()
+     }
+ 
++    /// The picture the window gets for `path` (`/<username>` or `/upload~<secret>`) through PATH's glab.
++    pub(super) fn asked(window: &MergeRequestWindow, path: &str) -> Response<Vec<u8>> {
++        picture_answer(&window.webview.state(), Glab::find().as_ref(), path)
++    }
++
++    pub(super) fn is_not_found(answer: &Response<Vec<u8>>) -> bool {
++        answer.status() == StatusCode::NOT_FOUND && answer.body().is_empty()
++    }
++
+     /// The opener's log once it is no longer `before`.
+     pub(super) fn log_after(before: &str) -> String {
+         let deadline = Instant::now() + OPEN_WAIT;
+diff --git a/src-tauri/src/merge_requests/tests/description.rs b/src-tauri/src/merge_requests/tests/description.rs
+index fd0ccce..3065616 100644
+--- a/src-tauri/src/merge_requests/tests/description.rs
++++ b/src-tauri/src/merge_requests/tests/description.rs
+@@ -1,12 +1,11 @@
++use tauri::http::StatusCode;
+ use tauri::http::header::{CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS};
+-use tauri::http::{Response, StatusCode};
+ 
+ use super::through_glab::{
+-    glab_log, in_this_repository, log_after, open, opened_log, run_with_fakes,
++    asked, glab_log, in_this_repository, is_not_found, log_after, open, opened_log, run_with_fakes,
+ };
+ use super::*;
+ use crate::merge_requests::description::{description_reply, read_description};
+-use crate::merge_requests::pictures::picture_answer;
+ 
+ const SCENARIO: &str = "mr-description";
+ const PAGES_TEST: &str = "merge_requests::tests::description::described_pages_on_paths_opener";
+@@ -23,7 +22,7 @@ const SHOT: &str =
+     "tests/glab/mr-description/uploads/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png";
+ const OLD: &str = "tests/glab/mr-description/pictures/-/project/7/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png";
+ const DOCS_PAGE: &str = "https://docs.example/x";
+-const ISSUE_PAGE: &str = "https://gitlab.example/taskboard/taskboard/-/issues/12";
++const ISSUE_PAGE: &str = "https://gitlab.com/taskboard/taskboard/-/issues/12";
+ const PLAIN_PAGE: &str = "http://plain.example/";
+ 
+ /// The reply the window gets for `iid` through the command.
+@@ -35,15 +34,6 @@ fn read(window: &MergeRequestWindow, iid: u32) -> Value {
+     serde_json::to_value(reply.unwrap()).unwrap()
+ }
+ 
+-/// The picture the window gets for `path` through PATH's glab.
+-fn asked(window: &MergeRequestWindow, path: &str) -> Response<Vec<u8>> {
+-    picture_answer(&window.webview.state(), Glab::find().as_ref(), path)
+-}
+-
+-fn is_not_found(answer: &Response<Vec<u8>>) -> bool {
+-    answer.status() == StatusCode::NOT_FOUND && answer.body().is_empty()
+-}
+-
+ /// Every uploaded image's key in `reply`, in document order.
+ fn uploaded_keys(reply: &Value) -> Vec<String> {
+     let mut keys = Vec::new();
+@@ -165,7 +155,7 @@ fn a_web_path_upload_on_paths_glab() {
+     let argv = glab_log("argv: ");
+     let asked = [
+         format!("argv: api projects/7/uploads/{HEX_B}/old.png"),
+-        format!("argv: api https://gitlab.example/-/project/7/uploads/{HEX_B}/old.png"),
++        format!("argv: api https://gitlab.com/-/project/7/uploads/{HEX_B}/old.png"),
+     ];
+     assert_eq!(argv[argv.len() - 2..], asked);
+ }
+diff --git a/src-tauri/src/merge_requests/tests/picture_scheme.rs b/src-tauri/src/merge_requests/tests/picture_scheme.rs
+index 969ad6b..d469e5a 100644
+--- a/src-tauri/src/merge_requests/tests/picture_scheme.rs
++++ b/src-tauri/src/merge_requests/tests/picture_scheme.rs
+@@ -1,10 +1,12 @@
+ use std::os::unix::fs::symlink;
+ use std::thread;
+ 
++use tauri::http::StatusCode;
+ use tauri::http::header::{CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS};
+-use tauri::http::{Response, StatusCode};
+ 
+-use super::through_glab::{glab_log, in_this_repository, run_with_fakes};
++use super::through_glab::{
++    asked, glab_log, in_this_repository, is_not_found, run_with_fakes, run_with_fakes_in,
++};
+ use super::*;
+ use crate::merge_requests::description::description_reply;
+ use crate::merge_requests::pictures::picture_answer;
+@@ -31,15 +33,6 @@ const SLOW_UPLOADS: [&str; 3] = [
+ /// glab runs the slow uploads take: A one, B and C two each (the API, then the web path).
+ const SLOW_UPLOAD_RUNS: usize = 5;
+ 
+-/// The picture the window gets for `path` (`/<username>`) through PATH's glab.
+-fn asked(window: &MergeRequestWindow, path: &str) -> Response<Vec<u8>> {
+-    picture_answer(&window.webview.state(), Glab::find().as_ref(), path)
+-}
+-
+-fn is_not_found(answer: &Response<Vec<u8>>) -> bool {
+-    answer.status() == StatusCode::NOT_FOUND && answer.body().is_empty()
+-}
+-
+ fn listed_window(scenario_repo: TempDir) -> MergeRequestWindow {
+     let window = open_window_in(scenario_repo);
+     let messages = list(&window);
+@@ -137,7 +130,7 @@ fn slow_pictures_on_path_s_glab() {
+ #[test]
+ fn an_avatar_and_an_upload_share_the_four_fetches_at_once() {
+     let scenario = crowd_and_description();
+-    run_with_fakes(MIXED_TEST, scenario.path().to_str().unwrap());
++    run_with_fakes_in(MIXED_TEST, scenario.path());
+ }
+ 
+ #[test]
+@@ -194,15 +187,15 @@ fn fetches_at_once() -> (usize, usize) {
+     (most, ended)
+ }
+ 
+-/// A scenario with `mr-row-details/crowd`'s list and slow avatars and `mr-description`'s !52, whose three uploads
+-/// each wait a second on the uploads API.
++/// A scenario with `mr-row-details/crowd`'s list and slow avatars and `mr-description`'s project on gitlab.com and
++/// its !52, whose three uploads each wait a second on the uploads API.
+ fn crowd_and_description() -> TempDir {
+     let scenario = TempDir::new().unwrap();
+     let root = scenario.path();
+     let crowd = in_this_repository("tests/glab").join(CROWD);
+     let description = in_this_repository("tests/glab/mr-description");
+     let linked = [
+-        (crowd.join("project.json"), "project.json"),
++        (description.join("project.json"), "project.json"),
+         (crowd.join("graphql-page-1.json"), "graphql-page-1.json"),
+         (
+             description.join("graphql-description-52.json"),
