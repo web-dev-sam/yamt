@@ -130,8 +130,14 @@ fn read_discussions_replies_on_paths_glab() {
         "createdAt": "2026-11-02T10:00:00Z",
         "text": "Please **check** <b>THIS</b> & that\non a dark theme\n<script>alert(1)</script>",
         "page": "https://gitlab.example/taskboard/taskboard/-/merge_requests/81#note_201",
+        "mentions": [],
     });
-    let discussion = json!({ "place": { "kind": "overview" }, "last": last });
+    let discussion = json!({
+        "id": "0000000000000000000000000000000000008101",
+        "place": { "kind": "overview" },
+        "earlier": [],
+        "last": last,
+    });
     let answer = json!({ "kind": "open", "discussions": [discussion] });
     assert_eq!(rows, json!([{ "iid": 81, "answer": answer }]));
     assert_eq!(read(&window, &[]), json!([]));

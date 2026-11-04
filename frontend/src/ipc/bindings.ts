@@ -74,8 +74,8 @@ export const commands = {
 	listMergeRequests: (messages: Channel<ListMessage>) => typedError<null, IpcError>(__TAURI_INVOKE("list_merge_requests", { messages })),
 	openMergeRequest: (iid: MergeRequestIid) => typedError<OpenReply, IpcError>(__TAURI_INVOKE("open_merge_request", { iid })),
 	/**
-	 *  Opens `page` in the browser only when a reply of this window sent it (lists, discussions, descriptions, links): the
-	 *  window cannot hand any other address to the system.
+	 *  Opens `page` in the browser only when a reply of this window sent it (lists, discussions, descriptions, links,
+	 *  threads, previews): the window cannot hand any other address to the system.
 	 */
 	openPage: (page: WebPage) => __TAURI_INVOKE<PageOpened>("open_page", { page }),
 	resolveMergeRequest: (iid: MergeRequestIid) => typedError<ResolveReply, IpcError>(__TAURI_INVOKE("resolve_merge_request", { iid })),
@@ -89,6 +89,11 @@ export const commands = {
 	changePeople: (iid: MergeRequestIid, change: PeopleChange) => typedError<PeopleChangeReply, IpcError>(__TAURI_INVOKE("change_people", { iid, change })),
 	readDescription: (iid: MergeRequestIid) => typedError<DescriptionReply, IpcError>(__TAURI_INVOKE("read_description", { iid })),
 	readLinks: (iid: MergeRequestIid) => typedError<LinksReply, IpcError>(__TAURI_INVOKE("read_links", { iid })),
+	readDiscussionThread: (iid: MergeRequestIid, discussion: DiscussionId) => typedError<DiscussionThreadReply, IpcError>(__TAURI_INVOKE("read_discussion_thread", { iid, discussion })),
+	replyToDiscussion: (iid: MergeRequestIid, discussion: DiscussionId, kind: ReplyKind, text: string) => typedError<DiscussionWriteReply, IpcError>(__TAURI_INVOKE("reply_to_discussion", { iid, discussion, kind, text })),
+	resolveDiscussion: (iid: MergeRequestIid, discussion: DiscussionId, resolve: boolean) => typedError<DiscussionWriteReply, IpcError>(__TAURI_INVOKE("resolve_discussion", { iid, discussion, resolve })),
+	submitReview: (iid: MergeRequestIid) => typedError<DiscussionWriteReply, IpcError>(__TAURI_INVOKE("submit_review", { iid })),
+	previewMarkdown: (iid: MergeRequestIid, text: string) => typedError<MarkdownPreviewReply, IpcError>(__TAURI_INVOKE("preview_markdown", { iid, text })),
 };
 
 /* Types */
@@ -275,6 +280,18 @@ export type ColumnVersions = {
 	right: ColumnVersion,
 };
 
+/**
+ *  Whether the viewer may comment on the merge request: `createNote` true → allowed; false with `discussionLocked`
+ *  → locked; false → not allowed.
+ */
+export type Commenting = 
+/**  They may. */
+"allowed" | 
+/**  Comments are locked to project members, and the viewer is not one. */
+"locked" | 
+/**  They may not. */
+"notAllowed";
+
 /**  What the window gets when it starts. */
 export type CompareStart = {
 	/**  The tabs. */
@@ -410,7 +427,9 @@ inlines: DescriptionInline[] } |
 /**  Where it loads from. */
 image: DescriptionImage; 
 /**  alt, else title, else the address as written (empty when there is none). */
-caption: string } | 
+caption: string; 
+/**  The size written in Markdown (`{width=…}`, `{height=…}`) as GitLab kept it on the `<img>`; None: its own. */
+size: ImageSize | null } | 
 /**  `<br>`. */
 { kind: "lineBreak" };
 
@@ -507,11 +526,34 @@ export type DifferenceWords = {
 	right: SideWordChanges<RightLine>,
 };
 
+/**  A comment of a thread. */
+export type DiscussionComment = {
+	/**  Who wrote it; `None` for a deleted user. */
+	author: Person | null,
+	/**  When it was written: GitLab's ISO 8601 time, as sent. */
+	createdAt: string,
+	/**
+	 *  Edited as GitLab's `Note#edited?` means it: `lastEditedBy` a person and `lastEditedAt` after `createdAt`
+	 *  (`app/models/note.rb:533-545`; resolving moves `lastEditedAt` alone, measured, design §1.3).
+	 */
+	edited: NoteEdit | null,
+	/**  GitLab's `bodyHtml` reduced by `described_on` on the merge request's page (RK60, RK66: no other path). */
+	body: Description,
+	/**  Its page on GitLab; `None` when GitLab's `url` is not the one it builds for this note. */
+	page: WebPage | null,
+};
+
 /**
  *  When the merge-request page reads each row's open discussions: as the list arrives, on the first hover of a
  *  row's count, or never.
  */
 export type DiscussionDetails = "full" | "lazy" | "off";
+
+/**
+ *  A discussion's id: GitLab's 40 lowercase hex digits, the REST routes' `:discussion_id` (from GraphQL
+ *  `gid://gitlab/Discussion/<hex>`). The window sends it back; nothing else deserializes.
+ */
+export type DiscussionId = string;
 
 /**  A note as the window shows it. */
 export type DiscussionNote = {
@@ -523,11 +565,13 @@ export type DiscussionNote = {
 	text: string,
 	/**  Its page on GitLab; `None` when GitLab's `url` is not the one it builds for this note. */
 	page: WebPage | null,
+	/**  The users it mentions. */
+	mentions: Mention[],
 };
 
 /**  Where a discussion is. */
 export type DiscussionPlace = 
-/**  On the merge request itself: the last person's note has no `position`. */
+/**  On the merge request itself: the first person's note has no `position`. */
 { kind: "overview" } | 
 /**  On the diff: `filePath`, and `newLine`, else `oldLine` (both may be null). */
 { kind: "file"; 
@@ -535,6 +579,65 @@ export type DiscussionPlace =
 path: string; 
 /**  The line, on the new side when it has one. */
 line: number | null };
+
+/**  A discussion's whole thread, and what the viewer may do in it. */
+export type DiscussionThread = {
+	/**  The same turn data the box gets, built by the same function (resolved or not). */
+	discussion: OpenDiscussion,
+	/**  Whether it is resolved. */
+	resolved: boolean,
+	/**  Every person note, oldest first; never empty (the discussion has one). System notes left out (RK61). */
+	comments: DiscussionComment[],
+	/**  The viewer's pending drafts in this discussion, in GitLab's order. */
+	drafts: PendingDraft[],
+	/**  All the viewer's pending drafts on this merge request (C9). */
+	pending: number,
+	/**  Whether the viewer may comment. */
+	commenting: Commenting,
+	/**  `Discussion.userPermissions.resolveNote`, and the discussion resolvable. */
+	mayResolve: boolean,
+};
+
+/**  How reading a discussion's whole thread ended. */
+export type DiscussionThreadReply = 
+/**  The thread. */
+{ kind: "read"; 
+/**  The thread. */
+thread: DiscussionThread } | 
+/**  The merge request answered, without this discussion (deleted, or never there). */
+{ kind: "notFound" } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first line, which names the instance. */
+detail: string } | 
+/**  glab's or GitLab's words, `page.rs` `NO_PROJECT`, or the 200-note rule's sentence. */
+{ kind: "failed"; 
+/**  What went wrong. */
+message: string };
+
+/**  How a write to a discussion ended. */
+export type DiscussionWriteReply = 
+/**  GitLab took it. */
+{ kind: "sent" } | 
+/**
+ *  GitLab answered 4xx: `HttpAnswer::reason()` (its `message`/`error`, glab's line, `HTTP <code>`); also a
+ *  blank text, before any glab run: "There is nothing to send."
+ */
+{ kind: "refused"; 
+/**  Why. */
+reason: string } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first line, which names the instance. */
+detail: string } | 
+/**  No HTTP answer (glab failed, timed out), a 5xx or another status (its reason), or `NO_PROJECT`. */
+{ kind: "failed"; 
+/**  What went wrong. */
+message: string };
 
 /**  How asking for a merge request's open discussions ended. */
 export type DiscussionsAnswer = 
@@ -654,6 +757,37 @@ export type HeadingLevel =
 
 /**  What a running server sends the window; `Exited` comes once, last. */
 export type HostEvent = { kind: "Message"; text: string } | { kind: "Log"; line: string } | { kind: "Exited"; code: number | null };
+
+/**  One length: a bare number is pixels, as on GitLab. */
+export type ImageLength = 
+/**  `12` or `12px`. */
+{ kind: "pixels"; 
+/**  0 to 9999. */
+value: number } | 
+/**  `40%`. */
+{ kind: "percent"; 
+/**  0 to 9999, as written. */
+value: number };
+
+/**
+ *  GitLab's `width`/`height` on an image, each only in GitLab's form `\A\d{1,4}(%|px)?\z` (Banzai
+ *  `AttributesFilter::VALID_SIZE_REGEX`); a value outside it is as if not written (request A3).
+ */
+export type ImageSize = 
+/**  A width alone. */
+{ kind: "width"; 
+/**  The width. */
+width: ImageLength } | 
+/**  A height alone. */
+{ kind: "height"; 
+/**  The height. */
+height: ImageLength } | 
+/**  A width and a height. */
+{ kind: "both"; 
+/**  The width. */
+width: ImageLength; 
+/**  The height. */
+height: ImageLength };
 
 /**
  *  A zero-width place inside one line of one text: `column` UTF-16 code units from the line's
@@ -902,6 +1036,31 @@ name: string } |
 /**  The commit's short id. */
 short_id: string };
 
+/**  How previewing a text as GitLab renders it ended. */
+export type MarkdownPreviewReply = 
+/**  GitLab's rendering of the text as yamt shows it; no blocks for a blank text. */
+{ kind: "read"; 
+/**  The rendering. */
+preview: Description } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first line, which names the instance. */
+detail: string } | 
+/**  glab's or GitLab's words, or `page.rs` `NO_PROJECT`. */
+{ kind: "failed"; 
+/**  What went wrong. */
+message: string };
+
+/**  A user GitLab linked as a mention in a note: `a[data-reference-type="user"][data-user]` of its `bodyHtml`. */
+export type Mention = {
+	/**  The `href`'s last path segment, when it is `[A-Za-z0-9_.-]+` (else the link is not a mention). */
+	username: string,
+	/**  The link's `title` (GitLab's name of the user), else the username. */
+	name: string,
+};
+
 export type MergeChunk = {
 	chunk: Chunk,
 	middle: LineRange<MiddleLine>,
@@ -1068,11 +1227,23 @@ message: string };
 /**  Why the file on disk cannot be shown as the middle text. */
 export type NotText = "Deleted" | "Binary" | "NonUtf8" | "TooLarge" | "Link" | "Directory";
 
-/**  An open discussion: where it is and its last note written by a person (system notes skipped). */
+/**  When and by whom a comment was last edited. */
+export type NoteEdit = {
+	/**  GitLab's ISO 8601 time, as sent. */
+	at: string,
+	/**  Who edited it. */
+	by: Person,
+};
+
+/**  A discussion and what the turn rule needs of it: every note written by a person (system notes skipped). */
 export type OpenDiscussion = {
-	/**  Where the discussion is. */
+	/**  Its id. */
+	id: DiscussionId,
+	/**  Where it is: the first person note's `position` (GitLab's place of the discussion). */
 	place: DiscussionPlace,
-	/**  Its last note written by a person. */
+	/**  Every person note before `last`, oldest first: `earlier[0]` (or `last` when empty) started the discussion. */
+	earlier: TurnComment[],
+	/**  Its last person note. */
 	last: DiscussionNote,
 };
 
@@ -1126,6 +1297,12 @@ export type PageOpened =
 { kind: "failed"; 
 /**  Why, in the system's words. */
 message: string };
+
+/**  A draft's raw text as written (GitLab's draft list sends no rendering; design §4 item 3). */
+export type PendingDraft = {
+	/**  The text. */
+	text: string,
+};
 
 /**  Whether a change adds a person to a list or removes them from it. */
 export type PeopleAction = 
@@ -1372,6 +1549,13 @@ export type Removal<L> = {
 	/**  The missing text, every line break written `\n`; never empty. */
 	text: string,
 };
+
+/**  How a reply is posted: at once, or as a draft of the viewer's review. */
+export type ReplyKind = 
+/**  A comment everyone sees now. */
+"comment" | 
+/**  A draft, published with the review. */
+"draft";
 
 export type RepositoryAnswer = "start" | "dontStart";
 
@@ -1726,6 +1910,14 @@ export type ThreadPlace = {
 	start: DiffLine,
 	/**  The last line, in the column it was picked in. */
 	end: ThreadLine,
+};
+
+/**  A person note before the last, as the turn rule reads it. */
+export type TurnComment = {
+	/**  Who wrote it; `None` for a deleted user. */
+	author: Person | null,
+	/**  The users it mentions. */
+	mentions: Mention[],
 };
 
 export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";

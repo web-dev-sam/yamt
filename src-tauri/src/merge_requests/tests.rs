@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::mpsc;
+use std::thread;
 
 use serde_json::{Value, json};
 use tauri::App;
@@ -136,6 +137,10 @@ mod description;
 
 #[cfg(unix)]
 mod links;
+
+#[cfg(unix)]
+#[path = "tests/thread.rs"]
+mod thread_commands;
 
 mod csp;
 

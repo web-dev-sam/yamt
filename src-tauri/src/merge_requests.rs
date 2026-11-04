@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::thread;
+use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use tauri::ipc::Channel;
@@ -26,6 +26,7 @@ pub(crate) mod links;
 mod list;
 mod people;
 mod pictures;
+pub(crate) mod thread;
 
 use list::ListMessage;
 
@@ -59,9 +60,10 @@ pub(crate) enum ContinueMergeReply {
 
 /// The window's GitLab project, found once at start, the folder pair locks live in, the window's `--ai` that "Show
 /// Diff" passes on, and every merge request's and failed job's page a list sent, every note's page
-/// `read_discussions` sent, every page `read_description` sent and every line's and parent's page `read_links` sent
-/// in this run: only those may be opened or have their log read (plan §2 #128–#137); `pages` is never locked
-/// together with another `Mutex`.
+/// `read_discussions` sent, every page `read_description` sent, every line's and parent's page `read_links` sent,
+/// every comment's and link's page `read_discussion_thread` sent and every link's page `preview_markdown` sent in
+/// this run: only those may be opened or have their log read (plan §2 #128–#137); `pages` is never locked together
+/// with another `Mutex`.
 pub(crate) struct MergeRequestState {
     gitlab: Option<GitLabRepository>,
     range_dir: PathBuf,
@@ -102,7 +104,8 @@ fn offer(
     state.pictures.offer(pictures);
 }
 
-/// Remembers a description's `pages`, then its `uploads`, as offered; the same two locks as `offer`, one after the other.
+/// Remembers rendered Markdown's `pages`, then its `uploads`, as offered (a description, a thread, a preview); the same
+/// two locks as `offer`, one after the other.
 fn offer_described(state: &MergeRequestState, pages: Vec<WebPage>, uploads: Vec<OfferedUpload>) {
     offered(&state.pages).extend(pages);
     state.pictures.offer_uploads(uploads);
@@ -213,7 +216,7 @@ fn wait_for_window_claim(root: &Path) {
             tracing::warn!(root = %root.display(), "the merge window did not claim its merge in time");
             return;
         }
-        thread::sleep(CLAIM_PROBE_INTERVAL);
+        sleep(CLAIM_PROBE_INTERVAL);
     }
 }
 
@@ -378,8 +381,8 @@ fn local_merge(state: &MergeRequestState) -> LocalMerge {
         })
 }
 
-/// Opens `page` in the browser only when a reply of this window sent it (lists, discussions, descriptions, links): the
-/// window cannot hand any other address to the system.
+/// Opens `page` in the browser only when a reply of this window sent it (lists, discussions, descriptions, links,
+/// threads, previews): the window cannot hand any other address to the system.
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
