@@ -27,7 +27,8 @@ private display.
 d01–d13, !636 (author Sam Weller, locked) three, d14–d16 (the cases of `briefs/mr-threads-fixtures.md`); d01 is the
 rich thread (four comments: code, table, link, uploaded and sized images, edits by self and by Dmitri Volkov; drafts
 in d01 and d05, 2 pending); !640's description has a 120 px, a 40 %, a 4000 px and a 60 px-high image. Texts starting
-`refuse` are refused ("403 Forbidden"), starting `fail` fail ("glab timed out"). Log lines:
+`refuse` are refused ("403 Forbidden"), starting `fail` fail ("glab timed out"); !637's d13 fails its first thread
+read ("glab timed out") and reads on Retry (the panel's Retry, step 10). Log lines:
 `mergeRequests.fixture_discussions { iids }`, `fixture_thread { iid, discussion }`, `fixture_write { kind, iid,
 discussion }`, `fixture_preview { iid }`, `fixture_page { page }`, and the window's `discussions_read`,
 `discussions_reloaded`, `thread_read`, `thread_write`, `preview_read` — never a text or a name.
