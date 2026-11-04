@@ -1,0 +1,2 @@
+just mutants HEAD → 17 mutants tested in 2m: 11 caught, 6 unviable, 0 missed
+

@@ -1,0 +1,20 @@
+{
+  "data": {
+    "project": {
+      "mergeRequest": {
+        "state": "opened",
+        "reviewers": {
+          "nodes": [
+            {
+              "id": "gid://gitlab/User/4",
+              "username": "ben",
+              "name": "Ben Okafor",
+              "avatarUrl": null,
+              "mergeRequestInteraction": { "approved": false, "reviewState": "REVIEWED" }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

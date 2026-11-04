@@ -105,7 +105,7 @@ pub fn rerequest_review(
 }
 
 /// glab missing → `GlabMissing`; the remembered project; the fresh reviewers, then the mutation unless the reviewer
-/// already awaits a review; a `Failed` reply's words through `logged_out_after`.
+/// already awaits a review; a `Failed` reply's words through `refusal`.
 fn asked_again(
     repository: &GitLabRepository,
     glab: Option<&Glab>,
@@ -120,10 +120,8 @@ fn asked_again(
         Err(refused) => return refused.into(),
     };
     let reply = rerequested(repository.root(), glab, &project, iid, username);
-    if let RerequestReply::Failed { message } = &reply
-        && let Some(detail) = repository.logged_out_after(glab, message)
-    {
-        return RerequestReply::NotLoggedIn { detail };
+    if let RerequestReply::Failed { message } = reply {
+        return repository.refusal(glab, message).into();
     }
     reply
 }

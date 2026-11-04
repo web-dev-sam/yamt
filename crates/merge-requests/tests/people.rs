@@ -250,7 +250,7 @@ fn a_mutation_error_is_refused_in_gitlabs_words() {
 }
 
 #[test]
-fn a_top_level_error_fails() {
+fn a_top_level_error_fails_and_asks_whether_the_login_is_gone() {
     let (_repo, repository) = gitlab_repo();
     let fake = Fake::new(SCENARIO);
     fake.answered_posts(6);
@@ -262,6 +262,9 @@ fn a_top_level_error_fails() {
     );
 
     assert_eq!(reply, json!({ "kind": "failed", "message": DENIED }));
+    let mut asked = CHANGE_ARGV.to_vec();
+    asked.push("argv: auth status");
+    assert_eq!(fake.logged("argv: "), asked);
 }
 
 #[test]

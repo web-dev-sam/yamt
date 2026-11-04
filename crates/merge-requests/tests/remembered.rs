@@ -30,6 +30,8 @@ const UNAUTHORIZED_LOGGED_IN: u32 = 3;
 const PROJECT_NOT_FOUND: u32 = 4;
 const FORBIDDEN: u32 = 5;
 const PROJECT_NULL: u32 = 6;
+const ANONYMOUS_LOGGED_OUT: u32 = 7;
+const MUTATION: &str = "argv: api graphql --input -";
 /// `page.rs` `NO_PROJECT`.
 const NO_PROJECT: &str = "GitLab finds no such project, or you may not see it";
 
@@ -294,6 +296,31 @@ fn a_missing_project_forgets() {
         setup.fake.answered_posts(PROJECT_NULL);
         assert_eq!(preview(setup)["kind"], "read");
         assert_eq!((setup.count(AUTH_STATUS), setup.count(PROJECT)), (3, 2));
+    }
+}
+
+#[test]
+fn a_mutation_denied_after_a_logout_answers_not_logged_in() {
+    let logged_out = json!({ "kind": "notLoggedIn", "detail": "gitlab.com" });
+    for (name, action) in [
+        ("change_people", change as Action),
+        ("rerequest_review", rerequest),
+    ] {
+        let setup = Setup::new(REMEMBERED);
+        assert_eq!(preview(&setup)["kind"], "read", "{name}");
+        setup.fake.answered_posts(ANONYMOUS_LOGGED_OUT);
+
+        let reply = action(&setup);
+
+        assert_eq!(reply, logged_out, "{name}");
+        let argv = setup.fake.logged("argv: ");
+        assert_eq!(argv.last().map(String::as_str), Some(AUTH_STATUS), "{name}");
+        assert_eq!(setup.fake.logged(MUTATION), [MUTATION], "{name}");
+        assert_eq!(
+            (setup.count(AUTH_STATUS), setup.count(PROJECT)),
+            (2, 1),
+            "{name}"
+        );
     }
 }
 

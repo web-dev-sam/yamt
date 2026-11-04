@@ -40,7 +40,7 @@ struct Commented {
 /// until one holds the discussion with `id` (the same pages as `read_discussions`, the `Fetch` seam); then one
 /// `Glab::get` of `draft_notes_args` (`--paginate`: one JSON array or one per page). A draft counts for `drafts` when
 /// its `discussion_id` is `id`'s hex; every draft counts for `pending`. The batch failing, the merge request missing,
-/// the 200-note rule or the draft list failing → `Failed`, its words through `logged_out_after`.
+/// the 200-note rule or the draft list failing → `Failed`, its words through `refusal`.
 /// `pages`/`uploads`/`pictures` empty unless `Read`. One `tracing::info!`: iid, outcome, comments, drafts, pending,
 /// pages, uploads, queries; never a name, text or address.
 #[must_use]
@@ -110,10 +110,8 @@ fn through_glab(
         glab.get(root, &args)
     };
     let read = thread_from(iid, discussion, &project, &mut fetch, &mut fetch_drafts);
-    if let Err(DiscussionThreadReply::Failed { message }) = &read
-        && let Some(detail) = repository.logged_out_after(glab, message)
-    {
-        return Err(DiscussionThreadReply::NotLoggedIn { detail });
+    if let Err(DiscussionThreadReply::Failed { message }) = read {
+        return Err(repository.refusal(glab, message).into());
     }
     read
 }

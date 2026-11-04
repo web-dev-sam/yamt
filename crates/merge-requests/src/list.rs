@@ -64,10 +64,8 @@ pub fn list_merge_requests(
         parsed(&json, &project)
     };
     let (mut end, rows) = pages(&mut fetch, on_page);
-    if let ListEnd::Failed { message } = &end
-        && let Some(detail) = repository.logged_out_after(glab, message)
-    {
-        end = ListEnd::NotLoggedIn { detail };
+    if let ListEnd::Failed { message } = end {
+        end = repository.refusal(glab, message).into();
     }
     let to_check = ConflictCheck {
         full_path: project.full_path,

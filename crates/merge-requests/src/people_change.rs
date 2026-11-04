@@ -132,8 +132,7 @@ pub fn change_people(
     changed
 }
 
-/// glab missing → `GlabMissing`; the remembered project; the mutation; its failure's words through
-/// `logged_out_after`.
+/// glab missing → `GlabMissing`; the remembered project; the mutation; its failure's words through `refusal`.
 fn asked(
     repository: &GitLabRepository,
     glab: Option<&Glab>,
@@ -150,10 +149,8 @@ fn asked(
     let body = people_change_body(&project.full_path, iid, change);
     let ran = glab.post(repository.root(), &GRAPHQL_BODY_ARGS, body);
     let changed = answered(ran, &project, change);
-    if let PeopleChangeReply::Failed { message } = &changed.reply
-        && let Some(detail) = repository.logged_out_after(glab, message)
-    {
-        return without_pictures(PeopleChangeReply::NotLoggedIn { detail });
+    if let PeopleChangeReply::Failed { message } = changed.reply {
+        return without_pictures(repository.refusal(glab, message).into());
     }
     changed
 }

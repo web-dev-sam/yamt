@@ -22,6 +22,10 @@ const UNAUTHORIZED: &str = "(HTTP 401)";
 const GRAPHQL_UNAUTHORIZED: &str = "glab: Invalid token";
 /// GitLab's words for a project it does not find or the reader may not see (`tests/glab/README.md:73-75`).
 const PROJECT_NOT_FOUND: &str = "404 Project Not Found";
+/// GitLab's GraphQL error for a mutation sent without a login, and for a logged-in reader's missing or forbidden
+/// merge request: `glab auth status` tells them apart (measured with glab 1.126.0 against gitlab.com on 2026-11-04,
+/// `tests/glab/README.md`).
+const NO_PERMISSION: &str = "The resource that you are attempting to access does not exist or you don't have permission to perform this action";
 
 /// The GitLab project of the repository's remotes.
 #[derive(Clone)]
@@ -58,10 +62,29 @@ impl Remembered {
         self.project.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn forget(&self, reason: &str) {
+    fn forget(&self, reason: Forget) {
         *self.held() = None;
+        let reason = match reason {
+            Forget::Refresh => "refresh",
+            Forget::Lost(Lost::Login) => "login",
+            Forget::Lost(Lost::Project) => "project",
+        };
         tracing::info!(reason, "forgot GitLab's login and project");
     }
+}
+
+/// What a failed call's words say is gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lost {
+    Login,
+    Project,
+}
+
+/// Why the remembered project is forgotten.
+#[derive(Clone, Copy)]
+enum Forget {
+    Refresh,
+    Lost(Lost),
 }
 
 impl GitLabRepository {
@@ -88,20 +111,16 @@ impl GitLabRepository {
     /// Forgets the remembered project (waiting for an ask in flight): the next action asks glab both again. One
     /// `tracing::info!` with the reason (`refresh`, `login`, `project`).
     pub fn forget_project(&self) {
-        self.remembered.forget("refresh");
+        self.remembered.forget(Forget::Refresh);
     }
 
     /// `words`: the failure an action is about to reply with, after the project was found — a read's `Failed`
-    /// message, a write's `HttpAnswer::glab_line`, or `NO_PROJECT`. When `is_lost(words)`: forgets, then one `glab auth
+    /// message, a write's `HttpAnswer::glab_line`, or `NO_PROJECT`. When `lost(words)`: forgets, then one `glab auth
     /// status`; `Some(detail)` when it says logged out (the action replies `NotLoggedIn { detail }`), else None (the
     /// action replies as today). Not lost → None, nothing forgotten, no glab run. Never repeats the action's call (RK54).
     pub(crate) fn logged_out_after(&self, glab: &Glab, words: &str) -> Option<String> {
-        if !is_lost(words) {
-            return None;
-        }
-        let is_login = words.ends_with(UNAUTHORIZED) || words == GRAPHQL_UNAUTHORIZED;
-        self.remembered
-            .forget(if is_login { "login" } else { "project" });
+        let lost = lost(words)?;
+        self.remembered.forget(Forget::Lost(lost));
         match glab.auth_status(self.root()) {
             AuthStatus::LoggedOut { detail } => Some(detail),
             AuthStatus::LoggedIn | AuthStatus::Failed { .. } => None,
@@ -118,13 +137,20 @@ impl GitLabRepository {
     }
 }
 
-/// Whether a failed call's words say the login is gone or the project is missing: they end `UNAUTHORIZED`, are
-/// `GRAPHQL_UNAUTHORIZED`, hold `PROJECT_NOT_FOUND`, or are `page.rs` `NO_PROJECT`. A 403 is not (design §1.4).
-fn is_lost(words: &str) -> bool {
-    words.ends_with(UNAUTHORIZED)
+/// What a failed call's words say is gone: the login when they end `UNAUTHORIZED`, are `GRAPHQL_UNAUTHORIZED` or
+/// hold `NO_PERMISSION`; the project when they hold `PROJECT_NOT_FOUND` or are `page.rs` `NO_PROJECT`; nothing for a
+/// 403 (design §1.4) or any other words.
+fn lost(words: &str) -> Option<Lost> {
+    if words.ends_with(UNAUTHORIZED)
         || words == GRAPHQL_UNAUTHORIZED
-        || words.contains(PROJECT_NOT_FOUND)
-        || words == NO_PROJECT
+        || words.contains(NO_PERMISSION)
+    {
+        Some(Lost::Login)
+    } else if words.contains(PROJECT_NOT_FOUND) || words == NO_PROJECT {
+        Some(Lost::Project)
+    } else {
+        None
+    }
 }
 
 /// `glab auth status`, then the project of the repository's remotes once it says glab is logged in.
@@ -318,25 +344,28 @@ mod tests {
     }
 
     #[test]
-    fn is_lost_reads_glabs_words() {
-        let lost = [
-            "glab: 401 Unauthorized (HTTP 401)",
-            "glab: Invalid token",
-            "glab: 404 Project Not Found (HTTP 404)",
-            NO_PROJECT,
+    fn lost_reads_glabs_words() {
+        let lost_words = [
+            ("glab: 401 Unauthorized (HTTP 401)", Lost::Login),
+            ("glab: Invalid token", Lost::Login),
+            (&format!("glab: {NO_PERMISSION}"), Lost::Login),
+            (NO_PERMISSION, Lost::Login),
+            ("glab: 404 Project Not Found (HTTP 404)", Lost::Project),
+            (NO_PROJECT, Lost::Project),
         ];
-        for words in lost {
-            assert!(is_lost(words), "{words}");
+        for (words, gone) in lost_words {
+            assert_eq!(lost(words), Some(gone), "{words}");
         }
         let kept = [
             "glab: 404 Not Found (HTTP 404)",
             "glab: 403 Forbidden (HTTP 403)",
             "glab timed out",
             "glab: Invalid token for a moment",
+            "The resource that you are attempting to access does not exist",
             "",
         ];
         for words in kept {
-            assert!(!is_lost(words), "{words}");
+            assert_eq!(lost(words), None, "{words}");
         }
     }
 }

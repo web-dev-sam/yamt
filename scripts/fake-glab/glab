@@ -51,14 +51,14 @@ log "argv: $*"
 log "cwd: $(pwd -P)"
 log "env: NO_COLOR=${NO_COLOR-unset} GIT_TERMINAL_PROMPT=${GIT_TERMINAL_PROMPT-unset}"
 
-# $1 a file name in the scenario, $2 and $3 suffixes: "$scenario/$1.after-post-<k>" for the largest k ≤ the posts
-# counted for which "<that>$2" or "<that>$3" exists; nothing when there is none.
+# $1 a path, $2 and $3 suffixes: "$1.after-post-<k>" for the largest k ≤ the posts counted for which "<that>$2" or
+# "<that>$3" exists; nothing when there is none.
 after_post() {
 	k=$(text_or "${YAMT_FAKE_GLAB_STATE:-}" 0)
 	k=${k:-0}
 	while [ "$k" -gt 0 ]; do
-		if [ -f "$scenario/$1.after-post-$k$2" ] || [ -f "$scenario/$1.after-post-$k$3" ]; then
-			printf '%s' "$scenario/$1.after-post-$k"
+		if [ -f "$1.after-post-$k$2" ] || [ -f "$1.after-post-$k$3" ]; then
+			printf '%s' "$1.after-post-$k"
 			return
 		fi
 		k=$((k - 1))
@@ -66,7 +66,7 @@ after_post() {
 }
 
 auth_status() {
-	answers=$(after_post auth-status .out .exit)
+	answers=$(after_post "$scenario/auth-status" .out .exit)
 	answers=${answers:-$scenario/auth-status}
 	if [ -f "$answers.out" ]; then
 		cat "$answers.out" >&2
@@ -126,15 +126,8 @@ field() {
 # $1.after-post-<k> instead, for the largest k whose .json exists, so a read after a write shows it; posts are never
 # redirected (post calls respond).
 reply() {
-	posts=$(text_or "${YAMT_FAKE_GLAB_STATE:-}" 0)
-	posts=${posts:-0}
-	while [ "$posts" -gt 0 ]; do
-		if [ -f "$1.after-post-$posts.json" ]; then
-			respond "$1.after-post-$posts" "$2"
-		fi
-		posts=$((posts - 1))
-	done
-	respond "$1" "$2"
+	answers=$(after_post "$1" .json .json)
+	respond "${answers:-$1}" "$2"
 }
 
 # $1 the answer's path without its extension, $2 its default status line: waits $1.sleep seconds, then fails before
@@ -256,12 +249,18 @@ upload() {
 
 # The status line in api-status.after-post-<k>, for the largest k ≤ the posts counted with such a file: every call
 # answers it, a post uncounted. GraphQL answering 401 prints GitLab's error as glab 1.126.0 did against gitlab.com
-# (2026-11-04): no "(HTTP 401)". An empty file, or none, answers as usual.
+# (2026-11-04): no "(HTTP 401)". The line "anonymous" answers as GitLab did a glab with no token on 2026-11-04: a
+# GraphQL mutation (sent with --input -) is denied in an HTTP 200, any other POST or PUT answers 401, a read as usual.
+# An empty file, or none, answers as usual.
 api_status() {
-	file=$(after_post api-status '' '')
+	file=$(after_post "$scenario/api-status" '' '')
 	[ -n "$file" ] || return 0
 	status=$(cat "$file")
 	[ -n "$status" ] || return 0
+	if [ "$status" = anonymous ]; then
+		anonymous
+		return 0
+	fi
 	if [ "$endpoint" = graphql ] && [ "${status%% *}" = 401 ]; then
 		headers "$status"
 		printf '%s' '{"errors":[{"message":"Invalid token"}]}'
@@ -269,6 +268,19 @@ api_status() {
 		exit 1
 	fi
 	answer "$status" "{\"message\":\"$status\"}"
+}
+
+anonymous() {
+	[ "$method" = GET ] && return 0
+	if [ "$endpoint" != graphql ]; then
+		answer '401 Unauthorized' '{"message":"401 Unauthorized"}'
+	fi
+	[ "$input" = - ] || return 0
+	denial="The resource that you are attempting to access does not exist or you don't have permission to perform this action"
+	headers '200 OK'
+	printf '{"errors":[{"message":"%s"}],"data":null}' "$denial"
+	printf 'glab: %s\n' "$denial" >&2
+	exit 1
 }
 
 api() {

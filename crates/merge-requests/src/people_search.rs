@@ -74,7 +74,7 @@ pub fn search_people(
     found
 }
 
-/// glab missing → `GlabMissing`; the remembered project; the search; its failure's words through `logged_out_after`.
+/// glab missing → `GlabMissing`; the remembered project; the search; its failure's words through `refusal`.
 fn searched(repository: &GitLabRepository, glab: Option<&Glab>, text: &str) -> FoundPeople {
     let Some(glab) = glab else {
         return without_pictures(PeopleSearchReply::GlabMissing);
@@ -86,10 +86,8 @@ fn searched(repository: &GitLabRepository, glab: Option<&Glab>, text: &str) -> F
     let args = people_search_args(&project.full_path, text);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let found = found_people(glab.get(repository.root(), &args), &project);
-    if let PeopleSearchReply::Failed { message } = &found.reply
-        && let Some(detail) = repository.logged_out_after(glab, message)
-    {
-        return without_pictures(PeopleSearchReply::NotLoggedIn { detail });
+    if let PeopleSearchReply::Failed { message } = found.reply {
+        return without_pictures(repository.refusal(glab, message).into());
     }
     found
 }
