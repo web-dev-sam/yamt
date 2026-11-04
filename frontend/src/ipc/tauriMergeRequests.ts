@@ -1,7 +1,7 @@
 import { Channel, convertFileSrc } from "@tauri-apps/api/core";
 
 import { commands, type ListMessage } from "./bindings";
-import { toDescriptionReply } from "./descriptionDomain";
+import { toDescriptionReply, toLinksReply } from "./descriptionDomain";
 import type { SourceResult } from "./domain";
 import {
   toCheckedRow,
@@ -81,10 +81,16 @@ function peopleCalls(): Pick<MergeRequestSource, "searchPeople" | "changePeople"
   };
 }
 
-function descriptionCalls(): Pick<MergeRequestSource, "readDescription" | "uploadedImage"> {
+function descriptionCalls(): Pick<
+  MergeRequestSource,
+  "readDescription" | "readLinks" | "uploadedImage"
+> {
   return {
     async readDescription(iid) {
       return converted(toResult(await commands.readDescription(iid)), toDescriptionReply);
+    },
+    async readLinks(iid) {
+      return converted(toResult(await commands.readLinks(iid)), toLinksReply);
     },
     uploadedImage: uploadedPicture,
   };

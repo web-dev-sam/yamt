@@ -1,4 +1,4 @@
-import type { DescriptionReply, UploadKey } from "./descriptionDomain";
+import type { DescriptionReply, LinksReply, UploadKey } from "./descriptionDomain";
 import type { MergeRequestIid, SourceResult, WebPage } from "./domain";
 import type {
   CheckedRow,
@@ -53,4 +53,7 @@ export interface MergeRequestSource {
   /** The address the window loads an uploaded description image from (the app: `convertFileSrc(key, PICTURE_SCHEME)`,
    *  `yamt-picture://localhost/<key>`; served only once a reply offered it). */
   uploadedImage(key: UploadKey): string;
+  /** The epics, issues and commits a merge request's description links to, with titles, states and parents; asked
+   *  on a row's first hover (plan §2 rows 175–176). */
+  readLinks(iid: MergeRequestIid): Promise<SourceResult<LinksReply>>;
 }

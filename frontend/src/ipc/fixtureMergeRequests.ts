@@ -16,6 +16,7 @@ import {
 } from "./fixtureMergeRequestData";
 import { descriptionScript } from "./fixtureMergeRequestDescriptions";
 import { discussionsScript } from "./fixtureMergeRequestDiscussions";
+import { linksScript } from "./fixtureMergeRequestLinks";
 import { fixtureJobLog } from "./fixtureMergeRequestLogs";
 import { peopleScript } from "./fixtureMergeRequestPeople";
 import type { Log } from "./log";
@@ -81,6 +82,10 @@ const WINDOW_FAILED_MESSAGE = "yamt: not found";
 
 function isScript(name: string): name is MergeRequestScript {
   return Object.hasOwn(SCRIPTS, name);
+}
+
+function fixtureProject(script: MergeRequestScript | null): Generated.GitLabProject {
+  return script === null ? { kind: "none" } : { kind: "found", repository: FIXTURE_REPOSITORY };
 }
 
 function shownScript(log: Log, search: string): MergeRequestScript | null {
@@ -251,11 +256,7 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
   let loads = 0;
   return {
     async findGitLabProject() {
-      return {
-        ok: true,
-        value:
-          script === null ? { kind: "none" } : { kind: "found", repository: FIXTURE_REPOSITORY },
-      };
+      return { ok: true, value: fixtureProject(script) };
     },
     async listMergeRequests(onPage, onChecked) {
       if (script === null) {
@@ -284,5 +285,6 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
     ...discussionsScript(log, LISTED_ROWS),
     ...peopleScript(log, LISTED_ROWS),
     ...descriptionScript(log, LISTED_ROWS),
+    ...linksScript(log),
   };
 }

@@ -1,0 +1,1315 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index a9710d9..f995b20 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -22,6 +22,8 @@ Each row's open discussions (request `docs/slices/request-mr-discussions.md`, pl
+ 
+ A merge request's description (request `docs/slices/request-mr-description.md`, plan §2 rows 171–175): `readDescription(iid)` → `DescriptionReply` (`read { description }`, the blocks Rust reduced GitLab's rendering to, or `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), asked afresh on every call and converted by `descriptionDomain.ts` `toDescriptionReply`, which brands every link's page at any depth as `WebPage` through `domain.ts` `isLinkedPage` (http or https; anything else throws); the description types live in `descriptionDomain.ts` and `index.ts` re-exports them from there. An `uploaded` image names only an `UploadKey`: `uploadedImage(key)` is the one address its `<img>` loads (in the app `convertFileSrc(key, PICTURE_SCHEME)`, `yamt-picture://localhost/upload~<secret>`, served once a reply offered the key); a `web` image loads its own https address. Fixture mode: `fixtureMergeRequestDescriptions.ts` `descriptionScript(log, listedRows)` (rows' `hasDescription` is false on every 7th row from !638) logs `mergeRequests.fixture_description { iid }` and answers through `toDescriptionReply` after 400 ms: !640 every element of rule 3 (upload `…01` loads a 16×16 PNG, `…02` is broken, the `web` image a `data:` PNG standing in for another site), !639 120 paragraphs, !637 no blocks, !636 `failed` on its first ask and !640's afterwards, !635 paragraphs whose text is planted markup, a row without a description no blocks, every other "Description of !<iid>.".
+ 
++A merge request's links (request `docs/slices/request-mr-links.md`, plan §2 rows 175–177): `readLinks(iid)` → `LinksReply` (`read { links }`, a `DescriptionLinks` of `epics`, `issues` and `commits`, each group in the order of first mention, each thing once; a `LinkedEpic`/`LinkedIssue` has `shown` null and a `LinkedCommit` `title` null when GitLab did not show it; an issue's `shown.parent` is its direct parent; or `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), converted by `descriptionDomain.ts` `toLinksReply`, which brands every line's and parent's `page` as `WebPage` through `domain.ts` `isLinkedPage`, as a description link's (http or https, as Rust's `WebPage::linked`; anything else throws); the links types live in `descriptionDomain.ts` and `index.ts` re-exports them. Fixture mode (`fixtureMergeRequestLinks.ts` `linksScript(log)`) logs `mergeRequests.fixture_links { iid }`, then answers after 400 ms: !640 every kind of line (epics `&3`, `&4` closed, `design&2` not shown; issues `#12` with parent `&3`, `#13` with parent `#12`, `other/lib#5` closed, `secret/vault#9` not shown; commits `fa3335f3`, the range `a1b2c3d4…e5f6a7b8`, `secret/vault@0badc0de` not shown), !636 `failed` "glab timed out" at its first ask and !640's links after, !634 `notLoggedIn` every time, every other row three empty groups.
++
+ `localMergeDomain.ts` holds the merge window's aliases (MergeView, ReturnTo, Leftover, AbortReply, PushReply) over bindings; domain.ts's Listing and ChunkSource import from it.
+ 
+ `tauri.ts` `readClipboard(selection)` reads the clipboard through the shell, never through WebKit (plan §2 #99): GTK's text request, `null` for unreadable or no text; `main.ts` hands it to `ui/linuxPaste.ts` `takeLinuxPastes` on Linux. The fence (PM8, `scripts/clipboardFence.ts`) is on WebKit's clipboard reads: `clipboardData` and `navigator.clipboard.read`/`readText` outside `ui/linuxPaste.ts`. `keys.ts` holds both platform tests: `isMac` (CodeMirror's `Mod`) and `isLinux` (the one Linux rule, also behind `showsAntialiasing`).
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index 760a796..c52fd30 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -1,4 +1,4 @@
+-import type { DescriptionReply, UploadKey } from "./descriptionDomain";
++import type { DescriptionReply, LinksReply, UploadKey } from "./descriptionDomain";
+ import type { MergeRequestIid, SourceResult, WebPage } from "./domain";
+ import type {
+   CheckedRow,
+@@ -53,4 +53,7 @@ export interface MergeRequestSource {
+   /** The address the window loads an uploaded description image from (the app: `convertFileSrc(key, PICTURE_SCHEME)`,
+    *  `yamt-picture://localhost/<key>`; served only once a reply offered it). */
+   uploadedImage(key: UploadKey): string;
++  /** The epics, issues and commits a merge request's description links to, with titles, states and parents; asked
++   *  on a row's first hover (plan §2 rows 175–176). */
++  readLinks(iid: MergeRequestIid): Promise<SourceResult<LinksReply>>;
+ }
+diff --git a/frontend/src/ipc/descriptionDomain.test.ts b/frontend/src/ipc/descriptionDomain.test.ts
+index 59707c0..18965ce 100644
+--- a/frontend/src/ipc/descriptionDomain.test.ts
++++ b/frontend/src/ipc/descriptionDomain.test.ts
+@@ -1,7 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+-import { toDescriptionReply } from "./descriptionDomain";
++import { toDescriptionReply, toLinksReply } from "./descriptionDomain";
+ 
+ type Inline = Generated.DescriptionInline;
+ type Block = Generated.DescriptionBlock;
+@@ -88,3 +88,64 @@ test("a refusal passes unchanged", () => {
+     expect(toDescriptionReply(reply)).toBe(reply);
+   }
+ });
++
++function linksAt(page: (field: string) => string): Generated.LinksReply {
++  const parent = {
++    reference: "&3",
++    title: "Board",
++    page: page("links.issues[1].shown.parent.page"),
++  };
++  return {
++    kind: "read",
++    links: {
++      epics: [{ reference: "&3", page: page("links.epics[0].page"), shown: null }],
++      issues: [
++        { reference: "#9", page: page("links.issues[0].page"), shown: null },
++        {
++          reference: "#12",
++          page: page("links.issues[1].page"),
++          shown: { title: "Snooze", closed: true, parent },
++        },
++        {
++          reference: "#13",
++          page: page("links.issues[2].page"),
++          shown: { title: "Test", closed: false, parent: null },
++        },
++      ],
++      commits: [{ reference: "fa3335f3", page: page("links.commits[0].page"), title: "Backfill" }],
++    },
++  };
++}
++
++const LINKS_FIELDS = [
++  "links.epics[0].page",
++  "links.issues[0].page",
++  "links.issues[1].page",
++  "links.issues[1].shown.parent.page",
++  "links.issues[2].page",
++  "links.commits[0].page",
++];
++
++test("every_links_page_is_branded_and_a_non_http_one_fails", () => {
++  const raw = linksAt((field) => `https://gitlab.example/${field}`);
++  expect(toLinksReply(raw)).toEqual(raw);
++  const plain = linksAt((field) => `http://gitlab.example/${field}`);
++  expect(toLinksReply(plain)).toEqual(plain);
++  for (const bad of LINKS_FIELDS) {
++    const reply = linksAt((field) => (field === bad ? "ftp://x" : "https://gitlab.example/"));
++    expect(() => toLinksReply(reply)).toThrow(
++      `${bad} must be an http or https address, got "ftp://x"`,
++    );
++  }
++});
++
++test("a_links_refusal_passes_unchanged", () => {
++  const replies: Generated.LinksReply[] = [
++    { kind: "glabMissing" },
++    { kind: "notLoggedIn", detail: "d" },
++    { kind: "failed", message: "m" },
++  ];
++  for (const reply of replies) {
++    expect(toLinksReply(reply)).toBe(reply);
++  }
++});
+diff --git a/frontend/src/ipc/descriptionDomain.ts b/frontend/src/ipc/descriptionDomain.ts
+index 1c24de5..29d612d 100644
+--- a/frontend/src/ipc/descriptionDomain.ts
++++ b/frontend/src/ipc/descriptionDomain.ts
+@@ -53,15 +53,48 @@ export type Description = { readonly blocks: Blocks };
+ export type DescriptionReply =
+   | { readonly kind: "read"; readonly description: Description }
+   | Readonly<Exclude<Generated.DescriptionReply, { kind: "read" }>>;
++export type LinkedParent = {
++  readonly reference: string;
++  readonly title: string;
++  readonly page: WebPage;
++};
++export type LinkedEpic = {
++  readonly reference: string;
++  readonly page: WebPage;
++  readonly shown: { readonly title: string; readonly closed: boolean } | null;
++};
++export type LinkedIssue = {
++  readonly reference: string;
++  readonly page: WebPage;
++  readonly shown: {
++    readonly title: string;
++    readonly closed: boolean;
++    readonly parent: LinkedParent | null;
++  } | null;
++};
++export type LinkedCommit = {
++  readonly reference: string;
++  readonly page: WebPage;
++  readonly title: string | null;
++};
++export type DescriptionLinks = {
++  readonly epics: readonly LinkedEpic[];
++  readonly issues: readonly LinkedIssue[];
++  readonly commits: readonly LinkedCommit[];
++};
++export type LinksReply =
++  | { readonly kind: "read"; readonly links: DescriptionLinks }
++  | Readonly<Exclude<Generated.LinksReply, { kind: "read" }>>;
++
++function toLinkedPage(text: string, field: string): WebPage {
++  if (!isLinkedPage(text)) {
++    throw new Error(`${field} must be an http or https address, got "${text}"`);
++  }
++  return text;
++}
+ 
+ function toLink(raw: Generated.DescriptionLink): DescriptionLink {
+-  if (raw.kind === "refused") {
+-    return raw;
+-  }
+-  if (!isLinkedPage(raw.page)) {
+-    throw new Error(`link.page must be an http or https address, got "${raw.page}"`);
+-  }
+-  return { kind: "page", page: raw.page };
++  return raw.kind === "refused" ? raw : { kind: "page", page: toLinkedPage(raw.page, "link.page") };
+ }
+ 
+ function toInline(raw: Generated.DescriptionInline): DescriptionInline {
+@@ -112,3 +145,43 @@ export function toDescriptionReply(raw: Generated.DescriptionReply): Description
+     ? { kind: "read", description: { blocks: raw.description.blocks.map(toBlock) } }
+     : raw;
+ }
++
++function toIssue(raw: Generated.LinkedIssue, field: string): LinkedIssue {
++  const page = toLinkedPage(raw.page, `${field}.page`);
++  if (raw.shown === null) {
++    return { ...raw, page, shown: null };
++  }
++  const { parent } = raw.shown;
++  const parentPage = `${field}.shown.parent.page`;
++  return {
++    ...raw,
++    page,
++    shown: {
++      ...raw.shown,
++      parent: parent === null ? null : { ...parent, page: toLinkedPage(parent.page, parentPage) },
++    },
++  };
++}
++
++/** Brands every line's and parent's page as a WebPage on http or https, as Rust's `WebPage::linked` makes it; any
++ *  other throws. */
++export function toLinksReply(raw: Generated.LinksReply): LinksReply {
++  if (raw.kind !== "read") {
++    return raw;
++  }
++  const { epics, issues, commits } = raw.links;
++  return {
++    kind: "read",
++    links: {
++      epics: epics.map((epic, at) => ({
++        ...epic,
++        page: toLinkedPage(epic.page, `links.epics[${at}].page`),
++      })),
++      issues: issues.map((issue, at) => toIssue(issue, `links.issues[${at}]`)),
++      commits: commits.map((commit, at) => ({
++        ...commit,
++        page: toLinkedPage(commit.page, `links.commits[${at}].page`),
++      })),
++    },
++  };
++}
+diff --git a/frontend/src/ipc/fixtureMergeRequestLinks.test.ts b/frontend/src/ipc/fixtureMergeRequestLinks.test.ts
+new file mode 100644
+index 0000000..9fed66e
+--- /dev/null
++++ b/frontend/src/ipc/fixtureMergeRequestLinks.test.ts
+@@ -0,0 +1,150 @@
++import { afterEach, expect, test, vi } from "vitest";
++
++import type { DescriptionLinks, LinksReply } from "./descriptionDomain";
++import { isMergeRequestIid, type SourceResult } from "./domain";
++import { linksScript } from "./fixtureMergeRequestLinks";
++import type { Log } from "./log";
++import type { MergeRequestSource } from "./MergeRequestSource";
++import { branded } from "./validate";
++
++const PAUSE_MS = 400;
++const ORIGIN = "https://gitlab.example/taskboard/taskboard";
++
++afterEach(() => {
++  vi.useRealTimers();
++});
++
++function quietLog(lines: string[]): Log {
++  function keep(event: string, fields: Record<string, string | number | boolean> = {}): void {
++    lines.push(`${event} ${JSON.stringify(fields)}`);
++  }
++  return { debug: keep, info: keep, warn: keep, error: keep };
++}
++
++function script(lines: string[] = []): Pick<MergeRequestSource, "readLinks"> {
++  return linksScript(quietLog(lines));
++}
++
++async function asked(
++  linked: Pick<MergeRequestSource, "readLinks">,
++  iid: number,
++): Promise<SourceResult<LinksReply>> {
++  const answer = linked.readLinks(branded(iid, isMergeRequestIid, "iid"));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  return answer;
++}
++
++async function linksOf(iid: number): Promise<DescriptionLinks> {
++  vi.useFakeTimers();
++  const result = await asked(script(), iid);
++  if (!result.ok || result.value.kind !== "read") {
++    throw new Error(`!${iid} did not read`);
++  }
++  return result.value.links;
++}
++
++test("the_rich_row_holds_every_kind_of_line", async () => {
++  const { epics, issues, commits } = await linksOf(640);
++
++  expect(epics.map((epic) => [epic.reference, epic.shown])).toEqual([
++    ["&3", { title: "Board redesign", closed: false }],
++    ["&4", { title: "Old board", closed: true }],
++    ["design&2", null],
++  ]);
++  expect(issues.map((issue) => [issue.reference, issue.shown])).toEqual([
++    [
++      "#12",
++      {
++        title: "Snooze a reminder",
++        closed: false,
++        parent: {
++          reference: "&3",
++          title: "Board redesign",
++          page: "https://gitlab.example/groups/taskboard/-/work_items/3",
++        },
++      },
++    ],
++    [
++      "#13",
++      {
++        title: "Write the snooze test",
++        closed: false,
++        parent: { reference: "#12", title: "Snooze a reminder", page: `${ORIGIN}/-/work_items/12` },
++      },
++    ],
++    ["other/lib#5", { title: "Fix date parsing", closed: true, parent: null }],
++    ["secret/vault#9", null],
++  ]);
++  expect(commits.map((commit) => [commit.reference, commit.title])).toEqual([
++    ["fa3335f3", "Backfill due dates"],
++    ["a1b2c3d4…e5f6a7b8", "Commits a1b2c3d4 through e5f6a7b8"],
++    ["secret/vault@0badc0de", null],
++  ]);
++  const pages = [...epics, ...issues, ...commits].map((line) => line.page);
++  expect(new Set(pages).size).toBe(pages.length);
++  expect(pages).toEqual([
++    "https://gitlab.example/groups/taskboard/-/epics/3",
++    "https://gitlab.example/groups/taskboard/-/epics/4",
++    "https://gitlab.example/groups/design/-/epics/2",
++    `${ORIGIN}/-/work_items/12`,
++    `${ORIGIN}/-/work_items/13`,
++    "https://gitlab.example/other/lib/-/issues/5",
++    "https://gitlab.example/secret/vault/-/issues/9",
++    `${ORIGIN}/-/commit/fa3335f304f9482273040a55bc9386ddffc6a59f`,
++    `${ORIGIN}/-/compare/a1b2c3d4...e5f6a7b8`,
++    "https://gitlab.example/secret/vault/-/commit/0badc0de",
++  ]);
++});
++
++test.each([639, 637, 600])("row !%i reads three empty groups", async (iid) => {
++  expect(await linksOf(iid)).toEqual({ epics: [], issues: [], commits: [] });
++});
++
++test("the_logged_out_row_is_refused_every_time", async () => {
++  vi.useFakeTimers();
++  const linked = script();
++  const refused = {
++    ok: true,
++    value: {
++      kind: "notLoggedIn",
++      detail:
++        "gitlab.example: No token found (checked config file, keyring, and environment variables).",
++    },
++  };
++  expect(await asked(linked, 634)).toEqual(refused);
++  expect(await asked(linked, 634)).toEqual(refused);
++});
++
++test("the_failing_row_fails_once_then_reads", async () => {
++  vi.useFakeTimers();
++  const linked = script();
++
++  expect(await asked(linked, 636)).toEqual({
++    ok: true,
++    value: { kind: "failed", message: "glab timed out" },
++  });
++  const rich = { ok: true, value: { kind: "read", links: await linksOf(640) } };
++  expect(await asked(linked, 636)).toEqual(rich);
++  expect(await asked(linked, 636)).toEqual(rich);
++  expect(await asked(script(), 636)).toMatchObject({ value: { kind: "failed" } });
++});
++
++test("each_ask_is_logged_before_its_answer", async () => {
++  vi.useFakeTimers();
++  const lines: string[] = [];
++  let answer: unknown = null;
++  void script(lines)
++    .readLinks(branded(637, isMergeRequestIid, "iid"))
++    .then((result) => {
++      answer = result;
++    });
++
++  expect(lines).toEqual(['mergeRequests.fixture_links {"iid":637}']);
++  await vi.advanceTimersByTimeAsync(PAUSE_MS - 1);
++  expect(answer).toBeNull();
++  await vi.advanceTimersByTimeAsync(1);
++  expect(answer).toEqual({
++    ok: true,
++    value: { kind: "read", links: { epics: [], issues: [], commits: [] } },
++  });
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequestLinks.ts b/frontend/src/ipc/fixtureMergeRequestLinks.ts
+new file mode 100644
+index 0000000..9c19e38
+--- /dev/null
++++ b/frontend/src/ipc/fixtureMergeRequestLinks.ts
+@@ -0,0 +1,113 @@
++import type * as Generated from "./bindings";
++import { toLinksReply } from "./descriptionDomain";
++import { pause } from "./fixture";
++import { TIMED_OUT } from "./fixtureGitLab";
++import { LOGGED_OUT_DETAIL, ORIGIN } from "./fixtureMergeRequestData";
++import type { Log } from "./log";
++import type { MergeRequestSource } from "./MergeRequestSource";
++
++const RICH_LINKS_IID = 640;
++const FAILS_ONCE_IID = 636;
++const LOGGED_OUT_IID = 634;
++const LINKS_PAUSE_MS = 400;
++
++function onServer(path: string): string {
++  return `https://gitlab.example/${path}`;
++}
++
++function epics(): Generated.LinkedEpic[] {
++  return [
++    {
++      reference: "&3",
++      page: onServer("groups/taskboard/-/epics/3"),
++      shown: { title: "Board redesign", closed: false },
++    },
++    {
++      reference: "&4",
++      page: onServer("groups/taskboard/-/epics/4"),
++      shown: { title: "Old board", closed: true },
++    },
++    { reference: "design&2", page: onServer("groups/design/-/epics/2"), shown: null },
++  ];
++}
++
++function issues(): Generated.LinkedIssue[] {
++  const board: Generated.LinkedParent = {
++    reference: "&3",
++    title: "Board redesign",
++    page: onServer("groups/taskboard/-/work_items/3"),
++  };
++  const snooze: Generated.LinkedParent = {
++    reference: "#12",
++    title: "Snooze a reminder",
++    page: `${ORIGIN}/-/work_items/12`,
++  };
++  return [
++    {
++      reference: snooze.reference,
++      page: snooze.page,
++      shown: { title: snooze.title, closed: false, parent: board },
++    },
++    {
++      reference: "#13",
++      page: `${ORIGIN}/-/work_items/13`,
++      shown: { title: "Write the snooze test", closed: false, parent: snooze },
++    },
++    {
++      reference: "other/lib#5",
++      page: onServer("other/lib/-/issues/5"),
++      shown: { title: "Fix date parsing", closed: true, parent: null },
++    },
++    { reference: "secret/vault#9", page: onServer("secret/vault/-/issues/9"), shown: null },
++  ];
++}
++
++function commits(): Generated.LinkedCommit[] {
++  return [
++    {
++      reference: "fa3335f3",
++      page: `${ORIGIN}/-/commit/fa3335f304f9482273040a55bc9386ddffc6a59f`,
++      title: "Backfill due dates",
++    },
++    {
++      reference: "a1b2c3d4…e5f6a7b8",
++      page: `${ORIGIN}/-/compare/a1b2c3d4...e5f6a7b8`,
++      title: "Commits a1b2c3d4 through e5f6a7b8",
++    },
++    {
++      reference: "secret/vault@0badc0de",
++      page: onServer("secret/vault/-/commit/0badc0de"),
++      title: null,
++    },
++  ];
++}
++
++function fixtureLinks(iid: number, firstAsk: boolean): Generated.LinksReply {
++  const rich: Generated.LinksReply = {
++    kind: "read",
++    links: { epics: epics(), issues: issues(), commits: commits() },
++  };
++  switch (iid) {
++    case RICH_LINKS_IID:
++      return rich;
++    case FAILS_ONCE_IID:
++      return firstAsk ? { kind: "failed", message: TIMED_OUT } : rich;
++    case LOGGED_OUT_IID:
++      return { kind: "notLoggedIn", detail: LOGGED_OUT_DETAIL };
++    default:
++      return { kind: "read", links: { epics: [], issues: [], commits: [] } };
++  }
++}
++
++export function linksScript(log: Log): Pick<MergeRequestSource, "readLinks"> {
++  const asked = new Set<number>();
++  return {
++    async readLinks(iid) {
++      log.info("mergeRequests.fixture_links", { iid });
++      const firstAsk = !asked.has(iid);
++      asked.add(iid);
++      await pause(LINKS_PAUSE_MS);
++      return { ok: true, value: toLinksReply(fixtureLinks(iid, firstAsk)) };
++    },
++  };
++}
+diff --git a/frontend/src/ipc/fixtureMergeRequests.ts b/frontend/src/ipc/fixtureMergeRequests.ts
+index d1082e3..615f20a 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.ts
+@@ -16,6 +16,7 @@ import {
+ } from "./fixtureMergeRequestData";
+ import { descriptionScript } from "./fixtureMergeRequestDescriptions";
+ import { discussionsScript } from "./fixtureMergeRequestDiscussions";
++import { linksScript } from "./fixtureMergeRequestLinks";
+ import { fixtureJobLog } from "./fixtureMergeRequestLogs";
+ import { peopleScript } from "./fixtureMergeRequestPeople";
+ import type { Log } from "./log";
+@@ -83,6 +84,10 @@ function isScript(name: string): name is MergeRequestScript {
+   return Object.hasOwn(SCRIPTS, name);
+ }
+ 
++function fixtureProject(script: MergeRequestScript | null): Generated.GitLabProject {
++  return script === null ? { kind: "none" } : { kind: "found", repository: FIXTURE_REPOSITORY };
++}
++
+ function shownScript(log: Log, search: string): MergeRequestScript | null {
+   const asked = new URLSearchParams(search).get("mr");
+   if (asked === null || asked === "") {
+@@ -251,11 +256,7 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
+   let loads = 0;
+   return {
+     async findGitLabProject() {
+-      return {
+-        ok: true,
+-        value:
+-          script === null ? { kind: "none" } : { kind: "found", repository: FIXTURE_REPOSITORY },
+-      };
++      return { ok: true, value: fixtureProject(script) };
+     },
+     async listMergeRequests(onPage, onChecked) {
+       if (script === null) {
+@@ -284,5 +285,6 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
+     ...discussionsScript(log, LISTED_ROWS),
+     ...peopleScript(log, LISTED_ROWS),
+     ...descriptionScript(log, LISTED_ROWS),
++    ...linksScript(log),
+   };
+ }
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 74e8960..77aba68 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -77,6 +77,12 @@ export type {
+   DescriptionLink,
+   DescriptionReply,
+   DescriptionRow,
++  DescriptionLinks,
++  LinkedCommit,
++  LinkedEpic,
++  LinkedIssue,
++  LinkedParent,
++  LinksReply,
+ } from "./descriptionDomain";
+ export type {
+   CheckedRow,
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index f5de709..1989202 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -17,6 +17,7 @@ const commands = vi.hoisted(() => ({
+   searchPeople: vi.fn(),
+   changePeople: vi.fn(),
+   readDescription: vi.fn(),
++  readLinks: vi.fn(),
+ }));
+ 
+ vi.mock("./bindings", () => ({ commands }));
+@@ -424,6 +425,40 @@ test("readDescription_throws_on_a_linked_page_that_is_not_http", async () => {
+   ).rejects.toThrow('link.page must be an http or https address, got "javascript:x"');
+ });
+ 
++test("readLinks_calls_the_command_with_the_iid_and_brands_the_pages", async () => {
++  const commit: Generated.LinkedCommit = {
++    reference: "fa3335f3",
++    page: "http://gitlab.example/g/p/-/commit/fa3335f3",
++    title: null,
++  };
++  const epic: Generated.LinkedEpic = {
++    reference: "&3",
++    page: "https://gitlab.example/groups/g/-/epics/3",
++    shown: null,
++  };
++  const reply: Generated.LinksReply = {
++    kind: "read",
++    links: { epics: [epic], issues: [], commits: [commit] },
++  };
++  commands.readLinks.mockResolvedValue({ status: "ok", data: reply });
++  const source = createTauriMergeRequests();
++
++  expect(await source.readLinks(branded(12, isMergeRequestIid, "iid"))).toEqual({
++    ok: true,
++    value: reply,
++  });
++  expect(commands.readLinks).toHaveBeenCalledWith(12);
++
++  const unbranded: Generated.LinksReply = {
++    kind: "read",
++    links: { epics: [], issues: [], commits: [{ ...commit, page: "ftp://x" }] },
++  };
++  commands.readLinks.mockResolvedValue({ status: "ok", data: unbranded });
++  await expect(source.readLinks(branded(12, isMergeRequestIid, "iid"))).rejects.toThrow(
++    'links.commits[0].page must be an http or https address, got "ftp://x"',
++  );
++});
++
+ test("uploadedImage_is_the_picture_scheme_address_of_the_key", () => {
+   expect(createTauriMergeRequests().uploadedImage(UPLOAD)).toBe(
+     "yamt-picture://localhost/upload~00000000000000000000000000000001",
+@@ -552,6 +587,7 @@ test.each([
+   ["searchPeople", { kind: "WorkerStopped" }],
+   ["changePeople", { kind: "WorkerStopped" }],
+   ["readDescription", { kind: "WorkerStopped" }],
++  ["readLinks", { kind: "WorkerStopped" }],
+ ] as const)("a %s failure comes back unchanged", async (name, failure) => {
+   commands[name].mockResolvedValue({ status: "error", error: failure });
+   const source = createTauriMergeRequests();
+@@ -569,6 +605,7 @@ test.each([
+         username: "anna",
+       }),
+     readDescription: () => source.readDescription(branded(1, isMergeRequestIid, "iid")),
++    readLinks: () => source.readLinks(branded(1, isMergeRequestIid, "iid")),
+   };
+   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
+ });
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index 31f7cc7..cf36346 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -1,7 +1,7 @@
+ import { Channel, convertFileSrc } from "@tauri-apps/api/core";
+ 
+ import { commands, type ListMessage } from "./bindings";
+-import { toDescriptionReply } from "./descriptionDomain";
++import { toDescriptionReply, toLinksReply } from "./descriptionDomain";
+ import type { SourceResult } from "./domain";
+ import {
+   toCheckedRow,
+@@ -81,11 +81,17 @@ function peopleCalls(): Pick<MergeRequestSource, "searchPeople" | "changePeople"
+   };
+ }
+ 
+-function descriptionCalls(): Pick<MergeRequestSource, "readDescription" | "uploadedImage"> {
++function descriptionCalls(): Pick<
++  MergeRequestSource,
++  "readDescription" | "readLinks" | "uploadedImage"
++> {
+   return {
+     async readDescription(iid) {
+       return converted(toResult(await commands.readDescription(iid)), toDescriptionReply);
+     },
++    async readLinks(iid) {
++      return converted(toResult(await commands.readLinks(iid)), toLinksReply);
++    },
+     uploadedImage: uploadedPicture,
+   };
+ }
+diff --git a/frontend/src/ui/mergeRequestLinks.test.ts b/frontend/src/ui/mergeRequestLinks.test.ts
+new file mode 100644
+index 0000000..db93964
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestLinks.test.ts
+@@ -0,0 +1,329 @@
++import { afterEach, beforeAll, expect, test, vi } from "vitest";
++import { effectScope, nextTick, shallowRef, type ComputedRef, type ShallowRef } from "vue";
++
++import {
++  createFixtureCompareSource,
++  isMergeRequestIid,
++  log,
++  type DescriptionLinks,
++  type LinksReply,
++  type MergeRequestIid,
++  type SourceFailure,
++  type SourceResult,
++} from "../ipc";
++import {
++  createLinks,
++  linksOf,
++  useRowLinks,
++  type LinkQueue,
++  type LinksLoad,
++} from "./mergeRequestLinks";
++
++type Call = {
++  readonly iid: MergeRequestIid;
++  readonly answer: (result: SourceResult<LinksReply>) => void;
++  readonly fail: (error: unknown) => void;
++};
++
++type Rig = { readonly queue: LinkQueue; readonly calls: Call[] };
++
++type Box = {
++  readonly open: ShallowRef<boolean>;
++  readonly load: ComputedRef<LinksLoad | undefined>;
++  readonly stop: () => void;
++};
++
++const MICROTASKS = 10;
++const FIXTURE_PAUSE_MS = 400;
++const STOPPED: SourceFailure = { kind: "WorkerStopped" };
++const LOADING: LinksLoad = { kind: "loading" };
++const NONE: DescriptionLinks = { epics: [], issues: [], commits: [] };
++
++let RICH: DescriptionLinks = NONE;
++
++beforeAll(async () => {
++  vi.useFakeTimers();
++  const answer = createFixtureCompareSource(log, "", {}).readLinks(iid(640));
++  await vi.advanceTimersByTimeAsync(FIXTURE_PAUSE_MS);
++  const result = await answer;
++  vi.useRealTimers();
++  if (!result.ok || result.value.kind !== "read") {
++    throw new Error("the fixture's !640 did not read");
++  }
++  RICH = result.value.links;
++});
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is not an iid`);
++  }
++  return value;
++}
++
++function rig(): Rig {
++  const calls: Call[] = [];
++  const source = {
++    ...createFixtureCompareSource(log, "", {}),
++    readLinks: (asked: MergeRequestIid) =>
++      new Promise<SourceResult<LinksReply>>((resolve, reject) => {
++        calls.push({ iid: asked, answer: resolve, fail: reject });
++      }),
++  };
++  return { queue: createLinks({ source }), calls };
++}
++
++async function settled(): Promise<void> {
++  for (let turn = 0; turn < MICROTASKS; turn += 1) {
++    await Promise.resolve();
++  }
++}
++
++function callAt(live: Rig, index: number): Call {
++  const call = live.calls[index];
++  if (call === undefined) {
++    throw new Error(`no call ${index}; ${live.calls.length} made`);
++  }
++  return call;
++}
++
++async function answered(live: Rig, index: number, links: DescriptionLinks = RICH): Promise<void> {
++  callAt(live, index).answer({ ok: true, value: { kind: "read", links } });
++  await settled();
++}
++
++function entry(live: Rig, value: number): LinksLoad | undefined {
++  return live.queue.links.value.get(iid(value));
++}
++
++function asked(live: Rig): number[] {
++  return live.calls.map((call) => call.iid);
++}
++
++function box(live: Rig, value: number): Box {
++  const open = shallowRef(false);
++  const scope = effectScope();
++  const load = scope.run(() =>
++    useRowLinks(
++      linksOf(live.queue),
++      () => iid(value),
++      () => open.value,
++    ),
++  );
++  if (load === undefined) {
++    throw new Error("the scope ran nothing");
++  }
++  return { open, load, stop: () => scope.stop() };
++}
++
++test("only_a_hovered_row_is_asked", async () => {
++  const live = rig();
++  const closed = box(live, 640);
++  await nextTick();
++  await settled();
++  expect(live.calls).toEqual([]);
++  expect(live.queue.links.value.size).toBe(0);
++  expect(closed.load.value).toBeUndefined();
++
++  live.queue.askLinks(iid(639));
++  await settled();
++  expect(asked(live)).toEqual([639]);
++  expect(entry(live, 640)).toBeUndefined();
++  closed.stop();
++});
++
++test("a_box_opening_asks_and_shows_loading_then_the_answer", async () => {
++  const live = rig();
++  const shown = box(live, 640);
++  shown.open.value = true;
++  await nextTick();
++  expect(asked(live)).toEqual([640]);
++  expect(shown.load.value).toEqual(LOADING);
++
++  await answered(live, 0);
++  expect(shown.load.value).toEqual({ kind: "read", links: RICH });
++  shown.stop();
++});
++
++test("a_read_or_loading_row_is_never_asked_again", async () => {
++  const live = rig();
++  const shown = box(live, 640);
++  shown.open.value = true;
++  await nextTick();
++  shown.open.value = false;
++  await nextTick();
++  shown.open.value = true;
++  await nextTick();
++  live.queue.askLinks(iid(640));
++  expect(asked(live)).toEqual([640]);
++
++  await answered(live, 0);
++  shown.open.value = false;
++  await nextTick();
++  shown.open.value = true;
++  await nextTick();
++  live.queue.askLinks(iid(640));
++  await settled();
++  expect(asked(live)).toEqual([640]);
++  expect(entry(live, 640)).toEqual({ kind: "read", links: RICH });
++  shown.stop();
++});
++
++test("asks_run_one_at_a_time_newest_first", async () => {
++  const live = rig();
++  live.queue.askLinks(iid(640));
++  live.queue.askLinks(iid(639));
++  live.queue.askLinks(iid(637));
++  await settled();
++  expect(asked(live)).toEqual([640]);
++  expect([entry(live, 639), entry(live, 637)]).toEqual([LOADING, LOADING]);
++
++  await answered(live, 0);
++  expect(asked(live)).toEqual([640, 637]);
++  await answered(live, 1, NONE);
++  expect(asked(live)).toEqual([640, 637, 639]);
++  await answered(live, 2, NONE);
++  expect(live.calls).toHaveLength(3);
++  expect(entry(live, 637)).toEqual({ kind: "read", links: NONE });
++});
++
++test("a_failure_is_asked_again_at_the_next_open", async () => {
++  const live = rig();
++  const failing = box(live, 636);
++  failing.open.value = true;
++  await nextTick();
++  callAt(live, 0).answer({ ok: false, failure: STOPPED });
++  await settled();
++  expect(failing.load.value).toEqual({ kind: "failed", cause: STOPPED });
++
++  failing.open.value = false;
++  await nextTick();
++  failing.open.value = true;
++  await nextTick();
++  expect(asked(live)).toEqual([636, 636]);
++  expect(failing.load.value).toEqual(LOADING);
++  callAt(live, 1).answer({ ok: true, value: { kind: "glabMissing" } });
++  await settled();
++  expect(failing.load.value).toEqual({ kind: "refused", reply: { kind: "glabMissing" } });
++
++  live.queue.askLinks(iid(636));
++  expect(asked(live)).toEqual([636, 636, 636]);
++  await answered(live, 2);
++  expect(failing.load.value).toEqual({ kind: "read", links: RICH });
++  failing.stop();
++});
++
++test("an_answer_after_a_refresh_is_dropped", async () => {
++  const live = rig();
++  live.queue.askLinks(iid(640));
++  live.queue.askLinks(iid(639));
++  live.queue.dropped();
++  expect(live.queue.links.value.size).toBe(0);
++
++  await answered(live, 0);
++  expect(live.queue.links.value.size).toBe(0);
++  expect(asked(live)).toEqual([640]);
++
++  live.queue.askLinks(iid(637));
++  await settled();
++  expect(asked(live)).toEqual([640, 637]);
++});
++
++test("an_ask_after_a_refresh_waits_for_the_call_in_flight", async () => {
++  const live = rig();
++  live.queue.askLinks(iid(640));
++  live.queue.dropped();
++  live.queue.askLinks(iid(640));
++  await settled();
++  expect(asked(live)).toEqual([640]);
++  expect(entry(live, 640)).toEqual(LOADING);
++
++  await answered(live, 0, NONE);
++  expect(entry(live, 640)).toEqual(LOADING);
++  expect(asked(live)).toEqual([640, 640]);
++  await answered(live, 1);
++  expect(entry(live, 640)).toEqual({ kind: "read", links: RICH });
++});
++
++test("a_box_left_open_across_a_refresh_asks_again", async () => {
++  const live = rig();
++  const shown = box(live, 640);
++  const other = box(live, 639);
++  shown.open.value = true;
++  other.open.value = true;
++  await nextTick();
++  await answered(live, 0);
++  await answered(live, 1);
++  other.open.value = false;
++  await nextTick();
++
++  live.queue.dropped();
++  await nextTick();
++  expect(asked(live)).toEqual([640, 639, 640]);
++  expect(shown.load.value).toEqual(LOADING);
++  expect(other.load.value).toBeUndefined();
++  shown.stop();
++  other.stop();
++});
++
++test("a_refusal_is_refused_and_a_thrown_call_is_failed_with_its_cause", async () => {
++  const live = rig();
++  live.queue.askLinks(iid(634));
++  const notLoggedIn: LinksReply = { kind: "notLoggedIn", detail: "gitlab.example: no token" };
++  callAt(live, 0).answer({ ok: true, value: notLoggedIn });
++  await settled();
++  expect(entry(live, 634)).toEqual({ kind: "refused", reply: notLoggedIn });
++
++  live.queue.askLinks(iid(636));
++  callAt(live, 1).fail(new Error("link.page must be an http or https address"));
++  await settled();
++  expect(entry(live, 636)).toEqual({
++    kind: "failed",
++    cause: { kind: "Unexpected", message: "link.page must be an http or https address" },
++  });
++});
++
++test("the_log_line_names_the_kind_and_counts_never_text", async () => {
++  const live = rig();
++  const info = vi.spyOn(log, "info");
++  vi.spyOn(performance, "now")
++    .mockReturnValueOnce(1000)
++    .mockReturnValueOnce(1250.4)
++    .mockReturnValueOnce(2000)
++    .mockReturnValueOnce(2008)
++    .mockReturnValueOnce(3000)
++    .mockReturnValueOnce(3001);
++  live.queue.askLinks(iid(640));
++  await answered(live, 0);
++  live.queue.askLinks(iid(634));
++  callAt(live, 1).answer({ ok: true, value: { kind: "failed", message: "glab timed out" } });
++  await settled();
++  live.queue.askLinks(iid(636));
++  callAt(live, 2).fail(new Error("unreadable"));
++  await settled();
++
++  expect(info.mock.calls).toEqual([
++    [
++      "mergeRequests.links_read",
++      { iid: 640, kind: "read", epics: 3, issues: 4, commits: 3, hidden: 3, ms: 250 },
++    ],
++    [
++      "mergeRequests.links_read",
++      { iid: 634, kind: "failed", epics: 0, issues: 0, commits: 0, hidden: 0, ms: 8 },
++    ],
++    [
++      "mergeRequests.links_read",
++      { iid: 636, kind: "thrown", epics: 0, issues: 0, commits: 0, hidden: 0, ms: 1 },
++    ],
++  ]);
++  const logged = JSON.stringify(info.mock.calls);
++  for (const line of [...RICH.epics, ...RICH.issues, ...RICH.commits]) {
++    expect(logged).not.toContain(line.reference);
++  }
++  for (const secret of ["Board redesign", "Backfill due dates", "gitlab.example", "timed out"]) {
++    expect(logged).not.toContain(secret);
++  }
++});
+diff --git a/frontend/src/ui/mergeRequestLinks.ts b/frontend/src/ui/mergeRequestLinks.ts
+new file mode 100644
+index 0000000..1c7153c
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestLinks.ts
+@@ -0,0 +1,145 @@
++import { computed, shallowRef, watch, type ComputedRef, type ShallowRef } from "vue";
++
++import {
++  log,
++  type DescriptionLinks,
++  type LinksReply,
++  type MergeRequestIid,
++  type MergeRequestSource,
++} from "../ipc";
++import { setRow } from "./mergeRequestActions";
++import { attempt, type Outcome, type ProblemCause } from "./problem";
++
++export type LinksLoad =
++  | { readonly kind: "loading" }
++  | { readonly kind: "read"; readonly links: DescriptionLinks }
++  | { readonly kind: "refused"; readonly reply: Exclude<LinksReply, { readonly kind: "read" }> }
++  | { readonly kind: "failed"; readonly cause: ProblemCause };
++export type Links = {
++  /** Each asked row's links while this list stands; no entry: not asked since the list was last replaced. */
++  readonly links: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, LinksLoad>>>;
++  /** A row's links box opened, or its Retry: asks GitLab unless the row's entry is loading or read. */
++  askLinks(iid: MergeRequestIid): void;
++};
++export type LinkQueue = Links & {
++  /** The list was replaced: every entry, every queued ask and any answer in flight are dropped. */
++  dropped(): void;
++};
++
++type Queue = {
++  readonly source: MergeRequestSource;
++  readonly entries: ShallowRef<ReadonlyMap<MergeRequestIid, LinksLoad>>;
++  /** The asks not sent yet, the newest first. */
++  queued: readonly MergeRequestIid[];
++  running: boolean;
++  generation: number;
++};
++
++function loadOf(outcome: Outcome<LinksReply>): LinksLoad {
++  if (!outcome.ok) {
++    return { kind: "failed", cause: outcome.cause };
++  }
++  const reply = outcome.value;
++  return reply.kind === "read" ? { kind: "read", links: reply.links } : { kind: "refused", reply };
++}
++
++function loggedFields(
++  iid: MergeRequestIid,
++  outcome: Outcome<LinksReply>,
++  ms: number,
++): Record<string, string | number> {
++  const reply = outcome.ok ? outcome.value : null;
++  const { epics, issues, commits } =
++    reply?.kind === "read" ? reply.links : { epics: [], issues: [], commits: [] };
++  const hidden =
++    epics.filter((epic) => epic.shown === null).length +
++    issues.filter((issue) => issue.shown === null).length +
++    commits.filter((commit) => commit.title === null).length;
++  return {
++    iid,
++    kind: reply?.kind ?? "thrown",
++    epics: epics.length,
++    issues: issues.length,
++    commits: commits.length,
++    hidden,
++    ms,
++  };
++}
++
++async function send(queue: Queue): Promise<void> {
++  const [iid, ...rest] = queue.queued;
++  if (queue.running || iid === undefined) {
++    return;
++  }
++  queue.queued = rest;
++  queue.running = true;
++  const { generation } = queue;
++  const started = performance.now();
++  const outcome = await attempt(() => queue.source.readLinks(iid));
++  queue.running = false;
++  const ms = Math.round(performance.now() - started);
++  log.info("mergeRequests.links_read", loggedFields(iid, outcome, ms));
++  if (generation === queue.generation) {
++    setRow(queue.entries, iid, loadOf(outcome));
++  }
++  await send(queue);
++}
++
++function asked(queue: Queue, iid: MergeRequestIid): void {
++  const kind = queue.entries.value.get(iid)?.kind;
++  if (kind === "loading" || kind === "read") {
++    return;
++  }
++  setRow(queue.entries, iid, { kind: "loading" });
++  queue.queued = [iid, ...queue.queued];
++  void send(queue);
++}
++
++function dropped(queue: Queue): void {
++  queue.generation += 1;
++  queue.entries.value = new Map();
++  queue.queued = [];
++}
++
++export function linksOf(queue: LinkQueue): Links {
++  return {
++    links: queue.links,
++    askLinks: (iid) => {
++      queue.askLinks(iid);
++    },
++  };
++}
++
++/** A row's links box: its entry, asked when the box opens and when the entry vanishes while the box is open. */
++export function useRowLinks(
++  links: Links,
++  iid: () => MergeRequestIid,
++  open: () => boolean,
++): ComputedRef<LinksLoad | undefined> {
++  const load = computed(() => links.links.value.get(iid()));
++  watch([open, () => load.value === undefined], ([isOpen]) => {
++    if (isOpen) {
++      links.askLinks(iid());
++    }
++  });
++  return load;
++}
++
++export function createLinks(deps: { readonly source: MergeRequestSource }): LinkQueue {
++  const queue: Queue = {
++    source: deps.source,
++    entries: shallowRef<ReadonlyMap<MergeRequestIid, LinksLoad>>(new Map()),
++    queued: [],
++    running: false,
++    generation: 0,
++  };
++  return {
++    links: queue.entries,
++    askLinks: (iid) => {
++      asked(queue, iid);
++    },
++    dropped: () => {
++      dropped(queue);
++    },
++  };
++}
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index fd75f07..1471bc4 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -206,6 +206,10 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+       value: { kind: "read", description: { blocks: [] } },
+     }),
+     uploadedImage: (key) => key,
++    readLinks: async () => ({
++      ok: true,
++      value: { kind: "read", links: { epics: [], issues: [], commits: [] } },
++    }),
+     ...edit,
+   };
+   const screen = shallowRef<Screen>({ kind: "files" });
+@@ -510,6 +514,47 @@ test("a_failed_first_load_drops_the_details_so_the_next_load_asks_its_rows_again
+   expect(live.slice.discussions.value.get(iid(open[0] ?? 0))).toEqual({ kind: "loading" });
+ });
+ 
++test("a_refresh_drops_every_rows_links", async () => {
++  const live = rig();
++  await loaded(live);
++  live.slice.askLinks(iid(640));
++  await settled();
++  live.slice.askLinks(iid(639));
++  await settled();
++  const read = { kind: "read", links: { epics: [], issues: [], commits: [] } };
++  expect([...live.slice.links.value.values()]).toEqual([read, read]);
++
++  const reloading = live.slice.refresh();
++  loadAt(live, 1).send({ me: "sam", rows: ROWS });
++  expect(live.slice.links.value.size).toBe(2);
++  loadAt(live, 1).end({ ok: true, value: { kind: "failed", message: "502" } });
++  await reloading;
++  expect(live.slice.links.value.size).toBe(2);
++
++  const swapping = live.slice.refresh();
++  loadAt(live, 2).send({ me: "sam", rows: ROWS });
++  loadAt(live, 2).end(LOADED);
++  await swapping;
++  expect(live.slice.links.value.size).toBe(0);
++});
++
++test("a_failed_first_load_drops_the_links", async () => {
++  const live = rig();
++  live.slice.show();
++  loadAt(live, 0).send({ me: "sam", rows: ROWS.slice(0, 2) });
++  live.slice.askLinks(iid(640));
++  await settled();
++  expect(live.slice.links.value.get(iid(640))?.kind).toBe("read");
++
++  loadAt(live, 0).end({ ok: false, failure: STOPPED });
++  await settled();
++  expect(live.slice.links.value.size).toBe(0);
++});
++
++test("the_slice_holds_only_the_public_part_of_the_link_queue", () => {
++  expect("dropped" in rig().slice).toBe(false);
++});
++
+ test("switching_to_full_asks_one_round_and_only_a_show_after_30_s_reloads_and_asks_it_again", async () => {
+   const live = rig();
+   live.mode.value = "off";
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 3ed0ae4..ba1b860 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -23,6 +23,7 @@ import {
+ } from "./mergeRequestDiscussions";
+ import { createDueDates, type DueDates } from "./mergeRequestDueDates";
+ import { createJobLogs, type JobLogs } from "./mergeRequestJobLogs";
++import { createLinks, linksOf, type LinkQueue, type Links } from "./mergeRequestLinks";
+ import { createPeopleChanges, type PeopleChanges } from "./mergeRequestPeople";
+ import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
+ import { loadList, type ListLoad, type ListState } from "./mergeRequestsList";
+@@ -50,6 +51,7 @@ export type MergeRequests = RowActions &
+   JobLogs &
+   Descriptions &
+   Discussions &
++  Links &
+   Shown &
+   PeopleChanges & {
+     readonly project: Readonly<ShallowRef<GitLabProject>>;
+@@ -91,6 +93,7 @@ type State = Deps &
+     readonly dueDates: DueDates;
+     readonly rowActions: RowActions;
+     readonly discussionQueue: DiscussionQueue;
++    readonly linkQueue: LinkQueue;
+   };
+ 
+ function withPeople(state: State, iid: MergeRequestIid, people: Partial<MergeRequestPeople>): void {
+@@ -187,6 +190,7 @@ function createState(deps: Deps): State {
+     dueDates: createDueDates(repository, deps.storage),
+     rowActions: createRowActions(deps),
+     discussionQueue: createDiscussions({ ...deps, mode, rows: () => rows.value }),
++    linkQueue: createLinks(deps),
+     shown: null,
+     running: null,
+   };
+@@ -248,5 +252,6 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     ...createJobLogs(deps),
+     ...createDescriptions(deps),
+     ...discussionsOf(state.discussionQueue),
++    ...linksOf(state.linkQueue),
+   };
+ }
+diff --git a/frontend/src/ui/mergeRequestsList.ts b/frontend/src/ui/mergeRequestsList.ts
+index a855d0c..e82f33b 100644
+--- a/frontend/src/ui/mergeRequestsList.ts
++++ b/frontend/src/ui/mergeRequestsList.ts
+@@ -10,6 +10,7 @@ import type {
+ import { merged, rechecked } from "../mergeRequests";
+ import type { DiscussionQueue } from "./mergeRequestDiscussions";
+ import type { DueDates } from "./mergeRequestDueDates";
++import type { LinkQueue } from "./mergeRequestLinks";
+ import { listFailureText } from "./mergeRequestsText";
+ import { attempt, type Problem } from "./problem";
+ 
+@@ -34,6 +35,7 @@ export type ListState = {
+   readonly listedAt: ShallowRef<number | null>;
+   readonly dueDates: Pick<DueDates, "keepOnly">;
+   readonly discussionQueue: Pick<DiscussionQueue, "listed" | "replaced">;
++  readonly linkQueue: Pick<LinkQueue, "dropped">;
+   shown: Load | null;
+   running: Load | null;
+ };
+@@ -61,6 +63,7 @@ function ended(state: ListState, load: Load, end: ListEnd): void {
+     state.me.value = load.me;
+     state.shown = load;
+     state.discussionQueue.replaced(state.rows.value);
++    state.linkQueue.dropped();
+   }
+   if (end.kind === "loaded") {
+     state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
+@@ -104,6 +107,7 @@ export async function loadList(state: ListState): Promise<void> {
+     state.rows.value = [];
+     state.shown = null;
+     state.discussionQueue.replaced([]);
++    state.linkQueue.dropped();
+   }
+   state.report({ action: "mergeRequests", step: "list", cause: outcome.cause });
+ }
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index f9bf99d..dcd322e 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -52,7 +52,8 @@ export type MergeRequestStep =
+   | "searchPeople"
+   | "changePeople"
+   | "description"
+-  | "link";
++  | "link"
++  | "links";
+ 
+ export type Problem =
+   | { readonly action: "list"; readonly cause: ProblemCause }
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index ba3cabb..4c1e22e 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -334,6 +334,7 @@ test.each([
+   ],
+   ["description", "Could not read the description: yamt's worker stopped; try again."],
+   ["link", "Could not open the link: yamt's worker stopped; try again."],
++  ["links", "Could not read the links: yamt's worker stopped; try again."],
+ ] as const)("a failed merge-request call at %s says what failed", (step, words) => {
+   expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
+ });
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index a59f715..32d9945 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -87,6 +87,7 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
+   changePeople: "Could not change the merge request's people",
+   description: "Could not read the description",
+   link: "Could not open the link",
++  links: "Could not read the links",
+ };
+ 
+ const FIXED_ATTEMPT_WORDS: Readonly<

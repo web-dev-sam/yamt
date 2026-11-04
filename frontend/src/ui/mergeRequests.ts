@@ -23,6 +23,7 @@ import {
 } from "./mergeRequestDiscussions";
 import { createDueDates, type DueDates } from "./mergeRequestDueDates";
 import { createJobLogs, type JobLogs } from "./mergeRequestJobLogs";
+import { createLinks, linksOf, type LinkQueue, type Links } from "./mergeRequestLinks";
 import { createPeopleChanges, type PeopleChanges } from "./mergeRequestPeople";
 import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
 import { loadList, type ListLoad, type ListState } from "./mergeRequestsList";
@@ -50,6 +51,7 @@ export type MergeRequests = RowActions &
   JobLogs &
   Descriptions &
   Discussions &
+  Links &
   Shown &
   PeopleChanges & {
     readonly project: Readonly<ShallowRef<GitLabProject>>;
@@ -91,6 +93,7 @@ type State = Deps &
     readonly dueDates: DueDates;
     readonly rowActions: RowActions;
     readonly discussionQueue: DiscussionQueue;
+    readonly linkQueue: LinkQueue;
   };
 
 function withPeople(state: State, iid: MergeRequestIid, people: Partial<MergeRequestPeople>): void {
@@ -187,6 +190,7 @@ function createState(deps: Deps): State {
     dueDates: createDueDates(repository, deps.storage),
     rowActions: createRowActions(deps),
     discussionQueue: createDiscussions({ ...deps, mode, rows: () => rows.value }),
+    linkQueue: createLinks(deps),
     shown: null,
     running: null,
   };
@@ -248,5 +252,6 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     ...createJobLogs(deps),
     ...createDescriptions(deps),
     ...discussionsOf(state.discussionQueue),
+    ...linksOf(state.linkQueue),
   };
 }

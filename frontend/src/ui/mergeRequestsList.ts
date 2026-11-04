@@ -10,6 +10,7 @@ import type {
 import { merged, rechecked } from "../mergeRequests";
 import type { DiscussionQueue } from "./mergeRequestDiscussions";
 import type { DueDates } from "./mergeRequestDueDates";
+import type { LinkQueue } from "./mergeRequestLinks";
 import { listFailureText } from "./mergeRequestsText";
 import { attempt, type Problem } from "./problem";
 
@@ -34,6 +35,7 @@ export type ListState = {
   readonly listedAt: ShallowRef<number | null>;
   readonly dueDates: Pick<DueDates, "keepOnly">;
   readonly discussionQueue: Pick<DiscussionQueue, "listed" | "replaced">;
+  readonly linkQueue: Pick<LinkQueue, "dropped">;
   shown: Load | null;
   running: Load | null;
 };
@@ -61,6 +63,7 @@ function ended(state: ListState, load: Load, end: ListEnd): void {
     state.me.value = load.me;
     state.shown = load;
     state.discussionQueue.replaced(state.rows.value);
+    state.linkQueue.dropped();
   }
   if (end.kind === "loaded") {
     state.dueDates.keepOnly(new Set(state.rows.value.map((row) => row.iid)));
@@ -104,6 +107,7 @@ export async function loadList(state: ListState): Promise<void> {
     state.rows.value = [];
     state.shown = null;
     state.discussionQueue.replaced([]);
+    state.linkQueue.dropped();
   }
   state.report({ action: "mergeRequests", step: "list", cause: outcome.cause });
 }

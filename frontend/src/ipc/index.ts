@@ -77,6 +77,12 @@ export type {
   DescriptionLink,
   DescriptionReply,
   DescriptionRow,
+  DescriptionLinks,
+  LinkedCommit,
+  LinkedEpic,
+  LinkedIssue,
+  LinkedParent,
+  LinksReply,
 } from "./descriptionDomain";
 export type {
   CheckedRow,

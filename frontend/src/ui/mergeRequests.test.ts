@@ -206,6 +206,10 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
       value: { kind: "read", description: { blocks: [] } },
     }),
     uploadedImage: (key) => key,
+    readLinks: async () => ({
+      ok: true,
+      value: { kind: "read", links: { epics: [], issues: [], commits: [] } },
+    }),
     ...edit,
   };
   const screen = shallowRef<Screen>({ kind: "files" });
@@ -508,6 +512,47 @@ test("a_failed_first_load_drops_the_details_so_the_next_load_asks_its_rows_again
   loadAt(live, 1).send({ me: "sam", rows: page });
   expect(live.discussionCalls.map((call) => call.iids)).toEqual([open, open]);
   expect(live.slice.discussions.value.get(iid(open[0] ?? 0))).toEqual({ kind: "loading" });
+});
+
+test("a_refresh_drops_every_rows_links", async () => {
+  const live = rig();
+  await loaded(live);
+  live.slice.askLinks(iid(640));
+  await settled();
+  live.slice.askLinks(iid(639));
+  await settled();
+  const read = { kind: "read", links: { epics: [], issues: [], commits: [] } };
+  expect([...live.slice.links.value.values()]).toEqual([read, read]);
+
+  const reloading = live.slice.refresh();
+  loadAt(live, 1).send({ me: "sam", rows: ROWS });
+  expect(live.slice.links.value.size).toBe(2);
+  loadAt(live, 1).end({ ok: true, value: { kind: "failed", message: "502" } });
+  await reloading;
+  expect(live.slice.links.value.size).toBe(2);
+
+  const swapping = live.slice.refresh();
+  loadAt(live, 2).send({ me: "sam", rows: ROWS });
+  loadAt(live, 2).end(LOADED);
+  await swapping;
+  expect(live.slice.links.value.size).toBe(0);
+});
+
+test("a_failed_first_load_drops_the_links", async () => {
+  const live = rig();
+  live.slice.show();
+  loadAt(live, 0).send({ me: "sam", rows: ROWS.slice(0, 2) });
+  live.slice.askLinks(iid(640));
+  await settled();
+  expect(live.slice.links.value.get(iid(640))?.kind).toBe("read");
+
+  loadAt(live, 0).end({ ok: false, failure: STOPPED });
+  await settled();
+  expect(live.slice.links.value.size).toBe(0);
+});
+
+test("the_slice_holds_only_the_public_part_of_the_link_queue", () => {
+  expect("dropped" in rig().slice).toBe(false);
 });
 
 test("switching_to_full_asks_one_round_and_only_a_show_after_30_s_reloads_and_asks_it_again", async () => {

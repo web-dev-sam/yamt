@@ -87,6 +87,7 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
   changePeople: "Could not change the merge request's people",
   description: "Could not read the description",
   link: "Could not open the link",
+  links: "Could not read the links",
 };
 
 const FIXED_ATTEMPT_WORDS: Readonly<

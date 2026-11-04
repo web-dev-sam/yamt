@@ -17,6 +17,7 @@ const commands = vi.hoisted(() => ({
   searchPeople: vi.fn(),
   changePeople: vi.fn(),
   readDescription: vi.fn(),
+  readLinks: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -424,6 +425,40 @@ test("readDescription_throws_on_a_linked_page_that_is_not_http", async () => {
   ).rejects.toThrow('link.page must be an http or https address, got "javascript:x"');
 });
 
+test("readLinks_calls_the_command_with_the_iid_and_brands_the_pages", async () => {
+  const commit: Generated.LinkedCommit = {
+    reference: "fa3335f3",
+    page: "http://gitlab.example/g/p/-/commit/fa3335f3",
+    title: null,
+  };
+  const epic: Generated.LinkedEpic = {
+    reference: "&3",
+    page: "https://gitlab.example/groups/g/-/epics/3",
+    shown: null,
+  };
+  const reply: Generated.LinksReply = {
+    kind: "read",
+    links: { epics: [epic], issues: [], commits: [commit] },
+  };
+  commands.readLinks.mockResolvedValue({ status: "ok", data: reply });
+  const source = createTauriMergeRequests();
+
+  expect(await source.readLinks(branded(12, isMergeRequestIid, "iid"))).toEqual({
+    ok: true,
+    value: reply,
+  });
+  expect(commands.readLinks).toHaveBeenCalledWith(12);
+
+  const unbranded: Generated.LinksReply = {
+    kind: "read",
+    links: { epics: [], issues: [], commits: [{ ...commit, page: "ftp://x" }] },
+  };
+  commands.readLinks.mockResolvedValue({ status: "ok", data: unbranded });
+  await expect(source.readLinks(branded(12, isMergeRequestIid, "iid"))).rejects.toThrow(
+    'links.commits[0].page must be an http or https address, got "ftp://x"',
+  );
+});
+
 test("uploadedImage_is_the_picture_scheme_address_of_the_key", () => {
   expect(createTauriMergeRequests().uploadedImage(UPLOAD)).toBe(
     "yamt-picture://localhost/upload~00000000000000000000000000000001",
@@ -552,6 +587,7 @@ test.each([
   ["searchPeople", { kind: "WorkerStopped" }],
   ["changePeople", { kind: "WorkerStopped" }],
   ["readDescription", { kind: "WorkerStopped" }],
+  ["readLinks", { kind: "WorkerStopped" }],
 ] as const)("a %s failure comes back unchanged", async (name, failure) => {
   commands[name].mockResolvedValue({ status: "error", error: failure });
   const source = createTauriMergeRequests();
@@ -569,6 +605,7 @@ test.each([
         username: "anna",
       }),
     readDescription: () => source.readDescription(branded(1, isMergeRequestIid, "iid")),
+    readLinks: () => source.readLinks(branded(1, isMergeRequestIid, "iid")),
   };
   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
 });
