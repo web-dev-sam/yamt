@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import FileDiff from "~icons/lucide/file-diff";
 import GitMerge from "~icons/lucide/git-merge";
+import Info from "~icons/lucide/info";
 import LoaderCircle from "~icons/lucide/loader-circle";
 import StepForward from "~icons/lucide/step-forward";
 import ThumbsUp from "~icons/lucide/thumbs-up";
@@ -19,6 +20,7 @@ import {
 } from "../mergeRequests";
 import CiStatusBox from "./CiStatusBox.vue";
 import type { RowActing } from "./mergeRequestActions";
+import { SHOW_DESCRIPTION } from "./mergeRequestDescriptionText";
 import MergeRequestDiscussions from "./MergeRequestDiscussions.vue";
 import MergeRequestDueDate from "./MergeRequestDueDate.vue";
 import MergeRequestLabels from "./MergeRequestLabels.vue";
@@ -27,6 +29,7 @@ import MergeRequestPicture from "./MergeRequestPicture.vue";
 import MergeRequestReadiness from "./MergeRequestReadiness.vue";
 import { rowReplyText } from "./mergeRequestRowReplyText";
 import type { Opening, RerequestAsk } from "./mergeRequests";
+import { useMergeRequests } from "./mergeRequestsStore";
 import {
   approvalsText,
   mergeRequestReference,
@@ -55,6 +58,8 @@ const emit = defineEmits<{
   rerequestReview: [iid: MergeRequestIid, username: string];
   peopleBoxClosed: [iid: MergeRequestIid];
 }>();
+
+const { description, toggleDescription } = useMergeRequests();
 
 const mr = computed(() => mergeRequestReference(props.row.iid));
 const author = computed(() => authorText(props.row.author));
@@ -87,11 +92,16 @@ const actionHover = computed(() =>
 const reply = computed(() =>
   props.acting?.kind === "replied" ? rowReplyText(props.acting.reply, props.row.iid) : null,
 );
+const describing = computed(() => description.value?.row.iid === props.row.iid);
 
 function openPage(): void {
   if (props.row.page !== null) {
     emit("openPage", "mergeRequest", props.row.page);
   }
+}
+
+function describe(): void {
+  void toggleDescription({ iid: props.row.iid, title: props.row.title });
 }
 
 function act(): void {
@@ -169,6 +179,22 @@ function act(): void {
       >
         <ThumbsUp class="size-4" aria-hidden="true" />
         <span aria-hidden="true">{{ approvals.count }}</span>
+      </span>
+      <span class="flex w-7 shrink-0 justify-center">
+        <button
+          v-if="row.hasDescription"
+          v-tooltip="SHOW_DESCRIPTION"
+          type="button"
+          data-row-control
+          :data-description-opener="row.iid"
+          :aria-label="SHOW_DESCRIPTION"
+          aria-haspopup="dialog"
+          :aria-expanded="describing"
+          class="shrink-0 cursor-pointer rounded p-1 hover:bg-hover"
+          @click.stop="describe"
+        >
+          <Info class="size-4" aria-hidden="true" />
+        </button>
       </span>
       <span class="flex w-7 shrink-0 justify-center">
         <CiStatusBox

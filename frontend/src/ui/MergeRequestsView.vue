@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useEventListener, useIntervalFn, useNow } from "@vueuse/core";
-import { computed, onMounted, useTemplateRef } from "vue";
+import { computed, onMounted, onUnmounted, useTemplateRef } from "vue";
 import ArrowLeft from "~icons/lucide/arrow-left";
 import RefreshCw from "~icons/lucide/refresh-cw";
 import X from "~icons/lucide/x";
@@ -9,6 +9,7 @@ import { filterLabel, isFiltered, type ListFilter, type ReviewFor } from "../mer
 import { RETRY } from "./aiText";
 import ChoiceButtons from "./ChoiceButtons.vue";
 import { returnFocus } from "./focusReturn";
+import MergeRequestDescription from "./MergeRequestDescription.vue";
 import MergeRequestFilter from "./MergeRequestFilter.vue";
 import MergeRequestReviewMode from "./MergeRequestReviewMode.vue";
 import MergeRequestReviewSort from "./MergeRequestReviewSort.vue";
@@ -63,6 +64,7 @@ const {
   discussionDetails,
   viewer,
   reviewSort,
+  description,
 } = requests;
 const back = useTemplateRef<HTMLButtonElement>("back");
 const bars = useTemplateRef<FilterBar[]>("bars");
@@ -89,6 +91,7 @@ const nowMs = computed(() => now.value.getTime());
 onMounted(() => {
   back.value?.focus();
 });
+onUnmounted(requests.closeDescription);
 
 async function goBack(): Promise<void> {
   requests.close();
@@ -150,6 +153,7 @@ async function pick(value: ReviewFor): Promise<void> {
         <span v-if="age !== null" v-tooltip="age.title" class="text-fg-muted">{{ age.text }}</span>
         <button
           type="button"
+          data-refreshes-list
           :disabled="loading"
           class="flex items-center gap-1.5 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
           @click="requests.refresh"
@@ -236,6 +240,7 @@ async function pick(value: ReviewFor): Promise<void> {
       {{ failure }}
       <button
         type="button"
+        data-refreshes-list
         :disabled="loading"
         class="shrink-0 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted"
         @click="requests.refresh"
@@ -272,5 +277,11 @@ async function pick(value: ReviewFor): Promise<void> {
         />
       </ul>
     </template>
+    <MergeRequestDescription
+      v-if="description !== null"
+      :key="description.row.iid"
+      :shown="description"
+      :asking="asking"
+    />
   </section>
 </template>

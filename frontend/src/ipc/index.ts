@@ -68,9 +68,6 @@ export { agentSessionId, isAgentSessionId, isMergeRequestIid, nextColumnVersion 
 export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
 export type { AbortReply, Leftover, MergeView, PushReply, ReturnTo } from "./localMergeDomain";
 export type {
-  CellAlign,
-  CheckedRow,
-  ContinueMergeReply,
   Description,
   DescriptionBlock,
   DescriptionCell,
@@ -80,12 +77,14 @@ export type {
   DescriptionLink,
   DescriptionReply,
   DescriptionRow,
+} from "./descriptionDomain";
+export type {
+  CheckedRow,
+  ContinueMergeReply,
   DiscussionsAnswer,
   GitLabProject,
-  HeadingLevel,
   JobLogReply,
   ListEnd,
-  ListNumbering,
   LocalMerge,
   Label,
   MergeRequestPage,
@@ -107,8 +106,6 @@ export type {
   Reviewer,
   RowDiscussions,
   Started,
-  TaskBox,
-  UploadKey,
 } from "./mergeRequestDomain";
 export type { MergeRequestSource } from "./MergeRequestSource";
 export type {

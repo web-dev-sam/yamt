@@ -1,0 +1,3 @@
+just mutants HEAD: 6 TS files, 513 mutants: 495 killed, 13 survived, 5 no coverage (descriptionDomain.ts 72/72 killed)
+src/ui/mergeRequestDescriptionText.ts:24 exhaustive default (NoCoverage ×2) — equivalent: unreachable `never` arm
+The rest are not on my changed lines: fixtureMergeRequestDescriptions.ts:17-22,29,32 module consts (#732), index.ts:183,187, tauriMergeRequests.ts:22, mergeRequestDomain.ts:131

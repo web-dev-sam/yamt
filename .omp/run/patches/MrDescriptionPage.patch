@@ -1,0 +1,1311 @@
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index 47ba6ed..760a796 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -1,8 +1,8 @@
++import type { DescriptionReply, UploadKey } from "./descriptionDomain";
+ import type { MergeRequestIid, SourceResult, WebPage } from "./domain";
+ import type {
+   CheckedRow,
+   ContinueMergeReply,
+-  DescriptionReply,
+   GitLabProject,
+   JobLogReply,
+   ListEnd,
+@@ -16,7 +16,6 @@ import type {
+   RerequestReply,
+   ResolveReply,
+   RowDiscussions,
+-  UploadKey,
+ } from "./mergeRequestDomain";
+ 
+ export interface MergeRequestSource {
+diff --git a/frontend/src/ipc/descriptionDomain.test.ts b/frontend/src/ipc/descriptionDomain.test.ts
+new file mode 100644
+index 0000000..59707c0
+--- /dev/null
++++ b/frontend/src/ipc/descriptionDomain.test.ts
+@@ -0,0 +1,90 @@
++import { expect, test } from "vitest";
++
++import type * as Generated from "./bindings";
++import { toDescriptionReply } from "./descriptionDomain";
++
++type Inline = Generated.DescriptionInline;
++type Block = Generated.DescriptionBlock;
++
++function linked(page: string): Inline {
++  return { kind: "link", link: { kind: "page", page }, inlines: [{ kind: "text", text: page }] };
++}
++
++function everyKind(page: string): Block[] {
++  const deep: Inline[] = [
++    { kind: "emphasis", inlines: [linked(page)] },
++    { kind: "strong", inlines: [{ kind: "strike", inlines: [linked(page)] }] },
++    { kind: "code", text: "x" },
++    { kind: "image", image: { kind: "refused" }, caption: "c" },
++    { kind: "lineBreak" },
++    { kind: "link", link: { kind: "refused", address: "mailto:a@b" }, inlines: [] },
++  ];
++  return [
++    { kind: "paragraph", inlines: deep },
++    { kind: "heading", level: "h2", inlines: [linked(page)] },
++    { kind: "code", language: "ruby", text: "end" },
++    { kind: "rule" },
++    {
++      kind: "list",
++      numbering: { kind: "numbers", start: 3 },
++      items: [{ task: "done", blocks: [{ kind: "paragraph", inlines: [linked(page)] }] }],
++    },
++    { kind: "quote", blocks: [{ kind: "paragraph", inlines: [linked(page)] }] },
++    {
++      kind: "table",
++      head: [{ cells: [{ header: true, align: "center", inlines: [linked(page)] }] }],
++      body: [{ cells: [{ header: false, align: "end", inlines: [linked(page)] }] }],
++    },
++    {
++      kind: "details",
++      open: true,
++      summary: [linked(page)],
++      blocks: [{ kind: "paragraph", inlines: [linked(page)] }],
++    },
++  ];
++}
++
++function read(blocks: Block[]): Generated.DescriptionReply {
++  return { kind: "read", description: { blocks } };
++}
++
++test.each(["https://gitlab.example/g/p/-/issues/12", "http://docs.example/x"])(
++  "every block and inline keeps its shape and its %s link",
++  (page) => {
++    const raw = read(everyKind(page));
++    expect(toDescriptionReply(raw)).toEqual(raw);
++  },
++);
++
++const LINKED_BLOCKS = everyKind("ftp://x.example/").filter(
++  (block) => block.kind !== "code" && block.kind !== "rule",
++);
++
++test.each(LINKED_BLOCKS.map((block) => [block.kind, block] as const))(
++  "a %s holding a link to a page that is not http or https throws",
++  (_, block) => {
++    expect(() => toDescriptionReply(read([block]))).toThrow(
++      'link.page must be an http or https address, got "ftp://x.example/"',
++    );
++  },
++);
++
++test.each(["httpx://docs.example/x", " https://docs.example/x", "mailto:a@b", "javascript:x", ""])(
++  "a linked page must start with http:// or https://, so %j throws",
++  (page) => {
++    expect(() =>
++      toDescriptionReply(read([{ kind: "paragraph", inlines: [linked(page)] }])),
++    ).toThrow(`link.page must be an http or https address, got "${page}"`);
++  },
++);
++
++test("a refusal passes unchanged", () => {
++  const replies: Generated.DescriptionReply[] = [
++    { kind: "glabMissing" },
++    { kind: "notLoggedIn", detail: "d" },
++    { kind: "failed", message: "m" },
++  ];
++  for (const reply of replies) {
++    expect(toDescriptionReply(reply)).toBe(reply);
++  }
++});
+diff --git a/frontend/src/ipc/descriptionDomain.ts b/frontend/src/ipc/descriptionDomain.ts
+new file mode 100644
+index 0000000..48d1fac
+--- /dev/null
++++ b/frontend/src/ipc/descriptionDomain.ts
+@@ -0,0 +1,118 @@
++import type * as Generated from "./bindings";
++import type { WebPage } from "./domain";
++
++type Inlines = readonly DescriptionInline[];
++type Blocks = readonly DescriptionBlock[];
++
++export type DescriptionImage = Readonly<Generated.DescriptionImage>;
++type HeadingLevel = Generated.HeadingLevel;
++type ListNumbering = Readonly<Generated.ListNumbering>;
++type TaskBox = Generated.TaskBox;
++type CellAlign = Generated.CellAlign;
++export type UploadKey = Generated.UploadKey;
++export type DescriptionLink =
++  | { readonly kind: "page"; readonly page: WebPage }
++  | Readonly<Extract<Generated.DescriptionLink, { kind: "refused" }>>;
++export type DescriptionInline =
++  | Readonly<
++      Extract<Generated.DescriptionInline, { kind: "text" | "code" | "image" | "lineBreak" }>
++    >
++  | { readonly kind: "emphasis"; readonly inlines: Inlines }
++  | { readonly kind: "strong"; readonly inlines: Inlines }
++  | { readonly kind: "strike"; readonly inlines: Inlines }
++  | { readonly kind: "link"; readonly link: DescriptionLink; readonly inlines: Inlines };
++export type DescriptionItem = { readonly task: TaskBox; readonly blocks: Blocks };
++export type DescriptionCell = {
++  readonly header: boolean;
++  readonly align: CellAlign;
++  readonly inlines: Inlines;
++};
++export type DescriptionRow = { readonly cells: readonly DescriptionCell[] };
++export type DescriptionBlock =
++  | Readonly<Extract<Generated.DescriptionBlock, { kind: "code" | "rule" }>>
++  | { readonly kind: "paragraph"; readonly inlines: Inlines }
++  | { readonly kind: "heading"; readonly level: HeadingLevel; readonly inlines: Inlines }
++  | {
++      readonly kind: "list";
++      readonly numbering: ListNumbering;
++      readonly items: readonly DescriptionItem[];
++    }
++  | { readonly kind: "quote"; readonly blocks: Blocks }
++  | {
++      readonly kind: "table";
++      readonly head: readonly DescriptionRow[];
++      readonly body: readonly DescriptionRow[];
++    }
++  | {
++      readonly kind: "details";
++      readonly open: boolean;
++      readonly summary: Inlines;
++      readonly blocks: Blocks;
++    };
++export type Description = { readonly blocks: Blocks };
++export type DescriptionReply =
++  | { readonly kind: "read"; readonly description: Description }
++  | Readonly<Exclude<Generated.DescriptionReply, { kind: "read" }>>;
++
++function isLinkedPage(text: string): text is WebPage {
++  return text.startsWith("https://") || text.startsWith("http://");
++}
++
++function toLink(raw: Generated.DescriptionLink): DescriptionLink {
++  if (raw.kind === "refused") {
++    return raw;
++  }
++  if (!isLinkedPage(raw.page)) {
++    throw new Error(`link.page must be an http or https address, got "${raw.page}"`);
++  }
++  return { kind: "page", page: raw.page };
++}
++
++function toInline(raw: Generated.DescriptionInline): DescriptionInline {
++  switch (raw.kind) {
++    case "text":
++    case "code":
++    case "image":
++    case "lineBreak":
++      return raw;
++    case "emphasis":
++    case "strong":
++    case "strike":
++      return { kind: raw.kind, inlines: raw.inlines.map(toInline) };
++    case "link":
++      return { kind: "link", link: toLink(raw.link), inlines: raw.inlines.map(toInline) };
++  }
++}
++
++function toRow(raw: Generated.DescriptionRow): DescriptionRow {
++  return { cells: raw.cells.map((cell) => ({ ...cell, inlines: cell.inlines.map(toInline) })) };
++}
++
++function toBlock(raw: Generated.DescriptionBlock): DescriptionBlock {
++  switch (raw.kind) {
++    case "code":
++    case "rule":
++      return raw;
++    case "paragraph":
++    case "heading":
++      return { ...raw, inlines: raw.inlines.map(toInline) };
++    case "list":
++      return {
++        ...raw,
++        items: raw.items.map((item) => ({ ...item, blocks: item.blocks.map(toBlock) })),
++      };
++    case "quote":
++      return { kind: "quote", blocks: raw.blocks.map(toBlock) };
++    case "table":
++      return { kind: "table", head: raw.head.map(toRow), body: raw.body.map(toRow) };
++    case "details":
++      return { ...raw, summary: raw.summary.map(toInline), blocks: raw.blocks.map(toBlock) };
++  }
++}
++
++/** Brands every link's page as a WebPage on http or https, as Rust's `WebPage::linked` makes it; any other throws. */
++export function toDescriptionReply(raw: Generated.DescriptionReply): DescriptionReply {
++  return raw.kind === "read"
++    ? { kind: "read", description: { blocks: raw.description.blocks.map(toBlock) } }
++    : raw;
++}
+diff --git a/frontend/src/ipc/fixtureMergeRequestDescriptions.ts b/frontend/src/ipc/fixtureMergeRequestDescriptions.ts
+index 658a6bc..988a71e 100644
+--- a/frontend/src/ipc/fixtureMergeRequestDescriptions.ts
++++ b/frontend/src/ipc/fixtureMergeRequestDescriptions.ts
+@@ -1,4 +1,5 @@
+ import type * as Generated from "./bindings";
++import { toDescriptionReply } from "./descriptionDomain";
+ import { pause } from "./fixture";
+ import { TIMED_OUT } from "./fixtureGitLab";
+ import { BROKEN_PICTURE, fixtureRows, ORIGIN } from "./fixtureMergeRequestData";
+@@ -224,7 +225,8 @@ export function descriptionScript(
+       const firstAsk = !asked.has(iid);
+       asked.add(iid);
+       await pause(DESCRIPTION_PAUSE_MS);
+-      return { ok: true, value: fixtureDescription(iid, firstAsk, fixtureRows(0, listedRows)) };
++      const reply = fixtureDescription(iid, firstAsk, fixtureRows(0, listedRows));
++      return { ok: true, value: toDescriptionReply(reply) };
+     },
+     uploadedImage: fixtureUploadedImage,
+   };
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index a6c15dc..74e8960 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -68,9 +68,6 @@ export { agentSessionId, isAgentSessionId, isMergeRequestIid, nextColumnVersion
+ export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
+ export type { AbortReply, Leftover, MergeView, PushReply, ReturnTo } from "./localMergeDomain";
+ export type {
+-  CellAlign,
+-  CheckedRow,
+-  ContinueMergeReply,
+   Description,
+   DescriptionBlock,
+   DescriptionCell,
+@@ -80,12 +77,14 @@ export type {
+   DescriptionLink,
+   DescriptionReply,
+   DescriptionRow,
++} from "./descriptionDomain";
++export type {
++  CheckedRow,
++  ContinueMergeReply,
+   DiscussionsAnswer,
+   GitLabProject,
+-  HeadingLevel,
+   JobLogReply,
+   ListEnd,
+-  ListNumbering,
+   LocalMerge,
+   Label,
+   MergeRequestPage,
+@@ -107,8 +106,6 @@ export type {
+   Reviewer,
+   RowDiscussions,
+   Started,
+-  TaskBox,
+-  UploadKey,
+ } from "./mergeRequestDomain";
+ export type { MergeRequestSource } from "./MergeRequestSource";
+ export type {
+diff --git a/frontend/src/ipc/mergeRequestDomain.ts b/frontend/src/ipc/mergeRequestDomain.ts
+index db334d4..872af2f 100644
+--- a/frontend/src/ipc/mergeRequestDomain.ts
++++ b/frontend/src/ipc/mergeRequestDomain.ts
+@@ -90,20 +90,6 @@ export type PeopleChangeReply =
+   | { readonly kind: "changed"; readonly people: MergeRequestPeople }
+   | { readonly kind: "unchanged"; readonly people: MergeRequestPeople }
+   | Readonly<Exclude<Generated.PeopleChangeReply, { kind: "changed" | "unchanged" }>>;
+-export type DescriptionReply = Readonly<Generated.DescriptionReply>;
+-export type Description = Readonly<Generated.Description>;
+-export type DescriptionBlock = Readonly<Generated.DescriptionBlock>;
+-export type DescriptionInline = Readonly<Generated.DescriptionInline>;
+-export type DescriptionItem = Readonly<Generated.DescriptionItem>;
+-export type DescriptionRow = Readonly<Generated.DescriptionRow>;
+-export type DescriptionCell = Readonly<Generated.DescriptionCell>;
+-export type DescriptionLink = Readonly<Generated.DescriptionLink>;
+-export type DescriptionImage = Readonly<Generated.DescriptionImage>;
+-export type HeadingLevel = Generated.HeadingLevel;
+-export type ListNumbering = Readonly<Generated.ListNumbering>;
+-export type TaskBox = Generated.TaskBox;
+-export type CellAlign = Generated.CellAlign;
+-export type UploadKey = Generated.UploadKey;
+ 
+ type UploadedPicture = (username: string) => string;
+ 
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index 862ec8d..0e91fd7 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -375,7 +375,7 @@ test("readJobLog_calls_the_command_with_the_page_and_returns_its_reply", async (
+   expect(commands.readJobLog).toHaveBeenCalledWith(page);
+ });
+ 
+-test("readDescription_calls_the_command_with_the_iid_and_passes_the_reply_through", async () => {
++test("readDescription_calls_the_command_with_the_iid_and_converts_the_reply", async () => {
+   const reply: Generated.DescriptionReply = {
+     kind: "read",
+     description: {
+@@ -383,7 +383,14 @@ test("readDescription_calls_the_command_with_the_iid_and_passes_the_reply_throug
+         { kind: "paragraph", inlines: [{ kind: "text", text: "Hello" }] },
+         {
+           kind: "paragraph",
+-          inlines: [{ kind: "image", image: { kind: "uploaded", key: UPLOAD }, caption: "shot" }],
++          inlines: [
++            { kind: "image", image: { kind: "uploaded", key: UPLOAD }, caption: "shot" },
++            {
++              kind: "link",
++              link: { kind: "page", page: "http://docs.example/x" },
++              inlines: [{ kind: "text", text: "docs" }],
++            },
++          ],
+         },
+       ],
+     },
+@@ -396,6 +403,27 @@ test("readDescription_calls_the_command_with_the_iid_and_passes_the_reply_throug
+   expect(commands.readDescription).toHaveBeenCalledWith(12);
+ });
+ 
++test("readDescription_throws_on_a_linked_page_that_is_not_http", async () => {
++  commands.readDescription.mockResolvedValue({
++    status: "ok",
++    data: {
++      kind: "read",
++      description: {
++        blocks: [
++          {
++            kind: "paragraph",
++            inlines: [{ kind: "link", link: { kind: "page", page: "javascript:x" }, inlines: [] }],
++          },
++        ],
++      },
++    },
++  });
++
++  await expect(
++    createTauriMergeRequests().readDescription(branded(12, isMergeRequestIid, "iid")),
++  ).rejects.toThrow('link.page must be an http or https address, got "javascript:x"');
++});
++
+ test("uploadedImage_is_the_picture_scheme_address_of_the_key", () => {
+   expect(createTauriMergeRequests().uploadedImage(UPLOAD)).toBe(
+     `${PICTURE_SCHEME}://localhost/${UPLOAD}`,
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index eec02d3..31f7cc7 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -1,6 +1,7 @@
+ import { Channel, convertFileSrc } from "@tauri-apps/api/core";
+ 
+ import { commands, type ListMessage } from "./bindings";
++import { toDescriptionReply } from "./descriptionDomain";
+ import type { SourceResult } from "./domain";
+ import {
+   toCheckedRow,
+@@ -83,7 +84,7 @@ function peopleCalls(): Pick<MergeRequestSource, "searchPeople" | "changePeople"
+ function descriptionCalls(): Pick<MergeRequestSource, "readDescription" | "uploadedImage"> {
+   return {
+     async readDescription(iid) {
+-      return toResult(await commands.readDescription(iid));
++      return converted(toResult(await commands.readDescription(iid)), toDescriptionReply);
+     },
+     uploadedImage: uploadedPicture,
+   };
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index e0b8d24..f312201 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -67,3 +67,5 @@ Merge-request conflicts (plan §2 #138–#143): `MergeRequestRow.vue` shows the
+ The merge window of a merge request (plan §2 #138–#143): `question.ts` is what is asked; `questionText.ts` is its words (`cancel: null` draws one button; a bullet list is kind `lines`). Abort of a merge yamt started (`mergeRequest`, written only by `listing.ts`) asks by returnTo/branchBefore, then shows the one-button notice if git left anything (`leftoverText.ts`, the page's `gitRefused` line uses it too), then `closeEndedMerge`. `pushing.ts` offers the push after Continue answers ReadyToPush: only Push pushes (RK45), a failure asks pushFailed again, Keep Local or Escape closes once. A failed push is the `push` problem ("Could not push <branch>"); a failed `closeEndedMerge`, after the push offer or after Abort's leftovers, is the `closeMerge` problem of the merge read before the action began ("Could not close the merge of <target> into <branch>"), never Abort's. Once Continue answers ReadyToPush, or Abort answers leftovers, git stays running: the window is ended for every reader.
+ 
+ People on a merge request (request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, plan §2 #169, #170): `useMergeRequests()` carries `peopleSearch`/`searchPeople`/`endPeopleSearch` (the window's one search, 250 ms after the last call, newest answer only), `peopleAsks`/`changePeople` (`mergeRequestPeople.ts`: one change at a time per merge request, `queue[0]` running, `notDone` kept until the box closes; `rowPeopleAsks(peopleAsks, iid)` is the one reader of a row's asks, empty for a row with none) and `openPeopleBoxes`/`peopleBoxOpened`/`peopleBoxClosed`: `shownRows` keeps a row whose box is open (rule 9), so `MergeRequestPeople.vue` calls Opened when `useHoverBox`'s `open` turns true and Closed when it turns false or the box unmounts open. On a row with `mayRerequest` the box always shows both groups ("None" when empty; a row with nobody opens it from the dimmed icon), each header with a `user-plus` add button that opens `MergeRequestPeopleSearch.vue` under it (one field per box, `adding`): a `role="combobox"` field over a `role="listbox"` of `mergeRequestPeopleLines.ts` `pickList` (the core's `peopleSuggestions` while empty, else the search's people; "Already an assignee/reviewer" lines `aria-disabled`, a queued add spinning), arrows over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines change (`keptHighlight`), Enter or a click (its `mousedown` prevented) adds, and once that add is answered the field clears unless its text changed meanwhile (not at the pick, so the picked line shows its spinner) and takes focus back only from `document.body`, never from a control the user moved to while waiting; Escape closes the field (focus to its add button), a second Escape the box. Each assignee and reviewer line ends with `MergeRequestPersonMenu.vue` (`ellipsis-vertical`, one `useDropdownMenu<true>` menu with "Remove assignee/reviewer", `position: fixed` inside the box so the hover box holds it; the spinner, `aria-disabled` and no menu while that remove is queued or running). A change GitLab did not make is one `peopleChangeText` sentence (`personState` under the listed person for a remove, else `groupNotices` under the group). Every control of a line carries `data-control`, its key built once on the line (`BoxLine`'s `review.rerequest.control` and `menuControl`, null when not shown) and bound by the template; when a reply removes the focused one (`lineControls` over the same lines), focus moves to the box.
++
++A merge request's description (request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, plan §2 #171–#174): the row's info column (`w-7`, between the approvals and the CI box, always rendered so the column stays) holds a button only when `row.hasDescription`; it calls `toggleDescription({ iid, title })` and carries `data-description-opener="<iid>"`. `MergeRequestsView.vue` renders the window's one `MergeRequestDescription.vue` after the list while `description` is set, keyed by the iid (a replace is a new panel), and closes it when the page unmounts. The panel is a non-modal `role="dialog"` that takes focus on mount; Escape (a window `keydown` listener in the capture phase, so the page's own Escape never sees it; not while a question is asked) and the close button call `closeDescription` and return focus to the row's opener when it is still listed; a press outside it closes it (`onClickOutside`, ignoring every opener, whose toggle closes or replaces); a scroll leaves it open. Its renderers use interpolation only and never `href`, `v-html`, `innerHTML` or `title` (RK66): `MergeRequestDescriptionBlocks.vue` and `MergeRequestDescriptionInlines.vue` each render nested content by referring to themselves, with `editor/theme.css`'s `markdown-*` classes; a link is an `a` with `role="link"`, `tabindex="0"` and no `href`, whose click or Enter calls `openPage("link", page)` for a `page` link (branded in `ipc/descriptionDomain.ts` `toDescriptionReply`, http or https) and does nothing for a `refused` one; task boxes are Lucide icons with `role="img"` and their word; `MergeRequestDescriptionImage.vue` loads `imageAddress(image)` with `referrerpolicy="no-referrer"` and shows the caption (else the `web` address, else "picture") when that is null or the image fails; `MergeRequestDescriptionCode.vue` hosts one `MarkdownView` through `useMarkdownCode`. The words are `mergeRequestDescriptionText.ts`.
+diff --git a/frontend/src/ui/MergeRequestDescription.test.ts b/frontend/src/ui/MergeRequestDescription.test.ts
+new file mode 100644
+index 0000000..0096554
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestDescription.test.ts
+@@ -0,0 +1,265 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { createSSRApp, h, shallowRef } from "vue";
++import { renderToString } from "vue/server-renderer";
++
++import {
++  createFixtureCompareSource,
++  isMergeRequestIid,
++  log,
++  type Description,
++  type DescriptionBlock,
++  type DiscussionDetails,
++  type MergeRequestIid,
++  type MergeRequestSource,
++} from "../ipc";
++import MergeRequestDescription from "./MergeRequestDescription.vue";
++import type { DescriptionLoad } from "./mergeRequestDescriptions";
++import { windowMergeRequests } from "./mergeRequestsStore";
++import type { Problem } from "./problem";
++import type { Screen } from "./screen";
++
++const shownCode = vi.hoisted(() => new Array<{ language: string | null; text: string }>());
++
++vi.mock("./tooltip", () => ({
++  vTooltip: {
++    getSSRProps: ({ value }: { value: string | null }) => ({ "data-tooltip": value }),
++  },
++}));
++vi.mock("./useMarkdown", () => ({
++  useMarkdownCode: (_: unknown, code: () => { language: string | null; text: string }) => {
++    shownCode.push(code());
++  },
++}));
++
++const DESCRIPTION_PAUSE_MS = 400;
++const RICH = 640;
++const PLANTED = 635;
++const LOADING_UPLOAD = "upload~00000000000000000000000000000001";
++const BROKEN_UPLOAD = "upload~00000000000000000000000000000002";
++
++let source: MergeRequestSource;
++
++beforeEach(() => {
++  const document = new EventTarget();
++  vi.stubGlobal("document", document);
++  vi.stubGlobal("window", Object.assign(new EventTarget(), { document }));
++  vi.useFakeTimers();
++  source = createFixtureCompareSource(log, "?mr=list", {});
++  windowMergeRequests(source, {
++    screen: shallowRef<Screen>({ kind: "mergeRequests" }),
++    problem: shallowRef<Problem | null>(null),
++    settings: shallowRef<{ readonly discussionDetails: DiscussionDetails }>({
++      discussionDetails: "full",
++    }),
++  });
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++});
++
++afterEach(() => {
++  shownCode.length = 0;
++  vi.useRealTimers();
++  vi.unstubAllGlobals();
++  vi.restoreAllMocks();
++});
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is not an iid`);
++  }
++  return value;
++}
++
++async function fixtureDescription(asked: number): Promise<Description> {
++  const answer = source.readDescription(iid(asked));
++  await vi.advanceTimersByTimeAsync(DESCRIPTION_PAUSE_MS);
++  const result = await answer;
++  if (!result.ok || result.value.kind !== "read") {
++    throw new Error(`the fixture did not read !${asked}`);
++  }
++  return result.value.description;
++}
++
++async function panel(load: DescriptionLoad): Promise<string> {
++  const shown = { row: { iid: iid(RICH), title: "Snooze a reminder" }, load };
++  const html = await renderToString(
++    createSSRApp({ render: () => h(MergeRequestDescription, { shown, asking: false }) }),
++  );
++  return html.replaceAll(/<!--[[\]]?-->/gu, "");
++}
++
++async function rendered(asked: number): Promise<string> {
++  return panel({ kind: "shown", description: await fixtureDescription(asked) });
++}
++
++function blocks(...shown: DescriptionBlock[]): Promise<string> {
++  return panel({ kind: "shown", description: { blocks: shown } });
++}
++
++function tagOf(html: string, text: string): string {
++  const at = html.indexOf(`>${text}<`);
++  return html.slice(html.lastIndexOf("<", at), at + 1);
++}
++
++test("every_block_and_inline_renders_its_element", async () => {
++  const html = await rendered(RICH);
++
++  for (const tag of [
++    '<h1 class="markdown-block markdown-heading"',
++    '<h2 class="markdown-block markdown-heading"',
++    '<h3 class="markdown-block markdown-heading"',
++    '<p class="markdown-block markdown-paragraph"',
++    "<em>",
++    "<strong>",
++    "<del>",
++    '<code class="markdown-inline-code">snooze(card)</code>',
++    "<br>",
++    '<ul class="markdown-block markdown-list"',
++    '<ol start="3" class="markdown-block markdown-list markdown-ordered"',
++    '<span class="markdown-number">3.</span>',
++    '<span class="markdown-number">4.</span>',
++    '<blockquote class="markdown-block markdown-quote"',
++    '<hr class="markdown-block markdown-rule"',
++    '<div class="markdown-block overflow-x-auto"><table class="markdown-table"><thead>',
++    "<tbody>",
++    "<th",
++    "<td",
++    '<details class="markdown-block"',
++    '<summary class="cursor-pointer">',
++    '<a role="link" tabindex="0"',
++    "<img",
++  ]) {
++    expect(html).toContain(tag);
++  }
++  expect(html).not.toContain("<details open");
++  expect(shownCode).toEqual([
++    { language: "ruby", text: "def snooze(card)\n  card.update!(due: 1.day.from_now)\nend" },
++    { language: null, text: "plain text\n  indented" },
++    { language: "mermaid", text: "graph TD\n  A --> B" },
++  ]);
++});
++
++test("a details block that starts open renders open; a heading level picks its tag", async () => {
++  const html = await blocks(
++    { kind: "details", open: true, summary: [{ kind: "text", text: "S" }], blocks: [] },
++    { kind: "heading", level: "h6", inlines: [{ kind: "text", text: "Six" }] },
++  );
++
++  expect(html).toContain("<details open");
++  expect(tagOf(html, "Six")).toBe('<h6 class="markdown-block markdown-heading">');
++});
++
++test("text_that_looks_like_markup_renders_as_text", async () => {
++  const html = await rendered(PLANTED);
++
++  expect(html).toContain("&lt;script&gt;window.yamtPlanted = true&lt;/script&gt;");
++  expect(html).toContain("&lt;img src=x onerror=&quot;window.yamtPlanted = true&quot;&gt;");
++  expect(html).toContain("&lt;iframe src=&quot;https://evil.example/&quot;&gt;");
++  expect(html).not.toContain("<script");
++  expect(html).not.toContain("<img");
++  expect(html).not.toContain("<iframe");
++});
++
++test("no_description_element_has_an_href_or_an_on_attribute", async () => {
++  const html = await rendered(RICH);
++
++  expect(html).not.toContain(" href=");
++  expect(html).not.toMatch(/ on[a-z]+=/u);
++  for (const tag of ["<input", "<iframe", "<form", "<style", "<object"]) {
++    expect(html).not.toContain(tag);
++  }
++});
++
++test("an_upload_and_another_sites_image_load_their_address_and_a_refused_one_shows_its_caption", async () => {
++  const html = await rendered(RICH);
++  const images = [...html.matchAll(/<img [^>]*>/gu)].map((found) => found[0]);
++
++  expect(images).toHaveLength(3);
++  expect(images[0]).toContain(`src="${source.uploadedImage(LOADING_UPLOAD)}"`);
++  expect(images[0]).toContain('alt="screenshot"');
++  expect(images[1]).toContain(`src="${source.uploadedImage(BROKEN_UPLOAD)}"`);
++  expect(images[2]).toContain('alt="outside picture"');
++  for (const image of images) {
++    expect(image).toContain('referrerpolicy="no-referrer" loading="lazy" draggable="false"');
++  }
++  expect(tagOf(html, "refused picture")).toBe('<span class="text-fg-muted">');
++});
++
++test("an image without a caption stands in with its address, or with 'picture'", async () => {
++  const html = await blocks({
++    kind: "paragraph",
++    inlines: [
++      { kind: "image", image: { kind: "refused" }, caption: "" },
++      {
++        kind: "image",
++        image: { kind: "web", address: "https://images.example/a.png" },
++        caption: "",
++      },
++    ],
++  });
++
++  expect(tagOf(html, "picture")).toBe('<span class="text-fg-muted">');
++  expect(html).toContain('<img src="https://images.example/a.png" alt referrerpolicy');
++});
++
++test("a_refused_link_carries_its_address_for_the_tooltip_and_no_page", async () => {
++  const html = await rendered(RICH);
++
++  expect(tagOf(html, "mail Anna")).toBe(
++    '<a role="link" tabindex="0" class="cursor-default text-fg-muted" data-tooltip="mailto:anna@example.com">',
++  );
++  expect(tagOf(html, "planted")).toBe(
++    '<a role="link" tabindex="0" class="cursor-default text-fg-muted" data-tooltip="javascript:window.yamtPlanted=true">',
++  );
++  expect(tagOf(html, "the docs")).toBe(
++    '<a role="link" tabindex="0" class="cursor-pointer text-syntax-link hover:underline" data-tooltip="https://docs.example/x">',
++  );
++});
++
++test("task_boxes_are_icons_with_their_word_never_inputs", async () => {
++  const html = await rendered(RICH);
++  const boxes = [...html.matchAll(/<svg [^>]*role="img"[^>]*>/gu)].map((found) => found[0]);
++
++  expect(boxes.map((box) => /aria-label="([^"]*)"/u.exec(box)?.[1])).toEqual([
++    "Done",
++    "Not done",
++    "Not applicable",
++  ]);
++  expect(html).toContain('<li class="list-none markdown-item">');
++  expect(html).not.toContain("<input");
++});
++
++test("table_cells_carry_their_alignment", async () => {
++  const html = await rendered(RICH);
++
++  expect(tagOf(html, "Card")).toBe('<th class="">');
++  expect(tagOf(html, "State")).toBe('<th class="markdown-align-center">');
++  expect(tagOf(html, "Days")).toBe('<th class="markdown-align-right">');
++  expect(tagOf(html, "Login")).toBe('<td class="">');
++  expect(tagOf(html, "open")).toBe('<td class="markdown-align-center">');
++  expect(tagOf(html, "3")).toBe('<td class="markdown-align-right">');
++});
++
++test("loading_empty_refused_and_failed_show_their_sentence_and_retry", async () => {
++  const retry = ">Retry</button>";
++  const loading = await panel({ kind: "loading" });
++  const empty = await panel({ kind: "shown", description: { blocks: [] } });
++  const refused = await panel({ kind: "refused", reply: { kind: "glabMissing" } });
++  const failed = await panel({ kind: "failed", cause: { kind: "WorkerStopped" } });
++
++  expect(tagOf(loading, "Loading…")).toBe('<p class="text-fg-muted">');
++  expect(tagOf(empty, "No description.")).toBe('<p class="text-fg-muted">');
++  expect(refused).toContain(
++    "glab is not installed (not found on PATH) — install glab, then Retry.</span>",
++  );
++  expect(failed).toContain(
++    "Could not read the description: yamt&#39;s worker stopped; try again.</span>",
++  );
++  expect([loading, empty, refused, failed].map((html) => html.includes(retry))).toEqual([
++    false,
++    false,
++    true,
++    true,
++  ]);
++  expect(loading).toContain('<span class="shrink-0 text-fg-muted">!640</span>');
++  expect(loading).toContain('<span class="truncate">Snooze a reminder</span>');
++});
+diff --git a/frontend/src/ui/MergeRequestDescription.vue b/frontend/src/ui/MergeRequestDescription.vue
+new file mode 100644
+index 0000000..92d773b
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestDescription.vue
+@@ -0,0 +1,116 @@
++<script setup lang="ts">
++import { onClickOutside, useEventListener } from "@vueuse/core";
++import { computed, onMounted, useId, useTemplateRef } from "vue";
++import X from "~icons/lucide/x";
++
++import type { DescriptionBlock } from "../ipc";
++import { RETRY } from "./aiText";
++import { returnFocus } from "./focusReturn";
++import MergeRequestDescriptionBlocks from "./MergeRequestDescriptionBlocks.vue";
++import type { DescriptionLoad, ShownDescription } from "./mergeRequestDescriptions";
++import {
++  CLOSE_DESCRIPTION,
++  DESCRIPTION_LOADING,
++  descriptionRefusalText,
++  NO_DESCRIPTION,
++} from "./mergeRequestDescriptionText";
++import { useMergeRequests } from "./mergeRequestsStore";
++import { mergeRequestReference } from "./mergeRequestsText";
++import type { Problem } from "./problem";
++import { problemText } from "./problemText";
++import { vTooltip } from "./tooltip";
++
++type Content =
++  | { readonly kind: "blocks"; readonly blocks: readonly DescriptionBlock[] }
++  | { readonly kind: "note"; readonly text: string }
++  | { readonly kind: "refusal"; readonly text: string };
++
++const props = defineProps<{ shown: ShownDescription; asking: boolean }>();
++
++const { closeDescription, retryDescription } = useMergeRequests();
++const panel = useTemplateRef<HTMLDivElement>("panel");
++const titleId = useId();
++onClickOutside(panel, closeDescription, {
++  ignore: ["[data-description-opener]", "[data-refreshes-list]"],
++});
++useEventListener(window, "keydown", keyPressed, { capture: true });
++
++const reference = computed(() => mergeRequestReference(props.shown.row.iid));
++const content = computed(() => contentOf(props.shown.load));
++
++onMounted(() => {
++  panel.value?.focus();
++});
++
++function contentOf(load: DescriptionLoad): Content {
++  switch (load.kind) {
++    case "loading":
++      return { kind: "note", text: DESCRIPTION_LOADING };
++    case "shown":
++      return load.description.blocks.length === 0
++        ? { kind: "note", text: NO_DESCRIPTION }
++        : { kind: "blocks", blocks: load.description.blocks };
++    case "refused":
++      return { kind: "refusal", text: descriptionRefusalText(load.reply) };
++    case "failed": {
++      const problem: Problem = { action: "mergeRequests", step: "description", cause: load.cause };
++      return { kind: "refusal", text: problemText(problem, navigator.platform) };
++    }
++  }
++}
++
++async function closeToOpener(): Promise<void> {
++  const opener = document.querySelector(`[data-description-opener="${props.shown.row.iid}"]`);
++  closeDescription();
++  await returnFocus(opener);
++}
++
++function keyPressed(event: KeyboardEvent): void {
++  if (event.key !== "Escape" || event.defaultPrevented || props.asking) {
++    return;
++  }
++  event.preventDefault();
++  void closeToOpener();
++}
++</script>
++
++<template>
++  <div
++    ref="panel"
++    role="dialog"
++    aria-modal="false"
++    :aria-labelledby="titleId"
++    tabindex="-1"
++    class="fixed top-1/2 left-1/2 z-20 flex max-h-[85vh] w-[min(64rem,calc(100vw-4rem))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-control-border bg-panel-inline text-fg shadow-lg outline-none"
++  >
++    <header class="flex shrink-0 items-center gap-2 border-b border-separator px-3 py-2">
++      <h2 :id="titleId" class="flex min-w-0 flex-1 gap-2 font-semibold">
++        <span class="shrink-0 text-fg-muted">{{ reference }}</span>
++        <span class="truncate">{{ shown.row.title }}</span>
++      </h2>
++      <button
++        v-tooltip="CLOSE_DESCRIPTION"
++        type="button"
++        :aria-label="CLOSE_DESCRIPTION"
++        class="shrink-0 cursor-pointer rounded p-1 hover:bg-hover"
++        @click="closeToOpener"
++      >
++        <X class="size-4" aria-hidden="true" />
++      </button>
++    </header>
++    <div class="min-h-0 overflow-y-auto overscroll-contain px-4 py-3">
++      <MergeRequestDescriptionBlocks v-if="content.kind === 'blocks'" :blocks="content.blocks" />
++      <p v-else-if="content.kind === 'note'" class="text-fg-muted">{{ content.text }}</p>
++      <p v-else role="alert" class="flex items-center gap-3">
++        <span class="text-problem-error">{{ content.text }}</span>
++        <button
++          type="button"
++          class="shrink-0 cursor-pointer rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++          @click="retryDescription"
++        >
++          {{ RETRY }}
++        </button>
++      </p>
++    </div>
++  </div>
++</template>
+diff --git a/frontend/src/ui/MergeRequestDescriptionBlocks.vue b/frontend/src/ui/MergeRequestDescriptionBlocks.vue
+new file mode 100644
+index 0000000..086586d
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestDescriptionBlocks.vue
+@@ -0,0 +1,128 @@
++<script setup lang="ts">
++import type { Component } from "vue";
++import Square from "~icons/lucide/square";
++import SquareCheck from "~icons/lucide/square-check";
++import SquareSlash from "~icons/lucide/square-slash";
++
++import type { DescriptionBlock, DescriptionCell, DescriptionItem, DescriptionRow } from "../ipc";
++import MergeRequestDescriptionCode from "./MergeRequestDescriptionCode.vue";
++import MergeRequestDescriptionInlines from "./MergeRequestDescriptionInlines.vue";
++import { TASK_DONE, TASK_INAPPLICABLE, TASK_OPEN } from "./mergeRequestDescriptionText";
++
++type List = Extract<DescriptionBlock, { kind: "list" }>;
++type Table = Extract<DescriptionBlock, { kind: "table" }>;
++type Task = Exclude<DescriptionItem["task"], "none">;
++type TablePart = { readonly tag: "thead" | "tbody"; readonly rows: readonly DescriptionRow[] };
++
++defineProps<{ blocks: readonly DescriptionBlock[] }>();
++
++const TASK_BOXES: Readonly<Record<Task, { readonly icon: Component; readonly word: string }>> = {
++  done: { icon: SquareCheck, word: TASK_DONE },
++  open: { icon: Square, word: TASK_OPEN },
++  inapplicable: { icon: SquareSlash, word: TASK_INAPPLICABLE },
++};
++const ALIGN_CLASS: Readonly<Record<DescriptionCell["align"], string>> = {
++  start: "",
++  center: "markdown-align-center",
++  end: "markdown-align-right",
++};
++
++function listStart(list: List): number | undefined {
++  return list.numbering.kind === "numbers" ? list.numbering.start : undefined;
++}
++
++function itemNumber(list: List, at: number): string | null {
++  return list.numbering.kind === "numbers" ? `${list.numbering.start + at}.` : null;
++}
++
++function tableParts(table: Table): readonly TablePart[] {
++  const parts: readonly TablePart[] = [
++    { tag: "thead", rows: table.head },
++    { tag: "tbody", rows: table.body },
++  ];
++  return parts.filter((part) => part.rows.length > 0);
++}
++</script>
++
++<template>
++  <template v-for="(block, index) in blocks" :key="index">
++    <p v-if="block.kind === 'paragraph'" class="markdown-block markdown-paragraph">
++      <MergeRequestDescriptionInlines :inlines="block.inlines" />
++    </p>
++    <component
++      :is="block.level"
++      v-else-if="block.kind === 'heading'"
++      class="markdown-block markdown-heading"
++    >
++      <MergeRequestDescriptionInlines :inlines="block.inlines" />
++    </component>
++    <MergeRequestDescriptionCode
++      v-else-if="block.kind === 'code'"
++      :language="block.language"
++      :text="block.text"
++    />
++    <ul
++      v-else-if="block.kind === 'list' && block.numbering.kind === 'bullets'"
++      class="markdown-block markdown-list"
++    >
++      <li
++        v-for="(item, at) in block.items"
++        :key="at"
++        class="markdown-item"
++        :class="{ 'list-none': item.task !== 'none' }"
++      >
++        <component
++          :is="TASK_BOXES[item.task].icon"
++          v-if="item.task !== 'none'"
++          role="img"
++          :aria-label="TASK_BOXES[item.task].word"
++          class="markdown-number top-0.5 size-4"
++        />
++        <MergeRequestDescriptionBlocks :blocks="item.blocks" />
++      </li>
++    </ul>
++    <ol
++      v-else-if="block.kind === 'list'"
++      :start="listStart(block)"
++      class="markdown-block markdown-list markdown-ordered"
++    >
++      <li v-for="(item, at) in block.items" :key="at" class="markdown-item">
++        <component
++          :is="TASK_BOXES[item.task].icon"
++          v-if="item.task !== 'none'"
++          role="img"
++          :aria-label="TASK_BOXES[item.task].word"
++          class="markdown-number top-0.5 size-4"
++        />
++        <span v-else class="markdown-number">{{ itemNumber(block, at) }}</span>
++        <MergeRequestDescriptionBlocks :blocks="item.blocks" />
++      </li>
++    </ol>
++    <blockquote v-else-if="block.kind === 'quote'" class="markdown-block markdown-quote">
++      <MergeRequestDescriptionBlocks :blocks="block.blocks" />
++    </blockquote>
++    <hr v-else-if="block.kind === 'rule'" class="markdown-block markdown-rule" />
++    <div v-else-if="block.kind === 'table'" class="markdown-block overflow-x-auto">
++      <table class="markdown-table">
++        <component :is="part.tag" v-for="part in tableParts(block)" :key="part.tag">
++          <tr v-for="(row, at) in part.rows" :key="at">
++            <component
++              :is="cell.header ? 'th' : 'td'"
++              v-for="(cell, column) in row.cells"
++              :key="column"
++              :class="ALIGN_CLASS[cell.align]"
++            >
++              <MergeRequestDescriptionInlines :inlines="cell.inlines" />
++            </component>
++          </tr>
++        </component>
++      </table>
++    </div>
++    <details v-else :open="block.open" class="markdown-block">
++      <summary class="cursor-pointer">
++        <MergeRequestDescriptionInlines :inlines="block.summary" />
++      </summary>
++      <MergeRequestDescriptionBlocks :blocks="block.blocks" />
++    </details>
++  </template>
++</template>
+diff --git a/frontend/src/ui/MergeRequestDescriptionCode.vue b/frontend/src/ui/MergeRequestDescriptionCode.vue
+new file mode 100644
+index 0000000..13e8d88
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestDescriptionCode.vue
+@@ -0,0 +1,14 @@
++<script setup lang="ts">
++import { useTemplateRef } from "vue";
++
++import { useMarkdownCode } from "./useMarkdown";
++
++const props = defineProps<{ language: string | null; text: string }>();
++
++const host = useTemplateRef<HTMLDivElement>("host");
++useMarkdownCode(host, () => ({ language: props.language, text: props.text }));
++</script>
++
++<template>
++  <div ref="host" class="markdown-block"></div>
++</template>
+diff --git a/frontend/src/ui/MergeRequestDescriptionImage.vue b/frontend/src/ui/MergeRequestDescriptionImage.vue
+new file mode 100644
+index 0000000..09dc677
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestDescriptionImage.vue
+@@ -0,0 +1,38 @@
++<script setup lang="ts">
++import { computed, shallowRef, watch } from "vue";
++
++import type { DescriptionImage } from "../ipc";
++import { IMAGE_STAND_IN } from "./mergeRequestDescriptionText";
++import { useMergeRequests } from "./mergeRequestsStore";
++
++const props = defineProps<{ image: DescriptionImage; caption: string }>();
++
++const { imageAddress } = useMergeRequests();
++const failed = shallowRef(false);
++
++const address = computed(() => imageAddress(props.image));
++const standIn = computed(() => {
++  if (props.caption !== "") {
++    return props.caption;
++  }
++  return props.image.kind === "web" ? props.image.address : IMAGE_STAND_IN;
++});
++
++watch(address, () => {
++  failed.value = false;
++});
++</script>
++
++<template>
++  <span v-if="address === null || failed" class="text-fg-muted">{{ standIn }}</span>
++  <img
++    v-else
++    :src="address"
++    :alt="caption"
++    referrerpolicy="no-referrer"
++    loading="lazy"
++    draggable="false"
++    class="inline h-auto max-w-full"
++    @error="failed = true"
++  />
++</template>
+diff --git a/frontend/src/ui/MergeRequestDescriptionInlines.vue b/frontend/src/ui/MergeRequestDescriptionInlines.vue
+new file mode 100644
+index 0000000..94d62c9
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestDescriptionInlines.vue
+@@ -0,0 +1,58 @@
++<script setup lang="ts">
++import type { DescriptionInline, DescriptionLink } from "../ipc";
++import MergeRequestDescriptionImage from "./MergeRequestDescriptionImage.vue";
++import { useMergeRequests } from "./mergeRequestsStore";
++import { vTooltip } from "./tooltip";
++
++defineProps<{ inlines: readonly DescriptionInline[] }>();
++
++const LINK_CLASS: Readonly<Record<DescriptionLink["kind"], string>> = {
++  page: "cursor-pointer text-syntax-link hover:underline",
++  refused: "cursor-default text-fg-muted",
++};
++
++const { openPage } = useMergeRequests();
++
++function linkAddress(link: DescriptionLink): string {
++  return link.kind === "page" ? link.page : link.address;
++}
++
++function linkPressed(link: DescriptionLink): void {
++  if (link.kind === "page") {
++    void openPage("link", link.page);
++  }
++}
++</script>
++
++<template>
++  <template v-for="(inline, index) in inlines" :key="index">
++    <template v-if="inline.kind === 'text'">{{ inline.text }}</template>
++    <em v-else-if="inline.kind === 'emphasis'">
++      <MergeRequestDescriptionInlines :inlines="inline.inlines" />
++    </em>
++    <strong v-else-if="inline.kind === 'strong'">
++      <MergeRequestDescriptionInlines :inlines="inline.inlines" />
++    </strong>
++    <del v-else-if="inline.kind === 'strike'">
++      <MergeRequestDescriptionInlines :inlines="inline.inlines" />
++    </del>
++    <code v-else-if="inline.kind === 'code'" class="markdown-inline-code">{{ inline.text }}</code>
++    <a
++      v-else-if="inline.kind === 'link'"
++      v-tooltip="linkAddress(inline.link)"
++      role="link"
++      tabindex="0"
++      :class="LINK_CLASS[inline.link.kind]"
++      @click="linkPressed(inline.link)"
++      @keydown.enter="linkPressed(inline.link)"
++    >
++      <MergeRequestDescriptionInlines :inlines="inline.inlines" />
++    </a>
++    <MergeRequestDescriptionImage
++      v-else-if="inline.kind === 'image'"
++      :image="inline.image"
++      :caption="inline.caption"
++    />
++    <br v-else />
++  </template>
++</template>
+diff --git a/frontend/src/ui/MergeRequestRow.vue b/frontend/src/ui/MergeRequestRow.vue
+index 42c5536..ed4996f 100644
+--- a/frontend/src/ui/MergeRequestRow.vue
++++ b/frontend/src/ui/MergeRequestRow.vue
+@@ -2,6 +2,7 @@
+ import { computed } from "vue";
+ import FileDiff from "~icons/lucide/file-diff";
+ import GitMerge from "~icons/lucide/git-merge";
++import Info from "~icons/lucide/info";
+ import LoaderCircle from "~icons/lucide/loader-circle";
+ import StepForward from "~icons/lucide/step-forward";
+ import ThumbsUp from "~icons/lucide/thumbs-up";
+@@ -19,6 +20,7 @@ import {
+ } from "../mergeRequests";
+ import CiStatusBox from "./CiStatusBox.vue";
+ import type { RowActing } from "./mergeRequestActions";
++import { SHOW_DESCRIPTION } from "./mergeRequestDescriptionText";
+ import MergeRequestDiscussions from "./MergeRequestDiscussions.vue";
+ import MergeRequestDueDate from "./MergeRequestDueDate.vue";
+ import MergeRequestLabels from "./MergeRequestLabels.vue";
+@@ -27,6 +29,7 @@ import MergeRequestPicture from "./MergeRequestPicture.vue";
+ import MergeRequestReadiness from "./MergeRequestReadiness.vue";
+ import { rowReplyText } from "./mergeRequestRowReplyText";
+ import type { Opening, RerequestAsk } from "./mergeRequests";
++import { useMergeRequests } from "./mergeRequestsStore";
+ import {
+   approvalsText,
+   mergeRequestReference,
+@@ -56,6 +59,8 @@ const emit = defineEmits<{
+   peopleBoxClosed: [iid: MergeRequestIid];
+ }>();
+ 
++const { description, toggleDescription } = useMergeRequests();
++
+ const mr = computed(() => mergeRequestReference(props.row.iid));
+ const author = computed(() => authorText(props.row.author));
+ const created = computed(() => createdAgo(props.row.createdAt, props.now));
+@@ -87,6 +92,7 @@ const actionHover = computed(() =>
+ const reply = computed(() =>
+   props.acting?.kind === "replied" ? rowReplyText(props.acting.reply, props.row.iid) : null,
+ );
++const describing = computed(() => description.value?.row.iid === props.row.iid);
+ 
+ function openPage(): void {
+   if (props.row.page !== null) {
+@@ -94,6 +100,10 @@ function openPage(): void {
+   }
+ }
+ 
++function describe(): void {
++  void toggleDescription({ iid: props.row.iid, title: props.row.title });
++}
++
+ function act(): void {
+   if (action.value.kind === "resolve") {
+     emit("resolve", props.row.iid);
+@@ -170,6 +180,22 @@ function act(): void {
+         <ThumbsUp class="size-4" aria-hidden="true" />
+         <span aria-hidden="true">{{ approvals.count }}</span>
+       </span>
++      <span class="flex w-7 shrink-0 justify-center">
++        <button
++          v-if="row.hasDescription"
++          v-tooltip="SHOW_DESCRIPTION"
++          type="button"
++          data-row-control
++          :data-description-opener="row.iid"
++          :aria-label="SHOW_DESCRIPTION"
++          aria-haspopup="dialog"
++          :aria-expanded="describing"
++          class="shrink-0 cursor-pointer rounded p-1 hover:bg-hover"
++          @click.stop="describe"
++        >
++          <Info class="size-4" aria-hidden="true" />
++        </button>
++      </span>
+       <span class="flex w-7 shrink-0 justify-center">
+         <CiStatusBox
+           v-if="row.pipeline !== null"
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index 1f94026..7959b93 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -1,6 +1,6 @@
+ <script setup lang="ts">
+ import { useEventListener, useIntervalFn, useNow } from "@vueuse/core";
+-import { computed, onMounted, useTemplateRef } from "vue";
++import { computed, onMounted, onUnmounted, useTemplateRef } from "vue";
+ import ArrowLeft from "~icons/lucide/arrow-left";
+ import RefreshCw from "~icons/lucide/refresh-cw";
+ import X from "~icons/lucide/x";
+@@ -9,6 +9,7 @@ import { filterLabel, isFiltered, type ListFilter, type ReviewFor } from "../mer
+ import { RETRY } from "./aiText";
+ import ChoiceButtons from "./ChoiceButtons.vue";
+ import { returnFocus } from "./focusReturn";
++import MergeRequestDescription from "./MergeRequestDescription.vue";
+ import MergeRequestFilter from "./MergeRequestFilter.vue";
+ import MergeRequestReviewMode from "./MergeRequestReviewMode.vue";
+ import MergeRequestReviewSort from "./MergeRequestReviewSort.vue";
+@@ -63,6 +64,7 @@ const {
+   discussionDetails,
+   viewer,
+   reviewSort,
++  description,
+ } = requests;
+ const back = useTemplateRef<HTMLButtonElement>("back");
+ const bars = useTemplateRef<FilterBar[]>("bars");
+@@ -89,6 +91,7 @@ const nowMs = computed(() => now.value.getTime());
+ onMounted(() => {
+   back.value?.focus();
+ });
++onUnmounted(requests.closeDescription);
+ 
+ async function goBack(): Promise<void> {
+   requests.close();
+@@ -150,6 +153,7 @@ async function pick(value: ReviewFor): Promise<void> {
+         <span v-if="age !== null" v-tooltip="age.title" class="text-fg-muted">{{ age.text }}</span>
+         <button
+           type="button"
++          data-refreshes-list
+           :disabled="loading"
+           class="flex items-center gap-1.5 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+           @click="requests.refresh"
+@@ -236,6 +240,7 @@ async function pick(value: ReviewFor): Promise<void> {
+       {{ failure }}
+       <button
+         type="button"
++        data-refreshes-list
+         :disabled="loading"
+         class="shrink-0 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted"
+         @click="requests.refresh"
+@@ -272,5 +277,11 @@ async function pick(value: ReviewFor): Promise<void> {
+         />
+       </ul>
+     </template>
++    <MergeRequestDescription
++      v-if="description !== null"
++      :key="description.row.iid"
++      :shown="description"
++      :asking="asking"
++    />
+   </section>
+ </template>
+diff --git a/frontend/src/ui/mergeRequestDescriptionText.test.ts b/frontend/src/ui/mergeRequestDescriptionText.test.ts
+new file mode 100644
+index 0000000..1a814f8
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestDescriptionText.test.ts
+@@ -0,0 +1,57 @@
++import { expect, test } from "vitest";
++
++import type { DescriptionReply } from "../ipc";
++import {
++  CLOSE_DESCRIPTION,
++  DESCRIPTION_LOADING,
++  descriptionRefusalText,
++  IMAGE_STAND_IN,
++  NO_DESCRIPTION,
++  SHOW_DESCRIPTION,
++  TASK_DONE,
++  TASK_INAPPLICABLE,
++  TASK_OPEN,
++} from "./mergeRequestDescriptionText";
++
++type Refused = Exclude<DescriptionReply, { readonly kind: "read" }>;
++
++const REFUSALS: Readonly<Record<Refused["kind"], readonly [Refused, string]>> = {
++  glabMissing: [
++    { kind: "glabMissing" },
++    "glab is not installed (not found on PATH) — install glab, then Retry.",
++  ],
++  notLoggedIn: [
++    { kind: "notLoggedIn", detail: "gitlab.example: not logged in" },
++    "glab is not logged in: gitlab.example: not logged in — run glab auth login in a terminal, then Retry.",
++  ],
++  failed: [
++    { kind: "failed", message: "glab timed out" },
++    "Could not read the description: glab timed out",
++  ],
++};
++
++test("the description panel's words", () => {
++  expect([
++    SHOW_DESCRIPTION,
++    CLOSE_DESCRIPTION,
++    DESCRIPTION_LOADING,
++    NO_DESCRIPTION,
++    TASK_DONE,
++    TASK_OPEN,
++    TASK_INAPPLICABLE,
++    IMAGE_STAND_IN,
++  ]).toEqual([
++    "Show description",
++    "Close",
++    "Loading…",
++    "No description.",
++    "Done",
++    "Not done",
++    "Not applicable",
++    "picture",
++  ]);
++});
++
++test.each(Object.values(REFUSALS))("a refused description says why: %o", (reply, words) => {
++  expect(descriptionRefusalText(reply)).toBe(words);
++});
+diff --git a/frontend/src/ui/mergeRequestDescriptionText.ts b/frontend/src/ui/mergeRequestDescriptionText.ts
+new file mode 100644
+index 0000000..8ea3a85
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestDescriptionText.ts
+@@ -0,0 +1,29 @@
++import type { DescriptionReply } from "../ipc";
++import { GLAB_MISSING_TEXT, glabNotLoggedInText } from "./glab";
++
++export const SHOW_DESCRIPTION = "Show description";
++export const CLOSE_DESCRIPTION = "Close";
++export const DESCRIPTION_LOADING = "Loading…";
++export const NO_DESCRIPTION = "No description.";
++export const TASK_DONE = "Done";
++export const TASK_OPEN = "Not done";
++export const TASK_INAPPLICABLE = "Not applicable";
++export const IMAGE_STAND_IN = "picture";
++
++/** One sentence; the panel puts Retry (aiText.ts RETRY) after it. */
++export function descriptionRefusalText(
++  reply: Exclude<DescriptionReply, { readonly kind: "read" }>,
++): string {
++  switch (reply.kind) {
++    case "glabMissing":
++      return `${GLAB_MISSING_TEXT} — install glab, then Retry.`;
++    case "notLoggedIn":
++      return `${glabNotLoggedInText(reply.detail)} — run glab auth login in a terminal, then Retry.`;
++    case "failed":
++      return `Could not read the description: ${reply.message}`;
++    default: {
++      const _exhaustive: never = reply;
++      return _exhaustive;
++    }
++  }
++}

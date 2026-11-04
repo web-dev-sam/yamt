@@ -375,7 +375,7 @@ test("readJobLog_calls_the_command_with_the_page_and_returns_its_reply", async (
   expect(commands.readJobLog).toHaveBeenCalledWith(page);
 });
 
-test("readDescription_calls_the_command_with_the_iid_and_passes_the_reply_through", async () => {
+test("readDescription_calls_the_command_with_the_iid_and_converts_the_reply", async () => {
   const reply: Generated.DescriptionReply = {
     kind: "read",
     description: {
@@ -383,7 +383,14 @@ test("readDescription_calls_the_command_with_the_iid_and_passes_the_reply_throug
         { kind: "paragraph", inlines: [{ kind: "text", text: "Hello" }] },
         {
           kind: "paragraph",
-          inlines: [{ kind: "image", image: { kind: "uploaded", key: UPLOAD }, caption: "shot" }],
+          inlines: [
+            { kind: "image", image: { kind: "uploaded", key: UPLOAD }, caption: "shot" },
+            {
+              kind: "link",
+              link: { kind: "page", page: "http://docs.example/x" },
+              inlines: [{ kind: "text", text: "docs" }],
+            },
+          ],
         },
       ],
     },
@@ -394,6 +401,27 @@ test("readDescription_calls_the_command_with_the_iid_and_passes_the_reply_throug
     await createTauriMergeRequests().readDescription(branded(12, isMergeRequestIid, "iid")),
   ).toEqual({ ok: true, value: reply });
   expect(commands.readDescription).toHaveBeenCalledWith(12);
+});
+
+test("readDescription_throws_on_a_linked_page_that_is_not_http", async () => {
+  commands.readDescription.mockResolvedValue({
+    status: "ok",
+    data: {
+      kind: "read",
+      description: {
+        blocks: [
+          {
+            kind: "paragraph",
+            inlines: [{ kind: "link", link: { kind: "page", page: "javascript:x" }, inlines: [] }],
+          },
+        ],
+      },
+    },
+  });
+
+  await expect(
+    createTauriMergeRequests().readDescription(branded(12, isMergeRequestIid, "iid")),
+  ).rejects.toThrow('link.page must be an http or https address, got "javascript:x"');
 });
 
 test("uploadedImage_is_the_picture_scheme_address_of_the_key", () => {

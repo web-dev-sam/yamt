@@ -1,4 +1,5 @@
 import type * as Generated from "./bindings";
+import { toDescriptionReply } from "./descriptionDomain";
 import { pause } from "./fixture";
 import { TIMED_OUT } from "./fixtureGitLab";
 import { BROKEN_PICTURE, fixtureRows, ORIGIN } from "./fixtureMergeRequestData";
@@ -224,7 +225,8 @@ export function descriptionScript(
       const firstAsk = !asked.has(iid);
       asked.add(iid);
       await pause(DESCRIPTION_PAUSE_MS);
-      return { ok: true, value: fixtureDescription(iid, firstAsk, fixtureRows(0, listedRows)) };
+      const reply = fixtureDescription(iid, firstAsk, fixtureRows(0, listedRows));
+      return { ok: true, value: toDescriptionReply(reply) };
     },
     uploadedImage: fixtureUploadedImage,
   };

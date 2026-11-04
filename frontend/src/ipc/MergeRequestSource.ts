@@ -1,8 +1,8 @@
+import type { DescriptionReply, UploadKey } from "./descriptionDomain";
 import type { MergeRequestIid, SourceResult, WebPage } from "./domain";
 import type {
   CheckedRow,
   ContinueMergeReply,
-  DescriptionReply,
   GitLabProject,
   JobLogReply,
   ListEnd,
@@ -16,7 +16,6 @@ import type {
   RerequestReply,
   ResolveReply,
   RowDiscussions,
-  UploadKey,
 } from "./mergeRequestDomain";
 
 export interface MergeRequestSource {
