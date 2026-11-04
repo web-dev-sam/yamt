@@ -6,6 +6,17 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Release 0.6.9 (session 50, owner: "release 0.6.9")
+
+0.6.9 = 0.6.8 plus the merge-request threads (section below; GitLab playground check still open). The owner pushes
+`main`, waits for green ci, then tags.
+
+| row | slice                                                                                                        | owner        | status  | evidence   |
+| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ------- | ---------- |
+| 1   | release commit 0.6.9: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done    | `4a13d9fc` |
+| 2   | final run 0.6.9 before tagging (`briefs/release-0.6.9-verify.md`)                                            | verifier     | running |            |
+| 3   | push `main`, ci green on all four jobs, tag `v0.6.9`, publish                                                | human        | todo    |            |
+
 ## Threads beside the box (session 50; owner #2329–#2333: "Your turn" only when it is, the whole thread, answering, sized images)
 
 Request `docs/slices/request-mr-threads.md` (parts A–D, acceptance, non-goals, reopens); base `69ab62d0`; facts
