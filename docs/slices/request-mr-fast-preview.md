@@ -48,9 +48,11 @@ glab calls in a row: `glab auth status` 0.61–0.66 s, `glab api projects/<path>
   is then one glab call; a reply one write plus the thread read.
 - **B2. Forgotten when wrong.** A GitLab answer that says the login is gone or the project is not found forgets the
   remembered answer; that action fails with today's words ("not logged in" with glab's detail, or the project
-  failure), and the next action asks again. The page's Refresh button asks both again (orchestrator).
+  failure), and the next action asks again. Every explicit refresh button asks both again: the page's Refresh (and its
+  Retry) and the discussions box's reload button (owner #2423).
 - **B3. Nothing else changes.** No action that today fails with "not logged in" succeeds silently or fails with
-  other words; the range window's review send keeps its own check.
+  other words; the range window's review send keeps its own check. Accepted exception (owner #2423): after a glab
+  logout while yamt runs, a public project's reads answer what anyone may see until a refresh button is pressed.
 
 ## To be measured by the design (unverified)
 

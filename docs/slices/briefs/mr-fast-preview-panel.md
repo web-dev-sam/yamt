@@ -18,6 +18,7 @@ run `just bindings` (`commands.askGitlabAgain`). **This slice wires the window**
 - `frontend/src/ui/mergeRequestThread.ts`, `frontend/src/ui/mergeRequestThread.test.ts`
 - `frontend/src/ui/MergeRequestThreadPanel.test.ts`
 - `frontend/src/ui/mergeRequests.ts`, `frontend/src/ui/mergeRequests.test.ts`
+- `frontend/src/ui/MergeRequestDiscussions.vue` (the reload button's click only), `frontend/src/ui/MergeRequestDiscussionsBox.test.ts`
 - `frontend/src/ipc/MergeRequestSource.ts`, `frontend/src/ipc/tauriMergeRequests.ts`,
   `frontend/src/ipc/tauriMergeRequests.test.ts`, `frontend/src/ipc/fixtureMergeRequests.ts`,
   `frontend/src/ipc/fixtureMergeRequests.test.ts`
@@ -49,8 +50,13 @@ Fixed; you may add, never change.
 export function previewHere(iid: MergeRequestIid, text: string): Preview | null;
 
 // ipc/MergeRequestSource.ts
-/** The page's Refresh: the next GitLab action asks glab for the login and the project again (plan §2 #187). */
+/** An explicit refresh (the page's Refresh and its Retry, the discussions box's reload button; owner #2423): the next
+ *  GitLab action asks glab for the login and the project again (plan §2 #187). */
 askGitLabAgain(): Promise<SourceResult<null>>;
+
+// ui/mergeRequests.ts — the slice gains (owner #2423)
+/** The discussions box's reload button: `askGitLabAgain`, then `reloadDiscussions(iid)`. */
+refreshDiscussions(iid: MergeRequestIid): void;
 ```
 
 - `mergeRequestThread.ts` `preview` (`:197-214`): blank → `empty` as today; then `previewHere(shown.iid, text)` — a read
@@ -62,6 +68,10 @@ askGitLabAgain(): Promise<SourceResult<null>>;
 - `mergeRequests.ts` `refresh` (`:285`): `askGitLabAgain()` through `attempt`, awaited, then `loadList(state)`; a failure
   logs `mergeRequests.ask_again_failed { kind }` and the list loads anyway. `show` (`:134-142`, the first load and the
   30 s stale reload) does not ask again.
+- `mergeRequests.ts` `refreshDiscussions(iid)` (owner #2423: every explicit refresh button asks again):
+  `askGitLabAgain()` through `attempt`, awaited, then the existing `reloadDiscussions(iid)` (`:187-190`); a failure logs
+  `ask_again_failed` and reloads anyway. `MergeRequestDiscussions.vue:268` calls `refreshDiscussions`. The reload a
+  submit triggers (`mergeRequestThread.ts:193` → `reloadDiscussions`) does not ask again: it is no button press.
 
 ## Change
 
@@ -93,6 +103,9 @@ askGitLabAgain(): Promise<SourceResult<null>>;
 - `refresh_asks_gitlab_again_before_listing` (`mergeRequests.test.ts`) — **owns the window's half of "Refresh runs both
   again"**: `refresh()` calls `askGitLabAgain` once, before the list load; `show()` (first and stale) calls it never; a
   failed `askGitLabAgain` still lists and logs `ask_again_failed`.
+- `the_discussions_reload_button_asks_gitlab_again` (`mergeRequests.test.ts` or `MergeRequestDiscussionsBox.test.ts`) —
+  **owns #2423's second button**: `refreshDiscussions(iid)` calls `askGitLabAgain` once before the row's reload; a
+  submit's reload calls it never; a failed ask still reloads.
 - `askGitLabAgain_calls_the_command` and the `WorkerStopped` row for it (`tauriMergeRequests.test.ts`); the fixture's
   `fixture_ask_again` line (`fixtureMergeRequests.test.ts`).
 

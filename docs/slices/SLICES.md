@@ -26,8 +26,9 @@ emoji becomes `gl-emoji`: a trigger). Design `briefs/mr-fast-preview-design.md` 
 yamt's parser (`editor/internal/`) decides and builds `Description` blocks, the panel asks it before GitLab; GitLab's
 recorded answers through the one Rust reducer are the fixture both sides test; `GitLabRepository` remembers the project
 (forgotten on 401, "404 Project Not Found", no project, Refresh's `ask_gitlab_again`); proposed plan #186–#188,
-RK74+ (docs keeper). Open for the owner, built as the design's default meanwhile (OR13): logged out while yamt runs on
-a public project keeps reading anonymously until Refresh; table alignment ignored by the reducer (non-goal here).
+RK74+ (docs keeper). Owner's answers to the design's questions: #2423 accept the anonymous public-project reads after
+a logout, and every explicit refresh button asks again (page Refresh/Retry, the discussions box's reload; panel brief,
+request B2/B3 amended); #2424 table alignment fixed later in its own request (non-goal here).
 Order: corpus ∥ remembered, local after corpus, `just bindings` after remembered, panel (wires the window), docs ∥
 smoke, final.
 
@@ -300,7 +301,9 @@ the people work (it edits only its briefs); its implementers wait for the people
    the whole thread in a Shift panel with reply/draft/submit/resolve, one-row reload. Done (section above, released
    in 0.6.9); owner check handed over.
 7. `request-mr-fast-preview.md` (session 50, owner #2419–#2422): an instant local preview when yamt renders the text
-   exactly as GitLab does, GitLab otherwise; the login check and the project lookup asked once. Todo.
+   exactly as GitLab does, GitLab otherwise; the login check and the project lookup asked once. Running (session 51).
+8. `request-table-alignment.md` (session 51, owner #2424): table columns aligned as GitLab aligns them, in every
+   rendering and the local preview together. Todo.
 
 ## Open product questions
 

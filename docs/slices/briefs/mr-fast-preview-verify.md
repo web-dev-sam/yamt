@@ -68,7 +68,7 @@ merge-requests page. Every step in yamt Dark and yamt Light (`--settings '{"them
 6. **A4.** An empty field's Preview: "Nothing to preview." and no `fixture_preview`, no `preview_local`; Write after a
    preview: the text and caret as typed; FAIL → "Could not preview: glab timed out", the text untouched.
 7. **B2 Refresh.** The page's Refresh: one `fixture_ask_again`, before the list's load lines; the panel stays open
-   (RK73).
+   (RK73). The discussions box's reload button (owner #2423): one `fixture_ask_again`, then the row's reload.
 8. `shot` of the panel with RICH previewed, dark and light.
 
 **C. Real app.** `scripts/local-conflicts-repo.sh <scratch>/mfv`, `cargo tauri build --debug --no-bundle`, `just
