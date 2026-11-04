@@ -1,5 +1,5 @@
 {
-  "MrFastPreviewPanelR1": {
+  "MrFastPreviewPanelR2": {
     "owned": [
       "frontend/src/ui/mergeRequestPreview.ts",
       "frontend/src/ui/mergeRequestThread.ts",
@@ -23,15 +23,6 @@
       "frontend/src/ipc/fixtureMergeRequests.ts",
       "frontend/src/ipc/fixtureMergeRequests.test.ts",
       "frontend/src/ipc/AGENTS.md"
-    ]
-  },
-  "MrFastPreviewDocs": {
-    "owned": [
-      "docs/architecture.md",
-      ".omp/skills/project-map/**",
-      ".omp/skills/ipc-contract/SKILL.md",
-      "docs/plan.md",
-      ".omp/skills/risk-register/**"
     ]
   }
 }
