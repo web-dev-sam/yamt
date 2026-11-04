@@ -6,6 +6,7 @@ use url::Url;
 
 use super::address::{image_of, link_of};
 use super::element::{align, code, commit_title, heading_level, numbers, task_box};
+use super::size::image_size;
 use super::{
     Description, DescriptionBlock, DescriptionCell, DescriptionImage, DescriptionInline,
     DescriptionItem, DescriptionLink, DescriptionRow, ListNumbering, OfferedUpload,
@@ -276,7 +277,11 @@ impl Walk {
             .iter()
             .find_map(|name| node.attr(name).filter(|value| !value.is_empty()))
             .map_or_else(|| written.to_owned(), |caption| caption.to_string());
-        let image = DescriptionInline::Image { image, caption };
+        let image = DescriptionInline::Image {
+            image,
+            caption,
+            size: image_size(node),
+        };
         if self.in_link {
             self.lifted.push(image);
             return Vec::new();

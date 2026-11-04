@@ -1,0 +1,419 @@
+diff --git a/crates/merge-requests/src/description.rs b/crates/merge-requests/src/description.rs
+index b34b36c..2ad4618 100644
+--- a/crates/merge-requests/src/description.rs
++++ b/crates/merge-requests/src/description.rs
+@@ -1,6 +1,7 @@
+ pub(crate) mod address;
+ mod element;
+ mod html;
++mod size;
+ 
+ use std::path::Path;
+ 
+@@ -16,6 +17,7 @@ use crate::{GitLabRepository, MergeRequestIid, WebPage};
+ pub use address::{DescriptionImage, DescriptionLink, OfferedUpload, UploadKey};
+ pub(crate) use html::Described;
+ use html::described;
++pub use size::ImageSize;
+ 
+ /// How reading a merge request's description ended.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+@@ -234,6 +236,8 @@ pub enum DescriptionInline {
+         image: DescriptionImage,
+         /// alt, else title, else the address as written (empty when there is none).
+         caption: String,
++        /// The size written in Markdown (`{width=…}`, `{height=…}`) as GitLab kept it on the `<img>`; None: its own.
++        size: Option<ImageSize>,
+     },
+     /// `<br>`.
+     LineBreak,
+diff --git a/crates/merge-requests/src/description/html.rs b/crates/merge-requests/src/description/html.rs
+index 8358f9d..68926c8 100644
+--- a/crates/merge-requests/src/description/html.rs
++++ b/crates/merge-requests/src/description/html.rs
+@@ -6,6 +6,7 @@ use url::Url;
+ 
+ use super::address::{image_of, link_of};
+ use super::element::{align, code, commit_title, heading_level, numbers, task_box};
++use super::size::image_size;
+ use super::{
+     Description, DescriptionBlock, DescriptionCell, DescriptionImage, DescriptionInline,
+     DescriptionItem, DescriptionLink, DescriptionRow, ListNumbering, OfferedUpload,
+@@ -276,7 +277,11 @@ impl Walk {
+             .iter()
+             .find_map(|name| node.attr(name).filter(|value| !value.is_empty()))
+             .map_or_else(|| written.to_owned(), |caption| caption.to_string());
+-        let image = DescriptionInline::Image { image, caption };
++        let image = DescriptionInline::Image {
++            image,
++            caption,
++            size: image_size(node),
++        };
+         if self.in_link {
+             self.lifted.push(image);
+             return Vec::new();
+diff --git a/crates/merge-requests/src/description/size.rs b/crates/merge-requests/src/description/size.rs
+new file mode 100644
+index 0000000..0e4b585
+--- /dev/null
++++ b/crates/merge-requests/src/description/size.rs
+@@ -0,0 +1,72 @@
++use dom_query::NodeRef;
++use serde::Serialize;
++use specta::Type;
++
++/// GitLab's `\d{1,4}`: at most four digits.
++const MAX_DIGITS: usize = 4;
++
++/// GitLab's `width`/`height` on an image, each only in GitLab's form `\A\d{1,4}(%|px)?\z` (Banzai
++/// `AttributesFilter::VALID_SIZE_REGEX`); a value outside it is as if not written (request A3).
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum ImageSize {
++    /// A width alone.
++    Width {
++        /// The width.
++        width: ImageLength,
++    },
++    /// A height alone.
++    Height {
++        /// The height.
++        height: ImageLength,
++    },
++    /// A width and a height.
++    Both {
++        /// The width.
++        width: ImageLength,
++        /// The height.
++        height: ImageLength,
++    },
++}
++
++/// One length: a bare number is pixels, as on GitLab.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum ImageLength {
++    /// `12` or `12px`.
++    Pixels {
++        /// 0 to 9999.
++        value: u16,
++    },
++    /// `40%`.
++    Percent {
++        /// 0 to 9999, as written.
++        value: u16,
++    },
++}
++
++/// Pure: GitLab's form only; leading/trailing whitespace, a sign, a fraction, five digits, `em`, `PX` → None.
++pub(crate) fn image_length(written: &str) -> Option<ImageLength> {
++    let (digits, is_percent) = match written.strip_suffix('%') {
++        Some(digits) => (digits, true),
++        None => (written.strip_suffix("px").unwrap_or(written), false),
++    };
++    let is_gitlabs = digits.len() <= MAX_DIGITS && digits.bytes().all(|byte| byte.is_ascii_digit());
++    let value = digits.parse().ok().filter(|_| is_gitlabs)?;
++    if is_percent {
++        Some(ImageLength::Percent { value })
++    } else {
++        Some(ImageLength::Pixels { value })
++    }
++}
++
++/// The `<img>`'s `width` and `height` read with `image_length`; None when neither is in GitLab's form.
++pub(super) fn image_size(image: &NodeRef) -> Option<ImageSize> {
++    let length = |name: &str| image.attr(name).and_then(|written| image_length(&written));
++    match (length("width"), length("height")) {
++        (Some(width), Some(height)) => Some(ImageSize::Both { width, height }),
++        (Some(width), None) => Some(ImageSize::Width { width }),
++        (None, Some(height)) => Some(ImageSize::Height { height }),
++        (None, None) => None,
++    }
++}
+diff --git a/crates/merge-requests/src/description/tests.rs b/crates/merge-requests/src/description/tests.rs
+index ad03bcd..820535f 100644
+--- a/crates/merge-requests/src/description/tests.rs
++++ b/crates/merge-requests/src/description/tests.rs
+@@ -5,6 +5,7 @@ use url::Url;
+ 
+ use super::address::{image_of, link_of};
+ use super::html::{MAX_NESTING, described};
++use super::size::{ImageLength, image_length};
+ use super::*;
+ use crate::PictureAddress;
+ 
+@@ -21,7 +22,7 @@ const PLANTED: &str =
+     include_str!("../../../../tests/glab/mr-description/graphql-description-50.json");
+ 
+ /// Every field name of the Contract's types, as serialised.
+-const CONTRACT_KEYS: [&str; 24] = [
++const CONTRACT_KEYS: [&str; 28] = [
+     "kind",
+     "description",
+     "blocks",
+@@ -46,6 +47,10 @@ const CONTRACT_KEYS: [&str; 24] = [
+     "image",
+     "caption",
+     "key",
++    "size",
++    "width",
++    "height",
++    "value",
+ ];
+ 
+ fn base() -> Url {
+@@ -110,10 +115,11 @@ fn uploaded(secret: &str) -> DescriptionImage {
+     image
+ }
+ 
+-fn image(image: DescriptionImage, caption: &str) -> DescriptionInline {
++fn image(image: DescriptionImage, caption: &str, size: Option<ImageSize>) -> DescriptionInline {
+     DescriptionInline::Image {
+         image,
+         caption: caption.to_owned(),
++        size,
+     }
+ }
+ 
+@@ -184,7 +190,7 @@ fn every_element_of_rule_3_becomes_its_block_or_inline() {
+             { "kind": "link", "link": { "kind": "page", "page": "https://gitlab.com/x" },
+               "inlines": [{ "kind": "text", "text": "a" }] },
+             { "kind": "image", "image": { "kind": "web", "address": "https://images.example/cat.png" },
+-              "caption": "cat" },
++              "caption": "cat", "size": null },
+         ] },
+         { "kind": "code", "language": null, "text": "plain" },
+         { "kind": "list", "numbering": { "kind": "bullets" }, "items": [item("bullet")] },
+@@ -237,7 +243,7 @@ fn a_lazy_image_is_read_from_data_src_and_its_link_is_dropped() {
+ 
+     let read = read(&measured);
+ 
+-    let shot = image(uploaded(HEX_A), "Screenshot_2025-08-01_at_4.25.21_pm");
++    let shot = image(uploaded(HEX_A), "Screenshot_2025-08-01_at_4.25.21_pm", None);
+     assert_eq!(read.description.blocks, [paragraph(vec![shot])]);
+     assert_eq!(read.pages, Vec::<WebPage>::new());
+     let route = format!("projects/278964/uploads/{HEX_A}/Screenshot_2025-08-01_at_4.25.21_pm.png");
+@@ -258,7 +264,7 @@ fn a_lazy_image_is_read_from_data_src_and_its_link_is_dropped() {
+             },
+         ],
+     };
+-    let cat = image(web("https://images.example/cat.png"), "cat");
++    let cat = image(web("https://images.example/cat.png"), "cat", None);
+     assert_eq!(read.description.blocks, [paragraph(vec![link, cat])]);
+     assert_eq!(read.web_images, 1);
+ }
+@@ -270,17 +276,137 @@ fn an_images_caption_is_its_alt_else_its_title_else_its_address() {
+         <img src=\"https://images.example/c.png\"><img alt=\"\"></p>";
+ 
+     let expected = paragraph(vec![
+-        image(web("https://images.example/a.png"), "alt"),
+-        image(web("https://images.example/b.png"), "title"),
++        image(web("https://images.example/a.png"), "alt", None),
++        image(web("https://images.example/b.png"), "title", None),
+         image(
+             web("https://images.example/c.png"),
+             "https://images.example/c.png",
++            None,
+         ),
+-        image(DescriptionImage::Refused, ""),
++        image(DescriptionImage::Refused, "", None),
+     ]);
+     assert_eq!(blocks(html), [expected]);
+ }
+ 
++fn pixels(value: u16) -> ImageLength {
++    ImageLength::Pixels { value }
++}
++
++fn percent(value: u16) -> ImageLength {
++    ImageLength::Percent { value }
++}
++
++fn cat(size: Option<ImageSize>) -> DescriptionInline {
++    image(web("https://images.example/cat.png"), "cat", size)
++}
++
++#[test]
++fn a_bare_number_is_pixels_and_px_and_percent_are_kept() {
++    let cases = [
++        ("12", pixels(12)),
++        ("12px", pixels(12)),
++        ("40%", percent(40)),
++        ("0", pixels(0)),
++        ("9999px", pixels(9999)),
++        ("9999%", percent(9999)),
++    ];
++    for (written, length) in cases {
++        assert_eq!(image_length(written), Some(length), "{written}");
++    }
++}
++
++#[test]
++fn a_size_outside_gitlabs_form_is_ignored() {
++    let outside = [
++        "abc", "12345", "1.5", " 12", "12 ", "-3", "+3", "12em", "12PX", "", "%", "px", "12px%",
++        "12%px", "٣",
++    ];
++    for written in outside {
++        assert_eq!(image_length(written), None, "{written:?}");
++        let sized = format!(
++            "<p><img src=\"https://images.example/cat.png\" alt=\"cat\" width=\"{written}\" \
++             height=\"{written}\"></p>"
++        );
++        assert_eq!(blocks(&sized), [paragraph(vec![cat(None)])], "{written:?}");
++    }
++}
++
++#[test]
++fn an_image_without_size_has_none() {
++    let html = "<p><img src=\"https://images.example/cat.png\" alt=\"cat\"></p>";
++
++    assert_eq!(blocks(html), [paragraph(vec![cat(None)])]);
++}
++
++#[test]
++fn width_and_height_together_are_both() {
++    let html = "<p><img src=\"https://images.example/cat.png\" alt=\"cat\" width=\"200\" height=\"50%\">\
++        <img src=\"https://images.example/cat.png\" alt=\"cat\" width=\"200px\" height=\"abc\"></p>";
++
++    let both = ImageSize::Both {
++        width: pixels(200),
++        height: percent(50),
++    };
++    let width = ImageSize::Width { width: pixels(200) };
++    assert_eq!(
++        blocks(html),
++        [paragraph(vec![cat(Some(both)), cat(Some(width))])]
++    );
++}
++
++#[test]
++fn height_alone_is_height() {
++    let html = "<p><img src=\"https://images.example/cat.png\" alt=\"cat\" height=\"80px\">\
++        <img src=\"https://images.example/cat.png\" alt=\"cat\" width=\"12em\" height=\"80\"></p>";
++
++    let height = ImageSize::Height { height: pixels(80) };
++    assert_eq!(
++        blocks(html),
++        [paragraph(vec![cat(Some(height)), cat(Some(height))])]
++    );
++}
++
++#[test]
++fn a_lazy_images_size_is_read_beside_its_data_src() {
++    let address = "https://user-content.gitlab-static.net/0a1b2c3d/_user.png";
++    let measured = format!(
++        "<p><img src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" \
++         alt=\"profile link\" width=\"12\" decoding=\"async\" class=\"lazy\" data-src=\"{address}\"></p>"
++    );
++
++    let width = ImageSize::Width { width: pixels(12) };
++    let profile = image(web(address), "profile link", Some(width));
++    assert_eq!(blocks(&measured), [paragraph(vec![profile])]);
++}
++
++#[test]
++fn an_image_lifted_out_of_a_link_keeps_its_size() {
++    let html = "<p><a href=\"https://docs.example/x\">see <img src=\"https://images.example/cat.png\" alt=\"cat\" \
++        width=\"40%\"></a></p>";
++
++    let link = DescriptionInline::Link {
++        link: page("https://docs.example/x"),
++        inlines: vec![text("see ")],
++    };
++    let width = ImageSize::Width { width: percent(40) };
++    assert_eq!(blocks(html), [paragraph(vec![link, cat(Some(width))])]);
++}
++
++#[test]
++fn the_ipc_form_names_kind_and_value() {
++    let size = ImageSize::Both {
++        width: pixels(200),
++        height: percent(50),
++    };
++
++    let expected = json!({
++        "kind": "both",
++        "width": { "kind": "pixels", "value": 200 },
++        "height": { "kind": "percent", "value": 50 },
++    });
++    assert_eq!(serde_json::to_value(size).unwrap(), expected);
++}
++
+ #[test]
+ fn a_heading_anchor_link_leaves_nothing() {
+     let measured = "<h2 id=\"user-content-what-does-this-mr-do-and-why\" data-sourcepos=\"1:1-1:32\" dir=\"auto\">\
+@@ -503,7 +629,7 @@ fn planted_script_style_frame_object_media_and_form_leave_nothing() {
+     let blocks = &read.description.blocks;
+     let starts = [
+         said("before"),
+-        paragraph(vec![image(web(&format!("{MERGE_REQUESTS}x")), "x")]),
++        paragraph(vec![image(web(&format!("{MERGE_REQUESTS}x")), "x", None)]),
+         paragraph(vec![DescriptionInline::Link {
+             link: page(&format!("{MERGE_REQUESTS}relative")),
+             inlines: vec![text("relative link")],
+@@ -552,7 +678,7 @@ fn a_base_or_meta_element_changes_no_address() {
+         link: page(&format!("{MERGE_REQUESTS}x")),
+         inlines: vec![text("x")],
+     };
+-    let y = image(web(&format!("{MERGE_REQUESTS}y.png")), "y");
++    let y = image(web(&format!("{MERGE_REQUESTS}y.png")), "y", None);
+     assert_eq!(read.description.blocks, [paragraph(vec![link, y])]);
+     assert_eq!(read.pages, [WebPage(format!("{MERGE_REQUESTS}x"))]);
+ }
+@@ -705,7 +831,7 @@ fn without_an_https_origin_a_relative_link_is_refused() {
+             link: page("https://docs.example/"),
+             inlines: vec![text("d")],
+         },
+-        image(DescriptionImage::Refused, "a"),
++        image(DescriptionImage::Refused, "a", None),
+     ]);
+     assert_eq!(read.description.blocks, [expected]);
+     assert_eq!(read.pages, [WebPage("https://docs.example/".to_owned())]);
+diff --git a/crates/merge-requests/tests/description.rs b/crates/merge-requests/tests/description.rs
+index f912b27..eecdc99 100644
+--- a/crates/merge-requests/tests/description.rs
++++ b/crates/merge-requests/tests/description.rs
+@@ -256,6 +256,42 @@ fn an_empty_description_has_no_blocks() {
+     assert!(read.pages.is_empty() && read.uploads.is_empty());
+ }
+ 
++#[test]
++fn a_descriptions_images_carry_the_size_gitlab_kept() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new(SCENARIO);
++
++    let read = read(&fake, &repository, 54);
++
++    let reply = sent(&read.reply);
++    let images: Vec<Value> = reply["description"]["blocks"]
++        .as_array()
++        .unwrap()
++        .iter()
++        .flat_map(|block| block["inlines"].as_array().unwrap())
++        .filter(|inline| inline["kind"] == "image")
++        .map(|image| json!({ "address": image["image"]["address"], "size": image["size"] }))
++        .collect();
++    let pixels = |value: u16| json!({ "kind": "pixels", "value": value });
++    let percent = |value: u16| json!({ "kind": "percent", "value": value });
++    let sized = |name: &str, size: Value| json!({ "address": format!("https://images.example/{name}.png"), "size": size });
++    let expected = [
++        sized("w300", json!({ "kind": "width", "width": pixels(300) })),
++        sized("w40", json!({ "kind": "width", "width": percent(40) })),
++        sized("h80", json!({ "kind": "height", "height": pixels(80) })),
++        sized(
++            "w200h100",
++            json!({ "kind": "both", "width": pixels(200), "height": pixels(100) }),
++        ),
++        sized("w5000", json!({ "kind": "width", "width": pixels(5000) })),
++        sized("wabc", Value::Null),
++        sized("w12345", Value::Null),
++        sized("h50", json!({ "kind": "height", "height": percent(50) })),
++        sized("plain", Value::Null),
++    ];
++    assert_eq!(images, expected);
++}
++
+ #[test]
+ fn the_planted_description_keeps_only_text_and_safe_pieces() {
+     let (_repo, repository) = gitlab_repo();

@@ -5,6 +5,7 @@ use url::Url;
 
 use super::address::{image_of, link_of};
 use super::html::{MAX_NESTING, described};
+use super::size::{ImageLength, image_length};
 use super::*;
 use crate::PictureAddress;
 
@@ -21,7 +22,7 @@ const PLANTED: &str =
     include_str!("../../../../tests/glab/mr-description/graphql-description-50.json");
 
 /// Every field name of the Contract's types, as serialised.
-const CONTRACT_KEYS: [&str; 24] = [
+const CONTRACT_KEYS: [&str; 28] = [
     "kind",
     "description",
     "blocks",
@@ -46,6 +47,10 @@ const CONTRACT_KEYS: [&str; 24] = [
     "image",
     "caption",
     "key",
+    "size",
+    "width",
+    "height",
+    "value",
 ];
 
 fn base() -> Url {
@@ -110,10 +115,11 @@ fn uploaded(secret: &str) -> DescriptionImage {
     image
 }
 
-fn image(image: DescriptionImage, caption: &str) -> DescriptionInline {
+fn image(image: DescriptionImage, caption: &str, size: Option<ImageSize>) -> DescriptionInline {
     DescriptionInline::Image {
         image,
         caption: caption.to_owned(),
+        size,
     }
 }
 
@@ -184,7 +190,7 @@ fn every_element_of_rule_3_becomes_its_block_or_inline() {
             { "kind": "link", "link": { "kind": "page", "page": "https://gitlab.com/x" },
               "inlines": [{ "kind": "text", "text": "a" }] },
             { "kind": "image", "image": { "kind": "web", "address": "https://images.example/cat.png" },
-              "caption": "cat" },
+              "caption": "cat", "size": null },
         ] },
         { "kind": "code", "language": null, "text": "plain" },
         { "kind": "list", "numbering": { "kind": "bullets" }, "items": [item("bullet")] },
@@ -237,7 +243,7 @@ fn a_lazy_image_is_read_from_data_src_and_its_link_is_dropped() {
 
     let read = read(&measured);
 
-    let shot = image(uploaded(HEX_A), "Screenshot_2025-08-01_at_4.25.21_pm");
+    let shot = image(uploaded(HEX_A), "Screenshot_2025-08-01_at_4.25.21_pm", None);
     assert_eq!(read.description.blocks, [paragraph(vec![shot])]);
     assert_eq!(read.pages, Vec::<WebPage>::new());
     let route = format!("projects/278964/uploads/{HEX_A}/Screenshot_2025-08-01_at_4.25.21_pm.png");
@@ -258,7 +264,7 @@ fn a_lazy_image_is_read_from_data_src_and_its_link_is_dropped() {
             },
         ],
     };
-    let cat = image(web("https://images.example/cat.png"), "cat");
+    let cat = image(web("https://images.example/cat.png"), "cat", None);
     assert_eq!(read.description.blocks, [paragraph(vec![link, cat])]);
     assert_eq!(read.web_images, 1);
 }
@@ -270,15 +276,135 @@ fn an_images_caption_is_its_alt_else_its_title_else_its_address() {
         <img src=\"https://images.example/c.png\"><img alt=\"\"></p>";
 
     let expected = paragraph(vec![
-        image(web("https://images.example/a.png"), "alt"),
-        image(web("https://images.example/b.png"), "title"),
+        image(web("https://images.example/a.png"), "alt", None),
+        image(web("https://images.example/b.png"), "title", None),
         image(
             web("https://images.example/c.png"),
             "https://images.example/c.png",
+            None,
         ),
-        image(DescriptionImage::Refused, ""),
+        image(DescriptionImage::Refused, "", None),
     ]);
     assert_eq!(blocks(html), [expected]);
+}
+
+fn pixels(value: u16) -> ImageLength {
+    ImageLength::Pixels { value }
+}
+
+fn percent(value: u16) -> ImageLength {
+    ImageLength::Percent { value }
+}
+
+fn cat(size: Option<ImageSize>) -> DescriptionInline {
+    image(web("https://images.example/cat.png"), "cat", size)
+}
+
+#[test]
+fn a_bare_number_is_pixels_and_px_and_percent_are_kept() {
+    let cases = [
+        ("12", pixels(12)),
+        ("12px", pixels(12)),
+        ("40%", percent(40)),
+        ("0", pixels(0)),
+        ("9999px", pixels(9999)),
+        ("9999%", percent(9999)),
+    ];
+    for (written, length) in cases {
+        assert_eq!(image_length(written), Some(length), "{written}");
+    }
+}
+
+#[test]
+fn a_size_outside_gitlabs_form_is_ignored() {
+    let outside = [
+        "abc", "12345", "1.5", " 12", "12 ", "-3", "+3", "12em", "12PX", "", "%", "px", "12px%",
+        "12%px", "٣",
+    ];
+    for written in outside {
+        assert_eq!(image_length(written), None, "{written:?}");
+        let sized = format!(
+            "<p><img src=\"https://images.example/cat.png\" alt=\"cat\" width=\"{written}\" \
+             height=\"{written}\"></p>"
+        );
+        assert_eq!(blocks(&sized), [paragraph(vec![cat(None)])], "{written:?}");
+    }
+}
+
+#[test]
+fn an_image_without_size_has_none() {
+    let html = "<p><img src=\"https://images.example/cat.png\" alt=\"cat\"></p>";
+
+    assert_eq!(blocks(html), [paragraph(vec![cat(None)])]);
+}
+
+#[test]
+fn width_and_height_together_are_both() {
+    let html = "<p><img src=\"https://images.example/cat.png\" alt=\"cat\" width=\"200\" height=\"50%\">\
+        <img src=\"https://images.example/cat.png\" alt=\"cat\" width=\"200px\" height=\"abc\"></p>";
+
+    let both = ImageSize::Both {
+        width: pixels(200),
+        height: percent(50),
+    };
+    let width = ImageSize::Width { width: pixels(200) };
+    assert_eq!(
+        blocks(html),
+        [paragraph(vec![cat(Some(both)), cat(Some(width))])]
+    );
+}
+
+#[test]
+fn height_alone_is_height() {
+    let html = "<p><img src=\"https://images.example/cat.png\" alt=\"cat\" height=\"80px\">\
+        <img src=\"https://images.example/cat.png\" alt=\"cat\" width=\"12em\" height=\"80\"></p>";
+
+    let height = ImageSize::Height { height: pixels(80) };
+    assert_eq!(
+        blocks(html),
+        [paragraph(vec![cat(Some(height)), cat(Some(height))])]
+    );
+}
+
+#[test]
+fn a_lazy_images_size_is_read_beside_its_data_src() {
+    let address = "https://user-content.gitlab-static.net/0a1b2c3d/_user.png";
+    let measured = format!(
+        "<p><img src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" \
+         alt=\"profile link\" width=\"12\" decoding=\"async\" class=\"lazy\" data-src=\"{address}\"></p>"
+    );
+
+    let width = ImageSize::Width { width: pixels(12) };
+    let profile = image(web(address), "profile link", Some(width));
+    assert_eq!(blocks(&measured), [paragraph(vec![profile])]);
+}
+
+#[test]
+fn an_image_lifted_out_of_a_link_keeps_its_size() {
+    let html = "<p><a href=\"https://docs.example/x\">see <img src=\"https://images.example/cat.png\" alt=\"cat\" \
+        width=\"40%\"></a></p>";
+
+    let link = DescriptionInline::Link {
+        link: page("https://docs.example/x"),
+        inlines: vec![text("see ")],
+    };
+    let width = ImageSize::Width { width: percent(40) };
+    assert_eq!(blocks(html), [paragraph(vec![link, cat(Some(width))])]);
+}
+
+#[test]
+fn the_ipc_form_names_kind_and_value() {
+    let size = ImageSize::Both {
+        width: pixels(200),
+        height: percent(50),
+    };
+
+    let expected = json!({
+        "kind": "both",
+        "width": { "kind": "pixels", "value": 200 },
+        "height": { "kind": "percent", "value": 50 },
+    });
+    assert_eq!(serde_json::to_value(size).unwrap(), expected);
 }
 
 #[test]
@@ -503,7 +629,7 @@ fn planted_script_style_frame_object_media_and_form_leave_nothing() {
     let blocks = &read.description.blocks;
     let starts = [
         said("before"),
-        paragraph(vec![image(web(&format!("{MERGE_REQUESTS}x")), "x")]),
+        paragraph(vec![image(web(&format!("{MERGE_REQUESTS}x")), "x", None)]),
         paragraph(vec![DescriptionInline::Link {
             link: page(&format!("{MERGE_REQUESTS}relative")),
             inlines: vec![text("relative link")],
@@ -552,7 +678,7 @@ fn a_base_or_meta_element_changes_no_address() {
         link: page(&format!("{MERGE_REQUESTS}x")),
         inlines: vec![text("x")],
     };
-    let y = image(web(&format!("{MERGE_REQUESTS}y.png")), "y");
+    let y = image(web(&format!("{MERGE_REQUESTS}y.png")), "y", None);
     assert_eq!(read.description.blocks, [paragraph(vec![link, y])]);
     assert_eq!(read.pages, [WebPage(format!("{MERGE_REQUESTS}x"))]);
 }
@@ -705,7 +831,7 @@ fn without_an_https_origin_a_relative_link_is_refused() {
             link: page("https://docs.example/"),
             inlines: vec![text("d")],
         },
-        image(DescriptionImage::Refused, "a"),
+        image(DescriptionImage::Refused, "a", None),
     ]);
     assert_eq!(read.description.blocks, [expected]);
     assert_eq!(read.pages, [WebPage("https://docs.example/".to_owned())]);

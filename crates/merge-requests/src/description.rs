@@ -1,6 +1,7 @@
 pub(crate) mod address;
 mod element;
 mod html;
+mod size;
 
 use std::path::Path;
 
@@ -16,6 +17,7 @@ use crate::{GitLabRepository, MergeRequestIid, WebPage};
 pub use address::{DescriptionImage, DescriptionLink, OfferedUpload, UploadKey};
 pub(crate) use html::Described;
 use html::described;
+pub use size::ImageSize;
 
 /// How reading a merge request's description ended.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
@@ -234,6 +236,8 @@ pub enum DescriptionInline {
         image: DescriptionImage,
         /// alt, else title, else the address as written (empty when there is none).
         caption: String,
+        /// The size written in Markdown (`{width=…}`, `{height=…}`) as GitLab kept it on the `<img>`; None: its own.
+        size: Option<ImageSize>,
     },
     /// `<br>`.
     LineBreak,

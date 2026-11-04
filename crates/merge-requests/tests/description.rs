@@ -257,6 +257,42 @@ fn an_empty_description_has_no_blocks() {
 }
 
 #[test]
+fn a_descriptions_images_carry_the_size_gitlab_kept() {
+    let (_repo, repository) = gitlab_repo();
+    let fake = Fake::new(SCENARIO);
+
+    let read = read(&fake, &repository, 54);
+
+    let reply = sent(&read.reply);
+    let images: Vec<Value> = reply["description"]["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|block| block["inlines"].as_array().unwrap())
+        .filter(|inline| inline["kind"] == "image")
+        .map(|image| json!({ "address": image["image"]["address"], "size": image["size"] }))
+        .collect();
+    let pixels = |value: u16| json!({ "kind": "pixels", "value": value });
+    let percent = |value: u16| json!({ "kind": "percent", "value": value });
+    let sized = |name: &str, size: Value| json!({ "address": format!("https://images.example/{name}.png"), "size": size });
+    let expected = [
+        sized("w300", json!({ "kind": "width", "width": pixels(300) })),
+        sized("w40", json!({ "kind": "width", "width": percent(40) })),
+        sized("h80", json!({ "kind": "height", "height": pixels(80) })),
+        sized(
+            "w200h100",
+            json!({ "kind": "both", "width": pixels(200), "height": pixels(100) }),
+        ),
+        sized("w5000", json!({ "kind": "width", "width": pixels(5000) })),
+        sized("wabc", Value::Null),
+        sized("w12345", Value::Null),
+        sized("h50", json!({ "kind": "height", "height": percent(50) })),
+        sized("plain", Value::Null),
+    ];
+    assert_eq!(images, expected);
+}
+
+#[test]
 fn the_planted_description_keeps_only_text_and_safe_pieces() {
     let (_repo, repository) = gitlab_repo();
     let fake = Fake::new(SCENARIO);
