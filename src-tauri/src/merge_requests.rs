@@ -59,8 +59,9 @@ pub(crate) enum ContinueMergeReply {
 
 /// The window's GitLab project, found once at start, the folder pair locks live in, the window's `--ai` that "Show
 /// Diff" passes on, and every merge request's and failed job's page a list sent, every note's page
-/// `read_discussions` sent and every page `read_description` sent in this run: only those may be opened or have
-/// their log read (plan §2 #128–#137); `pages` is never locked together with another `Mutex`.
+/// `read_discussions` sent, every page `read_description` sent and every line's and parent's page `read_links` sent
+/// in this run: only those may be opened or have their log read (plan §2 #128–#137); `pages` is never locked
+/// together with another `Mutex`.
 pub(crate) struct MergeRequestState {
     gitlab: Option<GitLabRepository>,
     range_dir: PathBuf,
