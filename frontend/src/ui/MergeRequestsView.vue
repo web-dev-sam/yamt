@@ -65,6 +65,7 @@ const {
   viewer,
   reviewSort,
   description,
+  thread,
 } = requests;
 const back = useTemplateRef<HTMLButtonElement>("back");
 const bars = useTemplateRef<FilterBar[]>("bars");
@@ -107,7 +108,7 @@ function escapePressed(event: KeyboardEvent): void {
     void dismiss();
     return;
   }
-  if (description.value !== null) {
+  if (description.value !== null || thread.value !== null) {
     return;
   }
   event.preventDefault();

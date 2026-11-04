@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useEventListener } from "@vueuse/core";
 import { computed, onMounted, useTemplateRef } from "vue";
 import Check from "~icons/lucide/check";
 import ExternalLink from "~icons/lucide/external-link";
@@ -48,6 +49,7 @@ const emit = defineEmits<{ close: [] }>();
 const { thread, retryThread, submitReview, openPage } = useMergeRequests();
 const panel = useTemplateRef<HTMLDivElement>("panel");
 const placement = useBesidePlacement(panel, () => props.anchor);
+useEventListener(window, "keydown", keyPressed);
 
 const shown = computed(() => (thread.value?.shown.iid === props.iid ? thread.value : null));
 const content = computed(() => (shown.value === null ? null : contentOf(shown.value.load)));
@@ -102,7 +104,7 @@ async function openThread(): Promise<void> {
 }
 
 function keyPressed(event: KeyboardEvent): void {
-  if (event.key !== "Escape" || event.defaultPrevented) {
+  if (event.key !== "Escape" || event.defaultPrevented || shown.value === null) {
     return;
   }
   event.preventDefault();
@@ -112,6 +114,11 @@ function keyPressed(event: KeyboardEvent): void {
 function publish(): void {
   focusPanel();
   void submitReview();
+}
+
+function retry(): void {
+  focusPanel();
+  retryThread();
 }
 </script>
 
@@ -191,7 +198,7 @@ function publish(): void {
         <button
           type="button"
           class="shrink-0 cursor-pointer rounded border border-control-border px-3.5 py-1 hover:bg-hover"
-          @click="retryThread"
+          @click="retry"
         >
           {{ RETRY }}
         </button>

@@ -7,7 +7,12 @@ import {
 import type { MergeRequestIid, SourceResult } from "./domain";
 import { pause } from "./fixture";
 import { TIMED_OUT } from "./fixtureGitLab";
-import { FIXTURE_ME, fixtureUploadedPicture, LOCKED_THREADS_IID } from "./fixtureMergeRequestData";
+import {
+  FIXTURE_ME,
+  fixtureUploadedPicture,
+  LOCKED_THREADS_IID,
+  THREADS_IID,
+} from "./fixtureMergeRequestData";
 import {
   openDiscussion,
   storedDiscussions,
@@ -15,7 +20,7 @@ import {
   type DiscussionStore,
 } from "./fixtureMergeRequestDiscussions";
 import { renderedText, textComment, type FixtureComment } from "./fixtureMergeRequestRendering";
-import type { FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
+import { discussionId, type FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
 import type { Log } from "./log";
 import type { MergeRequestSource } from "./MergeRequestSource";
 
@@ -29,6 +34,8 @@ const NOTHING_TO_SEND = "There is nothing to send.";
 const FORBIDDEN = "403 Forbidden";
 const NOT_FOUND = "404 Not Found";
 const SENT: Generated.DiscussionWriteReply = { kind: "sent" };
+/** !637's d13 fails its first read, then reads: the panel's Retry (verify step 10). */
+const FAILS_ONCE_SERIAL = 13;
 
 function discussionOf(
   store: DiscussionStore,
@@ -155,6 +162,24 @@ async function written(
   return { ok: true, value: write() };
 }
 
+function threadReader(
+  log: Log,
+  store: DiscussionStore,
+): MergeRequestSource["readDiscussionThread"] {
+  let failedOnce = false;
+  return async (iid, discussion) => {
+    log.info("mergeRequests.fixture_thread", { iid, discussion });
+    await pause(THREAD_PAUSE_MS);
+    const fails =
+      !failedOnce && iid === THREADS_IID && discussion === discussionId(FAILS_ONCE_SERIAL);
+    failedOnce ||= fails;
+    const reply: Generated.DiscussionThreadReply = fails
+      ? { kind: "failed", message: TIMED_OUT }
+      : thread(store, iid, discussion);
+    return { ok: true, value: toDiscussionThreadReply(reply, fixtureUploadedPicture) };
+  };
+}
+
 /** A discussion's thread, its writes and the preview over `store`, the discussions script's: a write shows in the
  *  next read of either. Logs name the iid and the discussion, never a text. */
 export function threadsScript(
@@ -169,12 +194,7 @@ export function threadsScript(
   | "previewMarkdown"
 > {
   return {
-    async readDiscussionThread(iid, discussion) {
-      log.info("mergeRequests.fixture_thread", { iid, discussion });
-      await pause(THREAD_PAUSE_MS);
-      const reply = thread(store, iid, discussion);
-      return { ok: true, value: toDiscussionThreadReply(reply, fixtureUploadedPicture) };
-    },
+    readDiscussionThread: threadReader(log, store),
     replyToDiscussion(iid, discussion, kind, text) {
       return written(log, { kind, iid, discussion }, () =>
         replied(store, { iid, discussion, kind, text }),

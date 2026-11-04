@@ -1,0 +1,224 @@
+diff --git a/frontend/src/ipc/fixtureMergeRequestDiscussions.ts b/frontend/src/ipc/fixtureMergeRequestDiscussions.ts
+index c6418dd..b752332 100644
+--- a/frontend/src/ipc/fixtureMergeRequestDiscussions.ts
++++ b/frontend/src/ipc/fixtureMergeRequestDiscussions.ts
+@@ -8,7 +8,7 @@ import {
+   LOGGED_OUT_DETAIL,
+   ORIGIN,
+ } from "./fixtureMergeRequestData";
+-import { personNamed, renderedText, type FixtureComment } from "./fixtureMergeRequestRendering";
++import { mentionsIn, renderedText, type FixtureComment } from "./fixtureMergeRequestRendering";
+ import { discussionId, turnCases, type FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
+ import type { Log } from "./log";
+ import type { MergeRequestSource } from "./MergeRequestSource";
+@@ -84,13 +84,7 @@ function note(
+ 
+ function asking(comment: FixtureComment, username: string): FixtureComment {
+   const said = `@${username} ${comment.text}`;
+-  const person = personNamed(username);
+-  return {
+-    ...comment,
+-    body: renderedText(said),
+-    text: said,
+-    mentions: person === null ? [] : [{ username: person.username, name: person.name }],
+-  };
++  return { ...comment, body: renderedText(said), text: said, mentions: mentionsIn(said) };
+ }
+ 
+ function discussions(row: Generated.MergeRequestRow, index: number): FixtureDiscussion[] {
+diff --git a/frontend/src/ipc/fixtureMergeRequestRendering.ts b/frontend/src/ipc/fixtureMergeRequestRendering.ts
+index 26543ac..02f9418 100644
+--- a/frontend/src/ipc/fixtureMergeRequestRendering.ts
++++ b/frontend/src/ipc/fixtureMergeRequestRendering.ts
+@@ -45,7 +45,7 @@ export function renderedText(text: string): Generated.Description {
+ }
+ 
+ /** GitLab links a person's `@username`, never one in code (design §1.2). */
+-function mentionsIn(text: string): Generated.Mention[] {
++export function mentionsIn(text: string): Generated.Mention[] {
+   return [...text.replace(CODE_SPANS, "").matchAll(MENTIONS)].flatMap((match) => {
+     const named = personNamed(match[1] ?? null);
+     return named === null ? [] : [{ username: named.username, name: named.name }];
+diff --git a/frontend/src/ipc/fixtureMergeRequestThreads.test.ts b/frontend/src/ipc/fixtureMergeRequestThreads.test.ts
+index 5108128..e1ef53d 100644
+--- a/frontend/src/ipc/fixtureMergeRequestThreads.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequestThreads.test.ts
+@@ -191,6 +191,8 @@ test("comments_are_an_hour_apart_and_every_note_page_is_new", async () => {
+   ).toEqual([48, 47, 46, 1]);
+ 
+   await wrote(live.source.replyToDiscussion(iid(637), d(2), "comment", "Thanks."));
++  const d13First = await answered(live.source.readDiscussionThread(iid(637), d(13)), THREAD_MS);
++  expect(d13First).toMatchObject({ value: { kind: "failed" } });
+   const notes = await Promise.all(
+     Array.from({ length: 13 }, (_, at) => threadOf(live, 637, at + 1)),
+   );
+@@ -295,6 +297,25 @@ test("an_unknown_iid_or_discussion_is_not_found", async () => {
+   expect(await wrote(live.source.submitReview(iid(140)))).toEqual(notFound);
+ });
+ 
++test("d13_fails_its_first_read_then_reads_for_the_panels_retry", async () => {
++  const live = rig();
++  expect((await threadOf(live, 637, 12)).discussion.id).toBe(d(12));
++  const failed = { ok: true, value: { kind: "failed", message: "glab timed out" } };
++  expect(await answered(live.source.readDiscussionThread(iid(637), d(13)), THREAD_MS)).toEqual(
++    failed,
++  );
++  const retried = await threadOf(live, 637, 13);
++  expect(retried.discussion.id).toBe(d(13));
++  expect(retried.comments).toHaveLength(1);
++  expect(await answered(rig().source.readDiscussionThread(iid(636), d(13)), THREAD_MS)).toEqual({
++    ok: true,
++    value: { kind: "notFound" },
++  });
++  expect(await answered(rig().source.readDiscussionThread(iid(637), d(13)), THREAD_MS)).toEqual(
++    failed,
++  );
++});
++
+ test("a_comment_shows_in_the_next_read_and_the_rows_discussions", async () => {
+   const live = rig();
+   expect(
+diff --git a/frontend/src/ipc/fixtureMergeRequestThreads.ts b/frontend/src/ipc/fixtureMergeRequestThreads.ts
+index b7d62f1..563c4be 100644
+--- a/frontend/src/ipc/fixtureMergeRequestThreads.ts
++++ b/frontend/src/ipc/fixtureMergeRequestThreads.ts
+@@ -7,7 +7,12 @@ import {
+ import type { MergeRequestIid, SourceResult } from "./domain";
+ import { pause } from "./fixture";
+ import { TIMED_OUT } from "./fixtureGitLab";
+-import { FIXTURE_ME, fixtureUploadedPicture, LOCKED_THREADS_IID } from "./fixtureMergeRequestData";
++import {
++  FIXTURE_ME,
++  fixtureUploadedPicture,
++  LOCKED_THREADS_IID,
++  THREADS_IID,
++} from "./fixtureMergeRequestData";
+ import {
+   openDiscussion,
+   storedDiscussions,
+@@ -15,7 +20,7 @@ import {
+   type DiscussionStore,
+ } from "./fixtureMergeRequestDiscussions";
+ import { renderedText, textComment, type FixtureComment } from "./fixtureMergeRequestRendering";
+-import type { FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
++import { discussionId, type FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
+ import type { Log } from "./log";
+ import type { MergeRequestSource } from "./MergeRequestSource";
+ 
+@@ -29,6 +34,8 @@ const NOTHING_TO_SEND = "There is nothing to send.";
+ const FORBIDDEN = "403 Forbidden";
+ const NOT_FOUND = "404 Not Found";
+ const SENT: Generated.DiscussionWriteReply = { kind: "sent" };
++/** !637's d13 fails its first read, then reads: the panel's Retry (verify step 10). */
++const FAILS_ONCE_SERIAL = 13;
+ 
+ function discussionOf(
+   store: DiscussionStore,
+@@ -155,6 +162,24 @@ async function written(
+   return { ok: true, value: write() };
+ }
+ 
++function threadReader(
++  log: Log,
++  store: DiscussionStore,
++): MergeRequestSource["readDiscussionThread"] {
++  let failedOnce = false;
++  return async (iid, discussion) => {
++    log.info("mergeRequests.fixture_thread", { iid, discussion });
++    await pause(THREAD_PAUSE_MS);
++    const fails =
++      !failedOnce && iid === THREADS_IID && discussion === discussionId(FAILS_ONCE_SERIAL);
++    failedOnce ||= fails;
++    const reply: Generated.DiscussionThreadReply = fails
++      ? { kind: "failed", message: TIMED_OUT }
++      : thread(store, iid, discussion);
++    return { ok: true, value: toDiscussionThreadReply(reply, fixtureUploadedPicture) };
++  };
++}
++
+ /** A discussion's thread, its writes and the preview over `store`, the discussions script's: a write shows in the
+  *  next read of either. Logs name the iid and the discussion, never a text. */
+ export function threadsScript(
+@@ -169,12 +194,7 @@ export function threadsScript(
+   | "previewMarkdown"
+ > {
+   return {
+-    async readDiscussionThread(iid, discussion) {
+-      log.info("mergeRequests.fixture_thread", { iid, discussion });
+-      await pause(THREAD_PAUSE_MS);
+-      const reply = thread(store, iid, discussion);
+-      return { ok: true, value: toDiscussionThreadReply(reply, fixtureUploadedPicture) };
+-    },
++    readDiscussionThread: threadReader(log, store),
+     replyToDiscussion(iid, discussion, kind, text) {
+       return written(log, { kind, iid, discussion }, () =>
+         replied(store, { iid, discussion, kind, text }),
+diff --git a/frontend/src/ui/MergeRequestThread.vue b/frontend/src/ui/MergeRequestThread.vue
+index a38ebb9..e758d80 100644
+--- a/frontend/src/ui/MergeRequestThread.vue
++++ b/frontend/src/ui/MergeRequestThread.vue
+@@ -1,4 +1,5 @@
+ <script setup lang="ts">
++import { useEventListener } from "@vueuse/core";
+ import { computed, onMounted, useTemplateRef } from "vue";
+ import Check from "~icons/lucide/check";
+ import ExternalLink from "~icons/lucide/external-link";
+@@ -48,6 +49,7 @@ const emit = defineEmits<{ close: [] }>();
+ const { thread, retryThread, submitReview, openPage } = useMergeRequests();
+ const panel = useTemplateRef<HTMLDivElement>("panel");
+ const placement = useBesidePlacement(panel, () => props.anchor);
++useEventListener(window, "keydown", keyPressed);
+ 
+ const shown = computed(() => (thread.value?.shown.iid === props.iid ? thread.value : null));
+ const content = computed(() => (shown.value === null ? null : contentOf(shown.value.load)));
+@@ -102,7 +104,7 @@ async function openThread(): Promise<void> {
+ }
+ 
+ function keyPressed(event: KeyboardEvent): void {
+-  if (event.key !== "Escape" || event.defaultPrevented) {
++  if (event.key !== "Escape" || event.defaultPrevented || shown.value === null) {
+     return;
+   }
+   event.preventDefault();
+@@ -113,6 +115,11 @@ function publish(): void {
+   focusPanel();
+   void submitReview();
+ }
++
++function retry(): void {
++  focusPanel();
++  retryThread();
++}
+ </script>
+ 
+ <template>
+@@ -191,7 +198,7 @@ function publish(): void {
+         <button
+           type="button"
+           class="shrink-0 cursor-pointer rounded border border-control-border px-3.5 py-1 hover:bg-hover"
+-          @click="retryThread"
++          @click="retry"
+         >
+           {{ RETRY }}
+         </button>
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index c3964df..43c53d9 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -65,6 +65,7 @@ const {
+   viewer,
+   reviewSort,
+   description,
++  thread,
+ } = requests;
+ const back = useTemplateRef<HTMLButtonElement>("back");
+ const bars = useTemplateRef<FilterBar[]>("bars");
+@@ -107,7 +108,7 @@ function escapePressed(event: KeyboardEvent): void {
+     void dismiss();
+     return;
+   }
+-  if (description.value !== null) {
++  if (description.value !== null || thread.value !== null) {
+     return;
+   }
+   event.preventDefault();

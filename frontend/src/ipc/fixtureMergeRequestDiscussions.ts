@@ -8,7 +8,7 @@ import {
   LOGGED_OUT_DETAIL,
   ORIGIN,
 } from "./fixtureMergeRequestData";
-import { personNamed, renderedText, type FixtureComment } from "./fixtureMergeRequestRendering";
+import { mentionsIn, renderedText, type FixtureComment } from "./fixtureMergeRequestRendering";
 import { discussionId, turnCases, type FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
 import type { Log } from "./log";
 import type { MergeRequestSource } from "./MergeRequestSource";
@@ -84,13 +84,7 @@ function note(
 
 function asking(comment: FixtureComment, username: string): FixtureComment {
   const said = `@${username} ${comment.text}`;
-  const person = personNamed(username);
-  return {
-    ...comment,
-    body: renderedText(said),
-    text: said,
-    mentions: person === null ? [] : [{ username: person.username, name: person.name }],
-  };
+  return { ...comment, body: renderedText(said), text: said, mentions: mentionsIn(said) };
 }
 
 function discussions(row: Generated.MergeRequestRow, index: number): FixtureDiscussion[] {

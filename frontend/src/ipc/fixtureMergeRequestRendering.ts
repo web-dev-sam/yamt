@@ -45,7 +45,7 @@ export function renderedText(text: string): Generated.Description {
 }
 
 /** GitLab links a person's `@username`, never one in code (design §1.2). */
-function mentionsIn(text: string): Generated.Mention[] {
+export function mentionsIn(text: string): Generated.Mention[] {
   return [...text.replace(CODE_SPANS, "").matchAll(MENTIONS)].flatMap((match) => {
     const named = personNamed(match[1] ?? null);
     return named === null ? [] : [{ username: named.username, name: named.name }];

@@ -191,6 +191,8 @@ test("comments_are_an_hour_apart_and_every_note_page_is_new", async () => {
   ).toEqual([48, 47, 46, 1]);
 
   await wrote(live.source.replyToDiscussion(iid(637), d(2), "comment", "Thanks."));
+  const d13First = await answered(live.source.readDiscussionThread(iid(637), d(13)), THREAD_MS);
+  expect(d13First).toMatchObject({ value: { kind: "failed" } });
   const notes = await Promise.all(
     Array.from({ length: 13 }, (_, at) => threadOf(live, 637, at + 1)),
   );
@@ -293,6 +295,25 @@ test("an_unknown_iid_or_discussion_is_not_found", async () => {
   );
   expect(await wrote(live.source.resolveDiscussion(iid(140), d(1), true))).toEqual(notFound);
   expect(await wrote(live.source.submitReview(iid(140)))).toEqual(notFound);
+});
+
+test("d13_fails_its_first_read_then_reads_for_the_panels_retry", async () => {
+  const live = rig();
+  expect((await threadOf(live, 637, 12)).discussion.id).toBe(d(12));
+  const failed = { ok: true, value: { kind: "failed", message: "glab timed out" } };
+  expect(await answered(live.source.readDiscussionThread(iid(637), d(13)), THREAD_MS)).toEqual(
+    failed,
+  );
+  const retried = await threadOf(live, 637, 13);
+  expect(retried.discussion.id).toBe(d(13));
+  expect(retried.comments).toHaveLength(1);
+  expect(await answered(rig().source.readDiscussionThread(iid(636), d(13)), THREAD_MS)).toEqual({
+    ok: true,
+    value: { kind: "notFound" },
+  });
+  expect(await answered(rig().source.readDiscussionThread(iid(637), d(13)), THREAD_MS)).toEqual(
+    failed,
+  );
 });
 
 test("a_comment_shows_in_the_next_read_and_the_rows_discussions", async () => {

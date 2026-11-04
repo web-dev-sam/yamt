@@ -1,0 +1,3 @@
+just mutants HEAD (TS only, 3 files): 367 killed, 41 survived, 2 no coverage, 89.51 %
+None on a changed line: Threads.ts:37-38 and :165-178 (threadReader) and Discussions.ts:85-88 have none. R1's NoCoverage `person === null` arm is gone.
+Unchanged lines shown by the HEAD diff: Discussions.ts:43-48, 54, 91, 143, 151-152; Rendering.ts:12-16; Threads.ts:33-36, 53. Rendering.ts:49:39 (the code-span `""` literal) is equivalent: text without '@' drops the mention.
