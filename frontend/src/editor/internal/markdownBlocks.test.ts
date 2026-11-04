@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { parseBlocks, type Block } from "./markdownBlocks";
+import { fencedLines, parseBlocks, type Block } from "./markdownBlocks";
 import { MAX_NESTING } from "./markdownTree";
 
 const LINEAR_MS = 500;
@@ -190,4 +190,19 @@ test("each block carries its source lines, so a streamed text keeps its earlier 
     "# Title",
     "some *text",
   ]);
+});
+
+test("fenced_lines_are_the_insides_of_each_fence", () => {
+  const cases: readonly (readonly [text: string, inside: readonly number[]])[] = [
+    ["a\n```\nb\nc\n```\nd", [2, 3]],
+    ["```\nb\nc", [1, 2]],
+    ["~~~\nx\n```\n~~~\ny", [1, 2]],
+    ["  ```\nx\n  ```", [1]],
+    ["```\na\n```\ntext\n~~~\nb\n~~~", [1, 5]],
+    ["``` a`b\nx\n``", []],
+    ["> ```\n> x\n> ```", []],
+  ];
+  for (const [text, inside] of cases) {
+    expect([...fencedLines(text)], text).toEqual(inside);
+  }
 });

@@ -1,0 +1,815 @@
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index 582861e..bb7924d 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -18,6 +18,8 @@ Markdown (plan §2 #112): `markdown.ts` (`MarkdownView`, reached from `ui/` only
+ 
+ `MarkdownView.showCode(language, text)` (plan §2 #171, a merge request's description): one code block through the same `blockNode` and `paintCode`, replacing whatever the view showed (it stays in `#shown` with no source, so a later `show` rebuilds from the top); `ui/useMarkdown.ts` `useMarkdownCode` is its one caller.
+ 
++Local comment preview (plan §2 #186, design `docs/slices/briefs/mr-fast-preview-design.md` §1.2): `internal/localPreview.ts` `localPreview(text)` (exported by `index.ts`, called by the merge-request reply panel) is the one owner of "yamt draws it" versus "GitLab must": it parses with the same subset (`parseBlocks`, `parseInline(source, "commonMark")` — CommonMark §6.2 flanking with Unicode punctuation; `markdownDom.ts` and the AI chat keep the default `"yamt"` mode) and returns the `Description` blocks GitLab's preview reduces to (every table cell `start`, every item `task: "none"`), or null at the first rule that holds: **C** a `\`, `[`, `<`, `{` or `$` outside code spans; **T** in a text inline a reference, mention or entity (`#!%@&` before a word), any `~`, an emoji code, a pictograph, a web address, a 7–40-digit hex word, a link; **S** on a line outside `fencedLines` (`markdownBlocks.ts`, through `fence`'s own rule) a setext underline, indented code, `1)`/`+`/empty items, mixed `-`/`*` bullets, `>>>`, front matter, `: `, a tab or NUL, a multi-word fence info, a `/` quick action; **K** a fence language yamt does not colour, not lower-case or one GitLab draws (`GITLAB_DRAWN_LANGUAGES`), or a fenced block with a blank first or last line; **N** a block or an inline 15 deep. Code spans and fenced lines are exempt from C, T and S (GitLab links nothing in code). Its proof is the recorded corpus `frontend/fixtures/markdown/gitlab-preview.json` (`localPreview.test.ts`: every `local: true` entry renders to GitLab's reduced blocks after the visible-text normalisation, every `local: false` entry is null); a new rule or construct is recorded there first.
++
+ Range threads (plan §2 #116, #145): `range.ts` (`RangeController`) shows the review's threads as block rows inside its two read-only columns; Vue fills them through the hosts `RangeEvents.hosts` hands out, never through the editor. A thread's `ThreadPlace` has two ends: `start` (a `DiffLine`, no column) and `end` (a `ThreadLine`, whose column holds the box and the count badge). `diffOrder.ts` (pure) is GitLab's one-column order over the differences (an unchanged line once, a change's removed lines, then its added ones), built by one walk whose segments carry their difference; its `segmentAt` (a column line's unchanged stretch or its side of a difference) is the one rule for whether a line is inside a difference and for an unchanged line's partner line, and `internal/threadAnchor.ts` (`linePlace`, `anchorAt`: a column line to its place and to a `ThreadLine`) is built on it; which column and line a `ThreadLine` shows in is `ipc`'s `shownLine`; `diffOrder.ts` also gives `orderIndex`/`lineAtIndex`, `placeBetween` (the earlier of press and pointer is `start`, the later `end`, keeping its column), `shownEnd` (the pointer clamped before a collapsed run), `placeSpans` (each column's lines of a place) and `unchangedRuns` (its unchanged stretches); `threadRows.ts` (pure) groups the shown threads by the aligned place of `place.end` (a removed or added line's gap after its difference's other side, an unchanged line's after its partner; collapsed threads place no row), gives each row its `kind` (`unchanged`, `changed`, or `leftEmpty`/`rightEmpty` when the gap is on a difference's empty side) and `rowHeight` (the larger column's summed host heights); `threadField.ts` holds each column's rows and count marks from `showThreadRows` and provides one `block` widget per row (`side: 1 + k` at the end of line `place − 1`; on its empty side a row sits before line `place` with a negative side, so it joins that line's block), plus `threadAnchors` (the text bottom above and the next line's block top below each unchanged row) that `CompareFrame` merges, sorted, into its scroll anchors; `CompareFrame` measures an empty difference side from its joined block's top to its text's top, so the empty side's rows are inside the band; `threadWidget.ts` (`ThreadRowWidget`) `eq`s by row key, column and keys only, so a height change keeps its DOM; `threadHosts.ts` (`ThreadHosts`, built after the views) keeps one host per shown key for as long as the key is shown, one `ResizeObserver` on every host (disconnected hosts skipped) and on both scrollers and gutters writes the row height on both cells and calls `requestMeasure`, writes `--thread-left`/`--thread-width` on each column host (the rows are `position: sticky`), gives focus back to a field inside a host after CodeMirror re-attaches it, unless a press outside every host left that field, and reports `hovered(key | null)` from each host's `pointerenter`/`pointerleave` (the hover reaches the editor through its own hosts, never through Vue); `threadNumbers.ts` merges a `mousedown` into the number gutter (returning `true`, so `@codemirror/view` calls `preventDefault` and no text selection starts; a number starts a drag, the count badge toggles that line's threads; `pressedLine`: the empty line after a last newline and an empty column's line are no line of the file and do nothing; `lineCounts` counts by `place.end`) and draws the number plus the badge as a `lineNumberMarkers` marker; the hover icon is a `theme.css` mask from `--thread-icon`. `threadDrag.ts` (`ThreadDrag`) runs the drag with capture-phase listeners on `document` (`pointermove`, `pointerup` starts the thread through `RangeEvents.startThread`, `pointercancel` and Escape cancel, Escape taken by the drag alone), `scroll` on both scrollers and window `blur` (cancel), all removed at release, cancel and `destroy`; a pointer move or a scroll asks for one `requestAnimationFrame` (a pending one is reused, cancelled at stop), which reads the line under the last pointer position after each column's own scroll-handler measure and moves the end, and a release reads it once more; the pointer's column is the one on the pointer's side of the strip's middle, and over a thread row, a column's end or an empty column the other column's line at that height. `threadTint.ts` (`threadTint`, `showTint`, `tintOf`) is a per-column field of tinted spans (`cm-thread-tint` on lines and gutter cells; `theme.css` paints `--color-selection` mixed at 45 % with transparent, a translucent layer over the difference colours whatever the theme's alpha); the controller sets it to the union of the drag's place, every draft's and the hovered host's thread (spans joined by `foldRuns.ts` `joinSpans`, the one overlap-or-touch rule, which `columnFolds.ts` also joins its runs with), dispatching only when a column's spans differ from that column's field (`tintOf`).
+ 
+ Collapsed unchanged lines in both windows (plan §2 #63, #64, #68, #126): one fold core serves the merge panes and the range columns — `foldRuns.ts` (runs and their 4/8/16 steps; `waveStartsIn`, where each run's wave starts in a pane), `foldSteps.ts` (the step state), `foldView.ts` `paneFoldView` (wave line, gutter wave, atomic ranges), `folding.ts` (hover and click), `geometry.ts` `waveTops` (wave starts to block tops, under `waveRows` and `columnWaves`), `wavePhase.ts` (`chainEnds`/`chainPhases`/`ChainPhases` over a chain of panes and strips — the one phase rule; `WavePhases` is the merge's three-pane chain, `panePhases` its mapping), `gap.ts` `joinPaints` and `strips.ts` `WaveLayer` (the strip's wave joins). The merge's state lives in the middle pane (`folds.ts`); the range's lives in the left column (`columnFolds.ts`: `ownerSteps`, the right's `mirrorSteps` copied by a push, `hiddenIn` each column's shown folds, `hiddenLeft` the left's hidden lines as spans), its view, hover, click and phases in `rangeFolds.ts` (`RangeFolds`, `columnWaves`), reaching `CompareFrame` through its opt-in `waves` part and `CompareStrip` only when given `hovered`, so the compare window paints as before. A press on a wave's gutter cell starts no thread (`threadNumbers.ts`) and shows no comment icon (`theme.css`). A thread's unchanged lines (`diffOrder.ts` `unchangedRuns`, one per stretch between differences; overlapping or touching ones merged, since `columnRuns` assumes changes that do not overlap) are run edges, so no line of a range hides; runs are computed at build and at each `setCollapsed(true)`, never on a thread change. Realigning after a fold change (both windows) or a merge go-to that selected a match is `ScrollSync.follow(source)`: the followed pane leads the next sync, and no other pane's scroll event (a clamped one from the change) replaces it before then.
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index ba5dd05..aed9061 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -11,6 +11,7 @@ export type { ProblemCounts } from "./internal/problems";
+ export type { ResultSnapshot } from "./internal/savedPoint";
+ export type { Side } from "./internal/side";
+ export type { MergeSummary } from "./internal/status";
++export { localPreview } from "./internal/localPreview";
+ export { MarkdownView } from "./markdown";
+ export { MergeController } from "./merge";
+ export type { MergeHosts, MergeOptions } from "./merge";
+diff --git a/frontend/src/editor/internal/localPreview.test.ts b/frontend/src/editor/internal/localPreview.test.ts
+new file mode 100644
+index 0000000..bfb03b5
+--- /dev/null
++++ b/frontend/src/editor/internal/localPreview.test.ts
+@@ -0,0 +1,223 @@
++import { expect, test } from "vitest";
++
++import { GITLAB_DRAWN_LANGUAGES, localPreview } from "./localPreview";
++
++type Entry = {
++  readonly name: string;
++  readonly text: string;
++  readonly local: boolean;
++  readonly blocks: unknown;
++};
++
++const CORPUS_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
++  "../../../fixtures/markdown/gitlab-preview.json",
++  { eager: true, import: "default" },
++);
++
++const NESTED = 15;
++
++const TRIGGERS: readonly (readonly [rule: string, text: string])[] = [
++  ["C1 escape", "a\\*b"],
++  ["C2 link", "[x](y)"],
++  ["C2 image", "![a](b)"],
++  ["C2 footnote", "[^1]"],
++  ["C2 task", "- [ ] t"],
++  ["C3 html", "<b>x</b>"],
++  ["C3 autolink", "<https://x>"],
++  ["C4 attributes", "![a](b){width=1}"],
++  ["C4 braces", "{width=1}"],
++  ["C5 math", "$x$"],
++  ["T1 issue", "#12"],
++  ["T1 merge request", "!3"],
++  ["T1 epic", "&4"],
++  ["T1 milestone", "%v1"],
++  ["T1 mention", "@anna"],
++  ["T1 e-mail", "a@b.org"],
++  ["T1 entity", "&amp;"],
++  ["T2 label", "~bug"],
++  ["T3 emoji code", ":smile:"],
++  ["T4 pictograph", "😀"],
++  ["T4 flag", "🇩🇪"],
++  ["T5 http", "http://x"],
++  ["T5 https", "https://x"],
++  ["T5 www", "www.x.org"],
++  ["T5 mailto", "mailto:a"],
++  ["T6 commit", "abc1234"],
++  ["T7 link", "see [x](y)"],
++  ["S1 setext h1", "Title\n==="],
++  ["S1 setext h2", "Sub\n---"],
++  ["S2 indented code", "p\n\n    code"],
++  ["S2 indented first line", "    code"],
++  ["S3 paren item", "1) a"],
++  ["S4 plus item", "+ a"],
++  ["S5 mixed bullets", "- a\n* b"],
++  ["S6 multi-line quote", ">>>\nq\n>>>"],
++  ["S7 front matter", "---\nk: v\n---"],
++  ["S7 toml front matter", "+++\nk = 1\n+++"],
++  ["S8 description list", "term\n: def"],
++  ["S9 tab", "a\tb"],
++  ["S9 nul", "a\0b"],
++  ["S13 info words", "```rust ignore\nlet a = 1;\n```"],
++  ["S14 quick action", "/close"],
++  ["S15 empty item", "-"],
++  ["S15 empty numbered item", "1."],
++  ["K1 upper case", "```TS\nconst a = 1;\n```"],
++  ["K1 unknown language", "```nosuchlanguage\nx\n```"],
++  ["K3 blank last line", "```\na\n\n```"],
++  ["K3 blank first line", "```\n\na\n```"],
++  ["K3 empty block", "```\n```"],
++  ["N quote", `${">".repeat(NESTED)} deep`],
++  ["N emphasis", `${"*a ".repeat(NESTED)}x${" a*".repeat(NESTED)}`],
++];
++
++function isEntry(value: unknown): value is Entry {
++  return (
++    typeof value === "object" &&
++    value !== null &&
++    "name" in value &&
++    typeof value.name === "string" &&
++    "text" in value &&
++    typeof value.text === "string" &&
++    "local" in value &&
++    typeof value.local === "boolean" &&
++    "blocks" in value &&
++    Array.isArray(value.blocks)
++  );
++}
++
++function corpus(): readonly Entry[] {
++  const [file] = Object.values(CORPUS_FILES);
++  const entries =
++    typeof file === "object" && file !== null && "entries" in file ? file.entries : [];
++  if (!Array.isArray(entries) || entries.length === 0 || !entries.every(isEntry)) {
++    throw new Error("gitlab-preview.json: entries are not { name, text, local, blocks }");
++  }
++  return entries;
++}
++
++function kindOf(item: unknown): unknown {
++  return typeof item === "object" && item !== null && "kind" in item ? item.kind : null;
++}
++
++function textOf(item: unknown): string | null {
++  return kindOf(item) === "text" &&
++    typeof item === "object" &&
++    item !== null &&
++    "text" in item &&
++    typeof item.text === "string"
++    ? item.text
++    : null;
++}
++
++function merged(items: readonly unknown[]): unknown[] {
++  const joined: unknown[] = [];
++  for (const item of items) {
++    const text = textOf(item);
++    const last = textOf(joined.at(-1));
++    if (text !== null && last !== null) {
++      joined[joined.length - 1] = { kind: "text", text: last + text };
++    } else {
++      joined.push(item);
++    }
++  }
++  return joined;
++}
++
++function visibleInlines(items: readonly unknown[]): unknown[] {
++  const joined = merged(items.map(visible));
++  return joined
++    .map((item, at) => {
++      const text = textOf(item);
++      if (text === null) {
++        return item;
++      }
++      let shown = text.replace(/[ \t\n]+/g, " ");
++      if (at === 0 || kindOf(joined[at - 1]) === "lineBreak") {
++        shown = shown.trimStart();
++      }
++      if (at === joined.length - 1 || kindOf(joined[at + 1]) === "lineBreak") {
++        shown = shown.trimEnd();
++      }
++      return { kind: "text", text: shown };
++    })
++    .filter((item) => textOf(item) !== "");
++}
++
++function visible(value: unknown): unknown {
++  if (Array.isArray(value)) {
++    return value.map(visible);
++  }
++  if (typeof value !== "object" || value === null) {
++    return value;
++  }
++  return Object.fromEntries(
++    Object.entries(value).map(([key, field]) => [
++      key,
++      key === "inlines" && Array.isArray(field) ? visibleInlines(field) : visible(field),
++    ]),
++  );
++}
++
++test("every_local_entry_of_gitlabs_corpus_renders_to_its_blocks", () => {
++  const local = corpus().filter((entry) => entry.local);
++  expect(local.length).toBeGreaterThan(0);
++  for (const entry of local) {
++    expect
++      .soft(visible(localPreview(entry.text)), entry.name)
++      .toEqual(visible({ blocks: entry.blocks }));
++  }
++});
++
++test("every_other_entry_of_the_corpus_goes_to_gitlab", () => {
++  const other = corpus().filter((entry) => !entry.local);
++  expect(other.length).toBeGreaterThan(0);
++  for (const entry of other) {
++    expect.soft(localPreview(entry.text), entry.name).toBeNull();
++  }
++});
++
++test("each_trigger_sends_the_text_to_gitlab", () => {
++  const drawn = GITLAB_DRAWN_LANGUAGES.map(
++    (language) => [`K1 ${language}`, `\`\`\`${language}\nx\n\`\`\``] as const,
++  );
++  for (const [rule, text] of [...TRIGGERS, ...drawn]) {
++    expect.soft(localPreview(text), rule).toBeNull();
++  }
++});
++
++test("a_trigger_inside_code_stays_local", () => {
++  const span = "#12 @anna a\\b [x](y) <b> {x} $5 ~x :x: abc1234";
++  expect(localPreview(`see \`${span}\``)).toEqual({
++    blocks: [
++      {
++        kind: "paragraph",
++        inlines: [
++          { kind: "text", text: "see " },
++          { kind: "code", text: span },
++        ],
++      },
++    ],
++  });
++  const code = 'fn a() {\n\tlet who = "@anna #12 <b> [x](y)";\n\n    let b = 1;\n}';
++  expect(localPreview(`\`\`\`rust\n${code}\n\`\`\``)).toEqual({
++    blocks: [{ kind: "code", language: "rust", text: code }],
++  });
++});
++
++function startRow(header: boolean, texts: readonly string[]): unknown {
++  return {
++    cells: texts.map((text) => ({ header, align: "start", inlines: [{ kind: "text", text }] })),
++  };
++}
++
++test("a_table_reads_start_whatever_its_alignment", () => {
++  expect(localPreview("| l | c | r |\n| :- | :-: | -: |\n| 1 | 2 | 3 |")).toEqual({
++    blocks: [
++      {
++        kind: "table",
++        head: [startRow(true, ["l", "c", "r"])],
++        body: [startRow(false, ["1", "2", "3"])],
++      },
++    ],
++  });
++});
+diff --git a/frontend/src/editor/internal/localPreview.ts b/frontend/src/editor/internal/localPreview.ts
+new file mode 100644
+index 0000000..f4d3e79
+--- /dev/null
++++ b/frontend/src/editor/internal/localPreview.ts
+@@ -0,0 +1,257 @@
++import type {
++  Description,
++  DescriptionBlock,
++  DescriptionCell,
++  DescriptionInline,
++  DescriptionItem,
++  DescriptionRow,
++} from "../../ipc";
++import { languageNamed } from "./language";
++import {
++  FENCE,
++  fencedLines,
++  indentOf,
++  isBlank,
++  LINE_BREAK,
++  parseBlocks,
++  type Block,
++  type CodeBlock,
++} from "./markdownBlocks";
++import { parseInline } from "./markdownInline";
++import type { Table } from "./markdownTable";
++import type { Inline } from "./markdownTree";
++
++/** Fenced-block languages GitLab draws instead of showing code (docs.gitlab.com: Diagrams and flowcharts, Math,
++ *  GeoJSON, STL, suggestions); each goes to GitLab even if yamt colours it. */
++export const GITLAB_DRAWN_LANGUAGES = [
++  "mermaid",
++  "plantuml",
++  "math",
++  "suggestion",
++  "geojson",
++  "topojson",
++  "stl",
++  "kroki",
++  "actdiag",
++  "blockdiag",
++  "bpmn",
++  "bytefield",
++  "c4plantuml",
++  "d2",
++  "dbml",
++  "ditaa",
++  "dot",
++  "erd",
++  "excalidraw",
++  "graphviz",
++  "nomnoml",
++  "nwdiag",
++  "packetdiag",
++  "pikchr",
++  "rackdiag",
++  "seqdiag",
++  "structurizr",
++  "svgbob",
++  "symbolator",
++  "tikz",
++  "umlet",
++  "vega",
++  "vegalite",
++  "wavedrom",
++  "wireviz",
++] as const;
++
++const NESTING_LIMIT = 15;
++const INDENTED_CODE_COLUMNS = 4;
++const OUTSIDE_CODE = ["\\", "[", "<", "{", "$"] as const;
++const TEXT_TRIGGERS: readonly RegExp[] = [
++  /[#!%@][\p{L}\p{N}_"]/u,
++  /&[\p{L}\p{N}_#]/u,
++  /~/,
++  /:[A-Za-z0-9_+-]+:/,
++  /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{FE0F}\u{20E3}]/u,
++  /[A-Za-z][A-Za-z0-9+.-]*:\/\//,
++  /www\./i,
++  /mailto:|xmpp:/i,
++  /(?<![\p{L}\p{N}_])[0-9A-Fa-f]{7,40}(?![\p{L}\p{N}_])/u,
++];
++const LINE_TRIGGERS: readonly RegExp[] = [
++  /^\s*\d{1,9}\)(\s|$)/,
++  /^\s*\+(\s|$)/,
++  /^ {0,3}>>>/,
++  /^\s*:\s/,
++  /[\t\0]/,
++  /^\/[A-Za-z]/,
++  /^\s*([-*]|\d{1,9}\.)\s*$/,
++];
++const SETEXT_UNDERLINE = /^ {0,3}(=+|-+)[ \t]*$/;
++const FRONT_MATTER = /^(---|\+\+\+|;;;)\s*$/;
++const DASH_ITEM = /^\s*-\s/;
++const STAR_ITEM = /^\s*\*\s/;
++const WHITE_SPACE = /\s/;
++const LANGUAGE_WORD = /^[a-z0-9_+-]+$/;
++
++function allOrNull<T, U>(items: readonly T[], convert: (item: T) => U | null): U[] | null {
++  const converted: U[] = [];
++  for (const item of items) {
++    const one = convert(item);
++    if (one === null) {
++      return null;
++    }
++    converted.push(one);
++  }
++  return converted;
++}
++
++function countOf(text: string, char: string): number {
++  return text.split(char).length - 1;
++}
++
++function lineGoesToGitLab(lines: readonly string[], at: number): boolean {
++  const line = lines[at] ?? "";
++  const afterBlank = isBlank(lines[at - 1] ?? "");
++  const [, , , fenceInfo = ""] = FENCE.exec(line) ?? [];
++  return (
++    (!afterBlank && SETEXT_UNDERLINE.test(line)) ||
++    (afterBlank && indentOf(line) >= INDENTED_CODE_COLUMNS) ||
++    WHITE_SPACE.test(fenceInfo.trim()) ||
++    LINE_TRIGGERS.some((trigger) => trigger.test(line))
++  );
++}
++
++function linesGoToGitLab(text: string): boolean {
++  const lines = text.split(LINE_BREAK);
++  const fenced = fencedLines(text);
++  const outside = lines.filter((_, at) => !fenced.has(at));
++  const dashItems = outside.some((line) => DASH_ITEM.test(line));
++  const starItems = outside.some((line) => STAR_ITEM.test(line));
++  return (
++    FRONT_MATTER.test(lines[0] ?? "") ||
++    (dashItems && starItems) ||
++    lines.some((_, at) => !fenced.has(at) && lineGoesToGitLab(lines, at))
++  );
++}
++
++function codeText(inlines: readonly Inline[]): string {
++  return inlines
++    .map((inline) => {
++      if (inline.kind === "code") {
++        return inline.text;
++      }
++      return "children" in inline ? codeText(inline.children) : "";
++    })
++    .join("");
++}
++
++function inlineOf(parsed: Inline, depth: number): DescriptionInline | null {
++  switch (parsed.kind) {
++    case "text":
++      return TEXT_TRIGGERS.some((trigger) => trigger.test(parsed.text)) ? null : parsed;
++    case "code":
++      return parsed;
++    case "break":
++      return { kind: "lineBreak" };
++    case "emphasis":
++    case "strong":
++    case "strike": {
++      const inlines = inlinesOf(parsed.children, depth + 1);
++      return inlines === null ? null : { kind: parsed.kind, inlines };
++    }
++    case "link":
++      return null;
++  }
++}
++
++function inlinesOf(parsed: readonly Inline[], depth: number): DescriptionInline[] | null {
++  return depth >= NESTING_LIMIT ? null : allOrNull(parsed, (inline) => inlineOf(inline, depth));
++}
++
++function sourceInlines(source: string): DescriptionInline[] | null {
++  const parsed = parseInline(source, "commonMark");
++  const code = codeText(parsed);
++  const outsideCode = OUTSIDE_CODE.some((char) => countOf(source, char) > countOf(code, char));
++  return outsideCode ? null : inlinesOf(parsed, 0);
++}
++
++function codeGoesToGitLab({ info, code }: CodeBlock): boolean {
++  const lines = code.split("\n");
++  const blankEdge = isBlank(lines[0] ?? "") || isBlank(lines.at(-1) ?? "");
++  const shownAsWritten =
++    LANGUAGE_WORD.test(info) &&
++    languageNamed(info) !== null &&
++    !GITLAB_DRAWN_LANGUAGES.some((drawn) => drawn === info);
++  return blankEdge || (info !== "" && !shownAsWritten);
++}
++
++function rowOf(cells: readonly string[], header: boolean): DescriptionRow | null {
++  const described = allOrNull(cells, (cell): DescriptionCell | null => {
++    const inlines = sourceInlines(cell);
++    return inlines === null ? null : { header, align: "start", inlines };
++  });
++  return described === null ? null : { cells: described };
++}
++
++function tableOf(parsed: Table): DescriptionBlock | null {
++  const head = rowOf(parsed.header, true);
++  const body = allOrNull(parsed.rows, (row) => rowOf(row, false));
++  return head === null || body === null ? null : { kind: "table", head: [head], body };
++}
++
++function listOf(parsed: Extract<Block, { kind: "list" }>, depth: number): DescriptionBlock | null {
++  const items = allOrNull(parsed.items, (item): DescriptionItem | null => {
++    const blocks = blocksOf(item.blocks, depth + 1);
++    return blocks === null ? null : { task: "none", blocks };
++  });
++  if (items === null) {
++    return null;
++  }
++  const { numbering } = parsed;
++  return numbering.kind === "bullet"
++    ? { kind: "list", numbering: { kind: "bullets" }, items }
++    : { kind: "list", numbering: { kind: "numbers", start: numbering.start }, items };
++}
++
++function blockOf(parsed: Block, depth: number): DescriptionBlock | null {
++  switch (parsed.kind) {
++    case "paragraph": {
++      const inlines = sourceInlines(parsed.text);
++      return inlines === null ? null : { kind: "paragraph", inlines };
++    }
++    case "heading": {
++      const inlines = sourceInlines(parsed.text);
++      return inlines === null ? null : { kind: "heading", level: parsed.tag, inlines };
++    }
++    case "code":
++      return codeGoesToGitLab(parsed)
++        ? null
++        : { kind: "code", language: parsed.info === "" ? null : parsed.info, text: parsed.code };
++    case "list":
++      return listOf(parsed, depth);
++    case "quote": {
++      const blocks = blocksOf(parsed.blocks, depth + 1);
++      return blocks === null ? null : { kind: "quote", blocks };
++    }
++    case "table":
++      return tableOf(parsed);
++    case "rule":
++      return parsed;
++  }
++}
++
++function blocksOf(parsed: readonly Block[], depth: number): DescriptionBlock[] | null {
++  return depth >= NESTING_LIMIT ? null : allOrNull(parsed, (block) => blockOf(block, depth));
++}
++
++/** `text` as yamt's Markdown subset draws it, in the blocks GitLab's preview reduces to, when that is exactly what
++ *  GitLab's preview shows (plan §2 row 186); null when anything in it may render otherwise on GitLab — then GitLab
++ *  must. The one owner of that decision (design §1.2). Never called with a blank text (the caller words it). */
++export function localPreview(text: string): Description | null {
++  if (linesGoToGitLab(text)) {
++    return null;
++  }
++  const blocks = blocksOf(
++    parseBlocks(text).map(({ block }) => block),
++    0,
++  );
++  return blocks === null ? null : { blocks };
++}
+diff --git a/frontend/src/editor/internal/markdownBlocks.test.ts b/frontend/src/editor/internal/markdownBlocks.test.ts
+index f693645..ed02265 100644
+--- a/frontend/src/editor/internal/markdownBlocks.test.ts
++++ b/frontend/src/editor/internal/markdownBlocks.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { parseBlocks, type Block } from "./markdownBlocks";
++import { fencedLines, parseBlocks, type Block } from "./markdownBlocks";
+ import { MAX_NESTING } from "./markdownTree";
+ 
+ const LINEAR_MS = 500;
+@@ -191,3 +191,18 @@ test("each block carries its source lines, so a streamed text keeps its earlier
+     "some *text",
+   ]);
+ });
++
++test("fenced_lines_are_the_insides_of_each_fence", () => {
++  const cases: readonly (readonly [text: string, inside: readonly number[]])[] = [
++    ["a\n```\nb\nc\n```\nd", [2, 3]],
++    ["```\nb\nc", [1, 2]],
++    ["~~~\nx\n```\n~~~\ny", [1, 2]],
++    ["  ```\nx\n  ```", [1]],
++    ["```\na\n```\ntext\n~~~\nb\n~~~", [1, 5]],
++    ["``` a`b\nx\n``", []],
++    ["> ```\n> x\n> ```", []],
++  ];
++  for (const [text, inside] of cases) {
++    expect([...fencedLines(text)], text).toEqual(inside);
++  }
++});
+diff --git a/frontend/src/editor/internal/markdownBlocks.ts b/frontend/src/editor/internal/markdownBlocks.ts
+index 374558b..411e8cd 100644
+--- a/frontend/src/editor/internal/markdownBlocks.ts
++++ b/frontend/src/editor/internal/markdownBlocks.ts
+@@ -24,19 +24,21 @@ export type CodeBlock = Extract<Block, { kind: "code" }>;
+ 
+ type Parsed = { readonly block: Block; readonly end: number };
+ 
++type Fence = { readonly indent: number; readonly info: string; readonly close: number };
++
+ type Starter = (lines: readonly string[], at: number, depth: number) => Parsed | null;
+ 
+ type ItemStart = { readonly numbering: Numbering; readonly column: number; readonly first: string };
+ 
+ const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const satisfies readonly HeadingTag[];
+-const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/s;
++export const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/s;
+ const CLOSING_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+ const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/s;
+ const RULE = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/;
+ const QUOTE = /^ {0,3}> ?(.*)$/s;
+ const ITEM = /^( {0,3})([-*]|\d{1,9}\.)(?:( +)(.*))?$/s;
+ const WHITESPACE = /^[ \t]$/;
+-const LINE_BREAK = /\r\n|\n|\r/;
++export const LINE_BREAK = /\r\n|\n|\r/;
+ const TAB_STOP = 4;
+ const MAX_ITEM_GAP = 4;
+ const TABLE_HEAD_LINES = 2;
+@@ -45,11 +47,11 @@ function lineAt(lines: readonly string[], at: number): string {
+   return lines[at] ?? "";
+ }
+ 
+-function isBlank(line: string): boolean {
++export function isBlank(line: string): boolean {
+   return line.trim() === "";
+ }
+ 
+-function indentOf(line: string): number {
++export function indentOf(line: string): number {
+   let width = 0;
+   for (const char of line) {
+     if (char === " ") {
+@@ -76,21 +78,44 @@ function closesFence(line: string, marks: string): boolean {
+   return close !== undefined && close[0] === marks[0] && close.length >= marks.length;
+ }
+ 
+-function fence(lines: readonly string[], at: number): Parsed | null {
++function fenceAt(lines: readonly string[], at: number): Fence | null {
+   const open = FENCE.exec(lineAt(lines, at));
+   const [, indent = "", marks = "", rest = ""] = open ?? [];
+   if (open === null || (marks.startsWith("`") && rest.includes("`"))) {
+     return null;
+   }
+-  const info = rest.trim().split(/\s+/)[0] ?? "";
+-  const code: string[] = [];
+-  let end = at + 1;
+-  while (end < lines.length && !closesFence(lineAt(lines, end), marks)) {
+-    code.push(stripColumns(lineAt(lines, end), indent.length));
+-    end += 1;
++  let close = at + 1;
++  while (close < lines.length && !closesFence(lineAt(lines, close), marks)) {
++    close += 1;
+   }
+-  const closed = Math.min(end + 1, lines.length);
+-  return { block: { kind: "code", info, code: code.join("\n") }, end: closed };
++  return { indent: indent.length, info: rest.trim().split(/\s+/)[0] ?? "", close };
++}
++
++function fence(lines: readonly string[], at: number): Parsed | null {
++  const found = fenceAt(lines, at);
++  if (found === null) {
++    return null;
++  }
++  const code = lines.slice(at + 1, found.close).map((line) => stripColumns(line, found.indent));
++  const end = Math.min(found.close + 1, lines.length);
++  return { block: { kind: "code", info: found.info, code: code.join("\n") }, end };
++}
++
++/** The indices of `text`'s lines (split as `parseBlocks` splits) inside fenced code: for each line where `fence`
++ *  finds a fence (indent 0–3), the lines after it up to its closing line or the text's end, the fence lines
++ *  themselves excluded; scanning resumes after the closing line. */
++export function fencedLines(text: string): ReadonlySet<number> {
++  const lines = text.split(LINE_BREAK);
++  const inside = new Set<number>();
++  let at = 0;
++  while (at < lines.length) {
++    const close = fenceAt(lines, at)?.close ?? at;
++    for (let line = at + 1; line < close; line += 1) {
++      inside.add(line);
++    }
++    at = close + 1;
++  }
++  return inside;
+ }
+ 
+ function headingText(content: string): string {
+diff --git a/frontend/src/editor/internal/markdownInline.test.ts b/frontend/src/editor/internal/markdownInline.test.ts
+index afac3a4..cbc8713 100644
+--- a/frontend/src/editor/internal/markdownInline.test.ts
++++ b/frontend/src/editor/internal/markdownInline.test.ts
+@@ -160,3 +160,37 @@ test("60,000 code spans parse in linear time", () => {
+     ]).flat(),
+   );
+ });
++
++test("commonmark_flanking_refuses_what_yamts_allows", () => {
++  expect(parseInline('a**"b"**')).toEqual([
++    { kind: "text", text: "a" },
++    { kind: "strong", children: [{ kind: "text", text: '"b"' }] },
++  ]);
++  expect(parseInline('a**"b"**', "commonMark")).toEqual([{ kind: "text", text: 'a**"b"**' }]);
++  for (const same of [
++    "**bold**.",
++    "(*it*)",
++    "(_it_)",
++    "snake_case_name",
++    "***both***",
++    "~~gone~~",
++  ]) {
++    expect(parseInline(same, "commonMark"), same).toEqual(parseInline(same));
++  }
++  expect(parseInline("(*it*)", "commonMark")).toEqual([
++    { kind: "text", text: "(" },
++    { kind: "emphasis", children: [{ kind: "text", text: "it" }] },
++    { kind: "text", text: ")" },
++  ]);
++});
++
++test("commonmark_flanking_reads_unicode_punctuation_and_white_space", () => {
++  expect(parseInline("a*“b”*", "commonMark")).toEqual([{ kind: "text", text: "a*“b”*" }]);
++  expect(parseInline("a*😀*", "commonMark")).toEqual([{ kind: "text", text: "a*😀*" }]);
++  expect(parseInline("*a\u00a0*", "commonMark")).toEqual([{ kind: "text", text: "*a\u00a0*" }]);
++  expect(parseInline("foo_(bar)_", "commonMark")).toEqual([{ kind: "text", text: "foo_(bar)_" }]);
++  expect(parseInline("_(bar)_.", "commonMark")).toEqual([
++    { kind: "emphasis", children: [{ kind: "text", text: "(bar)" }] },
++    { kind: "text", text: "." },
++  ]);
++});
+diff --git a/frontend/src/editor/internal/markdownInline.ts b/frontend/src/editor/internal/markdownInline.ts
+index c31db30..90c2828 100644
+--- a/frontend/src/editor/internal/markdownInline.ts
++++ b/frontend/src/editor/internal/markdownInline.ts
+@@ -15,11 +15,26 @@ type Target = { readonly address: string; readonly end: number };
+ 
+ type OpenBracket = { readonly bracket: Bracket; readonly piece: number; readonly at: number };
+ 
++/** How a delimiter run may open or close: "yamt" — the AI chat's rule since plan §2 row 112 (not beside white
++ *  space; `_` not inside a word); "commonMark" — CommonMark 0.31.2 §6.2's left- and right-flanking rule, with
++ *  Unicode punctuation (P and S categories) and white space (Zs, tab, line ending; a text's start and end count as
++ *  white space); `*` and `~` open when left-flanking and close when right-flanking; `_` as §6.2 rules 2 and 4. */
++export type Flanking = "yamt" | "commonMark";
++
++type Neighbour = "space" | "punctuation" | "other";
++
++type Neighbours = { readonly before: string; readonly after: string };
++
++type Ability = Pick<Run, "canOpen" | "canClose">;
++
+ const PUNCTUATION = /^[!-/:-@[-`{-~]$/;
+ const SPACE = /^\s$/;
+ const WORD = /^[\p{L}\p{N}]$/u;
++const UNICODE_SPACE = /^[\p{Zs}\t\n\f\r]$/u;
++const UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
+ const AUTOLINK = /^<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*|[^\s<>@]+@[^\s<>@]+)>/;
+ const ESCAPE_WIDTH = "\\*".length;
++const SURROGATE_PAIR = 2;
+ 
+ function runLength(text: string, at: number, char: string): number {
+   let end = at;
+@@ -124,31 +139,67 @@ function destination(
+   return { address: address.split(/\s+/)[0] ?? "", end: close + 1 };
+ }
+ 
+-function delimiterRun(source: string, at: number, char: Delimiter): Run {
+-  const length = runLength(source, at, char);
+-  const before = source.charAt(at - 1);
+-  const after = source.charAt(at + length);
++function codePointBefore(source: string, at: number): string {
++  return Array.from(source.slice(Math.max(0, at - SURROGATE_PAIR), at)).at(-1) ?? "";
++}
++
++function codePointAt(source: string, at: number): string {
++  return Array.from(source.slice(at, at + SURROGATE_PAIR))[0] ?? "";
++}
++
++function neighbour(char: string): Neighbour {
++  if (char === "" || UNICODE_SPACE.test(char)) {
++    return "space";
++  }
++  return UNICODE_PUNCTUATION.test(char) ? "punctuation" : "other";
++}
++
++function yamtAbility(char: Delimiter, { before, after }: Neighbours): Ability {
+   return {
+-    kind: "run",
+-    char,
+-    length,
+     canOpen: after !== "" && !SPACE.test(after) && (char !== "_" || !WORD.test(before)),
+     canClose: before !== "" && !SPACE.test(before) && (char !== "_" || !WORD.test(after)),
+-    closes: [],
+-    opens: [],
+   };
+ }
+ 
++function commonMarkAbility(char: Delimiter, { before, after }: Neighbours): Ability {
++  const prior = neighbour(before);
++  const next = neighbour(after);
++  const left = next !== "space" && (next !== "punctuation" || prior !== "other");
++  const right = prior !== "space" && (prior !== "punctuation" || next !== "other");
++  if (char !== "_") {
++    return { canOpen: left, canClose: right };
++  }
++  return {
++    canOpen: left && (!right || prior === "punctuation"),
++    canClose: right && (!left || next === "punctuation"),
++  };
++}
++
++function delimiterRun(source: string, at: number, char: Delimiter, flanking: Flanking): Run {
++  const length = runLength(source, at, char);
++  const end = at + length;
++  const ability =
++    flanking === "yamt"
++      ? yamtAbility(char, { before: source.charAt(at - 1), after: source.charAt(end) })
++      : commonMarkAbility(char, {
++          before: codePointBefore(source, at),
++          after: codePointAt(source, end),
++        });
++  return { kind: "run", char, length, ...ability, closes: [], opens: [] };
++}
++
+ class InlineScan {
+   readonly pieces: Piece[] = [];
+   readonly #source: string;
+   readonly #spans: CodeSpans;
+   readonly #parens: ReadonlyMap<number, number>;
+   readonly #brackets: OpenBracket[] = [];
++  readonly #flanking: Flanking;
+   #inactiveBelow = 0;
+ 
+-  constructor(source: string) {
++  constructor(source: string, flanking: Flanking) {
+     this.#source = source;
++    this.#flanking = flanking;
+     this.#spans = new CodeSpans(source);
+     this.#parens = parenMatches(source);
+   }
+@@ -186,7 +237,7 @@ class InlineScan {
+   }
+ 
+   #run(at: number, char: Delimiter): number {
+-    const run = delimiterRun(this.#source, at, char);
++    const run = delimiterRun(this.#source, at, char, this.#flanking);
+     if (char === "~" && run.length !== STRIKE_RUN) {
+       return this.#push(text(char.repeat(run.length), at + run.length));
+     }
+@@ -223,8 +274,8 @@ class InlineScan {
+   }
+ }
+ 
+-export function parseInline(source: string): Inline[] {
+-  const scan = new InlineScan(source);
++export function parseInline(source: string, flanking: Flanking = "yamt"): Inline[] {
++  const scan = new InlineScan(source, flanking);
+   let at = 0;
+   while (at < source.length) {
+     at = scan.step(at);

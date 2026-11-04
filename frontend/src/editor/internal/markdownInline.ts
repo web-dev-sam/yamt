@@ -15,11 +15,26 @@ type Target = { readonly address: string; readonly end: number };
 
 type OpenBracket = { readonly bracket: Bracket; readonly piece: number; readonly at: number };
 
+/** How a delimiter run may open or close: "yamt" — the AI chat's rule since plan §2 row 112 (not beside white
+ *  space; `_` not inside a word); "commonMark" — CommonMark 0.31.2 §6.2's left- and right-flanking rule, with
+ *  Unicode punctuation (P and S categories) and white space (Zs, tab, line ending; a text's start and end count as
+ *  white space); `*` and `~` open when left-flanking and close when right-flanking; `_` as §6.2 rules 2 and 4. */
+export type Flanking = "yamt" | "commonMark";
+
+type Neighbour = "space" | "punctuation" | "other";
+
+type Neighbours = { readonly before: string; readonly after: string };
+
+type Ability = Pick<Run, "canOpen" | "canClose">;
+
 const PUNCTUATION = /^[!-/:-@[-`{-~]$/;
 const SPACE = /^\s$/;
 const WORD = /^[\p{L}\p{N}]$/u;
+const UNICODE_SPACE = /^[\p{Zs}\t\n\f\r]$/u;
+const UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
 const AUTOLINK = /^<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*|[^\s<>@]+@[^\s<>@]+)>/;
 const ESCAPE_WIDTH = "\\*".length;
+const SURROGATE_PAIR = 2;
 
 function runLength(text: string, at: number, char: string): number {
   let end = at;
@@ -124,19 +139,53 @@ function destination(
   return { address: address.split(/\s+/)[0] ?? "", end: close + 1 };
 }
 
-function delimiterRun(source: string, at: number, char: Delimiter): Run {
-  const length = runLength(source, at, char);
-  const before = source.charAt(at - 1);
-  const after = source.charAt(at + length);
+function codePointBefore(source: string, at: number): string {
+  return Array.from(source.slice(Math.max(0, at - SURROGATE_PAIR), at)).at(-1) ?? "";
+}
+
+function codePointAt(source: string, at: number): string {
+  return Array.from(source.slice(at, at + SURROGATE_PAIR))[0] ?? "";
+}
+
+function neighbour(char: string): Neighbour {
+  if (char === "" || UNICODE_SPACE.test(char)) {
+    return "space";
+  }
+  return UNICODE_PUNCTUATION.test(char) ? "punctuation" : "other";
+}
+
+function yamtAbility(char: Delimiter, { before, after }: Neighbours): Ability {
   return {
-    kind: "run",
-    char,
-    length,
     canOpen: after !== "" && !SPACE.test(after) && (char !== "_" || !WORD.test(before)),
     canClose: before !== "" && !SPACE.test(before) && (char !== "_" || !WORD.test(after)),
-    closes: [],
-    opens: [],
   };
+}
+
+function commonMarkAbility(char: Delimiter, { before, after }: Neighbours): Ability {
+  const prior = neighbour(before);
+  const next = neighbour(after);
+  const left = next !== "space" && (next !== "punctuation" || prior !== "other");
+  const right = prior !== "space" && (prior !== "punctuation" || next !== "other");
+  if (char !== "_") {
+    return { canOpen: left, canClose: right };
+  }
+  return {
+    canOpen: left && (!right || prior === "punctuation"),
+    canClose: right && (!left || next === "punctuation"),
+  };
+}
+
+function delimiterRun(source: string, at: number, char: Delimiter, flanking: Flanking): Run {
+  const length = runLength(source, at, char);
+  const end = at + length;
+  const ability =
+    flanking === "yamt"
+      ? yamtAbility(char, { before: source.charAt(at - 1), after: source.charAt(end) })
+      : commonMarkAbility(char, {
+          before: codePointBefore(source, at),
+          after: codePointAt(source, end),
+        });
+  return { kind: "run", char, length, ...ability, closes: [], opens: [] };
 }
 
 class InlineScan {
@@ -145,10 +194,12 @@ class InlineScan {
   readonly #spans: CodeSpans;
   readonly #parens: ReadonlyMap<number, number>;
   readonly #brackets: OpenBracket[] = [];
+  readonly #flanking: Flanking;
   #inactiveBelow = 0;
 
-  constructor(source: string) {
+  constructor(source: string, flanking: Flanking) {
     this.#source = source;
+    this.#flanking = flanking;
     this.#spans = new CodeSpans(source);
     this.#parens = parenMatches(source);
   }
@@ -186,7 +237,7 @@ class InlineScan {
   }
 
   #run(at: number, char: Delimiter): number {
-    const run = delimiterRun(this.#source, at, char);
+    const run = delimiterRun(this.#source, at, char, this.#flanking);
     if (char === "~" && run.length !== STRIKE_RUN) {
       return this.#push(text(char.repeat(run.length), at + run.length));
     }
@@ -223,8 +274,8 @@ class InlineScan {
   }
 }
 
-export function parseInline(source: string): Inline[] {
-  const scan = new InlineScan(source);
+export function parseInline(source: string, flanking: Flanking = "yamt"): Inline[] {
+  const scan = new InlineScan(source, flanking);
   let at = 0;
   while (at < source.length) {
     at = scan.step(at);

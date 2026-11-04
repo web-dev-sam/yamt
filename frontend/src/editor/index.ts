@@ -11,6 +11,7 @@ export type { ProblemCounts } from "./internal/problems";
 export type { ResultSnapshot } from "./internal/savedPoint";
 export type { Side } from "./internal/side";
 export type { MergeSummary } from "./internal/status";
+export { localPreview } from "./internal/localPreview";
 export { MarkdownView } from "./markdown";
 export { MergeController } from "./merge";
 export type { MergeHosts, MergeOptions } from "./merge";

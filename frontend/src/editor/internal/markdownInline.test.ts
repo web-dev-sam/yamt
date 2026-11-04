@@ -160,3 +160,37 @@ test("60,000 code spans parse in linear time", () => {
     ]).flat(),
   );
 });
+
+test("commonmark_flanking_refuses_what_yamts_allows", () => {
+  expect(parseInline('a**"b"**')).toEqual([
+    { kind: "text", text: "a" },
+    { kind: "strong", children: [{ kind: "text", text: '"b"' }] },
+  ]);
+  expect(parseInline('a**"b"**', "commonMark")).toEqual([{ kind: "text", text: 'a**"b"**' }]);
+  for (const same of [
+    "**bold**.",
+    "(*it*)",
+    "(_it_)",
+    "snake_case_name",
+    "***both***",
+    "~~gone~~",
+  ]) {
+    expect(parseInline(same, "commonMark"), same).toEqual(parseInline(same));
+  }
+  expect(parseInline("(*it*)", "commonMark")).toEqual([
+    { kind: "text", text: "(" },
+    { kind: "emphasis", children: [{ kind: "text", text: "it" }] },
+    { kind: "text", text: ")" },
+  ]);
+});
+
+test("commonmark_flanking_reads_unicode_punctuation_and_white_space", () => {
+  expect(parseInline("a*“b”*", "commonMark")).toEqual([{ kind: "text", text: "a*“b”*" }]);
+  expect(parseInline("a*😀*", "commonMark")).toEqual([{ kind: "text", text: "a*😀*" }]);
+  expect(parseInline("*a\u00a0*", "commonMark")).toEqual([{ kind: "text", text: "*a\u00a0*" }]);
+  expect(parseInline("foo_(bar)_", "commonMark")).toEqual([{ kind: "text", text: "foo_(bar)_" }]);
+  expect(parseInline("_(bar)_.", "commonMark")).toEqual([
+    { kind: "emphasis", children: [{ kind: "text", text: "(bar)" }] },
+    { kind: "text", text: "." },
+  ]);
+});

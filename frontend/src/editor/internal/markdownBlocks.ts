@@ -24,19 +24,21 @@ export type CodeBlock = Extract<Block, { kind: "code" }>;
 
 type Parsed = { readonly block: Block; readonly end: number };
 
+type Fence = { readonly indent: number; readonly info: string; readonly close: number };
+
 type Starter = (lines: readonly string[], at: number, depth: number) => Parsed | null;
 
 type ItemStart = { readonly numbering: Numbering; readonly column: number; readonly first: string };
 
 const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const satisfies readonly HeadingTag[];
-const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/s;
+export const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/s;
 const CLOSING_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/s;
 const RULE = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/;
 const QUOTE = /^ {0,3}> ?(.*)$/s;
 const ITEM = /^( {0,3})([-*]|\d{1,9}\.)(?:( +)(.*))?$/s;
 const WHITESPACE = /^[ \t]$/;
-const LINE_BREAK = /\r\n|\n|\r/;
+export const LINE_BREAK = /\r\n|\n|\r/;
 const TAB_STOP = 4;
 const MAX_ITEM_GAP = 4;
 const TABLE_HEAD_LINES = 2;
@@ -45,11 +47,11 @@ function lineAt(lines: readonly string[], at: number): string {
   return lines[at] ?? "";
 }
 
-function isBlank(line: string): boolean {
+export function isBlank(line: string): boolean {
   return line.trim() === "";
 }
 
-function indentOf(line: string): number {
+export function indentOf(line: string): number {
   let width = 0;
   for (const char of line) {
     if (char === " ") {
@@ -76,21 +78,44 @@ function closesFence(line: string, marks: string): boolean {
   return close !== undefined && close[0] === marks[0] && close.length >= marks.length;
 }
 
-function fence(lines: readonly string[], at: number): Parsed | null {
+function fenceAt(lines: readonly string[], at: number): Fence | null {
   const open = FENCE.exec(lineAt(lines, at));
   const [, indent = "", marks = "", rest = ""] = open ?? [];
   if (open === null || (marks.startsWith("`") && rest.includes("`"))) {
     return null;
   }
-  const info = rest.trim().split(/\s+/)[0] ?? "";
-  const code: string[] = [];
-  let end = at + 1;
-  while (end < lines.length && !closesFence(lineAt(lines, end), marks)) {
-    code.push(stripColumns(lineAt(lines, end), indent.length));
-    end += 1;
+  let close = at + 1;
+  while (close < lines.length && !closesFence(lineAt(lines, close), marks)) {
+    close += 1;
   }
-  const closed = Math.min(end + 1, lines.length);
-  return { block: { kind: "code", info, code: code.join("\n") }, end: closed };
+  return { indent: indent.length, info: rest.trim().split(/\s+/)[0] ?? "", close };
+}
+
+function fence(lines: readonly string[], at: number): Parsed | null {
+  const found = fenceAt(lines, at);
+  if (found === null) {
+    return null;
+  }
+  const code = lines.slice(at + 1, found.close).map((line) => stripColumns(line, found.indent));
+  const end = Math.min(found.close + 1, lines.length);
+  return { block: { kind: "code", info: found.info, code: code.join("\n") }, end };
+}
+
+/** The indices of `text`'s lines (split as `parseBlocks` splits) inside fenced code: for each line where `fence`
+ *  finds a fence (indent 0–3), the lines after it up to its closing line or the text's end, the fence lines
+ *  themselves excluded; scanning resumes after the closing line. */
+export function fencedLines(text: string): ReadonlySet<number> {
+  const lines = text.split(LINE_BREAK);
+  const inside = new Set<number>();
+  let at = 0;
+  while (at < lines.length) {
+    const close = fenceAt(lines, at)?.close ?? at;
+    for (let line = at + 1; line < close; line += 1) {
+      inside.add(line);
+    }
+    at = close + 1;
+  }
+  return inside;
 }
 
 function headingText(content: string): string {
