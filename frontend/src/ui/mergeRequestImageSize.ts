@@ -1,6 +1,6 @@
 import type { DescriptionInline } from "../ipc";
 
-type ImageSize = NonNullable<Extract<DescriptionInline, { kind: "image" }>["size"]>;
+export type ImageSize = NonNullable<Extract<DescriptionInline, { kind: "image" }>["size"]>;
 type ImageLength = Extract<ImageSize, { kind: "width" }>["width"];
 type ImageStyle = Readonly<Record<string, string>>;
 

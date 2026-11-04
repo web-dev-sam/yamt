@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useElementSize } from "@vueuse/core";
 import { computed, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch } from "vue";
 
 import type { WebPage } from "../ipc";
@@ -27,7 +26,7 @@ import {
 import { useMergeRequests } from "./mergeRequestsStore";
 import { problemText } from "./problemText";
 import { useFollowEnd } from "./useFollowEnd";
-import { useMenuPlacement } from "./useMenuPlacement";
+import { useBesidePlacement } from "./useMenuPlacement";
 
 const props = defineProps<{
   shown: ShownJobLog;
@@ -53,11 +52,7 @@ const current = shallowRef<number | null>(null);
 const matches = new Highlight();
 const currentMatch = new Highlight();
 let frame: number | null = null;
-const boxSize = useElementSize(box, undefined, { box: "border-box" });
-const placement = useMenuPlacement(box, () => ({
-  x: props.anchor.left - boxSize.width.value,
-  y: props.anchor.top,
-}));
+const placement = useBesidePlacement(box, () => props.anchor);
 const follow = useFollowEnd(scroller, () => props.shown.load);
 
 const title = computed(() => jobLogTitle(props.shown.job.name));

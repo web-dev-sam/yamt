@@ -1,0 +1,311 @@
+diff --git a/frontend/src/ui/CiStatusJobLog.vue b/frontend/src/ui/CiStatusJobLog.vue
+index e789d86..8e2bbe3 100644
+--- a/frontend/src/ui/CiStatusJobLog.vue
++++ b/frontend/src/ui/CiStatusJobLog.vue
+@@ -1,5 +1,4 @@
+ <script setup lang="ts">
+-import { useElementSize } from "@vueuse/core";
+ import { computed, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch } from "vue";
+ 
+ import type { WebPage } from "../ipc";
+@@ -27,7 +26,7 @@ import {
+ import { useMergeRequests } from "./mergeRequestsStore";
+ import { problemText } from "./problemText";
+ import { useFollowEnd } from "./useFollowEnd";
+-import { useMenuPlacement } from "./useMenuPlacement";
++import { useBesidePlacement } from "./useMenuPlacement";
+ 
+ const props = defineProps<{
+   shown: ShownJobLog;
+@@ -53,11 +52,7 @@ const current = shallowRef<number | null>(null);
+ const matches = new Highlight();
+ const currentMatch = new Highlight();
+ let frame: number | null = null;
+-const boxSize = useElementSize(box, undefined, { box: "border-box" });
+-const placement = useMenuPlacement(box, () => ({
+-  x: props.anchor.left - boxSize.width.value,
+-  y: props.anchor.top,
+-}));
++const placement = useBesidePlacement(box, () => props.anchor);
+ const follow = useFollowEnd(scroller, () => props.shown.load);
+ 
+ const title = computed(() => jobLogTitle(props.shown.job.name));
+diff --git a/frontend/src/ui/MergeRequestDescriptionImage.vue b/frontend/src/ui/MergeRequestDescriptionImage.vue
+index 764f96b..f26d89a 100644
+--- a/frontend/src/ui/MergeRequestDescriptionImage.vue
++++ b/frontend/src/ui/MergeRequestDescriptionImage.vue
+@@ -1,14 +1,12 @@
+ <script setup lang="ts">
+ import { computed, shallowRef, useTemplateRef, watch } from "vue";
+ 
+-import type { DescriptionImage, DescriptionInline } from "../ipc";
++import type { DescriptionImage } from "../ipc";
+ import { IMAGE_STAND_IN } from "./mergeRequestDescriptionText";
+-import { imageStyle, type NaturalSize } from "./mergeRequestImageSize";
++import { imageStyle, type ImageSize, type NaturalSize } from "./mergeRequestImageSize";
+ import { useMergeRequests } from "./mergeRequestsStore";
+ 
+-type ImageSize = Extract<DescriptionInline, { kind: "image" }>["size"];
+-
+-const props = defineProps<{ image: DescriptionImage; caption: string; size: ImageSize }>();
++const props = defineProps<{ image: DescriptionImage; caption: string; size: ImageSize | null }>();
+ 
+ const { imageAddress } = useMergeRequests();
+ const picture = useTemplateRef<HTMLImageElement>("picture");
+diff --git a/frontend/src/ui/MergeRequestReplyField.vue b/frontend/src/ui/MergeRequestReplyField.vue
+index c13a75b..c8b1c1f 100644
+--- a/frontend/src/ui/MergeRequestReplyField.vue
++++ b/frontend/src/ui/MergeRequestReplyField.vue
+@@ -21,6 +21,7 @@ import {
+   WRITE,
+   writeFailureText,
+ } from "./mergeRequestThreadText";
++import { boxKeydown } from "./rangeKeys";
+ import { vTooltip } from "./tooltip";
+ 
+ type Shown =
+@@ -29,7 +30,8 @@ type Shown =
+   | { readonly kind: "refusal"; readonly text: string };
+ type Button = { readonly disabled: boolean; readonly reason: string | null };
+ 
+-const props = defineProps<{ thread: Thread }>();
++const props = defineProps<{ thread: Thread; writable: boolean }>();
++const emit = defineEmits<{ close: [] }>();
+ 
+ const MIN_LINES = 3;
+ const MAX_LINES = 12;
+@@ -49,20 +51,16 @@ const text = computed({
+ const writing = computed(() => props.thread.preview.kind === "writing");
+ const shownPreview = computed(() => previewOf(props.thread.preview));
+ const loaded = computed(() => (props.thread.load.kind === "read" ? props.thread.load : null));
+-const ready = computed(
+-  () =>
+-    loaded.value !== null && !loaded.value.refreshing && props.thread.sending.kind !== "sending",
+-);
+ const add = computed((): Button => {
+   const reason = loaded.value === null ? null : commentingReason(loaded.value.thread.commenting);
+-  return { disabled: !ready.value || text.value.trim() === "" || reason !== null, reason };
++  return { disabled: !props.writable || text.value.trim() === "" || reason !== null, reason };
+ });
+ const resolve = computed((): Button & { readonly label: string; readonly to: boolean } => {
+   const thread = loaded.value?.thread ?? null;
+   const reason = thread === null || thread.mayResolve ? null : MAY_NOT_RESOLVE;
+   const resolved = thread?.resolved ?? false;
+   return {
+-    disabled: !ready.value || reason !== null,
++    disabled: !props.writable || reason !== null,
+     reason,
+     label: resolved ? UNRESOLVE_THREAD : RESOLVE_THREAD,
+     to: !resolved,
+@@ -134,6 +132,17 @@ function send(kind: "comment" | "draft"): void {
+   }
+ }
+ 
++function keyPressed(event: KeyboardEvent): void {
++  boxKeydown(event, navigator.platform, {
++    submit: () => {
++      send("comment");
++    },
++    cancel: () => {
++      emit("close");
++    },
++  });
++}
++
+ function toggleResolved(): void {
+   void setResolved(resolve.value.to);
+ }
+@@ -166,7 +175,7 @@ function toggleResolved(): void {
+       :placeholder="REPLY_PLACEHOLDER"
+       :aria-label="REPLY_PLACEHOLDER"
+       class="w-full resize-none overflow-y-auto rounded border border-control-border bg-panel px-2 py-1 leading-5 outline-none focus:border-primary"
+-      @keydown.ctrl.enter.exact.prevent="send('comment')"
++      @keydown="keyPressed"
+     ></textarea>
+     <div
+       v-if="shownPreview !== null"
+diff --git a/frontend/src/ui/MergeRequestThread.vue b/frontend/src/ui/MergeRequestThread.vue
+index e7934b3..52cd3aa 100644
+--- a/frontend/src/ui/MergeRequestThread.vue
++++ b/frontend/src/ui/MergeRequestThread.vue
+@@ -1,5 +1,4 @@
+ <script setup lang="ts">
+-import { useElementSize } from "@vueuse/core";
+ import { computed, onMounted, useTemplateRef } from "vue";
+ import Check from "~icons/lucide/check";
+ import ExternalLink from "~icons/lucide/external-link";
+@@ -25,7 +24,7 @@ import {
+ } from "./mergeRequestThreadText";
+ import { problemText } from "./problemText";
+ import { vTooltip } from "./tooltip";
+-import { useMenuPlacement } from "./useMenuPlacement";
++import { useBesidePlacement } from "./useMenuPlacement";
+ 
+ type Content =
+   | { readonly kind: "thread"; readonly thread: DiscussionThread }
+@@ -48,11 +47,7 @@ const emit = defineEmits<{ close: [] }>();
+ 
+ const { thread, retryThread, submitReview, openPage } = useMergeRequests();
+ const panel = useTemplateRef<HTMLDivElement>("panel");
+-const panelSize = useElementSize(panel, undefined, { box: "border-box" });
+-const placement = useMenuPlacement(panel, () => ({
+-  x: props.anchor.left - panelSize.width.value,
+-  y: props.anchor.top,
+-}));
++const placement = useBesidePlacement(panel, () => props.anchor);
+ 
+ const shown = computed(() => (thread.value?.shown.iid === props.iid ? thread.value : null));
+ const content = computed(() => (shown.value === null ? null : contentOf(shown.value.load)));
+@@ -64,7 +59,12 @@ const submit = computed(() => {
+   return pending > 0 ? { tip: submitTip(pending), count: pendingText(pending) } : null;
+ });
+ const refreshing = computed(() => shown.value?.load.kind === "read" && shown.value.load.refreshing);
+-const sending = computed(() => shown.value?.sending.kind === "sending");
++const writable = computed(
++  () =>
++    shown.value?.load.kind === "read" &&
++    !shown.value.load.refreshing &&
++    shown.value.sending.kind !== "sending",
++);
+ 
+ onMounted(() => {
+   panel.value?.focus();
+@@ -139,7 +139,7 @@ function keyPressed(event: KeyboardEvent): void {
+         v-if="submit !== null"
+         v-tooltip="submit.tip"
+         type="button"
+-        :disabled="sending"
++        :disabled="!writable"
+         class="flex shrink-0 items-center gap-1.5 rounded border border-control-border px-2 py-0.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
+         @click="submitReview"
+       >
+@@ -190,6 +190,6 @@ function keyPressed(event: KeyboardEvent): void {
+         </button>
+       </p>
+     </div>
+-    <MergeRequestReplyField :thread="shown" />
++    <MergeRequestReplyField :thread="shown" :writable="writable" @close="emit('close')" />
+   </div>
+ </template>
+diff --git a/frontend/src/ui/MergeRequestThreadPanel.test.ts b/frontend/src/ui/MergeRequestThreadPanel.test.ts
+index d646c7d..65cb65f 100644
+--- a/frontend/src/ui/MergeRequestThreadPanel.test.ts
++++ b/frontend/src/ui/MergeRequestThreadPanel.test.ts
+@@ -173,6 +173,7 @@ test("submit_review_shows_the_pending_count_and_its_tip", async () => {
+ 
+   expect(html).toContain('data-tooltip="Publish your 2 pending comments on this merge request"');
+   expect(html).toContain('Submit review<span class="text-fg-muted">2 pending</span>');
++  expect(buttons(html)).toContain("Submit review");
+ 
+   await shown(LOCKED, 15);
+   expect(await panel(LOCKED)).not.toContain("Submit review");
+@@ -238,6 +239,12 @@ test("the_buttons_row_has_add_review_add_comment_and_resolve_at_the_right", asyn
+     "Add comment (disabled)",
+     "Resolve thread",
+   ]);
++  slice.setReplyText(d(1), " \n\t ");
++  expect(buttons(await panel()).slice(-3)).toEqual([
++    "Add review (disabled)",
++    "Add comment (disabled)",
++    "Resolve thread",
++  ]);
+   slice.setReplyText(d(1), "Agreed.");
+   const typed = await panel();
+   expect(buttons(typed).slice(-3)).toEqual(["Add review", "Add comment", "Resolve thread"]);
+@@ -354,6 +361,7 @@ test("a_refreshing_thread_keeps_its_comments_and_another_requests_thread_renders
+   expect(refreshing).toContain('aria-busy="true"');
+   expect(articles(refreshing)).toHaveLength(5);
+   expect(buttons(refreshing).at(-1)).toBe("Resolve thread (disabled)");
++  expect(buttons(refreshing)).toContain("Submit review (disabled)");
+ 
+   expect(await panel(LOCKED)).toBe("");
+ });
+diff --git a/frontend/src/ui/mergeRequestImageSize.ts b/frontend/src/ui/mergeRequestImageSize.ts
+index bde3e12..8f73db8 100644
+--- a/frontend/src/ui/mergeRequestImageSize.ts
++++ b/frontend/src/ui/mergeRequestImageSize.ts
+@@ -1,6 +1,6 @@
+ import type { DescriptionInline } from "../ipc";
+ 
+-type ImageSize = NonNullable<Extract<DescriptionInline, { kind: "image" }>["size"]>;
++export type ImageSize = NonNullable<Extract<DescriptionInline, { kind: "image" }>["size"]>;
+ type ImageLength = Extract<ImageSize, { kind: "width" }>["width"];
+ type ImageStyle = Readonly<Record<string, string>>;
+ 
+diff --git a/frontend/src/ui/useMenuPlacement.test.ts b/frontend/src/ui/useMenuPlacement.test.ts
+new file mode 100644
+index 0000000..ae7c564
+--- /dev/null
++++ b/frontend/src/ui/useMenuPlacement.test.ts
+@@ -0,0 +1,16 @@
++import { expect, test } from "vitest";
++
++import { besideLeft, useBesidePlacement } from "./useMenuPlacement";
++
++test("a_panel_beside_its_anchor_ends_at_the_anchors_left_with_tops_level", () => {
++  expect(besideLeft({ left: 800, top: 40 }, { width: 640, height: 768 })).toEqual({
++    x: 160,
++    y: 40,
++  });
++});
++
++test("the_beside_placement_puts_an_unmeasured_panel_at_its_anchor", () => {
++  const placement = useBesidePlacement(null, { left: 800, top: 40 });
++
++  expect(placement.value).toEqual({ left: "800px", top: "40px" });
++});
+diff --git a/frontend/src/ui/useMenuPlacement.ts b/frontend/src/ui/useMenuPlacement.ts
+index 043ac2b..a73e5b0 100644
+--- a/frontend/src/ui/useMenuPlacement.ts
++++ b/frontend/src/ui/useMenuPlacement.ts
+@@ -1,25 +1,46 @@
+ import { useElementSize, useWindowSize } from "@vueuse/core";
+ import { computed, toValue, type ComputedRef, type MaybeRefOrGetter } from "vue";
+ 
+-import { menuPosition, type Point } from "./menuPosition";
++import { menuPosition, type Point, type Size } from "./menuPosition";
+ 
+ type MenuPlacement = { readonly left: string; readonly top: string };
+ 
++type Anchor = { readonly left: number; readonly top: number };
++
+ export function belowLeft(opener: HTMLElement): Point {
+   const { left, bottom } = opener.getBoundingClientRect();
+   return { x: left, y: bottom };
+ }
+ 
++export function besideLeft(anchor: Anchor, panel: Size): Point {
++  return { x: anchor.left - panel.width, y: anchor.top };
++}
++
+ export function useMenuPlacement(
+   menu: MaybeRefOrGetter<HTMLElement | null>,
+   at: MaybeRefOrGetter<Point>,
+ ): ComputedRef<MenuPlacement> {
+-  const size = useElementSize(menu, undefined, { box: "border-box" });
++  return usePlacement(menu, () => toValue(at));
++}
++
++export function useBesidePlacement(
++  panel: MaybeRefOrGetter<HTMLElement | null>,
++  anchor: MaybeRefOrGetter<Anchor>,
++): ComputedRef<MenuPlacement> {
++  return usePlacement(panel, (size) => besideLeft(toValue(anchor), size));
++}
++
++function usePlacement(
++  element: MaybeRefOrGetter<HTMLElement | null>,
++  at: (size: Size) => Point,
++): ComputedRef<MenuPlacement> {
++  const size = useElementSize(element, undefined, { box: "border-box" });
+   const viewport = useWindowSize();
+   return computed(() => {
++    const menu = { width: size.width.value, height: size.height.value };
+     const { x, y } = menuPosition({
+-      pointer: toValue(at),
+-      menu: { width: size.width.value, height: size.height.value },
++      pointer: at(menu),
++      menu,
+       viewport: { width: viewport.width.value, height: viewport.height.value },
+     });
+     return { left: `${x}px`, top: `${y}px` };

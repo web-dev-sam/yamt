@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useElementSize } from "@vueuse/core";
 import { computed, onMounted, useTemplateRef } from "vue";
 import Check from "~icons/lucide/check";
 import ExternalLink from "~icons/lucide/external-link";
@@ -25,7 +24,7 @@ import {
 } from "./mergeRequestThreadText";
 import { problemText } from "./problemText";
 import { vTooltip } from "./tooltip";
-import { useMenuPlacement } from "./useMenuPlacement";
+import { useBesidePlacement } from "./useMenuPlacement";
 
 type Content =
   | { readonly kind: "thread"; readonly thread: DiscussionThread }
@@ -48,11 +47,7 @@ const emit = defineEmits<{ close: [] }>();
 
 const { thread, retryThread, submitReview, openPage } = useMergeRequests();
 const panel = useTemplateRef<HTMLDivElement>("panel");
-const panelSize = useElementSize(panel, undefined, { box: "border-box" });
-const placement = useMenuPlacement(panel, () => ({
-  x: props.anchor.left - panelSize.width.value,
-  y: props.anchor.top,
-}));
+const placement = useBesidePlacement(panel, () => props.anchor);
 
 const shown = computed(() => (thread.value?.shown.iid === props.iid ? thread.value : null));
 const content = computed(() => (shown.value === null ? null : contentOf(shown.value.load)));
@@ -64,7 +59,12 @@ const submit = computed(() => {
   return pending > 0 ? { tip: submitTip(pending), count: pendingText(pending) } : null;
 });
 const refreshing = computed(() => shown.value?.load.kind === "read" && shown.value.load.refreshing);
-const sending = computed(() => shown.value?.sending.kind === "sending");
+const writable = computed(
+  () =>
+    shown.value?.load.kind === "read" &&
+    !shown.value.load.refreshing &&
+    shown.value.sending.kind !== "sending",
+);
 
 onMounted(() => {
   panel.value?.focus();
@@ -139,7 +139,7 @@ function keyPressed(event: KeyboardEvent): void {
         v-if="submit !== null"
         v-tooltip="submit.tip"
         type="button"
-        :disabled="sending"
+        :disabled="!writable"
         class="flex shrink-0 items-center gap-1.5 rounded border border-control-border px-2 py-0.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
         @click="submitReview"
       >
@@ -190,6 +190,6 @@ function keyPressed(event: KeyboardEvent): void {
         </button>
       </p>
     </div>
-    <MergeRequestReplyField :thread="shown" />
+    <MergeRequestReplyField :thread="shown" :writable="writable" @close="emit('close')" />
   </div>
 </template>

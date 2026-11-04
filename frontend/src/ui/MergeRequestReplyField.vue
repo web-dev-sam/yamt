@@ -21,6 +21,7 @@ import {
   WRITE,
   writeFailureText,
 } from "./mergeRequestThreadText";
+import { boxKeydown } from "./rangeKeys";
 import { vTooltip } from "./tooltip";
 
 type Shown =
@@ -29,7 +30,8 @@ type Shown =
   | { readonly kind: "refusal"; readonly text: string };
 type Button = { readonly disabled: boolean; readonly reason: string | null };
 
-const props = defineProps<{ thread: Thread }>();
+const props = defineProps<{ thread: Thread; writable: boolean }>();
+const emit = defineEmits<{ close: [] }>();
 
 const MIN_LINES = 3;
 const MAX_LINES = 12;
@@ -49,20 +51,16 @@ const text = computed({
 const writing = computed(() => props.thread.preview.kind === "writing");
 const shownPreview = computed(() => previewOf(props.thread.preview));
 const loaded = computed(() => (props.thread.load.kind === "read" ? props.thread.load : null));
-const ready = computed(
-  () =>
-    loaded.value !== null && !loaded.value.refreshing && props.thread.sending.kind !== "sending",
-);
 const add = computed((): Button => {
   const reason = loaded.value === null ? null : commentingReason(loaded.value.thread.commenting);
-  return { disabled: !ready.value || text.value.trim() === "" || reason !== null, reason };
+  return { disabled: !props.writable || text.value.trim() === "" || reason !== null, reason };
 });
 const resolve = computed((): Button & { readonly label: string; readonly to: boolean } => {
   const thread = loaded.value?.thread ?? null;
   const reason = thread === null || thread.mayResolve ? null : MAY_NOT_RESOLVE;
   const resolved = thread?.resolved ?? false;
   return {
-    disabled: !ready.value || reason !== null,
+    disabled: !props.writable || reason !== null,
     reason,
     label: resolved ? UNRESOLVE_THREAD : RESOLVE_THREAD,
     to: !resolved,
@@ -134,6 +132,17 @@ function send(kind: "comment" | "draft"): void {
   }
 }
 
+function keyPressed(event: KeyboardEvent): void {
+  boxKeydown(event, navigator.platform, {
+    submit: () => {
+      send("comment");
+    },
+    cancel: () => {
+      emit("close");
+    },
+  });
+}
+
 function toggleResolved(): void {
   void setResolved(resolve.value.to);
 }
@@ -166,7 +175,7 @@ function toggleResolved(): void {
       :placeholder="REPLY_PLACEHOLDER"
       :aria-label="REPLY_PLACEHOLDER"
       class="w-full resize-none overflow-y-auto rounded border border-control-border bg-panel px-2 py-1 leading-5 outline-none focus:border-primary"
-      @keydown.ctrl.enter.exact.prevent="send('comment')"
+      @keydown="keyPressed"
     ></textarea>
     <div
       v-if="shownPreview !== null"

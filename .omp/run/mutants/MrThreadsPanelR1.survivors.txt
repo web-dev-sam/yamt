@@ -1,0 +1,3 @@
+just mutants HEAD → 79 killed, 2 survived, 2 no coverage, 0 errors (95.18%); .vue files are not mutated
+useMenuPlacement.ts:37 box "border-box" → {} / "" — wiring: useElementSize never measures in node. The WebKit rect check covers it (right 1394.359375 = box left exactly).
+mergeRequestImageSize.ts:56 never arm (NoCoverage ×2) — equivalent: unreachable once the switch is exhaustive; I did not change this line.

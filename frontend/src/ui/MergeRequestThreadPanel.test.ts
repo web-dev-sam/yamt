@@ -173,6 +173,7 @@ test("submit_review_shows_the_pending_count_and_its_tip", async () => {
 
   expect(html).toContain('data-tooltip="Publish your 2 pending comments on this merge request"');
   expect(html).toContain('Submit review<span class="text-fg-muted">2 pending</span>');
+  expect(buttons(html)).toContain("Submit review");
 
   await shown(LOCKED, 15);
   expect(await panel(LOCKED)).not.toContain("Submit review");
@@ -233,6 +234,12 @@ test("preview_shows_loading_then_blocks_and_nothing_for_empty", async () => {
 
 test("the_buttons_row_has_add_review_add_comment_and_resolve_at_the_right", async () => {
   await shown(THREADS, 1);
+  expect(buttons(await panel()).slice(-3)).toEqual([
+    "Add review (disabled)",
+    "Add comment (disabled)",
+    "Resolve thread",
+  ]);
+  slice.setReplyText(d(1), " \n\t ");
   expect(buttons(await panel()).slice(-3)).toEqual([
     "Add review (disabled)",
     "Add comment (disabled)",
@@ -354,6 +361,7 @@ test("a_refreshing_thread_keeps_its_comments_and_another_requests_thread_renders
   expect(refreshing).toContain('aria-busy="true"');
   expect(articles(refreshing)).toHaveLength(5);
   expect(buttons(refreshing).at(-1)).toBe("Resolve thread (disabled)");
+  expect(buttons(refreshing)).toContain("Submit review (disabled)");
 
   expect(await panel(LOCKED)).toBe("");
 });

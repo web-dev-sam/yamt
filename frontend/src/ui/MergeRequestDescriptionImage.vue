@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { computed, shallowRef, useTemplateRef, watch } from "vue";
 
-import type { DescriptionImage, DescriptionInline } from "../ipc";
+import type { DescriptionImage } from "../ipc";
 import { IMAGE_STAND_IN } from "./mergeRequestDescriptionText";
-import { imageStyle, type NaturalSize } from "./mergeRequestImageSize";
+import { imageStyle, type ImageSize, type NaturalSize } from "./mergeRequestImageSize";
 import { useMergeRequests } from "./mergeRequestsStore";
 
-type ImageSize = Extract<DescriptionInline, { kind: "image" }>["size"];
-
-const props = defineProps<{ image: DescriptionImage; caption: string; size: ImageSize }>();
+const props = defineProps<{ image: DescriptionImage; caption: string; size: ImageSize | null }>();
 
 const { imageAddress } = useMergeRequests();
 const picture = useTemplateRef<HTMLImageElement>("picture");
