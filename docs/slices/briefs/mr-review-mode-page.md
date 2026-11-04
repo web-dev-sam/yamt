@@ -261,7 +261,8 @@ Expected:
   - Set !93's due date to 04.11.2026 through its calendar box: still `!94 !91 !96 !93` (a due row that is not
     sam's turn stays with the rest).
   - Draft → All: `!95 !94 !91 !96 !93`.
-- **Anna Berg:** `!96 !97 !92`. !96's box reads "2 of 2 wait for Anna Berg".
+- **Anna Berg:** `!97 !96 !92` (since the threads turn rule, plan #179; before: `!96 !97 !92`). !96's box reads "0 of 2
+  wait for Anna Berg".
 - **Ben Okafor:** `!91 !90`, with the icon in the error colour and its tooltip naming !90.
 - **Clear filters:** all 8 rows, `!93` first (dated), then newest first.
 - **Reload and the setting:** as WebKit steps 5 and 8.

@@ -63,9 +63,10 @@ if [ -n "$forbidden_in_review" ]; then
 fi
 
 agent_deps=$(normal_deps yamt-agent)
-forbidden_in_agent=$(grep -E '^(yamt-|tauri(-|$)|serde_json$)' <<<"$agent_deps" | grep -vxE 'yamt-(agent|gitio|pipe|range|merge-core)' || true)
+agent_direct_deps=$(cargo tree --package yamt-agent --edges normal --target all --all-features --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
+forbidden_in_agent=$( { grep -E '^(yamt-|tauri(-|$))' <<<"$agent_deps"; grep -xE 'serde_json' <<<"$agent_direct_deps"; } | grep -vxE 'yamt-(agent|gitio|pipe|range|merge-core)' || true)
 if [ -n "$forbidden_in_agent" ]; then
-    echo "arch-check: yamt-agent depends on yamt-gitio, yamt-pipe and yamt-range (with its yamt-merge-core) only among yamt crates, never on tauri or serde_json, not:" $forbidden_in_agent >&2
+    echo "arch-check: yamt-agent depends on yamt-gitio, yamt-pipe and yamt-range (with its yamt-merge-core) only among yamt crates, never on tauri, and never directly on serde_json (its code parses no agent message), not:" $forbidden_in_agent >&2
     failed=1
 fi
 

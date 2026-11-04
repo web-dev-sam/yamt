@@ -215,7 +215,9 @@ by the unchanged fake (`scripts/fake-glab/glab:124-136`: `graphql-discussions-<i
     Draft All, !606 waits on the author in fewer threads than !632 and !617, so it sorts before them.
 
 - **Real app, `tests/glab/mr-review-mode/`** (user sam; reviewers sam, anna, ben): see the page brief's table. The
-  expected review orders are Me !94 !91 !96 !93, Anna !96 !97 !92, and Ben unsorted (!90 absent from the answer).
+  expected review orders are Me !94 !91 !96 !93, Anna !97 !96 !92 (under the threads turn rule, plan #179: !97 and !96
+  each have one thread waiting on the author, so the newer !97 comes first; !96 had "2 of 2"), and Ben unsorted (!90
+  absent from the answer).
 
 ## 2. Options
 
