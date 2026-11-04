@@ -53,7 +53,12 @@ file holding n > 0, the answer path `$1` becomes `$1.after-post-<k>` for the lar
 (`post-<n>`) are never redirected. So a thread read, a reload or a draft list after the k-th write shows it. One
 comment above `reply()` says so.
 
-### Scenario `tests/glab/mr-threads/` (project `taskboard/taskboard`, id 7, on `https://gitlab.example`; user `sam`)
+### Scenario `tests/glab/mr-threads/` (project `taskboard/taskboard`, id 7, on `https://gitlab.com`; user `sam`)
+
+(Amended after review #2339: on `https://gitlab.com` so a comment's upload is an uploads-API route under the
+description's rule #2280 (`description/address.rs` `upload_of`): d01's image `data-src` is
+`/-/project/7/uploads/<32 hex>/shot.png`, served from `uploads/7/uploads/<hex>/shot.png` as `mr-description` does;
+every note `url` and web address on `https://gitlab.com`.)
 
 `project.json` as `merge-requests/project.json`; `auth-status.out` absent (logged in). `graphql-page-1.json`: one page,
 the last, rows **!91** (author **sam**, 3 open discussions) and **!90** (author **dmitri**, 13 open discussions), the
@@ -129,12 +134,12 @@ above, `markdown.json` (`{ "html": "<p data-sourcepos=\"1:1-1:16\" dir=\"auto\">
 
 As `mr-threads` for project, page (only !90) and `graphql-discussions-90.json` (copy), plus:
 
-| n   | `post-<n>`                                                                                                     |
-| --- | -------------------------------------------------------------------------------------------------------------- |
-| 1   | `403 Forbidden`, `{"message":"403 Forbidden"}`                                                                 |
-| 2   | `400 Bad Request`, `{"error":"note is missing"}`, `post-2.err` "glab: note is missing (HTTP 400)"              |
-| 3   | `.exit` 1, `.err` "glab: Post \"https://gitlab.example/api/v4/…\": context deadline exceeded" (no HTTP answer) |
-| 4   | `500 Internal Server Error`, `{"message":"500 Internal Server Error"}`                                         |
+| n   | `post-<n>`                                                                                                 |
+| --- | ---------------------------------------------------------------------------------------------------------- |
+| 1   | `403 Forbidden`, `{"message":"403 Forbidden"}`                                                             |
+| 2   | `400 Bad Request`, `{"error":"note is missing"}`, `post-2.err` "glab: note is missing (HTTP 400)"          |
+| 3   | `.exit` 1, `.err` "glab: Post \"https://gitlab.com/api/v4/…\": context deadline exceeded" (no HTTP answer) |
+| 4   | `500 Internal Server Error`, `{"message":"500 Internal Server Error"}`                                     |
 
 `markdown.exit` 1 with `markdown.err` "glab: 401 Unauthorized (HTTP 401)" (a failed preview).
 

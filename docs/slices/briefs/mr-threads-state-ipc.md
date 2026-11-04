@@ -134,7 +134,7 @@ discussions script):
   `PendingDraft`; resolve/unresolve flip `resolved`; submit turns every draft of the merge request into sam's
   comments in their discussions and empties the drafts. Resolving on !636 → `refused { reason: "403 Forbidden" }`.
 - **Preview**: blank → `read` with no blocks; starting `fail` → `failed { message: "glab timed out" }`; else one
-  paragraph per non-empty line, `**x**` as strong text, `@name` as a link to `https://gitlab.example/name` (the
+  paragraph per non-empty line, `**x**` as strong text, `@name` as a link to `https://gitlab.com/name` (the
   person's page, as GitLab links a mention).
 - **Unknown iid or discussion** → `notFound`.
 

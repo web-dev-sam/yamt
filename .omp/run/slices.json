@@ -1,3 +1,9 @@
 {
-  "MrThreadsDesign": { "owned": ["docs/slices/briefs/mr-threads-*.md"] }
+  "MrThreadsImages": {
+    "owned": [
+      "crates/merge-requests/src/description.rs",
+      "crates/merge-requests/src/description/**",
+      "crates/merge-requests/tests/description.rs"
+    ]
+  }
 }
