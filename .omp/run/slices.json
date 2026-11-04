@@ -1,33 +1,30 @@
 {
-  "MrThreadsStateUi": {
+  "MrThreadsPanel": {
+    "owned": [
+      "frontend/src/ui/MergeRequestThread.vue",
+      "frontend/src/ui/MergeRequestThreadComment.vue",
+      "frontend/src/ui/MergeRequestReplyField.vue",
+      "frontend/src/ui/MergeRequestThread.test.ts",
+      "frontend/src/ui/mergeRequestThreadText.ts",
+      "frontend/src/ui/mergeRequestThreadText.test.ts",
+      "frontend/src/ui/mergeRequestImageSize.ts",
+      "frontend/src/ui/mergeRequestImageSize.test.ts",
+      "frontend/src/ui/MergeRequestDescriptionImage.vue",
+      "frontend/src/ui/MergeRequestDescriptionInlines.vue"
+    ]
+  },
+  "MrThreadsStateUiR1": {
     "owned": [
       "frontend/src/ui/mergeRequestDiscussions.ts",
       "frontend/src/ui/mergeRequestDiscussions.test.ts",
-      "frontend/src/ui/mergeRequestThread.ts",
-      "frontend/src/ui/mergeRequestThread.test.ts",
-      "frontend/src/ui/mergeRequestReload.test.ts",
-      "frontend/src/ui/mergeRequests.ts",
-      "frontend/src/ui/problem.ts",
-      "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ipc/index.ts",
       "frontend/src/ui/mergeRequestDiscussionRows.ts",
       "frontend/src/ui/mergeRequestDiscussionRows.test.ts",
+      "frontend/src/ui/mergeRequestThread.ts",
+      "frontend/src/ui/mergeRequestThread.test.ts",
       "frontend/src/ui/mergeRequestPreview.ts",
-      "frontend/src/ui/mergeRequestPreview.test.ts"
-    ]
-  },
-  "MrThreadsStateIpcR1": {
-    "owned": [
-      "frontend/src/ipc/fixtureMergeRequestThreads.ts",
-      "frontend/src/ipc/fixtureMergeRequestThreads.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestTurnCases.ts",
-      "frontend/src/ipc/fixtureMergeRequestRendering.ts",
-      "frontend/src/ipc/fixtureMergeRequestDiscussions.ts",
-      "frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts",
-      "frontend/src/ipc/fixtureMergeRequests.ts",
-      "frontend/src/ipc/fixtureMergeRequests.test.ts",
-      "frontend/src/ipc/AGENTS.md"
+      "frontend/src/ui/mergeRequestPreview.test.ts",
+      "frontend/src/ui/mergeRequestReload.test.ts",
+      "frontend/src/ui/mergeRequests.ts"
     ]
   }
 }
