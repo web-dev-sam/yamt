@@ -17,7 +17,8 @@
       "frontend/src/ui/AGENTS.md",
       "frontend/src/ipc/AGENTS.md",
       "frontend/src/ui/mergeRequestsRefresh.ts",
-      "frontend/src/ui/mergeRequestsRefresh.test.ts"
+      "frontend/src/ui/mergeRequestsRefresh.test.ts",
+      "frontend/src/ui/mergeRequestReload.test.ts"
     ]
   },
   "MrFastPreviewRememberedR1": {
