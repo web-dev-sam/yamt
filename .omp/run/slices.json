@@ -24,5 +24,12 @@
       "frontend/src/ipc/fixtureMergeRequests.test.ts",
       "frontend/src/ipc/AGENTS.md"
     ]
+  },
+  "MrFastPreviewLocalR3": {
+    "owned": [
+      "frontend/src/editor/internal/localPreview.ts",
+      "frontend/src/editor/internal/localPreview.test.ts",
+      "frontend/src/editor/AGENTS.md"
+    ]
   }
 }
