@@ -91,7 +91,7 @@ const LINE_TRIGGERS: Readonly<Record<string, RegExp>> = {
   quickAction: /^\/[A-Za-z]/,
   emptyItem: /^\s*([-*]|\d{1,9}\.)\s*$/,
 };
-const CONTAINER_PREFIX = /^ {0,3}(?:> ?|(?:[-*+]|\d{1,9}[.)])(?: |$))/;
+const CONTAINER_PREFIX = /^ *(?:> ?|(?:[-*+]|\d{1,9}[.)])(?: |$))|^ +/;
 const SETEXT_UNDERLINE = /^ {0,3}(=+|-+)[ \t]*$/;
 const FRONT_MATTER_OPENER = /^(---|\+\+\+|;;;)[ \t]*\S*[ \t]*$/;
 const DASH_ITEM = /^\s*-\s/;

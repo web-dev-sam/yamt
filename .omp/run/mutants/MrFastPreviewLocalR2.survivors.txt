@@ -1,0 +1,2 @@
+just mutants HEAD → 'mutants: no Rust changes since HEAD / mutants: no TypeScript changes since HEAD' (editor/ is not mutated; the failing paths above cover the changed regex)
+frontend/src/editor/internal/localPreview.ts:94 `^ *`→`^ {0,3}` in the marker alternative — equivalent: `|^ +` strips the indent first and the marker comes off on the next layer. It differs only in using one more of the MAX_NESTING layers.
