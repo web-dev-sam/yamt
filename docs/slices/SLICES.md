@@ -11,11 +11,11 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 0.6.9 = 0.6.8 plus the merge-request threads (section below; GitLab playground check still open). The owner pushes
 `main`, waits for green ci, then tags.
 
-| row | slice                                                                                                        | owner        | status  | evidence   |
-| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ------- | ---------- |
-| 1   | release commit 0.6.9: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done    | `4a13d9fc` |
-| 2   | final run 0.6.9 before tagging (`briefs/release-0.6.9-verify.md`)                                            | verifier     | running |            |
-| 3   | push `main`, ci green on all four jobs, tag `v0.6.9`, publish                                                | human        | todo    |            |
+| row | slice                                                                                                        | owner        | status      | evidence                                                                                                                                                                                                                                                     |
+| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | release commit 0.6.9: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done        | `4a13d9fc`                                                                                                                                                                                                                                                   |
+| 2   | final run 0.6.9 before tagging (`briefs/release-0.6.9-verify.md`)                                            | verifier     | done        | `Release069Verify` at `9d6cd91e`: `just check`, readmer, licences, `yamt_0.6.9_amd64.deb` Version `0.6.9`, `yamt 0.6.9`, release binary on `mr-threads` (turn words, thread panel, preview, one comment POST, no CSP error) pass. Note `Release069Verify.md` |
+| 3   | push `main`, ci green on all four jobs, tag `v0.6.9`, publish                                                | human        | handed over |                                                                                                                                                                                                                                                              |
 
 ## Threads beside the box (session 50; owner #2329–#2333: "Your turn" only when it is, the whole thread, answering, sized images)
 
