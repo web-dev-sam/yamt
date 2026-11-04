@@ -233,7 +233,9 @@ the people work (it edits only its briefs); its implementers wait for the people
 4. `request-mr-description.md`: done (section above, session 49); owner check handed over.
 5. `request-mr-links.md`: done (section above, session 49); owner check handed over.
 
-Nothing else is queued: the next request is the owner's to name.
+6. `request-mr-threads.md` (session 50, owner #2329–#2333): sized description images, "Your turn" only when it is,
+   the whole thread in a Shift panel with reply/draft/submit/resolve, one-row reload. Planned, not started; no
+   product question open.
 
 ## Open product questions
 
