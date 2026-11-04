@@ -1,7 +1,4 @@
 {
-  "MrPeopleFinal": {
-    "owned": []
-  },
   "MrDescriptionState": {
     "owned": [
       "frontend/src/ipc/MergeRequestSource.ts",
@@ -29,14 +26,12 @@
       "frontend/src/**/*.test.ts"
     ]
   },
-  "MrDescriptionRustR2": {
+  "MrDescriptionAppR1": {
     "owned": [
-      "crates/merge-requests/src/**",
-      "crates/merge-requests/tests/**",
-      "crates/merge-requests/AGENTS.md",
-      "scripts/fake-glab/glab",
-      "tests/glab/mr-description/**",
-      "tests/glab/README.md"
+      "src-tauri/src/merge_requests.rs",
+      "src-tauri/src/merge_requests/**",
+      "src-tauri/src/commands.rs",
+      "src-tauri/tauri.conf.json"
     ]
   }
 }
