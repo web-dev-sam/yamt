@@ -1,0 +1,5 @@
+just mutants HEAD (TS only): 496 killed, 29 survived, 7 no coverage, 93.23 %; a rerun on the same code showed the same survivors
+fixtureMergeRequestDiscussions.ts:54 ASKED literals ({} and each "") — gate-covered: a module constant the runner never re-evaluates (#732); the_review_orders_the_smoke_expects and …only_the_due_rows_ask_their_reviewer assert every entry
+fixtureMergeRequestDiscussions.ts:92 `person === null` → false; NoCoverage on `[]` — equivalent: every ASKED username is in PEOPLE, so personNamed is never null there; the arm only keeps the type total
+discussions.ts:58 `username !== null` → true — equivalent: a Person's username is a string, never null (line renamed only)
+Not changed this round (shown because the files are diffed against HEAD): fixtureMergeRequestDiscussions.ts:43-48, 97, 149, 157-158; discussions.ts:47-52, 190, 211; useHoverBox.ts:134, 136

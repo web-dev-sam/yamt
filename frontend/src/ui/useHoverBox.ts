@@ -9,9 +9,12 @@ type HoverBoxParts = {
   readonly opener: () => HTMLElement | null;
   readonly box: MaybeRefOrGetter<HTMLElement | null>;
   /** While true (a side panel is open): leaving with the pointer or focus, a window blur and a scroll outside never
-   *  close the box; a `pointerdown` outside the area closes it (C2, RK73). Absent: today's rule. */
+   *  close the box; a `pointerdown` outside the area closes it (C2, RK73), except on a list refresh trigger
+   *  (`data-refreshes-list`: the list is read again under the open box). Absent: today's rule. */
   readonly pinned?: () => boolean;
 };
+
+const REFRESHES_LIST = "[data-refreshes-list]";
 
 type Held = Omit<HoverBoxParts, "pinned"> & {
   readonly pinned: () => boolean;
@@ -142,8 +145,9 @@ export function useHoverBox(parts: HoverBoxParts): HoverBox {
   useEventListener(
     () => (held.open.value && held.pinned() ? document : null),
     "pointerdown",
-    (event) => {
-      if (!contains(held.area(), event.target)) {
+    ({ target }) => {
+      const refreshes = target instanceof Element && target.closest(REFRESHES_LIST) !== null;
+      if (!contains(held.area(), target) && !refreshes) {
         close(held);
       }
     },

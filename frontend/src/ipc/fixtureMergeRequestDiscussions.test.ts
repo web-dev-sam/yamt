@@ -66,13 +66,25 @@ test("every_listed_row_with_open_discussions_has_that_many", () => {
   expect(LISTED.some((row) => row.openDiscussions === 2)).toBe(true);
 });
 
-test("every_discussion_id_is_40_hex_and_unique_and_other_rows_have_no_earlier_or_mentions", () => {
+test("every_discussion_id_is_40_hex_and_unique_and_only_the_due_rows_ask_their_reviewer", () => {
   const ids = UNSCRIPTED.flatMap((row) => openOf(row.iid).map((discussion) => discussion.id));
   expect(ids.every((id) => /^[0-9a-f]{40}$/u.test(id))).toBe(true);
   expect(new Set(ids).size).toBe(ids.length);
-  for (const discussion of everyDiscussion()) {
-    expect([discussion.earlier, discussion.last.mentions]).toEqual([[], []]);
-  }
+  expect(everyDiscussion().every((discussion) => discussion.earlier.length === 0)).toBe(true);
+  const asking = GENERATED.flatMap((row) =>
+    openOf(row.iid)
+      .filter((discussion) => discussion.last.mentions.length > 0)
+      .map(
+        ({ last }) =>
+          `!${row.iid} ${last.mentions.map((mention) => mention.username).join()}: ${last.text}`,
+      ),
+  );
+  expect(asking).toEqual([
+    "!633 sam: @sam Could you look at this again?",
+    "!623 sam: @sam Could you look at this again?",
+    "!618 sam: @sam Could you look at this again?",
+    "!602 anna: @anna Could you look at this again?",
+  ]);
 });
 
 test("every_listed_row_with_open_discussions_has_that_many", () => {
@@ -252,16 +264,16 @@ test("the_review_orders_the_smoke_expects", () => {
 
   expect(orders(reviewing({ kind: "me" }), FIXTURE_ME)).toEqual({
     normal: "!622 !618 !633 !623 !638 !608 !603",
-    review: "!622 !618 !633 !638 !603 !623 !608",
+    review: "!618 !633 !623 !622 !638 !603 !608",
     failed: null,
   });
   expect(orders(anna, "anna")).toEqual({
     normal: "!622 !602 !632 !630 !617 !612",
-    review: "!622 !630 !612 !602 !632 !617",
+    review: "!602 !622 !630 !612 !632 !617",
     failed: null,
   });
   expect(orders(withDraft(anna, "all"), "anna").review).toBe(
-    "!622 !630 !627 !612 !606 !602 !632 !617",
+    "!602 !622 !630 !627 !612 !606 !632 !617",
   );
   expect(orders(reviewing({ kind: "person", username: "chiara" }), "chiara")).toEqual({
     normal: "!638 !635 !630 !615 !614 !605",

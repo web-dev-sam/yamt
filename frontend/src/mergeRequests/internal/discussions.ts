@@ -54,7 +54,7 @@ const WAITING_TEXT = "Waiting for an answer";
 /** Who a discussion's turn is weighed for: usernames, null for nobody (no viewer) or unknown (no author). */
 type Sides = { readonly viewer: string | null; readonly author: string | null };
 
-function isPerson(person: Person | null, username: string | null): person is Person {
+function isUser(person: Person | null, username: string | null): boolean {
   return username !== null && person !== null && person.username === username;
 }
 
@@ -72,7 +72,7 @@ function waitedOn(discussion: OpenDiscussion, { viewer, author }: Sides): Turn {
     return AUTHOR;
   }
   const starter = starterOf(discussion);
-  return starter === null || isPerson(starter, author) ? WAITING : personsTurn(starter);
+  return starter === null || isUser(starter, author) ? WAITING : personsTurn(starter);
 }
 
 /** B2, with B1 false. B2.1 (the viewer started it) is B2.4 (the viewer wrote a comment); a mention of the viewer in
@@ -83,7 +83,7 @@ function isViewersTurn(discussion: OpenDiscussion, { viewer, author }: Sides): b
     (viewer === author ||
       [...discussion.earlier, discussion.last].some(
         (comment) =>
-          isPerson(comment.author, viewer) ||
+          isUser(comment.author, viewer) ||
           comment.mentions.some((mention) => mention.username === viewer),
       ))
   );
@@ -96,11 +96,11 @@ function othersTurn(discussion: OpenDiscussion, author: string | null): Turn {
   if (mentioned !== undefined) {
     return mentioned.username === author ? AUTHOR : personsTurn(mentioned);
   }
-  if (!isPerson(last.author, author)) {
+  if (!isUser(last.author, author)) {
     return AUTHOR;
   }
   const starter = starterOf(discussion);
-  return starter === null || isPerson(starter, author) ? OPEN : personsTurn(starter);
+  return starter === null || isUser(starter, author) ? OPEN : personsTurn(starter);
 }
 
 /** Request B1–B3 for `viewer` (a username; null: no one — never the viewer's turn, design §4 item 11) on a merge
@@ -112,7 +112,7 @@ export function turnOf(
   author: string | null,
 ): Turn {
   const sides: Sides = { viewer, author };
-  if (isPerson(discussion.last.author, viewer)) {
+  if (isUser(discussion.last.author, viewer)) {
     return waitedOn(discussion, sides);
   }
   return isViewersTurn(discussion, sides) ? VIEWER : othersTurn(discussion, author);

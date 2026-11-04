@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useElementBounding } from "@vueuse/core";
-import { computed, shallowRef, useTemplateRef, watch } from "vue";
+import { computed, onBeforeUnmount, shallowRef, useTemplateRef, watch } from "vue";
 import Check from "~icons/lucide/check";
 import MessageSquare from "~icons/lucide/message-square";
 import RefreshCw from "~icons/lucide/refresh-cw";
@@ -45,14 +45,11 @@ const { discussionDetails, viewer, openPage, reloads, thread } = mergeRequests;
 const area = useTemplateRef<HTMLSpanElement>("area");
 const opener = useTemplateRef<HTMLButtonElement>("opener");
 const box = useTemplateRef<HTMLDivElement>("box");
-const shownId = computed(() =>
-  thread.value?.shown.iid === props.row.iid ? thread.value.shown.discussion : null,
-);
-const { open, placement, on } = useHoverBox({
+const { open, placement, on, close } = useHoverBox({
   area: () => area.value,
   opener: () => opener.value,
   box,
-  pinned: () => shownId.value !== null,
+  pinned: () => shownHere() !== null,
 });
 const boxBounds = useElementBounding(box);
 const load = useRowDiscussions(
@@ -63,6 +60,7 @@ const load = useRowDiscussions(
 const pointed = shallowRef<DiscussionId | null>(null);
 const focused = shallowRef<DiscussionId | null>(null);
 
+const shownId = computed(shownHere);
 const count = computed(() => props.row.openDiscussions);
 const label = computed(() => discussionsText(count.value));
 const author = computed(() => props.row.author?.username ?? null);
@@ -102,16 +100,38 @@ watch(useShiftTaps(), () => {
   mergeRequests.showThread(props.row.iid, id);
 });
 watch(open, (now) => {
-  if (now) {
-    return;
+  if (!now) {
+    boxClosedHere();
   }
+});
+watch(
+  () => thread.value?.shown.iid,
+  (iid) => {
+    if (open.value && iid !== undefined && iid !== props.row.iid) {
+      close();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (open.value) {
+    boxClosedHere();
+  }
+});
+
+function shownHere(): DiscussionId | null {
+  const shown = thread.value?.shown;
+  return shown?.iid === props.row.iid ? shown.discussion : null;
+}
+
+function boxClosedHere(): void {
   pointed.value = null;
   focused.value = null;
-  if (shownId.value !== null) {
+  if (shownHere() !== null) {
     mergeRequests.closeThread();
   }
   mergeRequests.boxClosed(props.row.iid);
-});
+}
 
 function headerOf(shown: DiscussionLoad | undefined): Header {
   if (shown === undefined) {

@@ -7,11 +7,15 @@ class FakeNode extends EventTarget {
   readonly children: FakeNode[] = [];
   left = 0;
   bottom = 0;
+  refreshesList = false;
   contains(node: unknown): boolean {
     return node === this || this.children.some((child) => child.contains(node));
   }
   focus(): void {
     page.focused = this;
+  }
+  closest(selector: string): FakeNode | null {
+    return selector === "[data-refreshes-list]" && this.refreshesList ? this : null;
   }
   getBoundingClientRect(): { readonly left: number; readonly bottom: number } {
     return { left: this.left, bottom: this.bottom };
@@ -52,6 +56,7 @@ let areaShown: boolean;
 beforeEach(() => {
   vi.stubGlobal("Node", FakeNode);
   vi.stubGlobal("HTMLElement", FakeNode);
+  vi.stubGlobal("Element", FakeNode);
   vi.stubGlobal("FocusEvent", FakeFocusEvent);
   vi.stubGlobal("KeyboardEvent", FakeKeyboardEvent);
   page.window = new EventTarget();
@@ -433,6 +438,19 @@ test("a_press_outside_closes_a_pinned_box", async () => {
 
   press(item);
   press(opener);
+  expect(box.open.value).toBe(true);
+  press(outside);
+
+  expect(box.open.value).toBe(false);
+});
+
+test("a_press_on_a_list_refresh_keeps_a_pinned_box", async () => {
+  const refresh = Object.assign(new FakeNode(), { refreshesList: true });
+  const box = hoverBox(boxNode, () => true);
+  box.on.pointerenter();
+  await nextTick();
+
+  press(refresh);
   expect(box.open.value).toBe(true);
   press(outside);
 

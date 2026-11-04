@@ -66,9 +66,11 @@ const writable = computed(
     shown.value.sending.kind !== "sending",
 );
 
-onMounted(() => {
+onMounted(focusPanel);
+
+function focusPanel(): void {
   panel.value?.focus();
-});
+}
 
 function contentOf(load: ThreadLoad): Content {
   switch (load.kind) {
@@ -106,6 +108,11 @@ function keyPressed(event: KeyboardEvent): void {
   event.preventDefault();
   emit("close");
 }
+
+function publish(): void {
+  focusPanel();
+  void submitReview();
+}
 </script>
 
 <template>
@@ -141,7 +148,7 @@ function keyPressed(event: KeyboardEvent): void {
         type="button"
         :disabled="!writable"
         class="flex shrink-0 items-center gap-1.5 rounded border border-control-border px-2 py-0.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
-        @click="submitReview"
+        @click="publish"
       >
         {{ SUBMIT_REVIEW }}<span class="text-fg-muted">{{ submit.count }}</span>
       </button>
@@ -190,6 +197,11 @@ function keyPressed(event: KeyboardEvent): void {
         </button>
       </p>
     </div>
-    <MergeRequestReplyField :thread="shown" :writable="writable" @close="emit('close')" />
+    <MergeRequestReplyField
+      :thread="shown"
+      :writable="writable"
+      @close="emit('close')"
+      @focus-panel="focusPanel"
+    />
   </div>
 </template>

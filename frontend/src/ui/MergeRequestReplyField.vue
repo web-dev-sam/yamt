@@ -31,7 +31,7 @@ type Shown =
 type Button = { readonly disabled: boolean; readonly reason: string | null };
 
 const props = defineProps<{ thread: Thread; writable: boolean }>();
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; focusPanel: [] }>();
 
 const MIN_LINES = 3;
 const MAX_LINES = 12;
@@ -126,8 +126,19 @@ async function backToWrite(): Promise<void> {
   field.value?.focus();
 }
 
+/** A pressed button that turns disabled drops WebKit's focus to the body without a focusout, and Escape would then
+ *  reach the page (HTML "focus fixup rule": https://html.spec.whatwg.org/multipage/interaction.html#focus-fixup-rule). */
+function keepFocus(): void {
+  if (writing.value) {
+    field.value?.focus();
+  } else {
+    emit("focusPanel");
+  }
+}
+
 function send(kind: "comment" | "draft"): void {
   if (!add.value.disabled) {
+    keepFocus();
     void sendReply(kind);
   }
 }
@@ -144,6 +155,7 @@ function keyPressed(event: KeyboardEvent): void {
 }
 
 function toggleResolved(): void {
+  keepFocus();
   void setResolved(resolve.value.to);
 }
 </script>

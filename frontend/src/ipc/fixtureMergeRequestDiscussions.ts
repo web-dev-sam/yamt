@@ -8,7 +8,7 @@ import {
   LOGGED_OUT_DETAIL,
   ORIGIN,
 } from "./fixtureMergeRequestData";
-import type { FixtureComment } from "./fixtureMergeRequestRendering";
+import { personNamed, renderedText, type FixtureComment } from "./fixtureMergeRequestRendering";
 import { discussionId, turnCases, type FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
 import type { Log } from "./log";
 import type { MergeRequestSource } from "./MergeRequestSource";
@@ -48,6 +48,11 @@ const SHORT_TEXTS: Readonly<Record<Position["at"], string>> = {
   1: "Done, see the new commit.",
 };
 
+/** The smoke's due rows (`docs/slices/briefs/mr-review-mode-design.md` §1, "Expected orders"): their first discussion
+ *  asks the reviewer, so it is the reviewer's turn (request-mr-threads B2) and review mode puts them first; !622, due
+ *  too, asks no one. */
+const ASKED: Readonly<Record<number, string>> = { 618: "sam", 633: "sam", 623: "sam", 602: "anna" };
+
 function text({ index, at }: Position): string {
   if (index === LONG_TEXT_INDEX && at === 0) {
     return LONG_TEXT;
@@ -77,6 +82,17 @@ function note(
   };
 }
 
+function asking(comment: FixtureComment, username: string): FixtureComment {
+  const said = `@${username} ${comment.text}`;
+  const person = personNamed(username);
+  return {
+    ...comment,
+    body: renderedText(said),
+    text: said,
+    mentions: person === null ? [] : [{ username: person.username, name: person.name }],
+  };
+}
+
 function discussions(row: Generated.MergeRequestRow, index: number): FixtureDiscussion[] {
   const nextAuthor = fixtureRows(index + 1, 1)[0]?.author ?? null;
   const first: Generated.DiscussionPlace =
@@ -88,8 +104,10 @@ function discussions(row: Generated.MergeRequestRow, index: number): FixtureDisc
     path: "src/board/column.ts",
     line: null,
   };
+  const opening = note(row, { index, at: 0 }, nextAuthor, 1);
+  const asked = ASKED[row.iid];
   const lasts = [
-    note(row, { index, at: 0 }, nextAuthor, 1),
+    asked === undefined ? opening : asking(opening, asked),
     note(row, { index, at: 1 }, row.reviewers[0]?.person ?? null, REPLY_HOURS),
   ];
   return lasts.slice(0, row.openDiscussions).map((last, at) => ({
