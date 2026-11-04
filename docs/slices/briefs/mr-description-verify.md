@@ -36,7 +36,7 @@ session or the private display.
     uploaded `…02` broken ("broken screenshot"), a stand-in for another site, refused ("refused picture").
   - !639 long (120 paragraphs).
   - !637 empty.
-  - !636 fails once ("glab: a deadline line"), then reads.
+  - !636 fails once ("glab timed out", the fixture's `TIMED_OUT`), then reads.
   - !635: markup-looking text.
   - Every other row: "Description of !<iid>.".
 - Log lines: `mergeRequests.fixture_description { iid }`, `mergeRequests.fixture_page { page }`,
@@ -44,7 +44,8 @@ session or the private display.
 
 **Scenario `tests/glab/mr-description/`**, as `mr-description-rust` recorded it:
 
-- User `sam`, project 7 `taskboard/taskboard` on `https://gitlab.example`.
+- User `sam`, project 7 `taskboard/taskboard` on `https://gitlab.com` (uploads are fetched with the login only there,
+  #2280); `mr-description/self-managed/` (on `https://gitlab.example`) is exercised by the Rust tests only.
 - !52 rich, with uploads:
   - A (`shot.png`, REST);
   - B (`old.png`, web path);
@@ -101,7 +102,7 @@ and yamt Light (`--settings '{"theme":"light"}'`) unless noted.
 8. **Fresh (rule 7).** Close and reopen !640: two `fixture_description { iid: 640 }` lines, each with "Loading…" first.
 9. **Empty and failed (rules 1, 7).**
    - !637 "No description.".
-   - !636 shows "Could not read the description: glab: a deadline line" and Retry; Retry shows the rich description.
+   - !636 shows "Could not read the description: glab timed out" and Retry; Retry shows the rich description.
 10. **Planted as text (rule 6).** !635 shows its three lines literally. No `script`, `iframe` or `img` is in the panel,
     and `window.yamtPlanted` is undefined.
 11. **Keyboard.**
@@ -123,10 +124,10 @@ merge-requests page.
    - `images.example`, `evil.example` and `plain.example` images show their captions (no network), or load (network),
      and never appear in the fake glab log.
    - The log has `argv: api projects/7/uploads/<hex A>/shot.png`, and `argv: api projects/7/uploads/<hex B>/old.png`
-     followed by `argv: api https://gitlab.example/-/project/7/uploads/<hex B>/old.png`.
+     followed by `argv: api https://gitlab.com/-/project/7/uploads/<hex B>/old.png`.
    - No `stdin:` line and no `-X`.
 3. **Links (rule 4).**
-   - `https://docs.example/x` and `#12` reach the fake xdg-open (`https://gitlab.example/taskboard/taskboard/-/issues/12`).
+   - `https://docs.example/x` and `#12` reach the fake xdg-open (`https://gitlab.com/taskboard/taskboard/-/issues/12`).
    - `mailto:`, `file:` and `javascript:` reach nothing.
 4. **!50 planted (rule 6).**
    - `window.yamtPlanted` is undefined.

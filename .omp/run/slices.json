@@ -1,9 +1,4 @@
 {
-  "MrLinksDesign": {
-    "owned": [
-      "docs/slices/briefs/mr-links-*.md"
-    ]
-  },
   "MrDescriptionDocs": {
     "owned": [
       "docs/architecture.md",
@@ -15,7 +10,22 @@
       "frontend/src/ipc/AGENTS.md"
     ]
   },
-  "MrDescriptionSmoke": {
-    "owned": []
+  "MrDescriptionPageR1": {
+    "owned": [
+      "frontend/src/ui/MergeRequestDescription.vue",
+      "frontend/src/ui/MergeRequestsView.vue",
+      "frontend/src/ui/AGENTS.md",
+      "frontend/src/ipc/*.ts"
+    ]
+  },
+  "MrLinksRust": {
+    "owned": [
+      "crates/merge-requests/src/**",
+      "crates/merge-requests/tests/**",
+      "crates/merge-requests/AGENTS.md",
+      "scripts/fake-glab/glab",
+      "tests/glab/mr-links/**",
+      "tests/glab/README.md"
+    ]
   }
 }
