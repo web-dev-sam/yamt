@@ -24,12 +24,5 @@
       "frontend/src/ipc/descriptionDomain.ts",
       "frontend/src/ipc/descriptionDomain.test.ts"
     ]
-  },
-  "MrLinksRustR1": {
-    "owned": [
-      "crates/merge-requests/src/**",
-      "crates/merge-requests/tests/**",
-      "crates/merge-requests/AGENTS.md"
-    ]
   }
 }
