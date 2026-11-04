@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use url::Url;
@@ -908,12 +908,33 @@ fn pages_and_uploads_are_collected_once_each_in_order() {
 }
 
 #[test]
+fn a_commit_reference_keeps_gitlabs_title_and_no_other_link_does() {
+    let commit = "/taskboard/taskboard/-/commit/fa3335f304f9482273040a55bc9386ddffc6a59f";
+    let range = "/taskboard/taskboard/-/compare/a1b2c3d4...e5f6a7b8";
+    let html = format!(
+        "<p><a href=\"{commit}\" data-reference-type=\"commit\" title=\"Backfill due dates\">fa3335f3</a>\
+         <a href=\"{range}\" data-reference-type=\"commit_range\" title=\"Commits a1b2c3d4 through e5f6a7b8\">r</a>\
+         <a href=\"{commit}\" data-reference-type=\"commit\" title=\"A later title\">again</a>\
+         <a href=\"/x/-/issues/1\" data-reference-type=\"issue\" title=\"An issue\">#1</a>\
+         <a href=\"/x/-/commit/0badc0de\" data-reference-type=\"commit\" title=\"\">empty</a>\
+         <a href=\"/x/-/commit/1badc0de\" title=\"A plain link's title\">plain</a>\
+         <a href=\"/x/-/commit/2badc0de\" data-reference-type=\"commit\">untitled</a></p>"
+    );
+
+    let read = read(&html);
+
+    let at = |path: &str| WebPage(format!("https://gitlab.com{path}"));
+    let expected = BTreeMap::from([
+        (at(commit), "Backfill due dates".to_owned()),
+        (at(range), "Commits a1b2c3d4 through e5f6a7b8".to_owned()),
+    ]);
+    assert_eq!(read.commit_titles, expected);
+    assert_eq!(read.pages.len(), 6);
+}
+
+#[test]
 fn glabs_or_gitlabs_failure_is_the_reply_and_no_html_is_empty() {
-    let failed = |message: &str| {
-        Err(DescriptionReply::Failed {
-            message: message.to_owned(),
-        })
-    };
+    let failed = |message: &str| Err(message.to_owned());
     let answer = |data: Value| Ok(json!({ "data": data }).to_string().into_bytes());
     let refused =
         json!({ "data": null, "errors": [{ "message": "Field 'descriptionHtml' doesn't exist" }] });

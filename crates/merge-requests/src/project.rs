@@ -5,8 +5,8 @@ use yamt_gitio::{AuthStatus, Glab};
 
 use crate::web_page::HTTPS;
 use crate::{
-    DescriptionReply, DiscussionsAnswer, JobLogReply, ListEnd, OpenReply, PeopleChangeReply,
-    PeopleSearchReply, RerequestReply, ResolveRefusal,
+    DescriptionReply, DiscussionsAnswer, JobLogReply, LinksReply, ListEnd, OpenReply,
+    PeopleChangeReply, PeopleSearchReply, RerequestReply, ResolveRefusal,
 };
 
 /// glab fills `:fullpath` with the project of the folder's remotes (glab docs, `glab api`).
@@ -146,6 +146,15 @@ impl From<NoProject> for DescriptionReply {
         match refused {
             NoProject::NotLoggedIn { detail } => DescriptionReply::NotLoggedIn { detail },
             NoProject::Failed { message } => DescriptionReply::Failed { message },
+        }
+    }
+}
+
+impl From<NoProject> for LinksReply {
+    fn from(refused: NoProject) -> LinksReply {
+        match refused {
+            NoProject::NotLoggedIn { detail } => LinksReply::NotLoggedIn { detail },
+            NoProject::Failed { message } => LinksReply::Failed { message },
         }
     }
 }

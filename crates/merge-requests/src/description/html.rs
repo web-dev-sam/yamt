@@ -1,10 +1,11 @@
+use std::collections::BTreeMap;
 use std::mem;
 
 use dom_query::{Document, NodeRef};
 use url::Url;
 
 use super::address::{image_of, link_of};
-use super::element::{align, code, heading_level, numbers, task_box};
+use super::element::{align, code, commit_title, heading_level, numbers, task_box};
 use super::{
     Description, DescriptionBlock, DescriptionCell, DescriptionImage, DescriptionInline,
     DescriptionItem, DescriptionLink, DescriptionRow, ListNumbering, OfferedUpload,
@@ -28,6 +29,9 @@ const CAPTION_ATTRIBUTES: [&str; 2] = ["alt", "title"];
 pub(crate) struct Described {
     pub description: Description,
     pub pages: Vec<WebPage>,
+    /// GitLab's non-empty `title` on each link it made from a commit or a commit range (`data-reference-type`
+    /// `commit` or `commit_range`), by the link's page; no other link's `title` is kept.
+    pub commit_titles: BTreeMap<WebPage, String>,
     pub uploads: Vec<OfferedUpload>,
     /// Its images from other sites, for the log.
     pub web_images: usize,
@@ -47,6 +51,7 @@ enum Child<'a> {
 struct Walk {
     base: Option<Url>,
     pages: Vec<WebPage>,
+    commit_titles: BTreeMap<WebPage, String>,
     uploads: Vec<OfferedUpload>,
     web_images: usize,
     /// Inside a link, images go to `lifted` and follow the link.
@@ -60,6 +65,7 @@ pub(crate) fn described(html: &str, base: Option<&WebPage>) -> Described {
     let mut walk = Walk {
         base: base.and_then(|page| Url::parse(page.as_str()).ok()),
         pages: Vec::new(),
+        commit_titles: BTreeMap::new(),
         uploads: Vec::new(),
         web_images: 0,
         in_link: false,
@@ -78,6 +84,7 @@ pub(crate) fn described(html: &str, base: Option<&WebPage>) -> Described {
     Described {
         description: Description { blocks },
         pages: walk.pages,
+        commit_titles: walk.commit_titles,
         uploads: walk.uploads,
         web_images: walk.web_images,
     }
@@ -233,15 +240,23 @@ impl Walk {
         let mut found = Vec::new();
         if !is_blank(&inlines) {
             let link = link_of(self.base.as_ref(), &href);
-            if let DescriptionLink::Page { page } = &link
-                && !self.pages.contains(page)
-            {
-                self.pages.push(page.clone());
+            if let DescriptionLink::Page { page } = &link {
+                self.keep_page(page, commit_title(node));
             }
             found.push(DescriptionInline::Link { link, inlines });
         }
         found.append(&mut self.lifted);
         found
+    }
+
+    /// `page` once among the pages; a commit's `title`, the first one per page.
+    fn keep_page(&mut self, page: &WebPage, commit_title: Option<String>) {
+        if !self.pages.contains(page) {
+            self.pages.push(page.clone());
+        }
+        if let Some(title) = commit_title {
+            self.commit_titles.entry(page.clone()).or_insert(title);
+        }
     }
 
     /// The image from `data-src` (GitLab's lazy images), else `src`; inside a link it waits in `lifted`.

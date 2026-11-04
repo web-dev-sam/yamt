@@ -2,7 +2,7 @@
 //! each row's conflicts checked by yamt's own merge of GitLab's two commits, each one's changes prepared for a window
 //! of their own, its page or a failed job's opened in the browser, a failed job's log read, each row's open
 //! discussions read with their last person's note, its assignees and reviewers added and removed, its description
-//! read as GitLab renders it.
+//! read as GitLab renders it, and the epics, issues and commits it links to looked up.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
@@ -12,6 +12,7 @@ mod detect;
 mod discussions;
 mod job_log;
 mod labels;
+mod links;
 mod list;
 mod open;
 mod page;
@@ -46,6 +47,10 @@ pub use discussions::{
 };
 pub use job_log::{JobLog, JobLogReply, MAX_LOG_BYTES, read_job_log};
 pub use labels::{Label, LabelColors};
+pub use links::{
+    DescriptionLinks, LinkedCommit, LinkedEpic, LinkedIssue, LinkedParent, LinksReply, ReadLinks,
+    ShownEpic, ShownIssue, read_links,
+};
 pub use list::{Listed, ListedPage, OfferedPicture, list_merge_requests};
 pub use open::prepare_open;
 pub use people::{Person, PersonPicture, ReviewState, Reviewer};

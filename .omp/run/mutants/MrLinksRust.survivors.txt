@@ -1,0 +1,2 @@
+just mutants HEAD → Found 125 mutants to test; 125 mutants tested in 8m: 1 missed, 103 caught, 21 unviable (no TypeScript changes)
+crates/merge-requests/src/links.rs:324 replace log_read with () — wiring: it only emits the info line; counts(), outcome(), calls and score are each tested; no tracing-subscriber dev-dep (Cargo.toml read-only)

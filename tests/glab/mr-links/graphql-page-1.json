@@ -1,0 +1,85 @@
+{
+  "data": {
+    "queryComplexity": { "score": 172, "limit": 250 },
+    "currentUser": { "username": "sam" },
+    "project": {
+      "mergeRequests": {
+        "pageInfo": { "hasNextPage": false, "endCursor": null },
+        "nodes": [
+          {
+            "iid": "62",
+            "title": "Snooze a reminder",
+            "description": "Closes #12 of &3. Commits fa3335f3 and a1b2c3d4...e5f6a7b8.",
+            "createdAt": "2026-11-04T12:00:00Z",
+            "draft": false,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main"
+          },
+          {
+            "iid": "61",
+            "title": "Link nothing of interest",
+            "description": "See !7, ~frontend and @anna.",
+            "createdAt": "2026-11-04T11:00:00Z",
+            "draft": false,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main"
+          },
+          {
+            "iid": "60",
+            "title": "Time out looking up the links",
+            "description": "Closes #30.",
+            "createdAt": "2026-11-04T10:00:00Z",
+            "draft": false,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main"
+          },
+          {
+            "iid": "59",
+            "title": "Link on GitLab Free",
+            "description": "Closes #20 and #21, part of https://gitlab.example/groups/taskboard/-/epics/8.",
+            "createdAt": "2026-11-04T09:00:00Z",
+            "draft": false,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main"
+          },
+          {
+            "iid": "58",
+            "title": "Link commits only",
+            "description": "After fa3335f3 and secret/vault@0badc0de.",
+            "createdAt": "2026-11-04T08:00:00Z",
+            "draft": false,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main"
+          },
+          {
+            "iid": "57",
+            "title": "No description at all",
+            "description": null,
+            "createdAt": "2026-11-04T07:00:00Z",
+            "draft": false,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,6 +1,8 @@
 use serde_json::json;
 
 use crate::discussions::{DISCUSSIONS_PER_PAGE, NOTES_READ};
+use crate::links::lookup::Part;
+use crate::links::target::Namespace;
 use crate::{MAX_FAILED_JOBS, MergeRequestIid, PAGE_SIZE, PeopleAction, PeopleChange, PeopleGroup};
 
 /// A merge request's state, target branch and the two commits of its diff, asked afresh on each open so a push
@@ -187,6 +189,65 @@ pub(crate) fn people_search_args(full_path: &str, text: &str) -> Vec<String> {
         "-f".to_owned(),
         format!("search={text}"),
     ]
+}
+
+/// What the links lookup asks of each work item: fields every GitLab edition has at 15.6, `Group.workItems` at 16.3
+/// (`docs/slices/briefs/mr-links-design.md` §1.2, RK69); the hierarchy widget's parent, never `Issue.epic`.
+const LINKED_FRAGMENT: &str = "fragment linked on WorkItem { iid title state webUrl workItemType { name } \
+     widgets { ... on WorkItemWidgetHierarchy { parent { iid title webUrl workItemType { name } } } } }";
+
+/// The alias of the call's `k`-th part, from 0.
+pub(crate) fn part_name(k: usize) -> String {
+    format!("part{k}")
+}
+
+/// The titles, states and direct parents of the work items `$iids<k>` of each project or group `$path<k>`: 50 of
+/// GitLab's limit of 250 for 3 iids of a project and 2 of a group, 124 for 100 iids of a project, measured logged in
+/// on gitlab.com on 2026-11-04. One line, so the fake glab logs each call on one line.
+fn links_query(call: &[Part]) -> String {
+    let mut variables = Vec::new();
+    let mut parts = Vec::new();
+    for (k, part) in call.iter().enumerate() {
+        variables.push(format!(
+            "$path{k}: ID!, $iids{k}: [String!], $first{k}: Int!"
+        ));
+        let owner = match part.namespace {
+            Namespace::Project(_) => "project",
+            Namespace::Group(_) => "group",
+        };
+        parts.push(format!(
+            "{}: {owner}(fullPath: $path{k}) {{ workItems(iids: $iids{k}, first: $first{k}) {{ nodes {{ ...linked }} }} }}",
+            part_name(k)
+        ));
+    }
+    format!(
+        "query MergeRequestLinks({}) {{ queryComplexity {{ score limit }} {} }} {LINKED_FRAGMENT}",
+        variables.join(", "),
+        parts.join(" ")
+    )
+}
+
+/// `glab api graphql` for one call of the links lookup: `-f query=<the query> -f path<k>=<full path> -F
+/// iids<k>=<a JSON array of strings> -F first<k>=<their count>` for each part.
+pub(crate) fn links_args(call: &[Part]) -> Vec<String> {
+    let mut args = vec![
+        "api".to_owned(),
+        "graphql".to_owned(),
+        "-f".to_owned(),
+        format!("query={}", links_query(call)),
+    ];
+    for (k, part) in call.iter().enumerate() {
+        let iids: Vec<String> = part.iids.iter().map(u64::to_string).collect();
+        args.extend([
+            "-f".to_owned(),
+            format!("path{k}={}", part.namespace.path()),
+            "-F".to_owned(),
+            format!("iids{k}={}", json!(iids)),
+            "-F".to_owned(),
+            format!("first{k}={}", part.iids.len()),
+        ]);
+    }
+    args
 }
 
 /// The JSON body asking the reviewer with global id `user_id` (`gid://gitlab/User/<n>`) for their review of merge

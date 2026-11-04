@@ -36,7 +36,8 @@ A Rust test that needs post n without making posts 1 to n − 1 first calls `Fak
 | `post-<n>.err`                                | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body")                                                                                      |
 | `post-<n>.exit`                               | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout                                                                                                                                                                                                                   |
 | `post-<n>.sleep`                              | seconds to wait before answering (a post that hangs)                                                                                                                                                                                                                                                                         |
-| `graphql-page-<n>.json`                       | `glab api graphql` without `--input -` and without a field `iids`, `search` or `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`)                                                                                                                               |
+| `graphql-page-<n>.json`                       | `glab api graphql` without `--input -` and without a field `iids`, `search` or `iid` and not the links lookup: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`)                                                                                                      |
+| `graphql-links-<iids0>.json`                  | `glab api graphql` without `--input -`, with a field `query` starting `query MergeRequestLinks` (a merge request's links lookup), whatever its other fields: `<iids0>` is the field `iids0=<JSON array>` without its quotes, brackets and spaces, its commas as `-` (`iids0=["12","13","99"]` → `graphql-links-12-13-99`)    |
 | `graphql-discussions-<iids>.json`             | `glab api graphql` without `--input -`, with a field `iids=<JSON array>` (the discussions query): `<iids>` is the array without its quotes, brackets and spaces, its commas as `-` (`iids=["82","81"]` → `graphql-discussions-82-81`); with a field `discussionsAfter=<cursor>`, `graphql-discussions-<iids>-after-<cursor>` |
 | `graphql-people-<text>.json`                  | `glab api graphql` without `--input -` and without a field `iids`, with a field `search=<text>` (the project's people search): `<text>` as given (`search=er` → `graphql-people-er`)                                                                                                                                         |
 | `graphql-description-<iid>.json`              | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `query` starting `query MergeRequestDescription` (a merge request's description) and a field `iid=<iid>`                                                                                                                         |
@@ -248,6 +249,31 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   `self-managed/` is a scenario of its own: the project on `https://gitlab.example/taskboard/taskboard` and
   `graphql-description-52.json` naming `/-/project/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png` and
   `/taskboard/taskboard/uploads/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png`, which it serves on no route.
+- `mr-links/` — a merge request's linked epics, issues and commits (`crates/merge-requests/tests/links.rs`): logged in;
+  `merge-requests/`'s project (`taskboard/taskboard`, id 7, on `https://gitlab.example`); user `sam`; one page, the
+  last, with the list query's fields: !62–!58 each with a description, !57 `null`; no `diffHeadSha`.
+  `graphql-description-62.json`, in GitLab's shapes (`docs/slices/briefs/mr-links-design.md` §1.1), in order: `#12`
+  (`gfm-issue`, `/taskboard/taskboard/-/work_items/12`), `&3` (`https://gitlab.example/groups/taskboard/-/epics/3`),
+  `#13` (a `work_item` of type `task`), `other/lib#5`, `taskboard/web#6`, a plain link to
+  `…/secret/vault/-/issues/9`, `#12` again as `…/taskboard/taskboard/-/issues/12#note_7`, a plain link to
+  `…/taskboard/taskboard/-/work_items/99`, `…/groups/taskboard/-/work_items/4`, `…/groups/design/-/epics/2`, the
+  commit `fa3335f3` (title "Backfill due dates"), this merge request's commit
+  (`…/merge_requests/62/diffs?commit_id=6ea97d8c…`, "Snooze a reminder"), the range `a1b2c3d4…e5f6a7b8` ("Commits
+  a1b2c3d4 through e5f6a7b8"), a plain link to `…/commit/fa3335f3` (the same commit, short), a plain link to
+  `…/secret/vault/-/commit/0badc0de…`; then what is never listed: `!7`, the label `frontend`, `@anna`,
+  `<code>#12</code>`, a code block holding `…/issues/14`, `https://gitlab.other/x/y/-/issues/1`, a milestone, a
+  compare of branches and `https://docs.example/x`. `graphql-links-12-13-99.json` answers its one lookup
+  (`queryComplexity` 50 of 250): part0 `taskboard/taskboard` 12 `Issue` "Snooze a reminder" (parent the epic 3 on
+  `…/groups/taskboard/-/work_items/3`), 13 `Task` "Write the snooze test" (parent issue 12), no 99; part1 group
+  `taskboard` 3 `Epic` "Board redesign" with a parent epic of its own, 4 `Epic` "Old board" `CLOSED`; part2
+  `other/lib` 5 "Fix date parsing" `CLOSED`; part3 `taskboard/web` 6 "Web card" with a parent on
+  `https://evil.example`; part4 (`secret/vault`) `null`; part5 group `design` 2 `Epic` "Design system".
+  `graphql-description-61.json` links only what is never listed; `graphql-description-60.json` links `#30`, whose
+  lookup `graphql-links-30.err` and `.exit` (1) fail before any answer with "glab: a deadline line";
+  `graphql-description-59.json` (GitLab Free) links `#20`, `#21` (a task) and `…/groups/taskboard/-/epics/8`,
+  answered by `graphql-links-20-21.json`: 20 `Issue` "Free issue" with the hierarchy widget's `parent: null`, 21
+  `Task` "Free task" with parent 20, and the group part `{ "workItems": { "nodes": [] } }`;
+  `graphql-description-58.json` links only the two commits given as plain links.
 
 ## Fake browser opener
 

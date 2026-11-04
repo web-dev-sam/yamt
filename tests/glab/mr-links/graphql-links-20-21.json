@@ -1,0 +1,39 @@
+{
+  "data": {
+    "queryComplexity": { "score": 47, "limit": 250 },
+    "part0": {
+      "workItems": {
+        "nodes": [
+          {
+            "iid": "20",
+            "title": "Free issue",
+            "state": "OPEN",
+            "webUrl": "https://gitlab.example/taskboard/taskboard/-/work_items/20",
+            "workItemType": { "name": "Issue" },
+            "widgets": [{}, { "parent": null }, {}]
+          },
+          {
+            "iid": "21",
+            "title": "Free task",
+            "state": "OPEN",
+            "webUrl": "https://gitlab.example/taskboard/taskboard/-/work_items/21",
+            "workItemType": { "name": "Task" },
+            "widgets": [
+              {},
+              {
+                "parent": {
+                  "iid": "20",
+                  "title": "Free issue",
+                  "webUrl": "https://gitlab.example/taskboard/taskboard/-/work_items/20",
+                  "workItemType": { "name": "Issue" }
+                }
+              },
+              {}
+            ]
+          }
+        ]
+      }
+    },
+    "part1": { "workItems": { "nodes": [] } }
+  }
+}

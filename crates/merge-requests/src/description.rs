@@ -14,7 +14,8 @@ use crate::query::description_args;
 use crate::{GitLabRepository, MergeRequestIid, WebPage};
 
 pub use address::{DescriptionImage, DescriptionLink, OfferedUpload, UploadKey};
-use html::{Described, described};
+pub(crate) use html::Described;
+use html::described;
 
 /// How reading a merge request's description ended.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
@@ -315,39 +316,39 @@ fn read(
     };
     let root = repository.root();
     let project = logged_in_project(glab, root)?;
-    let html = fetch_description(glab, root, &project, iid)?;
+    let html = fetch_description(glab, root, &project, iid)
+        .map_err(|message| DescriptionReply::Failed { message })?;
+    Ok(described_on(&project, iid, &html))
+}
+
+/// The walk of `html`, its relative links read on merge request `iid`'s page on the project's GitLab (none off
+/// https).
+pub(crate) fn described_on(project: &Project, iid: MergeRequestIid, html: &str) -> Described {
     let base = project
         .web_origin
         .as_deref()
         .and_then(|origin| WebPage::merge_request(origin, &project.web_path, iid));
-    Ok(described(&html, base.as_ref()))
+    described(html, base.as_ref())
 }
 
-/// The one request for a description (request-mr-links reuses it): one `Glab::get` of `description_args`.
+/// The one request for a description (`read_links` reuses it): one `Glab::get` of `description_args`.
 pub(crate) fn fetch_description(
     glab: &Glab,
     root: &Path,
     project: &Project,
     iid: MergeRequestIid,
-) -> Result<String, DescriptionReply> {
+) -> Result<String, String> {
     let args = description_args(&project.full_path, iid);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     html_of(glab.get(root, &args))
 }
 
-/// `Err(line)` or a GraphQL error → `Failed` in those words; `project: null` → `Failed(NO_PROJECT)`; `mergeRequest:
-/// null` → `Failed(NO_MERGE_REQUEST)`; `descriptionHtml: null` → "".
-fn html_of(printed: Result<Vec<u8>, String>) -> Result<String, DescriptionReply> {
-    let failed = |message: &str| DescriptionReply::Failed {
-        message: message.to_owned(),
-    };
-    let data: DescriptionData = printed
-        .and_then(|json| graphql_data(&json))
-        .map_err(|message| failed(&message))?;
-    let project = data.project.ok_or_else(|| failed(NO_PROJECT))?;
-    let merge_request = project
-        .merge_request
-        .ok_or_else(|| failed(NO_MERGE_REQUEST))?;
+/// `Err(line)` or a GraphQL error → those words; `project: null` → `NO_PROJECT`; `mergeRequest: null` →
+/// `NO_MERGE_REQUEST`; `descriptionHtml: null` → "".
+fn html_of(printed: Result<Vec<u8>, String>) -> Result<String, String> {
+    let data: DescriptionData = printed.and_then(|json| graphql_data(&json))?;
+    let project = data.project.ok_or(NO_PROJECT)?;
+    let merge_request = project.merge_request.ok_or(NO_MERGE_REQUEST)?;
     Ok(merge_request.description_html.unwrap_or_default())
 }
 

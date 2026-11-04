@@ -4,6 +4,8 @@ use super::{CellAlign, DescriptionBlock, HeadingLevel, ListNumbering, TaskBox};
 
 const TASK_BOX_CLASS: &str = "task-list-item-checkbox";
 const LANGUAGE_ATTRIBUTES: [&str; 2] = ["data-canonical-lang", "lang"];
+/// GitLab's `data-reference-type` of a commit's or a commit range's link (`commit_reference_filter.rb`).
+const COMMIT_REFERENCE_TYPES: [&str; 2] = ["commit", "commit_range"];
 
 /// A `<pre>`'s code block: its language from GitLab's `data-canonical-lang`, else `lang`; its text, one final "\n"
 /// removed.
@@ -74,4 +76,12 @@ pub(super) fn align(cell: &NodeRef) -> CellAlign {
         Some("text-align: right") => CellAlign::End,
         _ => CellAlign::Start,
     }
+}
+
+/// GitLab's non-empty `title` on a link it made from a commit or a commit range; None on any other link.
+pub(super) fn commit_title(link: &NodeRef) -> Option<String> {
+    let kind = link.attr("data-reference-type")?;
+    let title = link.attr("title")?;
+    let is_titled = COMMIT_REFERENCE_TYPES.contains(&&*kind) && !title.is_empty();
+    is_titled.then(|| title.to_string())
 }

@@ -1,0 +1,138 @@
+{
+  "data": {
+    "queryComplexity": { "score": 50, "limit": 250 },
+    "part0": {
+      "workItems": {
+        "nodes": [
+          {
+            "iid": "13",
+            "title": "Write the snooze test",
+            "state": "OPEN",
+            "webUrl": "https://gitlab.example/taskboard/taskboard/-/work_items/13",
+            "workItemType": { "name": "Task" },
+            "widgets": [
+              {},
+              {},
+              {
+                "parent": {
+                  "iid": "12",
+                  "title": "Snooze a reminder",
+                  "webUrl": "https://gitlab.example/taskboard/taskboard/-/work_items/12",
+                  "workItemType": { "name": "Issue" }
+                }
+              },
+              {}
+            ]
+          },
+          {
+            "iid": "12",
+            "title": "Snooze a reminder",
+            "state": "OPEN",
+            "webUrl": "https://gitlab.example/taskboard/taskboard/-/work_items/12",
+            "workItemType": { "name": "Issue" },
+            "widgets": [
+              {},
+              {},
+              {
+                "parent": {
+                  "iid": "3",
+                  "title": "Board redesign",
+                  "webUrl": "https://gitlab.example/groups/taskboard/-/work_items/3",
+                  "workItemType": { "name": "Epic" }
+                }
+              },
+              {}
+            ]
+          }
+        ]
+      }
+    },
+    "part1": {
+      "workItems": {
+        "nodes": [
+          {
+            "iid": "3",
+            "title": "Board redesign",
+            "state": "OPEN",
+            "webUrl": "https://gitlab.example/groups/taskboard/-/work_items/3",
+            "workItemType": { "name": "Epic" },
+            "widgets": [
+              {},
+              {
+                "parent": {
+                  "iid": "1",
+                  "title": "Taskboard roadmap",
+                  "webUrl": "https://gitlab.example/groups/taskboard/-/work_items/1",
+                  "workItemType": { "name": "Epic" }
+                }
+              },
+              {}
+            ]
+          },
+          {
+            "iid": "4",
+            "title": "Old board",
+            "state": "CLOSED",
+            "webUrl": "https://gitlab.example/groups/taskboard/-/work_items/4",
+            "workItemType": { "name": "Epic" },
+            "widgets": [{}, { "parent": null }, {}]
+          }
+        ]
+      }
+    },
+    "part2": {
+      "workItems": {
+        "nodes": [
+          {
+            "iid": "5",
+            "title": "Fix date parsing",
+            "state": "CLOSED",
+            "webUrl": "https://gitlab.example/other/lib/-/work_items/5",
+            "workItemType": { "name": "Issue" },
+            "widgets": [{}, { "parent": null }, {}]
+          }
+        ]
+      }
+    },
+    "part3": {
+      "workItems": {
+        "nodes": [
+          {
+            "iid": "6",
+            "title": "Web card",
+            "state": "OPEN",
+            "webUrl": "https://gitlab.example/taskboard/web/-/work_items/6",
+            "workItemType": { "name": "Issue" },
+            "widgets": [
+              {},
+              {
+                "parent": {
+                  "iid": "1",
+                  "title": "Elsewhere",
+                  "webUrl": "https://evil.example/groups/x/-/work_items/1",
+                  "workItemType": { "name": "Epic" }
+                }
+              },
+              {}
+            ]
+          }
+        ]
+      }
+    },
+    "part4": null,
+    "part5": {
+      "workItems": {
+        "nodes": [
+          {
+            "iid": "2",
+            "title": "Design system",
+            "state": "OPEN",
+            "webUrl": "https://gitlab.example/groups/design/-/work_items/2",
+            "workItemType": { "name": "Epic" },
+            "widgets": [{}, { "parent": null }, {}]
+          }
+        ]
+      }
+    }
+  }
+}

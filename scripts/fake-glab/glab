@@ -126,12 +126,20 @@ post() {
 	reply "$scenario/post-$number" '201 Created'
 }
 
-# Merge requests' discussions with a field iids=<JSON array>: graphql-discussions-<the iids joined by "-">, with
+# A merge request's links lookup with a field query starting "query MergeRequestLinks": graphql-links-<iids0>, the
+# field iids0=<JSON array> without its brackets, quotes and spaces, its commas as "-". Else merge requests'
+# discussions with a field iids=<JSON array>: graphql-discussions-<the iids joined by "-">, with
 # -after-<cursor> for a field discussionsAfter. Else the project's people with a field search=<text>:
 # graphql-people-<text>. Else a merge request's description with a field query starting
 # "query MergeRequestDescription" and a field iid=<n>: graphql-description-<n>. Else a merge request's details with a
 # field iid=<n>; else a page of the list: the first without a field after, the n-th for after=page-<n>.
 graphql() {
+	case $(field query) in
+	'query MergeRequestLinks'*)
+		name=$(field iids0 | sed 's/[][" ]//g; s/,/-/g')
+		reply "$scenario/graphql-links-$name" '200 OK'
+		;;
+	esac
 	iids=$(field iids)
 	if [ -n "$iids" ]; then
 		name=$(printf '%s' "$iids" | sed 's/[][" ]//g; s/,/-/g')
