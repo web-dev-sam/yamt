@@ -1,15 +1,9 @@
 {
-  "MrLinksRust": {
+  "MrLinksApp": {
     "owned": [
-      "crates/merge-requests/src/**",
-      "crates/merge-requests/tests/**",
-      "crates/merge-requests/AGENTS.md",
-      "scripts/fake-glab/glab",
-      "tests/glab/mr-links/**",
-      "tests/glab/README.md"
+      "src-tauri/src/merge_requests.rs",
+      "src-tauri/src/merge_requests/**",
+      "src-tauri/src/commands.rs"
     ]
-  },
-  "MrDescriptionFinal": {
-    "owned": []
   }
 }
