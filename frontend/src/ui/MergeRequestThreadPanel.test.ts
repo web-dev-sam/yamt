@@ -97,6 +97,7 @@ async function panel(number = THREADS): Promise<string> {
     turn: "Your turn",
     anchor: { left: 800, top: 40 },
     now: NOW,
+    asking: false,
   };
   const html = await renderToString(createSSRApp({ render: () => h(MergeRequestThread, props) }));
   return html.replaceAll(/<!--[[\]]?-->/gu, "");

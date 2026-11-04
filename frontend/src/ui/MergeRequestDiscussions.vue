@@ -38,7 +38,7 @@ import { useShiftTaps } from "./useShiftHeld";
 type Header = { readonly text: string; readonly failed: boolean };
 type Words = { readonly place: string; readonly turn: string };
 
-const props = defineProps<{ row: MergeRequestRow; now: number }>();
+const props = defineProps<{ row: MergeRequestRow; now: number; asking: boolean }>();
 
 const mergeRequests = useMergeRequests();
 const { discussionDetails, viewer, openPage, reloads, thread } = mergeRequests;
@@ -325,6 +325,7 @@ function threadClosed(): void {
       :turn="panelWords.turn"
       :anchor
       :now
+      :asking
       @close="threadClosed"
     />
   </span>

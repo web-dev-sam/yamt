@@ -43,10 +43,11 @@ const props = defineProps<{
   anchor: { readonly left: number; readonly top: number };
   /** The page's clock, as the box gets it: "3 hours ago". */
   now: number;
+  asking: boolean;
 }>();
 const emit = defineEmits<{ close: [] }>();
 
-const { thread, retryThread, submitReview, openPage } = useMergeRequests();
+const { thread, description, retryThread, submitReview, openPage } = useMergeRequests();
 const panel = useTemplateRef<HTMLDivElement>("panel");
 const placement = useBesidePlacement(panel, () => props.anchor);
 useEventListener(window, "keydown", keyPressed);
@@ -104,7 +105,13 @@ async function openThread(): Promise<void> {
 }
 
 function keyPressed(event: KeyboardEvent): void {
-  if (event.key !== "Escape" || event.defaultPrevented || shown.value === null) {
+  if (
+    event.key !== "Escape" ||
+    event.defaultPrevented ||
+    shown.value === null ||
+    props.asking ||
+    description.value !== null
+  ) {
     return;
   }
   event.preventDefault();

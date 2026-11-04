@@ -1,0 +1,111 @@
+diff --git a/frontend/src/ui/MergeRequestDiscussions.vue b/frontend/src/ui/MergeRequestDiscussions.vue
+index 30bba01..63317f7 100644
+--- a/frontend/src/ui/MergeRequestDiscussions.vue
++++ b/frontend/src/ui/MergeRequestDiscussions.vue
+@@ -38,7 +38,7 @@ import { useShiftTaps } from "./useShiftHeld";
+ type Header = { readonly text: string; readonly failed: boolean };
+ type Words = { readonly place: string; readonly turn: string };
+ 
+-const props = defineProps<{ row: MergeRequestRow; now: number }>();
++const props = defineProps<{ row: MergeRequestRow; now: number; asking: boolean }>();
+ 
+ const mergeRequests = useMergeRequests();
+ const { discussionDetails, viewer, openPage, reloads, thread } = mergeRequests;
+@@ -325,6 +325,7 @@ function threadClosed(): void {
+       :turn="panelWords.turn"
+       :anchor
+       :now
++      :asking
+       @close="threadClosed"
+     />
+   </span>
+diff --git a/frontend/src/ui/MergeRequestDiscussionsBox.test.ts b/frontend/src/ui/MergeRequestDiscussionsBox.test.ts
+index 8e17658..795f543 100644
+--- a/frontend/src/ui/MergeRequestDiscussionsBox.test.ts
++++ b/frontend/src/ui/MergeRequestDiscussionsBox.test.ts
+@@ -119,7 +119,7 @@ async function discussionsRead(): Promise<void> {
+ }
+ 
+ async function box(): Promise<string> {
+-  const props = { row: rowOf(THREADS), now: NOW };
++  const props = { row: rowOf(THREADS), now: NOW, asking: false };
+   const html = await renderToString(
+     createSSRApp({ render: () => h(MergeRequestDiscussions, props) }),
+   );
+diff --git a/frontend/src/ui/MergeRequestRow.vue b/frontend/src/ui/MergeRequestRow.vue
+index 305a721..407854f 100644
+--- a/frontend/src/ui/MergeRequestRow.vue
++++ b/frontend/src/ui/MergeRequestRow.vue
+@@ -49,6 +49,7 @@ const props = defineProps<{
+   acting: RowActing | null;
+   due: CalendarDay | null;
+   asks: ReadonlyMap<string, RerequestAsk>;
++  asking: boolean;
+ }>();
+ const emit = defineEmits<{
+   open: [iid: MergeRequestIid];
+@@ -170,7 +171,7 @@ function act(): void {
+         <MergeRequestDueDate :due="due" :now="now" @set="emit('setDue', row.iid, $event)" />
+       </span>
+       <span class="flex w-12 shrink-0">
+-        <MergeRequestDiscussions :row :now />
++        <MergeRequestDiscussions :row :now :asking />
+       </span>
+       <span
+         v-tooltip="approvals.names"
+diff --git a/frontend/src/ui/MergeRequestThread.vue b/frontend/src/ui/MergeRequestThread.vue
+index e758d80..87ef56f 100644
+--- a/frontend/src/ui/MergeRequestThread.vue
++++ b/frontend/src/ui/MergeRequestThread.vue
+@@ -43,10 +43,11 @@ const props = defineProps<{
+   anchor: { readonly left: number; readonly top: number };
+   /** The page's clock, as the box gets it: "3 hours ago". */
+   now: number;
++  asking: boolean;
+ }>();
+ const emit = defineEmits<{ close: [] }>();
+ 
+-const { thread, retryThread, submitReview, openPage } = useMergeRequests();
++const { thread, description, retryThread, submitReview, openPage } = useMergeRequests();
+ const panel = useTemplateRef<HTMLDivElement>("panel");
+ const placement = useBesidePlacement(panel, () => props.anchor);
+ useEventListener(window, "keydown", keyPressed);
+@@ -104,7 +105,13 @@ async function openThread(): Promise<void> {
+ }
+ 
+ function keyPressed(event: KeyboardEvent): void {
+-  if (event.key !== "Escape" || event.defaultPrevented || shown.value === null) {
++  if (
++    event.key !== "Escape" ||
++    event.defaultPrevented ||
++    shown.value === null ||
++    props.asking ||
++    description.value !== null
++  ) {
+     return;
+   }
+   event.preventDefault();
+diff --git a/frontend/src/ui/MergeRequestThreadPanel.test.ts b/frontend/src/ui/MergeRequestThreadPanel.test.ts
+index 65cb65f..580552e 100644
+--- a/frontend/src/ui/MergeRequestThreadPanel.test.ts
++++ b/frontend/src/ui/MergeRequestThreadPanel.test.ts
+@@ -97,6 +97,7 @@ async function panel(number = THREADS): Promise<string> {
+     turn: "Your turn",
+     anchor: { left: 800, top: 40 },
+     now: NOW,
++    asking: false,
+   };
+   const html = await renderToString(createSSRApp({ render: () => h(MergeRequestThread, props) }));
+   return html.replaceAll(/<!--[[\]]?-->/gu, "");
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index 43c53d9..69a7fbf 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -272,6 +272,7 @@ async function pick(value: ReviewFor): Promise<void> {
+           :acting="actions.get(row.iid) ?? null"
+           :due="dueDates.get(row.iid) ?? null"
+           :asks="rerequests.get(row.iid) ?? NO_ASKS"
++          :asking="asking"
+           @open="requests.openChanges"
+           @open-page="requests.openPage"
+           @resolve="requests.resolve"

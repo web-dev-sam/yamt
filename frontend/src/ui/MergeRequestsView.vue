@@ -272,6 +272,7 @@ async function pick(value: ReviewFor): Promise<void> {
           :acting="actions.get(row.iid) ?? null"
           :due="dueDates.get(row.iid) ?? null"
           :asks="rerequests.get(row.iid) ?? NO_ASKS"
+          :asking="asking"
           @open="requests.openChanges"
           @open-page="requests.openPage"
           @resolve="requests.resolve"

@@ -49,6 +49,7 @@ const props = defineProps<{
   acting: RowActing | null;
   due: CalendarDay | null;
   asks: ReadonlyMap<string, RerequestAsk>;
+  asking: boolean;
 }>();
 const emit = defineEmits<{
   open: [iid: MergeRequestIid];
@@ -170,7 +171,7 @@ function act(): void {
         <MergeRequestDueDate :due="due" :now="now" @set="emit('setDue', row.iid, $event)" />
       </span>
       <span class="flex w-12 shrink-0">
-        <MergeRequestDiscussions :row :now />
+        <MergeRequestDiscussions :row :now :asking />
       </span>
       <span
         v-tooltip="approvals.names"

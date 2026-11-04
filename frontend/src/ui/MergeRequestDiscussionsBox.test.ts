@@ -119,7 +119,7 @@ async function discussionsRead(): Promise<void> {
 }
 
 async function box(): Promise<string> {
-  const props = { row: rowOf(THREADS), now: NOW };
+  const props = { row: rowOf(THREADS), now: NOW, asking: false };
   const html = await renderToString(
     createSSRApp({ render: () => h(MergeRequestDiscussions, props) }),
   );
