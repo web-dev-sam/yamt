@@ -203,6 +203,10 @@ export function isWebPage(text: string): text is WebPage {
   return text.startsWith("https://");
 }
 
+export function isLinkedPage(text: string): text is WebPage {
+  return text.startsWith("https://") || text.startsWith("http://");
+}
+
 export function nextColumnVersion(version: ColumnVersion): ColumnVersion {
   return branded(version + 1, isColumnVersion, "version");
 }
@@ -281,15 +285,6 @@ export function toListing(dto: Generated.Listing): Listing {
   }
   const { files, disk_changes: diskChanges, operation, sides, merge_request: mergeRequest } = dto;
   return { kind: "Files", files, diskChanges, operation, sides, mergeRequest };
-}
-
-export function toSettingsRead(dto: Generated.SettingsRead): SettingsRead {
-  const { languageServers } = dto.stored;
-  const stored = {
-    ...dto.stored,
-    languageServers: { ...languageServers, off: languageServers.off ?? {} },
-  };
-  return { path: dto.path, defaultPath: dto.default_path, stored };
 }
 
 export function toStartReply(dto: Generated.StartReply): StartReply {

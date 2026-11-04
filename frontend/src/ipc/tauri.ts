@@ -11,7 +11,6 @@ import type { ChunkSource, SettingsSource } from "./ChunkSource";
 import {
   toDomain,
   toListing,
-  toSettingsRead,
   toSides,
   toStartReply,
   type ClipboardSelection,
@@ -22,6 +21,7 @@ import {
 } from "./domain";
 import type { LogEntry } from "./log";
 import type { ServerHost } from "./ServerHost";
+import { toSettingsRead } from "./settingsRead";
 
 // `typedError` (bindings.ts) re-throws only `Error`s and returns any other rejection as the command's
 // error. Tauri rejects invalid arguments, unknown commands and ACL denials with a plain JSON value, a

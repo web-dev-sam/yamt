@@ -1,0 +1,2 @@
+just mutants HEAD: stryker on descriptionDomain/domain/settingsRead/tauri.ts, 244 mutants: 240 killed, 3 survived, 1 no coverage; descriptionDomain.ts and settingsRead.ts 100%
+

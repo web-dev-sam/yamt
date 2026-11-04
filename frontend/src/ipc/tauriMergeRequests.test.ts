@@ -426,7 +426,7 @@ test("readDescription_throws_on_a_linked_page_that_is_not_http", async () => {
 
 test("uploadedImage_is_the_picture_scheme_address_of_the_key", () => {
   expect(createTauriMergeRequests().uploadedImage(UPLOAD)).toBe(
-    `${PICTURE_SCHEME}://localhost/${UPLOAD}`,
+    "yamt-picture://localhost/upload~00000000000000000000000000000001",
   );
 });
 

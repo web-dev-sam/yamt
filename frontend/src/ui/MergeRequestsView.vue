@@ -102,12 +102,16 @@ function escapePressed(event: KeyboardEvent): void {
   if (event.key !== "Escape" || event.defaultPrevented || props.asking) {
     return;
   }
-  event.preventDefault();
-  if (openFor.value === null) {
-    void goBack();
-  } else {
+  if (openFor.value !== null) {
+    event.preventDefault();
     void dismiss();
+    return;
   }
+  if (description.value !== null) {
+    return;
+  }
+  event.preventDefault();
+  void goBack();
 }
 
 function windowFocused(): void {

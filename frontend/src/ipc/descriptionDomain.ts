@@ -1,5 +1,5 @@
 import type * as Generated from "./bindings";
-import type { WebPage } from "./domain";
+import { isLinkedPage, type WebPage } from "./domain";
 
 type Inlines = readonly DescriptionInline[];
 type Blocks = readonly DescriptionBlock[];
@@ -53,10 +53,6 @@ export type Description = { readonly blocks: Blocks };
 export type DescriptionReply =
   | { readonly kind: "read"; readonly description: Description }
   | Readonly<Exclude<Generated.DescriptionReply, { kind: "read" }>>;
-
-function isLinkedPage(text: string): text is WebPage {
-  return text.startsWith("https://") || text.startsWith("http://");
-}
 
 function toLink(raw: Generated.DescriptionLink): DescriptionLink {
   if (raw.kind === "refused") {

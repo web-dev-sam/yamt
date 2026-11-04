@@ -33,7 +33,7 @@ const titleId = useId();
 onClickOutside(panel, closeDescription, {
   ignore: ["[data-description-opener]", "[data-refreshes-list]"],
 });
-useEventListener(window, "keydown", keyPressed, { capture: true });
+useEventListener(window, "keydown", keyPressed);
 
 const reference = computed(() => mergeRequestReference(props.shown.row.iid));
 const content = computed(() => contentOf(props.shown.load));
