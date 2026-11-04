@@ -5,7 +5,6 @@ use yamt_gitio::{FETCH_TIMEOUT, Glab, Oid, Repo};
 use yamt_range::{PairLock, RangeSpec, Resolved};
 
 use crate::page::{NO_PROJECT, graphql_data};
-use crate::project::logged_in_project;
 use crate::query::details_args;
 use crate::remote::remote_for;
 use crate::{GitLabRepository, MergeRequestIid, OpenReply, RangeToOpen};
@@ -59,12 +58,11 @@ pub fn prepare_open(
     let Some(glab) = glab else {
         return Err(OpenReply::GlabMissing);
     };
-    let root = repository.root();
-    let full_path = logged_in_project(glab, root)?.full_path;
-    let diff = open_diff(glab, root, &full_path, iid)?;
+    let full_path = repository.logged_in_project(glab)?.full_path;
+    let diff = open_diff(repository, glab, &full_path, iid)?;
     fetch_unless_local(repository, &full_path, iid, &diff)?;
     let spec = format!("{}..{}", diff.base.as_str(), diff.head.as_str());
-    let resolved = resolved(root, &spec)?;
+    let resolved = resolved(repository.root(), &spec)?;
     require_not_shown(range_dir, &resolved)?;
     Ok(RangeToOpen {
         root: resolved.root().to_owned(),
@@ -72,17 +70,20 @@ pub fn prepare_open(
     })
 }
 
+/// The merge request's diff refs as GitLab has them now; the call's failure, GraphQL's errors and `NO_PROJECT`
+/// through `refusal`.
 fn open_diff(
+    repository: &GitLabRepository,
     glab: &Glab,
-    root: &Path,
     full_path: &str,
     iid: MergeRequestIid,
 ) -> Result<OpenDiff, OpenReply> {
+    let refused = |message| OpenReply::from(repository.refusal(glab, message));
     let args = details_args(full_path, iid);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let json = glab.get(root, &args).map_err(failed)?;
-    let data: DetailsData = graphql_data(&json).map_err(failed)?;
-    let project = data.project.ok_or_else(|| failed(NO_PROJECT.to_owned()))?;
+    let json = glab.get(repository.root(), &args).map_err(refused)?;
+    let data: DetailsData = graphql_data(&json).map_err(refused)?;
+    let project = data.project.ok_or_else(|| refused(NO_PROJECT.to_owned()))?;
     let Some(details) = project.merge_request else {
         return Err(OpenReply::NotOpen);
     };

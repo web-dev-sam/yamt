@@ -56,22 +56,22 @@ fn listed_with_pictures(
     (end, sent.try_iter().collect())
 }
 
-/// Whether a load on `scenario`'s fake glab (none for `None`) hands rows to the local check.
-fn has_rows_to_check(repository: &GitLabRepository, scenario: Option<&str>) -> bool {
+/// Whether a load on `scenario`'s fake glab (none for `None`) hands rows to the local check, on a repository of its
+/// own: nothing remembered from another load.
+fn has_rows_to_check(scenario: Option<&str>) -> bool {
+    let (_repo, repository) = gitlab_repo();
     let fake = scenario.map(Fake::new);
     let glab = fake.as_ref().map(|fake| &fake.glab);
-    let listed = list_merge_requests(repository, glab, &|_| {});
+    let listed = list_merge_requests(&repository, glab, &|_| {});
     listed.to_check.is_some()
 }
 
 #[test]
 fn only_a_load_that_reached_the_project_hands_rows_to_the_check() {
-    let (_repo, repository) = gitlab_repo();
-
-    assert!(has_rows_to_check(&repository, Some("merge-requests")));
-    assert!(!has_rows_to_check(&repository, None));
-    assert!(!has_rows_to_check(&repository, Some("logged-out")));
-    assert!(!has_rows_to_check(&repository, Some("lined-up")));
+    assert!(has_rows_to_check(Some("merge-requests")));
+    assert!(!has_rows_to_check(None));
+    assert!(!has_rows_to_check(Some("logged-out")));
+    assert!(!has_rows_to_check(Some("lined-up")));
 }
 
 fn iids(page: &MergeRequestPage) -> Vec<u32> {

@@ -216,7 +216,11 @@ fn removing_sends_one_remove_of_one_username() {
         json!({ "query": SET_REVIEWERS, "variables": variables("chiara") }),
     ];
     assert_eq!(bodies(&fake), expected);
-    assert_eq!(fake.logged("argv: "), [CHANGE_ARGV, CHANGE_ARGV].concat());
+    let second_change = &CHANGE_ARGV[2..];
+    assert_eq!(
+        fake.logged("argv: "),
+        [&CHANGE_ARGV[..], second_change].concat()
+    );
 }
 
 #[test]

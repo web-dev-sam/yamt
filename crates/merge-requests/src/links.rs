@@ -8,7 +8,7 @@ use specta::Type;
 use yamt_gitio::Glab;
 
 use crate::description::{described_on, fetch_description};
-use crate::project::{Project, logged_in_project};
+use crate::project::Project;
 use crate::query::links_args;
 use crate::{GitLabRepository, MergeRequestIid, WebPage};
 
@@ -144,9 +144,10 @@ struct Read {
     score: Option<u32>,
 }
 
-/// glab missing → `GlabMissing`; `logged_in_project`; `fetch_description`; `described`; the lookup calls when an
-/// issue or epic is linked. `pages` empty unless `Read`. One `tracing::info!`: iid, outcome kind, epics, issues,
-/// commits, not shown, calls, the highest `queryComplexity` score; never a title, reference or address.
+/// glab missing → `GlabMissing`; the remembered project; `fetch_description`; `described`; the lookup calls when an
+/// issue or epic is linked; the description's or the lookup's failure through `refusal`. `pages` empty unless `Read`.
+/// One `tracing::info!`: iid, outcome kind, epics, issues, commits, not shown, calls, the highest `queryComplexity`
+/// score; never a title, reference or address.
 #[must_use]
 pub fn read_links(
     repository: &GitLabRepository,
@@ -174,15 +175,16 @@ fn read(
         return Err(LinksReply::GlabMissing);
     };
     let root = repository.root();
-    let project = logged_in_project(glab, root)?;
-    let failed = |message| LinksReply::Failed { message };
-    let html = fetch_description(glab, root, &project, iid).map_err(failed)?;
+    let project = repository.logged_in_project(glab)?;
+    let refused = |message| repository.refusal(glab, message);
+    let html = fetch_description(glab, root, &project, iid).map_err(refused)?;
     let mut fetch = |call: &[Part]| {
         let args = links_args(call);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         glab.get(root, &args)
     };
-    links_of(&project, iid, &html, &mut fetch).map_err(failed)
+    let read = links_of(&project, iid, &html, &mut fetch).map_err(refused)?;
+    Ok(read)
 }
 
 /// The links of merge request `iid`'s description `html`, looked up through `fetch` when an issue or epic is

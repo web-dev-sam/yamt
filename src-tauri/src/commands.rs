@@ -74,6 +74,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         ai::diff_texts,
         clipboard::read_clipboard::<tauri::Wry>,
         merge_requests::find_gitlab_project,
+        merge_requests::ask_gitlab_again::<tauri::Wry>,
         merge_requests::list_merge_requests::<tauri::Wry>,
         merge_requests::open_merge_request::<tauri::Wry>,
         merge_requests::open_page,

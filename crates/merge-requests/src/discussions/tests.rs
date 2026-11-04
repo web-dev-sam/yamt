@@ -16,7 +16,9 @@ fn rows_for(asked: &[u32], batch: &[Value]) -> Vec<RowDiscussions> {
         assert_eq!(after, None);
         Ok(answer(batch))
     };
-    answered(&iids(asked), &project(), &mut fetch).read.rows
+    answered(&iids(asked), &project(), &mut fetch, &as_failed)
+        .read
+        .rows
 }
 
 /// The open discussions of the one row asked.
@@ -42,6 +44,11 @@ fn failed(message: &str) -> DiscussionsAnswer {
     DiscussionsAnswer::Failed {
         message: message.to_owned(),
     }
+}
+
+/// `answered`'s answer for a failing batch, as `read_discussions` gives it while glab is logged in.
+fn as_failed(message: String) -> DiscussionsAnswer {
+    DiscussionsAnswer::Failed { message }
 }
 
 #[test]
@@ -250,7 +257,7 @@ fn graphql_errors_fail_each_row_of_the_batch() {
     let refused = json!({ "data": null, "errors": [{ "message": "Field 'x' doesn't exist" }] });
     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(refused.to_string().into_bytes());
 
-    let call = answered(&iids(&[2, 1]), &project(), &mut fetch);
+    let call = answered(&iids(&[2, 1]), &project(), &mut fetch, &as_failed);
 
     let answer = failed("Field 'x' doesn't exist");
     let expected = [
@@ -271,7 +278,7 @@ fn graphql_errors_fail_each_row_of_the_batch() {
 fn a_failed_batch_call_fails_each_row_with_glab_s_words() {
     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Err("glab: timed out".to_owned());
 
-    let call = answered(&iids(&[2, 1]), &project(), &mut fetch);
+    let call = answered(&iids(&[2, 1]), &project(), &mut fetch, &as_failed);
 
     let answers: Vec<&DiscussionsAnswer> = call.read.rows.iter().map(|row| &row.answer).collect();
     assert_eq!(answers, [&failed("glab: timed out"); 2]);
@@ -307,7 +314,7 @@ fn an_uploaded_avatar_is_offered_once_per_username() {
     ];
     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(answer(&batch));
 
-    let read = answered(&iids(&[1, 2]), &project(), &mut fetch).read;
+    let read = answered(&iids(&[1, 2]), &project(), &mut fetch, &as_failed).read;
 
     let AvatarSource::Uploaded(address) = avatar_source(Some(ORIGIN), Some(ANNA_S_AVATAR)) else {
         panic!("{ANNA_S_AVATAR} is no uploaded avatar");
@@ -336,7 +343,9 @@ fn paged(pages: u32) -> (Vec<RowDiscussions>, Vec<Option<String>>) {
         }
         Ok(page(n))
     };
-    let rows = answered(&iids(&[1]), &project(), &mut fetch).read.rows;
+    let rows = answered(&iids(&[1]), &project(), &mut fetch, &as_failed)
+        .read
+        .rows;
     (rows, asked)
 }
 
@@ -374,7 +383,7 @@ fn a_failing_later_page_fails_its_row_alone() {
         Some(_) => Ok(answer(&[])),
     };
 
-    let rows = answered(&iids(&[1, 2, 3]), &project(), &mut fetch)
+    let rows = answered(&iids(&[1, 2, 3]), &project(), &mut fetch, &as_failed)
         .read
         .rows;
 
@@ -412,7 +421,9 @@ fn no_project_in_the_answer_fails_each_row() {
     let refused = json!({ "data": { "queryComplexity": null, "project": null } });
     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(refused.to_string().into_bytes());
 
-    let rows = answered(&iids(&[1]), &project(), &mut fetch).read.rows;
+    let rows = answered(&iids(&[1]), &project(), &mut fetch, &as_failed)
+        .read
+        .rows;
 
     assert_eq!(rows[0].answer, failed(NO_PROJECT));
 }
@@ -431,7 +442,7 @@ fn each_query_of_a_call_is_counted_and_the_batch_s_complexity_kept() {
         Some(_) => Err("glab: page 2 failed".to_owned()),
     };
 
-    let call = answered(&iids(&[1, 2]), &project(), &mut fetch);
+    let call = answered(&iids(&[1, 2]), &project(), &mut fetch, &as_failed);
 
     assert_eq!(call.queries, 3);
     let measured = Complexity {

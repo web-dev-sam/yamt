@@ -1,0 +1,3 @@
+just mutants HEAD (after the fixes): 68 mutants, 25 caught, 41 unviable, 2 missed (first run: 69, 4 missed; forget_project→() and the failure_words guard were then killed by new tests)
+crates/merge-requests/src/project.rs:102 replace || with && in logged_out_after — equivalent: `is_login` only picks the reason word ('login'/'project') of the forget's info line; the reply and the glab calls do not change
+crates/merge-requests/src/project.rs:102 replace == with != in logged_out_after — equivalent: same log-only reason word

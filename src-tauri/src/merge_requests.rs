@@ -58,12 +58,12 @@ pub(crate) enum ContinueMergeReply {
     WindowFailed { message: String },
 }
 
-/// The window's GitLab project, found once at start, the folder pair locks live in, the window's `--ai` that "Show
-/// Diff" passes on, and every merge request's and failed job's page a list sent, every note's page
-/// `read_discussions` sent, every page `read_description` sent, every line's and parent's page `read_links` sent,
-/// every comment's and link's page `read_discussion_thread` sent and every link's page `preview_markdown` sent in
-/// this run: only those may be opened or have their log read (plan §2 #128–#137); `pages` is never locked together
-/// with another `Mutex`.
+/// The window's GitLab project, found once at start (glab's login and project remembered in it until
+/// `ask_gitlab_again`), the folder pair locks live in, the window's `--ai` that "Show Diff" passes on, and every
+/// merge request's and failed job's page a list sent, every note's page `read_discussions` sent, every page
+/// `read_description` sent, every line's and parent's page `read_links` sent, every comment's and link's page
+/// `read_discussion_thread` sent and every link's page `preview_markdown` sent in this run: only those may be opened
+/// or have their log read (plan §2 #128–#137); `pages` is never locked together with another `Mutex`.
 pub(crate) struct MergeRequestState {
     gitlab: Option<GitLabRepository>,
     range_dir: PathBuf,
@@ -228,6 +228,20 @@ pub(crate) fn find_gitlab_project(state: State<'_, MergeRequestState>) -> GitLab
         .gitlab
         .as_ref()
         .map_or(GitLabProject::None, GitLabRepository::project)
+}
+
+/// Every explicit refresh — the page's Refresh and Retry, the discussions box's reload (plan §2 #187): the next GitLab
+/// action asks glab for the login and the project again; no GitLab project → nothing to forget.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn ask_gitlab_again<R: Runtime>(window: WebviewWindow<R>) -> Result<(), IpcError> {
+    blocking_reply(move || {
+        if let Some(repository) = &window.state::<MergeRequestState>().gitlab {
+            repository.forget_project();
+        }
+        Ok(())
+    })
+    .await
 }
 
 // The state comes from the window: tauri-macros 2.7 checks an async command with a borrowed

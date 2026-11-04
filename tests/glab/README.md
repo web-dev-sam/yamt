@@ -26,6 +26,8 @@ A Rust test that needs post n without making posts 1 to n − 1 first calls `Fak
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `auth-status.out`                             | `glab auth status`: printed on **stderr**, as glab prints all of it                                                                                                                                                                                                                                                                                   |
 | `auth-status.exit`                            | its exit status (missing = 0)                                                                                                                                                                                                                                                                                                                         |
+| `auth-status.after-post-<k>.out`, `.exit`     | once the state file counts n posts, for the largest k ≤ n for which either file exists: they replace `auth-status.out` and `.exit` (a missing one of the pair: no output, exit 0), so glab can log out or in again mid-test                                                                                                                                    |
+| `api-status.after-post-<k>`                   | for the largest k ≤ n with such a file: a status line (`401 Unauthorized`) makes every `glab api` call, any method or endpoint, answer it with the body `{"message":"<status line>"}`, stderr `glab: <status line> (HTTP <code>)` and exit 1 (status line and headers first with `--include`), counting no post; `graphql` answering 401 prints as glab does for GraphQL (below); an empty file answers as usual |
 | `project.json`                                | `glab api` GET `projects/:fullpath`                                                                                                                                                                                                                                                                                                                   |
 | `merge-requests.json`                         | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests`                                                                                                                                                                                                                                                                     |
 | `merge-request-<iid>.json`                    | `glab api` GET `…/merge_requests/<iid>` for that iid                                                                                                                                                                                                                                                                                                  |
@@ -78,6 +80,13 @@ Measured with `HOME` and `XDG_CONFIG_HOME` in a temporary folder (no token), aga
   printed `HTTP/2.0 200 OK`, while curl saw a 302, on 2026-11-04; `internal/api/redirect.go`). A 3xx it does not
   follow (no `Location`) is an error: stdout holds the body, stderr `glab: HTTP <code>` and a newline, exit 1
   (`internal/commands/api/api.go`, `resp.StatusCode > 299`). The fake answers every 3xx so.
+- A GraphQL call GitLab answers 401 (`GITLAB_TOKEN=glpat-yamt-invalid-token glab api graphql -f query='query {
+  currentUser { username } }'`, glab 1.126.0 against gitlab.com on 2026-11-04): stdout `HTTP/2.0 401 Unauthorized`
+  with `--include`, the body `{"errors":[{"message":"Invalid token"}]}`, stderr `glab: Invalid token` — no
+  `(HTTP 401)` — exit 1. The same token on REST (`glab api projects/…`) prints `{"message":"401 Unauthorized"}` and
+  `glab: 401 Unauthorized (HTTP 401)`, exit 1.
+- Without a login (`HOME` and `XDG_CONFIG_HOME` in a temporary folder), `glab api --method POST markdown --input -`
+  for a public project answers GitLab's preview, exit 0 (2026-11-04).
 - `glab auth status` with no token: everything on stderr — the instance (`gitlab.com`), the failed API call,
   "No token found …", the ERROR box — and exit 1. `auth-status.out` in `runner/` is that text (trailing spaces
   dropped).
@@ -313,6 +322,12 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   post 2 `400 Bad Request` with `{"error":"note is missing"}` and its `.err`; post 3 fails before any answer (`.exit`
   1, a deadline line); post 4 `500 Internal Server Error`. The preview fails: `markdown.exit` 1 with
   "glab: 401 Unauthorized (HTTP 401)".
+- `mr-remembered/` — glab's login and project asked once, forgotten when wrong (`crates/merge-requests/tests/remembered.rs`):
+  `mr-threads/`'s project (`taskboard/taskboard` on gitlab.com), logged in, `markdown.json` a one-paragraph preview
+  ("Remembered"). What changes after k posts (set by `Fake::answered_posts(k)`): 1 → every api call `401
+  Unauthorized` and `glab auth status` logged out as `logged-out/` (exit 1); 2 → api as usual, logged in again; 3 →
+  api `401 Unauthorized`, still logged in; 4 → api `404 Project Not Found`; 5 → api `403 Forbidden`; 6 → api as
+  usual, `graphql-description-90.after-post-6.json` answering `project: null`.
 
 ## Fake browser opener
 

@@ -3,7 +3,7 @@ use specta::Type;
 use yamt_gitio::Glab;
 
 use crate::description::{Described, described_on};
-use crate::project::{Project, logged_in_project};
+use crate::project::Project;
 use crate::query::{markdown_args, markdown_body};
 use crate::{Description, GitLabRepository, MergeRequestIid, OfferedUpload, WebPage};
 
@@ -49,10 +49,10 @@ struct Rendered {
     html: String,
 }
 
-/// A blank text → `Read` with no blocks and no glab run. Else glab missing → `GlabMissing`; `logged_in_project`; one
-/// `Glab::post(root, markdown_args, markdown_body)`; `Err` → Failed; the answer's `html` (a string) through
-/// `described_on(project, iid, html)`, else Failed "GitLab's preview is not JSON with html". Never a write: no
-/// `--include`, nothing counted (RK54). One `tracing::info!`: iid, outcome, blocks, pages, uploads.
+/// A blank text → `Read` with no blocks and no glab run. Else glab missing → `GlabMissing`; the remembered project;
+/// one `Glab::post(root, markdown_args, markdown_body)`; `Err` → its words through `refusal`; the answer's `html` (a
+/// string) through `described_on(project, iid, html)`, else Failed "GitLab's preview is not JSON with html". Never a
+/// write: no `--include`, nothing counted (RK54). One `tracing::info!`: iid, outcome, blocks, pages, uploads.
 #[must_use]
 pub fn preview_markdown(
     repository: &GitLabRepository,
@@ -99,16 +99,19 @@ fn rendered(
         return Err(MarkdownPreviewReply::GlabMissing);
     };
     let root = repository.root();
-    let project = logged_in_project(glab, root)?;
+    let project = repository.logged_in_project(glab)?;
     let args = markdown_args();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let body = markdown_body(text, &project.full_path);
-    let failed = |message| MarkdownPreviewReply::Failed { message };
-    let json = glab.post(root, &args, body).map_err(failed)?;
+    let json = glab
+        .post(root, &args, body)
+        .map_err(|message| repository.refusal(glab, message))?;
     let described = preview_of(&json, &project, iid);
     described
         .map(Some)
-        .ok_or_else(|| failed(NOT_A_PREVIEW.to_owned()))
+        .ok_or_else(|| MarkdownPreviewReply::Failed {
+            message: NOT_A_PREVIEW.to_owned(),
+        })
 }
 
 /// The answer's `html` walked on merge request `iid`'s page; `None` when the answer is not JSON with a string `html`.

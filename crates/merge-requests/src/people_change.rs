@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use yamt_gitio::Glab;
@@ -7,7 +5,7 @@ use yamt_gitio::Glab;
 use crate::list::one_per_username;
 use crate::page::{NO_MERGE_REQUEST, Nodes, graphql_data, listed};
 use crate::people::{People, ReviewerNode, UserNode, warn_unknown_review_state};
-use crate::project::{Project, logged_in_project};
+use crate::project::Project;
 use crate::query::{GRAPHQL_BODY_ARGS, people_change_body};
 use crate::{GitLabRepository, MergeRequestIid, OfferedPicture, Person, Reviewer};
 
@@ -123,7 +121,7 @@ pub fn change_people(
     iid: MergeRequestIid,
     change: &PeopleChange,
 ) -> ChangedPeople {
-    let changed = asked(repository.root(), glab, iid, change);
+    let changed = asked(repository, glab, iid, change);
     tracing::info!(
         iid = iid.0,
         group = ?change.group,
@@ -134,8 +132,10 @@ pub fn change_people(
     changed
 }
 
+/// glab missing → `GlabMissing`; the remembered project; the mutation; its failure's words through
+/// `logged_out_after`.
 fn asked(
-    root: &Path,
+    repository: &GitLabRepository,
     glab: Option<&Glab>,
     iid: MergeRequestIid,
     change: &PeopleChange,
@@ -143,12 +143,19 @@ fn asked(
     let Some(glab) = glab else {
         return without_pictures(PeopleChangeReply::GlabMissing);
     };
-    let project = match logged_in_project(glab, root) {
+    let project = match repository.logged_in_project(glab) {
         Ok(project) => project,
         Err(refused) => return without_pictures(refused.into()),
     };
     let body = people_change_body(&project.full_path, iid, change);
-    answered(glab.post(root, &GRAPHQL_BODY_ARGS, body), &project, change)
+    let ran = glab.post(repository.root(), &GRAPHQL_BODY_ARGS, body);
+    let changed = answered(ran, &project, change);
+    if let PeopleChangeReply::Failed { message } = &changed.reply
+        && let Some(detail) = repository.logged_out_after(glab, message)
+    {
+        return without_pictures(PeopleChangeReply::NotLoggedIn { detail });
+    }
+    changed
 }
 
 /// The reply to the mutation as glab ran it: glab's failure, GitLab's top-level error, the mutation's own first

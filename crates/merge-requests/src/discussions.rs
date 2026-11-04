@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use serde::Serialize;
 use specta::Type;
 use yamt_gitio::Glab;
@@ -7,7 +5,7 @@ use yamt_gitio::Glab;
 use crate::list::one_per_username;
 use crate::page::{Complexity, Connection, PageInfo};
 use crate::people::People;
-use crate::project::{Project, logged_in_project};
+use crate::project::Project;
 use crate::query::discussions_args;
 use crate::{GitLabRepository, MergeRequestIid, OfferedPicture, Person, WebPage};
 
@@ -170,7 +168,7 @@ pub fn read_discussions(
             complexity: None,
         }
     } else {
-        through_glab(repository.root(), glab, &asked)
+        through_glab(repository, glab, &asked)
     };
     log_read(&call);
     call.read
@@ -216,24 +214,36 @@ fn unanswered(asked: &[MergeRequestIid], answer: &DiscussionsAnswer) -> Answered
     }
 }
 
-fn through_glab(root: &Path, glab: Option<&Glab>, asked: &[MergeRequestIid]) -> Answered {
+fn through_glab(
+    repository: &GitLabRepository,
+    glab: Option<&Glab>,
+    asked: &[MergeRequestIid],
+) -> Answered {
     let Some(glab) = glab else {
         return unanswered(asked, &DiscussionsAnswer::GlabMissing);
     };
-    let project = match logged_in_project(glab, root) {
+    let project = match repository.logged_in_project(glab) {
         Ok(project) => project,
         Err(refused) => return unanswered(asked, &refused.into()),
     };
+    let root = repository.root();
     let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| {
         let args = discussions_args(&project.full_path, iids, after);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         glab.get(root, &args)
     };
-    answered(asked, &project, &mut fetch)
+    let batch_failed = |message| DiscussionsAnswer::from(repository.refusal(glab, message));
+    answered(asked, &project, &mut fetch, &batch_failed)
 }
 
-/// Each asked row from the batch's answer and its later pages; a failing batch fails each row.
-fn answered(asked: &[MergeRequestIid], project: &Project, fetch: &mut Fetch) -> Answered {
+/// Each asked row from the batch's answer and its later pages; a failing batch answers each row
+/// `batch_failed(its words)`.
+fn answered(
+    asked: &[MergeRequestIid],
+    project: &Project,
+    fetch: &mut Fetch,
+    batch_failed: &dyn Fn(String) -> DiscussionsAnswer,
+) -> Answered {
     let mut queries = 0;
     let mut counted = |iids: &[MergeRequestIid], after: Option<&str>| {
         queries += 1;
@@ -244,7 +254,7 @@ fn answered(asked: &[MergeRequestIid], project: &Project, fetch: &mut Fetch) -> 
         Err(message) => {
             return Answered {
                 queries,
-                ..unanswered(asked, &DiscussionsAnswer::Failed { message })
+                ..unanswered(asked, &batch_failed(message))
             };
         }
     };

@@ -3,6 +3,7 @@ use std::path::Path;
 use yamt_gitio::{RemoteUrl, Repo};
 
 use crate::GitLabProject;
+use crate::project::Remembered;
 
 const GITLAB_LABEL_START: &str = "gitlab";
 const SCHEME_END: &str = "://";
@@ -15,6 +16,7 @@ pub struct GitLabRepository {
     repo: Repo,
     repository: String,
     gitlab_remotes: Vec<Remote>,
+    pub(crate) remembered: Remembered,
 }
 
 /// A remote's name and URL: lossy UTF-8 of git's bytes.
@@ -45,6 +47,7 @@ pub fn gitlab_repository(folder: &Path) -> Option<GitLabRepository> {
         repo,
         repository: common_dir.to_string_lossy().into_owned(),
         gitlab_remotes,
+        remembered: Remembered::default(),
     })
 }
 

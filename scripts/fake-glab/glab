@@ -51,11 +51,27 @@ log "argv: $*"
 log "cwd: $(pwd -P)"
 log "env: NO_COLOR=${NO_COLOR-unset} GIT_TERMINAL_PROMPT=${GIT_TERMINAL_PROMPT-unset}"
 
+# $1 a file name in the scenario, $2 and $3 suffixes: "$scenario/$1.after-post-<k>" for the largest k ≤ the posts
+# counted for which "<that>$2" or "<that>$3" exists; nothing when there is none.
+after_post() {
+	k=$(text_or "${YAMT_FAKE_GLAB_STATE:-}" 0)
+	k=${k:-0}
+	while [ "$k" -gt 0 ]; do
+		if [ -f "$scenario/$1.after-post-$k$2" ] || [ -f "$scenario/$1.after-post-$k$3" ]; then
+			printf '%s' "$scenario/$1.after-post-$k"
+			return
+		fi
+		k=$((k - 1))
+	done
+}
+
 auth_status() {
-	if [ -f "$scenario/auth-status.out" ]; then
-		cat "$scenario/auth-status.out" >&2
+	answers=$(after_post auth-status .out .exit)
+	answers=${answers:-$scenario/auth-status}
+	if [ -f "$answers.out" ]; then
+		cat "$answers.out" >&2
 	fi
-	exit "$(text_or "$scenario/auth-status.exit" 0)"
+	exit "$(text_or "$answers.exit" 0)"
 }
 
 include=no
@@ -64,12 +80,17 @@ input=
 endpoint=
 fields=
 
-# $1 status line ("200 OK"), $2 the body, $3 (optional) a file holding what glab prints on stderr for an HTTP
-# error instead of its own line: printed as glab prints an HTTP answer, then exits as glab does.
-answer() {
+# $1 status line: what `--include` prints before the body.
+headers() {
 	if [ "$include" = yes ]; then
 		printf 'HTTP/2.0 %s\r\nContent-Type: application/json\r\n\r\n' "$1"
 	fi
+}
+
+# $1 status line ("200 OK"), $2 the body, $3 (optional) a file holding what glab prints on stderr for an HTTP
+# error instead of its own line: printed as glab prints an HTTP answer, then exits as glab does.
+answer() {
+	headers "$1"
 	printf '%s' "$2"
 	code=${1%% *}
 	if [ "$code" -lt 300 ]; then
@@ -233,6 +254,23 @@ upload() {
 	serve_file "$scenario/uploads/${endpoint#projects/}"
 }
 
+# The status line in api-status.after-post-<k>, for the largest k ≤ the posts counted with such a file: every call
+# answers it, a post uncounted. GraphQL answering 401 prints GitLab's error as glab 1.126.0 did against gitlab.com
+# (2026-11-04): no "(HTTP 401)". An empty file, or none, answers as usual.
+api_status() {
+	file=$(after_post api-status '' '')
+	[ -n "$file" ] || return 0
+	status=$(cat "$file")
+	[ -n "$status" ] || return 0
+	if [ "$endpoint" = graphql ] && [ "${status%% *}" = 401 ]; then
+		headers "$status"
+		printf '%s' '{"errors":[{"message":"Invalid token"}]}'
+		printf 'glab: Invalid token\n' >&2
+		exit 1
+	fi
+	answer "$status" "{\"message\":\"$status\"}"
+}
+
 api() {
 	while [ $# -gt 0 ]; do
 		case $1 in
@@ -267,6 +305,7 @@ api() {
 	if [ -z "$method" ]; then
 		if [ -n "$input" ] || [ -n "$fields" ]; then method=POST; else method=GET; fi
 	fi
+	api_status
 	case "$method $endpoint" in
 	# "Publish all pending draft notes" (docs.gitlab.com/api/draft_notes).
 	"POST "*/draft_notes/bulk_publish) post ;;

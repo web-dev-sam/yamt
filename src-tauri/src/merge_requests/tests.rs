@@ -140,6 +140,9 @@ mod links;
 #[cfg(unix)]
 mod discussion_thread;
 
+#[cfg(unix)]
+mod remembered;
+
 mod csp;
 
 #[cfg(unix)]

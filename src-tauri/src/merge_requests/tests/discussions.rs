@@ -152,7 +152,8 @@ fn the_log_line_on_paths_glab() {
     let (_, log) = logged(reply);
 
     let lines: Vec<&str> = log.lines().filter(|line| line.contains(" INFO ")).collect();
+    let asked = " INFO yamt_merge_requests::project: asked glab for the login and the project outcome=\"found\"";
     let line = " INFO yamt_merge_requests::discussions: read merge requests' open discussions asked=4 \
                 answered=3 failed=1 queries=2 score=58 limit=250";
-    assert_eq!(lines, [line], "{log}");
+    assert_eq!(lines, [asked, line], "{log}");
 }

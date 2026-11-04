@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use yamt_gitio::Glab;
@@ -7,7 +5,7 @@ use yamt_gitio::Glab;
 use crate::list::one_per_username;
 use crate::page::{NO_PROJECT, graphql_data};
 use crate::people::{People, UserNode};
-use crate::project::{Project, logged_in_project};
+use crate::project::Project;
 use crate::query::people_search_args;
 use crate::{GitLabRepository, OfferedPicture, Person};
 
@@ -61,7 +59,7 @@ pub fn search_people(
     glab: Option<&Glab>,
     text: &str,
 ) -> FoundPeople {
-    let found = searched(repository.root(), glab, text);
+    let found = searched(repository, glab, text);
     let count = match &found.reply {
         PeopleSearchReply::Found { people } => people.len(),
         PeopleSearchReply::GlabMissing
@@ -76,17 +74,24 @@ pub fn search_people(
     found
 }
 
-fn searched(root: &Path, glab: Option<&Glab>, text: &str) -> FoundPeople {
+/// glab missing → `GlabMissing`; the remembered project; the search; its failure's words through `logged_out_after`.
+fn searched(repository: &GitLabRepository, glab: Option<&Glab>, text: &str) -> FoundPeople {
     let Some(glab) = glab else {
         return without_pictures(PeopleSearchReply::GlabMissing);
     };
-    let project = match logged_in_project(glab, root) {
+    let project = match repository.logged_in_project(glab) {
         Ok(project) => project,
         Err(refused) => return without_pictures(refused.into()),
     };
     let args = people_search_args(&project.full_path, text);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    found_people(glab.get(root, &args), &project)
+    let found = found_people(glab.get(repository.root(), &args), &project);
+    if let PeopleSearchReply::Failed { message } = &found.reply
+        && let Some(detail) = repository.logged_out_after(glab, message)
+    {
+        return without_pictures(PeopleSearchReply::NotLoggedIn { detail });
+    }
+    found
 }
 
 /// The reply to the search as glab ran it: glab's failure, GitLab's first error, or the people it found.

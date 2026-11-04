@@ -10,7 +10,7 @@ use specta::Type;
 use yamt_gitio::Glab;
 
 use crate::page::{NO_MERGE_REQUEST, NO_PROJECT, graphql_data};
-use crate::project::{Project, logged_in_project};
+use crate::project::Project;
 use crate::query::description_args;
 use crate::{GitLabRepository, MergeRequestIid, WebPage};
 
@@ -271,9 +271,9 @@ struct DescriptionNode {
     description_html: Option<String>,
 }
 
-/// glab missing → `GlabMissing`; `logged_in_project`; `fetch_description`; then `described`. `pages` and `uploads`
-/// once each, in document order; both empty unless `Read`. One `tracing::info!`: iid, outcome kind, blocks, pages,
-/// uploads, web images; never text or an address.
+/// glab missing → `GlabMissing`; the remembered project; `fetch_description`, its failure through `refusal`; then
+/// `described`. `pages` and `uploads` once each, in document order; both empty unless `Read`. One `tracing::info!`:
+/// iid, outcome kind, blocks, pages, uploads, web images; never text or an address.
 pub fn read_description(
     repository: &GitLabRepository,
     glab: Option<&Glab>,
@@ -318,10 +318,9 @@ fn read(
     let Some(glab) = glab else {
         return Err(DescriptionReply::GlabMissing);
     };
-    let root = repository.root();
-    let project = logged_in_project(glab, root)?;
-    let html = fetch_description(glab, root, &project, iid)
-        .map_err(|message| DescriptionReply::Failed { message })?;
+    let project = repository.logged_in_project(glab)?;
+    let html = fetch_description(glab, repository.root(), &project, iid)
+        .map_err(|message| repository.refusal(glab, message))?;
     Ok(described_on(&project, iid, &html))
 }
 

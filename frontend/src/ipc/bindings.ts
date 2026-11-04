@@ -71,6 +71,11 @@ export const commands = {
 	 */
 	readClipboard: (selection: ClipboardSelection) => __TAURI_INVOKE<string | null>("read_clipboard", { selection }),
 	findGitlabProject: () => __TAURI_INVOKE<GitLabProject>("find_gitlab_project"),
+	/**
+	 *  Every explicit refresh — the page's Refresh and Retry, the discussions box's reload (plan §2 #187): the next GitLab
+	 *  action asks glab for the login and the project again; no GitLab project → nothing to forget.
+	 */
+	askGitlabAgain: () => typedError<null, IpcError>(__TAURI_INVOKE("ask_gitlab_again")),
 	listMergeRequests: (messages: Channel<ListMessage>) => typedError<null, IpcError>(__TAURI_INVOKE("list_merge_requests", { messages })),
 	openMergeRequest: (iid: MergeRequestIid) => typedError<OpenReply, IpcError>(__TAURI_INVOKE("open_merge_request", { iid })),
 	/**

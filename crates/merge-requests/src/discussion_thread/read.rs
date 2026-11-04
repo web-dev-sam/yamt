@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use yamt_gitio::Glab;
 
 use crate::description::described_on;
@@ -9,7 +7,7 @@ use crate::discussions::{
 };
 use crate::list::one_per_username;
 use crate::people::People;
-use crate::project::{Project, logged_in_project};
+use crate::project::Project;
 use crate::query::{discussions_args, draft_notes_args};
 use crate::{
     DiscussionId, GitLabRepository, MergeRequestIid, OfferedPicture, OfferedUpload, WebPage,
@@ -38,12 +36,13 @@ struct Commented {
     uploads: Vec<OfferedUpload>,
 }
 
-/// glab missing → `GlabMissing`; `logged_in_project`; the discussions query for `[iid]`, then its later pages until one
-/// holds the discussion with `id` (the same pages as `read_discussions`, the `Fetch` seam); then one `Glab::get` of
-/// `draft_notes_args` (`--paginate`: one JSON array or one per page). A draft counts for `drafts` when its
-/// `discussion_id` is `id`'s hex; every draft counts for `pending`. The batch failing, the merge request missing, the
-/// 200-note rule or the draft list failing → `Failed`. `pages`/`uploads`/`pictures` empty unless `Read`. One
-/// `tracing::info!`: iid, outcome, comments, drafts, pending, pages, uploads, queries; never a name, text or address.
+/// glab missing → `GlabMissing`; the remembered project; the discussions query for `[iid]`, then its later pages
+/// until one holds the discussion with `id` (the same pages as `read_discussions`, the `Fetch` seam); then one
+/// `Glab::get` of `draft_notes_args` (`--paginate`: one JSON array or one per page). A draft counts for `drafts` when
+/// its `discussion_id` is `id`'s hex; every draft counts for `pending`. The batch failing, the merge request missing,
+/// the 200-note rule or the draft list failing → `Failed`, its words through `logged_out_after`.
+/// `pages`/`uploads`/`pictures` empty unless `Read`. One `tracing::info!`: iid, outcome, comments, drafts, pending,
+/// pages, uploads, queries; never a name, text or address.
 #[must_use]
 pub fn read_discussion_thread(
     repository: &GitLabRepository,
@@ -53,7 +52,7 @@ pub fn read_discussion_thread(
 ) -> ReadThread {
     let mut queries = 0;
     let read = offered(through_glab(
-        repository.root(),
+        repository,
         glab,
         iid,
         discussion,
@@ -88,7 +87,7 @@ pub(super) fn offered(read: Result<Read, DiscussionThreadReply>) -> ReadThread {
     reason = "the reply is returned at once, never stored"
 )]
 fn through_glab(
-    root: &Path,
+    repository: &GitLabRepository,
     glab: Option<&Glab>,
     iid: MergeRequestIid,
     discussion: &DiscussionId,
@@ -97,7 +96,8 @@ fn through_glab(
     let Some(glab) = glab else {
         return Err(DiscussionThreadReply::GlabMissing);
     };
-    let project = logged_in_project(glab, root)?;
+    let project = repository.logged_in_project(glab)?;
+    let root = repository.root();
     let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| {
         *queries += 1;
         let args = discussions_args(&project.full_path, iids, after);
@@ -109,7 +109,13 @@ fn through_glab(
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         glab.get(root, &args)
     };
-    thread_from(iid, discussion, &project, &mut fetch, &mut fetch_drafts)
+    let read = thread_from(iid, discussion, &project, &mut fetch, &mut fetch_drafts);
+    if let Err(DiscussionThreadReply::Failed { message }) = &read
+        && let Some(detail) = repository.logged_out_after(glab, message)
+    {
+        return Err(DiscussionThreadReply::NotLoggedIn { detail });
+    }
+    read
 }
 
 /// The thread of `discussion` from the discussions query for `[iid]` and its later pages, then the viewer's drafts.

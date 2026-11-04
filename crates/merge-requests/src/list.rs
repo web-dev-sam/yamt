@@ -5,7 +5,6 @@ use yamt_gitio::Glab;
 use crate::check::{ConflictCheck, RowToCheck};
 use crate::page::{ParsedPage, parsed};
 use crate::people::warn_unknown_review_state;
-use crate::project::logged_in_project;
 use crate::query::list_args;
 use crate::{
     GitLabRepository, ListEnd, MAX_MERGE_REQUESTS, MergeRequestPage, PAGE_SIZE, PictureAddress,
@@ -54,7 +53,7 @@ pub fn list_merge_requests(
         return unreached(ListEnd::GlabMissing);
     };
     let root = repository.root();
-    let project = match logged_in_project(glab, root) {
+    let project = match repository.logged_in_project(glab) {
         Ok(project) => project,
         Err(refused) => return unreached(refused.into()),
     };
@@ -64,7 +63,12 @@ pub fn list_merge_requests(
         let json = glab.get(root, &args)?;
         parsed(&json, &project)
     };
-    let (end, rows) = pages(&mut fetch, on_page);
+    let (mut end, rows) = pages(&mut fetch, on_page);
+    if let ListEnd::Failed { message } = &end
+        && let Some(detail) = repository.logged_out_after(glab, message)
+    {
+        end = ListEnd::NotLoggedIn { detail };
+    }
     let to_check = ConflictCheck {
         full_path: project.full_path,
         rows,

@@ -1,0 +1,1826 @@
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+index c1a2ede..07f6168 100644
+--- a/crates/merge-requests/AGENTS.md
++++ b/crates/merge-requests/AGENTS.md
+@@ -11,3 +11,6 @@ A merge request's description (plan §2 #171–#174; request `docs/slices/reques
+ A merge request's linked epics, issues and commits (plan §2 #176, #178; request `docs/slices/request-mr-links.md` rules 2–6, design `docs/slices/briefs/mr-links-design.md` option A, §1.1–§1.4, §1.6, §1.7; RK41 amended, RK68, RK69): `links.rs` (the IPC types `LinksReply` `read { links }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, `DescriptionLinks { epics, issues, commits }`, `LinkedEpic { reference, page, shown: ShownEpic { title, closed } | null }`, `LinkedIssue { reference, page, shown: ShownIssue { title, closed, parent: LinkedParent { reference, title, page } | null } | null }`, `LinkedCommit { reference, page, title | null }`; the shell's `ReadLinks { reply, pages }`, `pages` every line's page and each parent's after its issue, once each, empty unless `read`; `read_links`: glab missing → `GlabMissing`, `logged_in_project`, the description's own `fetch_description`, `described_on`, then the lookup only when an issue or epic is linked; one `info` line with iid, outcome, epics, issues, commits, not shown, calls and the highest score, never a title, reference or address). **What counts** (`links/target.rs`, the one reader of an address as a thing): the walk's `pages`, read by `target_of` against the `Server` (the `url::Origin` parsed from `Project.web_origin` and the sub-path, `web_path` without `/<full_path>`; none off https, so nothing is listed and nothing asked): the same `url::Origin`, compared as `description/address.rs` does (a `web_url` with an upper-case host or an explicit `:443` keeps every link), under the sub-path, every segment `is_path_segment`, split at the first `/-/`: `groups/<g…>/-/epics|work_items/<n>` → a group's item, `<p…>/-/issues/<n>`, `issues/incident/<n>`, `work_items/<n>` → a project's item (`p` never `groups`), `<p…>/-/commit/<7–40 lowercase hex>` and `<p…>/-/merge_requests/<n>/diffs?commit_id=<40 hex>` → a commit, `<p…>/-/compare/<sha>...<sha>` (or `..`) → a range, anything else none (query and fragment ignored but `commit_id`); one entry per thing at its first page (`Target::is_same`: a commit whose id starts the other's in the same project is that commit). `reference` writes GitLab's `to_reference` from the project: `#n`, `<sibling>#n`, `<path>#n`; an epic `&n` in the project's namespace, else `<group>&n`; a group's other item `<group>#n`; a commit's first 8 characters after `<path>@` or `<sibling>@`; a range `<from 8>…<to 8>`. **The lookup** (`links/lookup.rs`, `query.rs` `links_args`): `calls` groups the items' iids by namespace in order of first mention, cuts each at `MAX_IIDS_PER_PART` 100 (GitLab's `workItems(iids:)` maximum) and packs the parts in order into calls whose estimate `PART_SCORE` 25 × parts + iids stays ≤ `LOOKUP_BUDGET` 200 (GitLab's limit is 250 logged in); each call is one `Glab::get` of `api graphql -f query=<MergeRequestLinks: queryComplexity, part<k>: project|group(fullPath: $path<k>) { workItems(iids: $iids<k>, first: $first<k>) { nodes { ...linked } } }> -f path<k>=… -F iids<k>=<JSON strings> -F first<k>=<count>`, the fragment asking `iid title state webUrl workItemType { name }` and the hierarchy widget's `parent { iid title webUrl workItemType { name } }` only (fields every edition has at 15.6, `Group.workItems` at 16.3; never `epic`, `epics`, `hasEpic`, `hasParent`, `onlyTypes`, `reference`, `namespace` or `project` on a work item); measured logged in with glab 1.126.0 on gitlab.com 2026-11-04: 50 of 250 for 3 project iids and 2 group iids (6.2 s, the `gitlab-org` group part alone 6.9 s), 124 for 100 project iids (1.6 s). glab's `Err` or a GraphQL `errors` entry fails the reply in those words and no later call runs; `part<k>: null` or an iid absent from `nodes` is not shown, never an error. A node typed `Epic` is an epic (its own parent dropped), any other an issue whose parent is kept only when its `webUrl` reads as an item on the project's server (`WebPage::linked` of it is the page). Grouping: shown epic → Epics, shown other → Issues, not shown → Epics for a group's item, Issues for a project's; commits and ranges → Commits, titled from the walk's `commit_titles` of their first page, never looked up. Tests: `links/tests.rs` (routes, sub-path, an upper-case host or `:443` in the `web_url`, references, one entry per thing, groups, unseen parts, parents, packing, the query's fields, pages, no https), `description/tests.rs` (`commit_titles`), `tests/links.rs` over the fake glab scenario `mr-links` (`tests/glab/README.md`; the route `graphql-links-<iids0>`).
+ 
+ A discussion's thread, the four writes and the preview (plan §2 #180–#182; request `docs/slices/request-mr-threads.md` C3–C5, C7–C10; design `docs/slices/briefs/mr-threads-design.md` option A, §1.3; RK54, RK60, RK61, RK66): `discussion_thread.rs` (the IPC types `DiscussionThreadReply` `read { thread }`/`notFound`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, `DiscussionThread` (`discussion` the box's `OpenDiscussion`, resolved or not, `resolved`, `comments`, `drafts`, `pending`, `commenting`, `mayResolve`), `DiscussionComment` (`author`, `createdAt`, `edited: NoteEdit { at, by } | null`, `body: Description`, `page`), `PendingDraft { text }`, `Commenting` `allowed`/`locked`/`notAllowed`; the shell's `ReadThread { reply, pages, uploads, pictures }`), `discussion_thread/read.rs` (`read_discussion_thread`: glab missing → `GlabMissing`, `logged_in_project`, the discussions query for `[iid]` (`discussions.rs` `merge_request_page`), then its later pages (`later_page`: the same `Fetch` seam, cursor and 10-page rules as `read_discussions`) only until one holds the asked id (no GraphQL field reads one discussion), the merge request missing → `Failed`, the discussion with the asked id missing (or with no person note) → `NotFound`, the 200-note rule → `Failed`; `commenting` `createNote` true → allowed, false with `discussionLocked` → locked, else not allowed; `mayResolve` = `resolvable && resolveNote`; each person note a comment: its `bodyHtml` only through `described_on` on the merge request's page (RK60, RK66), edited as GitLab's `Note#edited?` (`lastEditedBy` a person and `lastEditedAt` after `createdAt`; resolving moves `lastEditedAt` alone); then one `Glab::get` of `draft_notes_args`; `pages` every comment's page then its links' pages, once each, `uploads` once each, `pictures` the authors' and editors' one per username, all empty unless `read`; one `info` line: iid, outcome, comments, drafts, pending, pages, uploads, queries), `discussion_thread/drafts.rs` (`drafts_in`: `glab api --paginate`'s one JSON array or one per page; a draft whose `discussion_id` is the asked id's hex shows its `note`, every draft counts for `pending`), `discussion_thread/write.rs` (the IPC types `ReplyKind` `comment`/`draft` (sent by the window; `Write::Reply` carries it, the one comment/draft split) and `DiscussionWriteReply` `sent`/`refused { reason }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`; `reply_to_discussion` (a blank text → `refused` "There is nothing to send." before any glab run; the text sent as written), `resolve_discussion`, `submit_review`: glab missing → `GlabMissing`, `logged_in_project`, then exactly one `Glab::send` of the write's argv and body (RK54); 2xx → `sent` (the body not read), 4xx → `refused` with `HttpAnswer::reason`, any other status → `failed` with it, no HTTP answer → `failed` in glab's words; one `info` line per write: iid, kind `comment`/`draft`/`resolve`/`unresolve`/`submit`, outcome and status, never the text, a name or the discussion id), `markdown_preview.rs` (the IPC type `MarkdownPreviewReply` `read { preview }`/`glabMissing`/`notLoggedIn { detail }`/`failed { message }`, the shell's `ReadPreview { reply, pages, uploads }`; `preview_markdown`: a blank text → `read` with no blocks and no glab run, else glab missing → `GlabMissing`, `logged_in_project`, one `Glab::post` of `markdown_args` with `markdown_body` (a read: no `--include`, never counted as a post), the answer's string `html` through `described_on`, else `failed` "GitLab's preview is not JSON with html"; one `info` line: iid, outcome, blocks, pages, uploads). `query/rest.rs` builds every REST call, the project's full path with "/" as "%2F" and the discussion's 40 hex digits in the route (`docs.gitlab.com/api/discussions`, `/api/draft_notes`, `/api/markdown`): `draft_notes_args` `api --paginate projects/<p>/merge_requests/<iid>/draft_notes`; `reply_args` `api --include --method POST …/discussions/<d>/notes --input -` with `reply_body` `{"body"}`; `draft_reply_args` `POST …/draft_notes` with `draft_reply_body` `{"note", "in_reply_to_discussion_id"}`; `resolve_args` `PUT …/discussions/<d>` with `resolve_body` `{"resolved"}`; `submit_review_args` `POST …/draft_notes/bulk_publish` with `submit_review_body` `{}` (never `reviewer_state`); `markdown_args` `api --method POST markdown --input -` with `markdown_body` `{"text", "gfm": true, "project"}`; every body by `serde_json`. `project.rs` turns `NoProject` into `DiscussionThreadReply`, `DiscussionWriteReply` and `MarkdownPreviewReply` too. Measured 2026-11-04 logged in on gitlab.com: the playground's !1 answers the thread's fields (`discussionLocked: false`, `createNote`, `resolveNote`, an unedited note's `lastEditedAt == createdAt` with `lastEditedBy: null`) in 0.9 s, score 46; `POST markdown` answers `201` with `{ "html" }` in 0.7 s, its user link absolute (`https://gitlab.com/samubr`). Tests: `discussion_thread/tests.rs` (the thread's pick, a thread on the first page reading no later page and one on a later page found there, `notFound` without a drafts call, failures, commenting and `mayResolve`, drafts and their pages, edits, a comment's HTML only as blocks, planted handlers left out, an image's size, pages and uploads once each in order; every write's argv and body, a blank reply without glab, 4xx refused with GitLab's reason, no answer, 3xx and 5xx failed), `markdown_preview.rs` (a blank preview without glab, the preview walked on the merge request's page), `tests/threads.rs` (`mr-threads/`: d01 whole with its edits and drafts, its image's size, pages, upload and pictures, !91 locked, a read and a preview write nothing, posts 1–5 one call each in order and the thread read after them; `mr-threads-refused/`: 403 and 400 refused with GitLab's reasons, post 3 without an answer, post 4's 500, a failed preview; glab missing or logged out).
++
++The remembered login and project (plan §2 #187, RK75; request `docs/slices/request-mr-fast-preview.md` part B, design `docs/slices/briefs/mr-fast-preview-design.md` §1.4): `project.rs` `Remembered` (a private `Mutex<Option<Project>>`, `GitLabRepository.remembered`; only `project.rs` reads or writes it). Every `logged_in_project` above is `GitLabRepository::logged_in_project(glab)`: the remembered project, else `glab auth status` then `glab api projects/:fullpath`, remembered when found, the lock held while asking so actions started together ask once; a refusal is never remembered; one `info` line per ask (outcome only). What forgets: `forget_project` (the shell's `ask_gitlab_again`, reason `refresh`), and `logged_out_after(glab, words)`, applied once by each of the 13 actions to the failure it replies with after the project was found (a read's `Failed` words — `refusal` turns them into a `NoProject` — the discussions batch's before it fans out to the rows, the job log's glab line before `(HTTP 404)` → `NoLog`, a write's `HttpAnswer::glab_line` of a non-2xx answer or its `NotAnswered` words): `is_lost` — the words end `(HTTP 401)`, are GraphQL's `glab: Invalid token` (measured, `tests/glab/README.md`), hold `404 Project Not Found`, or are `page.rs` `NO_PROJECT`; never a 403 — forgets (reason `login` or `project`) and runs one `glab auth status`: logged out → the action's `NotLoggedIn { detail }`, else its reply as before. The action's call is never repeated (RK54). Tests: `project.rs` `is_lost_reads_glabs_words`; `tests/remembered.rs` on `mr-threads` (one ask for a preview, a preview, a thread read and a reply; two previews at once) and `mr-remembered` (each of the 13 actions after a 401 while logged out; a 401 while logged in; a missing project; a 403).
++`Remembered` is the crate's one `Mutex` and, beside the shell-held `MergedPairs`, its one memory across actions (the "no `Mutex`" of the first paragraph predates it).
+diff --git a/crates/merge-requests/src/description.rs b/crates/merge-requests/src/description.rs
+index 7ebb16b..d3784dd 100644
+--- a/crates/merge-requests/src/description.rs
++++ b/crates/merge-requests/src/description.rs
+@@ -10,7 +10,7 @@ use specta::Type;
+ use yamt_gitio::Glab;
+ 
+ use crate::page::{NO_MERGE_REQUEST, NO_PROJECT, graphql_data};
+-use crate::project::{Project, logged_in_project};
++use crate::project::Project;
+ use crate::query::description_args;
+ use crate::{GitLabRepository, MergeRequestIid, WebPage};
+ 
+@@ -271,9 +271,9 @@ struct DescriptionNode {
+     description_html: Option<String>,
+ }
+ 
+-/// glab missing → `GlabMissing`; `logged_in_project`; `fetch_description`; then `described`. `pages` and `uploads`
+-/// once each, in document order; both empty unless `Read`. One `tracing::info!`: iid, outcome kind, blocks, pages,
+-/// uploads, web images; never text or an address.
++/// glab missing → `GlabMissing`; the remembered project; `fetch_description`, its failure through `refusal`; then
++/// `described`. `pages` and `uploads` once each, in document order; both empty unless `Read`. One `tracing::info!`:
++/// iid, outcome kind, blocks, pages, uploads, web images; never text or an address.
+ pub fn read_description(
+     repository: &GitLabRepository,
+     glab: Option<&Glab>,
+@@ -318,10 +318,9 @@ fn read(
+     let Some(glab) = glab else {
+         return Err(DescriptionReply::GlabMissing);
+     };
+-    let root = repository.root();
+-    let project = logged_in_project(glab, root)?;
+-    let html = fetch_description(glab, root, &project, iid)
+-        .map_err(|message| DescriptionReply::Failed { message })?;
++    let project = repository.logged_in_project(glab)?;
++    let html = fetch_description(glab, repository.root(), &project, iid)
++        .map_err(|message| repository.refusal(glab, message))?;
+     Ok(described_on(&project, iid, &html))
+ }
+ 
+diff --git a/crates/merge-requests/src/detect.rs b/crates/merge-requests/src/detect.rs
+index 79a0e10..8cca014 100644
+--- a/crates/merge-requests/src/detect.rs
++++ b/crates/merge-requests/src/detect.rs
+@@ -3,6 +3,7 @@ use std::path::Path;
+ use yamt_gitio::{RemoteUrl, Repo};
+ 
+ use crate::GitLabProject;
++use crate::project::Remembered;
+ 
+ const GITLAB_LABEL_START: &str = "gitlab";
+ const SCHEME_END: &str = "://";
+@@ -15,6 +16,7 @@ pub struct GitLabRepository {
+     repo: Repo,
+     repository: String,
+     gitlab_remotes: Vec<Remote>,
++    pub(crate) remembered: Remembered,
+ }
+ 
+ /// A remote's name and URL: lossy UTF-8 of git's bytes.
+@@ -45,6 +47,7 @@ pub fn gitlab_repository(folder: &Path) -> Option<GitLabRepository> {
+         repo,
+         repository: common_dir.to_string_lossy().into_owned(),
+         gitlab_remotes,
++        remembered: Remembered::default(),
+     })
+ }
+ 
+diff --git a/crates/merge-requests/src/discussion_thread/read.rs b/crates/merge-requests/src/discussion_thread/read.rs
+index 774d356..d2840a8 100644
+--- a/crates/merge-requests/src/discussion_thread/read.rs
++++ b/crates/merge-requests/src/discussion_thread/read.rs
+@@ -1,5 +1,3 @@
+-use std::path::Path;
+-
+ use yamt_gitio::Glab;
+ 
+ use crate::description::described_on;
+@@ -9,7 +7,7 @@ use crate::discussions::{
+ };
+ use crate::list::one_per_username;
+ use crate::people::People;
+-use crate::project::{Project, logged_in_project};
++use crate::project::Project;
+ use crate::query::{discussions_args, draft_notes_args};
+ use crate::{
+     DiscussionId, GitLabRepository, MergeRequestIid, OfferedPicture, OfferedUpload, WebPage,
+@@ -38,12 +36,13 @@ struct Commented {
+     uploads: Vec<OfferedUpload>,
+ }
+ 
+-/// glab missing → `GlabMissing`; `logged_in_project`; the discussions query for `[iid]`, then its later pages until one
+-/// holds the discussion with `id` (the same pages as `read_discussions`, the `Fetch` seam); then one `Glab::get` of
+-/// `draft_notes_args` (`--paginate`: one JSON array or one per page). A draft counts for `drafts` when its
+-/// `discussion_id` is `id`'s hex; every draft counts for `pending`. The batch failing, the merge request missing, the
+-/// 200-note rule or the draft list failing → `Failed`. `pages`/`uploads`/`pictures` empty unless `Read`. One
+-/// `tracing::info!`: iid, outcome, comments, drafts, pending, pages, uploads, queries; never a name, text or address.
++/// glab missing → `GlabMissing`; the remembered project; the discussions query for `[iid]`, then its later pages
++/// until one holds the discussion with `id` (the same pages as `read_discussions`, the `Fetch` seam); then one
++/// `Glab::get` of `draft_notes_args` (`--paginate`: one JSON array or one per page). A draft counts for `drafts` when
++/// its `discussion_id` is `id`'s hex; every draft counts for `pending`. The batch failing, the merge request missing,
++/// the 200-note rule or the draft list failing → `Failed`, its words through `logged_out_after`.
++/// `pages`/`uploads`/`pictures` empty unless `Read`. One `tracing::info!`: iid, outcome, comments, drafts, pending,
++/// pages, uploads, queries; never a name, text or address.
+ #[must_use]
+ pub fn read_discussion_thread(
+     repository: &GitLabRepository,
+@@ -53,7 +52,7 @@ pub fn read_discussion_thread(
+ ) -> ReadThread {
+     let mut queries = 0;
+     let read = offered(through_glab(
+-        repository.root(),
++        repository,
+         glab,
+         iid,
+         discussion,
+@@ -88,7 +87,7 @@ pub(super) fn offered(read: Result<Read, DiscussionThreadReply>) -> ReadThread {
+     reason = "the reply is returned at once, never stored"
+ )]
+ fn through_glab(
+-    root: &Path,
++    repository: &GitLabRepository,
+     glab: Option<&Glab>,
+     iid: MergeRequestIid,
+     discussion: &DiscussionId,
+@@ -97,7 +96,8 @@ fn through_glab(
+     let Some(glab) = glab else {
+         return Err(DiscussionThreadReply::GlabMissing);
+     };
+-    let project = logged_in_project(glab, root)?;
++    let project = repository.logged_in_project(glab)?;
++    let root = repository.root();
+     let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| {
+         *queries += 1;
+         let args = discussions_args(&project.full_path, iids, after);
+@@ -109,7 +109,13 @@ fn through_glab(
+         let args: Vec<&str> = args.iter().map(String::as_str).collect();
+         glab.get(root, &args)
+     };
+-    thread_from(iid, discussion, &project, &mut fetch, &mut fetch_drafts)
++    let read = thread_from(iid, discussion, &project, &mut fetch, &mut fetch_drafts);
++    if let Err(DiscussionThreadReply::Failed { message }) = &read
++        && let Some(detail) = repository.logged_out_after(glab, message)
++    {
++        return Err(DiscussionThreadReply::NotLoggedIn { detail });
++    }
++    read
+ }
+ 
+ /// The thread of `discussion` from the discussions query for `[iid]` and its later pages, then the viewer's drafts.
+diff --git a/crates/merge-requests/src/discussion_thread/tests.rs b/crates/merge-requests/src/discussion_thread/tests.rs
+index 55c3beb..11ea3f7 100644
+--- a/crates/merge-requests/src/discussion_thread/tests.rs
++++ b/crates/merge-requests/src/discussion_thread/tests.rs
+@@ -3,7 +3,7 @@ use yamt_conflict_repo::{TempDir, git_ok};
+ use yamt_gitio::{Glab, HttpAnswer, HttpCall};
+ 
+ use super::read::{self, offered, thread_from};
+-use super::write::{self, Write, replied, request};
++use super::write::{self, Write, failure_words, replied, request};
+ use super::*;
+ use crate::discussions::sample::{
+     answer, comment, discussion, hex, merge_request, open, project, system_note, with_id,
+@@ -625,6 +625,21 @@ fn no_http_answer_or_a_5xx_fails() {
+     );
+ }
+ 
++#[test]
++fn a_write_s_failure_words_are_glabs_line_or_its_words_never_a_2xx_s() {
++    let unauthorized = "glab: 401 Unauthorized (HTTP 401)";
++    let notice = "A new version of glab is out";
++    let timed_out = HttpCall::NotAnswered("glab: timed out".to_owned());
++
++    assert_eq!(
++        failure_words(&http(401, "", Some(unauthorized))),
++        Some(unauthorized)
++    );
++    assert_eq!(failure_words(&http(500, "", None)), None);
++    assert_eq!(failure_words(&timed_out), Some("glab: timed out"));
++    assert_eq!(failure_words(&http(201, "{}", Some(notice))), None);
++}
++
+ #[test]
+ fn the_logs_name_each_outcome_by_its_kind() {
+     let threads = [
+diff --git a/crates/merge-requests/src/discussion_thread/write.rs b/crates/merge-requests/src/discussion_thread/write.rs
+index c115c65..e36984d 100644
+--- a/crates/merge-requests/src/discussion_thread/write.rs
++++ b/crates/merge-requests/src/discussion_thread/write.rs
+@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
+ use specta::Type;
+ use yamt_gitio::{Glab, HttpCall};
+ 
+-use crate::project::logged_in_project;
+ use crate::query::{
+     draft_reply_args, draft_reply_body, reply_args, reply_body, resolve_args, resolve_body,
+     submit_review_args, submit_review_body,
+@@ -125,8 +124,8 @@ fn written(
+     logged(iid, write, sent(repository, glab, iid, write))
+ }
+ 
+-/// glab missing → `GlabMissing`; `logged_in_project`; then exactly one `Glab::send` of the write's argv and body. The
+-/// reply, and GitLab's status when it answered.
++/// glab missing → `GlabMissing`; the remembered project; then exactly one `Glab::send` of the write's argv and body;
++/// a failure's words (`failure_words`) through `logged_out_after`. The reply, and GitLab's status when it answered.
+ fn sent(
+     repository: &GitLabRepository,
+     glab: Option<&Glab>,
+@@ -136,14 +135,29 @@ fn sent(
+     let Some(glab) = glab else {
+         return (DiscussionWriteReply::GlabMissing, None);
+     };
+-    let root = repository.root();
+-    let project = match logged_in_project(glab, root) {
++    let project = match repository.logged_in_project(glab) {
+         Ok(project) => project,
+         Err(refused) => return (refused.into(), None),
+     };
+     let (args, body) = request(write, &project.full_path, iid);
+     let args: Vec<&str> = args.iter().map(String::as_str).collect();
+-    replied(glab.send(root, &args, Some(body)))
++    let call = glab.send(repository.root(), &args, Some(body));
++    let logged_out =
++        failure_words(&call).and_then(|words| repository.logged_out_after(glab, words));
++    let (reply, status) = replied(call);
++    match logged_out {
++        Some(detail) => (DiscussionWriteReply::NotLoggedIn { detail }, status),
++        None => (reply, status),
++    }
++}
++
++/// glab's line of a non-2xx answer, or its words when GitLab never answered; None for a 2xx.
++pub(super) fn failure_words(call: &HttpCall) -> Option<&str> {
++    match call {
++        HttpCall::Answered(answer) if answer.is_success() => None,
++        HttpCall::Answered(answer) => answer.glab_line.as_deref(),
++        HttpCall::NotAnswered(message) => Some(message),
++    }
+ }
+ 
+ /// The write's argv and stdin body (`query.rs`).
+diff --git a/crates/merge-requests/src/discussions.rs b/crates/merge-requests/src/discussions.rs
+index 9f1f016..77c486a 100644
+--- a/crates/merge-requests/src/discussions.rs
++++ b/crates/merge-requests/src/discussions.rs
+@@ -1,5 +1,3 @@
+-use std::path::Path;
+-
+ use serde::Serialize;
+ use specta::Type;
+ use yamt_gitio::Glab;
+@@ -7,7 +5,7 @@ use yamt_gitio::Glab;
+ use crate::list::one_per_username;
+ use crate::page::{Complexity, Connection, PageInfo};
+ use crate::people::People;
+-use crate::project::{Project, logged_in_project};
++use crate::project::Project;
+ use crate::query::discussions_args;
+ use crate::{GitLabRepository, MergeRequestIid, OfferedPicture, Person, WebPage};
+ 
+@@ -170,7 +168,7 @@ pub fn read_discussions(
+             complexity: None,
+         }
+     } else {
+-        through_glab(repository.root(), glab, &asked)
++        through_glab(repository, glab, &asked)
+     };
+     log_read(&call);
+     call.read
+@@ -216,24 +214,36 @@ fn unanswered(asked: &[MergeRequestIid], answer: &DiscussionsAnswer) -> Answered
+     }
+ }
+ 
+-fn through_glab(root: &Path, glab: Option<&Glab>, asked: &[MergeRequestIid]) -> Answered {
++fn through_glab(
++    repository: &GitLabRepository,
++    glab: Option<&Glab>,
++    asked: &[MergeRequestIid],
++) -> Answered {
+     let Some(glab) = glab else {
+         return unanswered(asked, &DiscussionsAnswer::GlabMissing);
+     };
+-    let project = match logged_in_project(glab, root) {
++    let project = match repository.logged_in_project(glab) {
+         Ok(project) => project,
+         Err(refused) => return unanswered(asked, &refused.into()),
+     };
++    let root = repository.root();
+     let mut fetch = |iids: &[MergeRequestIid], after: Option<&str>| {
+         let args = discussions_args(&project.full_path, iids, after);
+         let args: Vec<&str> = args.iter().map(String::as_str).collect();
+         glab.get(root, &args)
+     };
+-    answered(asked, &project, &mut fetch)
++    let batch_failed = |message| DiscussionsAnswer::from(repository.refusal(glab, message));
++    answered(asked, &project, &mut fetch, &batch_failed)
+ }
+ 
+-/// Each asked row from the batch's answer and its later pages; a failing batch fails each row.
+-fn answered(asked: &[MergeRequestIid], project: &Project, fetch: &mut Fetch) -> Answered {
++/// Each asked row from the batch's answer and its later pages; a failing batch answers each row
++/// `batch_failed(its words)`.
++fn answered(
++    asked: &[MergeRequestIid],
++    project: &Project,
++    fetch: &mut Fetch,
++    batch_failed: &dyn Fn(String) -> DiscussionsAnswer,
++) -> Answered {
+     let mut queries = 0;
+     let mut counted = |iids: &[MergeRequestIid], after: Option<&str>| {
+         queries += 1;
+@@ -244,7 +254,7 @@ fn answered(asked: &[MergeRequestIid], project: &Project, fetch: &mut Fetch) ->
+         Err(message) => {
+             return Answered {
+                 queries,
+-                ..unanswered(asked, &DiscussionsAnswer::Failed { message })
++                ..unanswered(asked, &batch_failed(message))
+             };
+         }
+     };
+diff --git a/crates/merge-requests/src/discussions/tests.rs b/crates/merge-requests/src/discussions/tests.rs
+index a272a89..6d8be95 100644
+--- a/crates/merge-requests/src/discussions/tests.rs
++++ b/crates/merge-requests/src/discussions/tests.rs
+@@ -16,7 +16,9 @@ fn rows_for(asked: &[u32], batch: &[Value]) -> Vec<RowDiscussions> {
+         assert_eq!(after, None);
+         Ok(answer(batch))
+     };
+-    answered(&iids(asked), &project(), &mut fetch).read.rows
++    answered(&iids(asked), &project(), &mut fetch, &as_failed)
++        .read
++        .rows
+ }
+ 
+ /// The open discussions of the one row asked.
+@@ -44,6 +46,11 @@ fn failed(message: &str) -> DiscussionsAnswer {
+     }
+ }
+ 
++/// `answered`'s answer for a failing batch, as `read_discussions` gives it while glab is logged in.
++fn as_failed(message: String) -> DiscussionsAnswer {
++    DiscussionsAnswer::Failed { message }
++}
++
+ #[test]
+ fn a_system_note_after_the_last_reply_is_skipped() {
+     let notes = [comment("anna", 1), comment("ben", 2), system_note(3)];
+@@ -250,7 +257,7 @@ fn graphql_errors_fail_each_row_of_the_batch() {
+     let refused = json!({ "data": null, "errors": [{ "message": "Field 'x' doesn't exist" }] });
+     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(refused.to_string().into_bytes());
+ 
+-    let call = answered(&iids(&[2, 1]), &project(), &mut fetch);
++    let call = answered(&iids(&[2, 1]), &project(), &mut fetch, &as_failed);
+ 
+     let answer = failed("Field 'x' doesn't exist");
+     let expected = [
+@@ -271,7 +278,7 @@ fn graphql_errors_fail_each_row_of_the_batch() {
+ fn a_failed_batch_call_fails_each_row_with_glab_s_words() {
+     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Err("glab: timed out".to_owned());
+ 
+-    let call = answered(&iids(&[2, 1]), &project(), &mut fetch);
++    let call = answered(&iids(&[2, 1]), &project(), &mut fetch, &as_failed);
+ 
+     let answers: Vec<&DiscussionsAnswer> = call.read.rows.iter().map(|row| &row.answer).collect();
+     assert_eq!(answers, [&failed("glab: timed out"); 2]);
+@@ -307,7 +314,7 @@ fn an_uploaded_avatar_is_offered_once_per_username() {
+     ];
+     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(answer(&batch));
+ 
+-    let read = answered(&iids(&[1, 2]), &project(), &mut fetch).read;
++    let read = answered(&iids(&[1, 2]), &project(), &mut fetch, &as_failed).read;
+ 
+     let AvatarSource::Uploaded(address) = avatar_source(Some(ORIGIN), Some(ANNA_S_AVATAR)) else {
+         panic!("{ANNA_S_AVATAR} is no uploaded avatar");
+@@ -336,7 +343,9 @@ fn paged(pages: u32) -> (Vec<RowDiscussions>, Vec<Option<String>>) {
+         }
+         Ok(page(n))
+     };
+-    let rows = answered(&iids(&[1]), &project(), &mut fetch).read.rows;
++    let rows = answered(&iids(&[1]), &project(), &mut fetch, &as_failed)
++        .read
++        .rows;
+     (rows, asked)
+ }
+ 
+@@ -374,7 +383,7 @@ fn a_failing_later_page_fails_its_row_alone() {
+         Some(_) => Ok(answer(&[])),
+     };
+ 
+-    let rows = answered(&iids(&[1, 2, 3]), &project(), &mut fetch)
++    let rows = answered(&iids(&[1, 2, 3]), &project(), &mut fetch, &as_failed)
+         .read
+         .rows;
+ 
+@@ -412,7 +421,9 @@ fn no_project_in_the_answer_fails_each_row() {
+     let refused = json!({ "data": { "queryComplexity": null, "project": null } });
+     let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(refused.to_string().into_bytes());
+ 
+-    let rows = answered(&iids(&[1]), &project(), &mut fetch).read.rows;
++    let rows = answered(&iids(&[1]), &project(), &mut fetch, &as_failed)
++        .read
++        .rows;
+ 
+     assert_eq!(rows[0].answer, failed(NO_PROJECT));
+ }
+@@ -431,7 +442,7 @@ fn each_query_of_a_call_is_counted_and_the_batch_s_complexity_kept() {
+         Some(_) => Err("glab: page 2 failed".to_owned()),
+     };
+ 
+-    let call = answered(&iids(&[1, 2]), &project(), &mut fetch);
++    let call = answered(&iids(&[1, 2]), &project(), &mut fetch, &as_failed);
+ 
+     assert_eq!(call.queries, 3);
+     let measured = Complexity {
+diff --git a/crates/merge-requests/src/job_log.rs b/crates/merge-requests/src/job_log.rs
+index e6a2e97..6209699 100644
+--- a/crates/merge-requests/src/job_log.rs
++++ b/crates/merge-requests/src/job_log.rs
+@@ -3,7 +3,7 @@ use specta::Type;
+ use yamt_gitio::Glab;
+ 
+ use crate::page::NOT_FOUND;
+-use crate::project::{Project, logged_in_project};
++use crate::project::Project;
+ use crate::web_page::{ESCAPED_SLASH, is_web_path};
+ use crate::{GitLabRepository, WebPage};
+ 
+@@ -84,10 +84,15 @@ fn trace(
+     if page.job_parts().is_none() {
+         return Err(JobLogReply::NotOffered);
+     }
+-    let root = repository.root();
+-    let project = logged_in_project(glab, root).map_err(JobLogReply::from)?;
++    let project = repository.logged_in_project(glab)?;
+     let route = trace_route(&project, page).ok_or(JobLogReply::NotOffered)?;
+-    glab.get(root, &["api", &route]).map_err(failure_reply)
++    let root = repository.root();
++    glab.get(root, &["api", &route]).map_err(|line| {
++        match repository.logged_out_after(glab, &line) {
++            Some(detail) => JobLogReply::NotLoggedIn { detail },
++            None => failure_reply(line),
++        }
++    })
+ }
+ 
+ fn log_reply(trace: &[u8]) -> JobLogReply {
+diff --git a/crates/merge-requests/src/links.rs b/crates/merge-requests/src/links.rs
+index 4ec37d4..b7a8eab 100644
+--- a/crates/merge-requests/src/links.rs
++++ b/crates/merge-requests/src/links.rs
+@@ -8,7 +8,7 @@ use specta::Type;
+ use yamt_gitio::Glab;
+ 
+ use crate::description::{described_on, fetch_description};
+-use crate::project::{Project, logged_in_project};
++use crate::project::Project;
+ use crate::query::links_args;
+ use crate::{GitLabRepository, MergeRequestIid, WebPage};
+ 
+@@ -144,9 +144,10 @@ struct Read {
+     score: Option<u32>,
+ }
+ 
+-/// glab missing → `GlabMissing`; `logged_in_project`; `fetch_description`; `described`; the lookup calls when an
+-/// issue or epic is linked. `pages` empty unless `Read`. One `tracing::info!`: iid, outcome kind, epics, issues,
+-/// commits, not shown, calls, the highest `queryComplexity` score; never a title, reference or address.
++/// glab missing → `GlabMissing`; the remembered project; `fetch_description`; `described`; the lookup calls when an
++/// issue or epic is linked; the description's or the lookup's failure through `refusal`. `pages` empty unless `Read`.
++/// One `tracing::info!`: iid, outcome kind, epics, issues, commits, not shown, calls, the highest `queryComplexity`
++/// score; never a title, reference or address.
+ #[must_use]
+ pub fn read_links(
+     repository: &GitLabRepository,
+@@ -174,15 +175,16 @@ fn read(
+         return Err(LinksReply::GlabMissing);
+     };
+     let root = repository.root();
+-    let project = logged_in_project(glab, root)?;
+-    let failed = |message| LinksReply::Failed { message };
+-    let html = fetch_description(glab, root, &project, iid).map_err(failed)?;
++    let project = repository.logged_in_project(glab)?;
++    let refused = |message| repository.refusal(glab, message);
++    let html = fetch_description(glab, root, &project, iid).map_err(refused)?;
+     let mut fetch = |call: &[Part]| {
+         let args = links_args(call);
+         let args: Vec<&str> = args.iter().map(String::as_str).collect();
+         glab.get(root, &args)
+     };
+-    links_of(&project, iid, &html, &mut fetch).map_err(failed)
++    let read = links_of(&project, iid, &html, &mut fetch).map_err(refused)?;
++    Ok(read)
+ }
+ 
+ /// The links of merge request `iid`'s description `html`, looked up through `fetch` when an issue or epic is
+diff --git a/crates/merge-requests/src/list.rs b/crates/merge-requests/src/list.rs
+index 3aca136..fdc53d6 100644
+--- a/crates/merge-requests/src/list.rs
++++ b/crates/merge-requests/src/list.rs
+@@ -5,7 +5,6 @@ use yamt_gitio::Glab;
+ use crate::check::{ConflictCheck, RowToCheck};
+ use crate::page::{ParsedPage, parsed};
+ use crate::people::warn_unknown_review_state;
+-use crate::project::logged_in_project;
+ use crate::query::list_args;
+ use crate::{
+     GitLabRepository, ListEnd, MAX_MERGE_REQUESTS, MergeRequestPage, PAGE_SIZE, PictureAddress,
+@@ -54,7 +53,7 @@ pub fn list_merge_requests(
+         return unreached(ListEnd::GlabMissing);
+     };
+     let root = repository.root();
+-    let project = match logged_in_project(glab, root) {
++    let project = match repository.logged_in_project(glab) {
+         Ok(project) => project,
+         Err(refused) => return unreached(refused.into()),
+     };
+@@ -64,7 +63,12 @@ pub fn list_merge_requests(
+         let json = glab.get(root, &args)?;
+         parsed(&json, &project)
+     };
+-    let (end, rows) = pages(&mut fetch, on_page);
++    let (mut end, rows) = pages(&mut fetch, on_page);
++    if let ListEnd::Failed { message } = &end
++        && let Some(detail) = repository.logged_out_after(glab, message)
++    {
++        end = ListEnd::NotLoggedIn { detail };
++    }
+     let to_check = ConflictCheck {
+         full_path: project.full_path,
+         rows,
+diff --git a/crates/merge-requests/src/markdown_preview.rs b/crates/merge-requests/src/markdown_preview.rs
+index 134a552..f084165 100644
+--- a/crates/merge-requests/src/markdown_preview.rs
++++ b/crates/merge-requests/src/markdown_preview.rs
+@@ -3,7 +3,7 @@ use specta::Type;
+ use yamt_gitio::Glab;
+ 
+ use crate::description::{Described, described_on};
+-use crate::project::{Project, logged_in_project};
++use crate::project::Project;
+ use crate::query::{markdown_args, markdown_body};
+ use crate::{Description, GitLabRepository, MergeRequestIid, OfferedUpload, WebPage};
+ 
+@@ -49,10 +49,10 @@ struct Rendered {
+     html: String,
+ }
+ 
+-/// A blank text → `Read` with no blocks and no glab run. Else glab missing → `GlabMissing`; `logged_in_project`; one
+-/// `Glab::post(root, markdown_args, markdown_body)`; `Err` → Failed; the answer's `html` (a string) through
+-/// `described_on(project, iid, html)`, else Failed "GitLab's preview is not JSON with html". Never a write: no
+-/// `--include`, nothing counted (RK54). One `tracing::info!`: iid, outcome, blocks, pages, uploads.
++/// A blank text → `Read` with no blocks and no glab run. Else glab missing → `GlabMissing`; the remembered project;
++/// one `Glab::post(root, markdown_args, markdown_body)`; `Err` → its words through `refusal`; the answer's `html` (a
++/// string) through `described_on(project, iid, html)`, else Failed "GitLab's preview is not JSON with html". Never a
++/// write: no `--include`, nothing counted (RK54). One `tracing::info!`: iid, outcome, blocks, pages, uploads.
+ #[must_use]
+ pub fn preview_markdown(
+     repository: &GitLabRepository,
+@@ -99,16 +99,19 @@ fn rendered(
+         return Err(MarkdownPreviewReply::GlabMissing);
+     };
+     let root = repository.root();
+-    let project = logged_in_project(glab, root)?;
++    let project = repository.logged_in_project(glab)?;
+     let args = markdown_args();
+     let args: Vec<&str> = args.iter().map(String::as_str).collect();
+     let body = markdown_body(text, &project.full_path);
+-    let failed = |message| MarkdownPreviewReply::Failed { message };
+-    let json = glab.post(root, &args, body).map_err(failed)?;
++    let json = glab
++        .post(root, &args, body)
++        .map_err(|message| repository.refusal(glab, message))?;
+     let described = preview_of(&json, &project, iid);
+     described
+         .map(Some)
+-        .ok_or_else(|| failed(NOT_A_PREVIEW.to_owned()))
++        .ok_or_else(|| MarkdownPreviewReply::Failed {
++            message: NOT_A_PREVIEW.to_owned(),
++        })
+ }
+ 
+ /// The answer's `html` walked on merge request `iid`'s page; `None` when the answer is not JSON with a string `html`.
+diff --git a/crates/merge-requests/src/open.rs b/crates/merge-requests/src/open.rs
+index 626a949..0594e9c 100644
+--- a/crates/merge-requests/src/open.rs
++++ b/crates/merge-requests/src/open.rs
+@@ -5,7 +5,6 @@ use yamt_gitio::{FETCH_TIMEOUT, Glab, Oid, Repo};
+ use yamt_range::{PairLock, RangeSpec, Resolved};
+ 
+ use crate::page::{NO_PROJECT, graphql_data};
+-use crate::project::logged_in_project;
+ use crate::query::details_args;
+ use crate::remote::remote_for;
+ use crate::{GitLabRepository, MergeRequestIid, OpenReply, RangeToOpen};
+@@ -59,12 +58,11 @@ pub fn prepare_open(
+     let Some(glab) = glab else {
+         return Err(OpenReply::GlabMissing);
+     };
+-    let root = repository.root();
+-    let full_path = logged_in_project(glab, root)?.full_path;
+-    let diff = open_diff(glab, root, &full_path, iid)?;
++    let full_path = repository.logged_in_project(glab)?.full_path;
++    let diff = open_diff(repository, glab, &full_path, iid)?;
+     fetch_unless_local(repository, &full_path, iid, &diff)?;
+     let spec = format!("{}..{}", diff.base.as_str(), diff.head.as_str());
+-    let resolved = resolved(root, &spec)?;
++    let resolved = resolved(repository.root(), &spec)?;
+     require_not_shown(range_dir, &resolved)?;
+     Ok(RangeToOpen {
+         root: resolved.root().to_owned(),
+@@ -72,17 +70,20 @@ pub fn prepare_open(
+     })
+ }
+ 
++/// The merge request's diff refs as GitLab has them now; the call's failure, GraphQL's errors and `NO_PROJECT`
++/// through `refusal`.
+ fn open_diff(
++    repository: &GitLabRepository,
+     glab: &Glab,
+-    root: &Path,
+     full_path: &str,
+     iid: MergeRequestIid,
+ ) -> Result<OpenDiff, OpenReply> {
++    let refused = |message| OpenReply::from(repository.refusal(glab, message));
+     let args = details_args(full_path, iid);
+     let args: Vec<&str> = args.iter().map(String::as_str).collect();
+-    let json = glab.get(root, &args).map_err(failed)?;
+-    let data: DetailsData = graphql_data(&json).map_err(failed)?;
+-    let project = data.project.ok_or_else(|| failed(NO_PROJECT.to_owned()))?;
++    let json = glab.get(repository.root(), &args).map_err(refused)?;
++    let data: DetailsData = graphql_data(&json).map_err(refused)?;
++    let project = data.project.ok_or_else(|| refused(NO_PROJECT.to_owned()))?;
+     let Some(details) = project.merge_request else {
+         return Err(OpenReply::NotOpen);
+     };
+diff --git a/crates/merge-requests/src/people_change.rs b/crates/merge-requests/src/people_change.rs
+index a37336f..129734e 100644
+--- a/crates/merge-requests/src/people_change.rs
++++ b/crates/merge-requests/src/people_change.rs
+@@ -1,5 +1,3 @@
+-use std::path::Path;
+-
+ use serde::{Deserialize, Serialize};
+ use specta::Type;
+ use yamt_gitio::Glab;
+@@ -7,7 +5,7 @@ use yamt_gitio::Glab;
+ use crate::list::one_per_username;
+ use crate::page::{NO_MERGE_REQUEST, Nodes, graphql_data, listed};
+ use crate::people::{People, ReviewerNode, UserNode, warn_unknown_review_state};
+-use crate::project::{Project, logged_in_project};
++use crate::project::Project;
+ use crate::query::{GRAPHQL_BODY_ARGS, people_change_body};
+ use crate::{GitLabRepository, MergeRequestIid, OfferedPicture, Person, Reviewer};
+ 
+@@ -123,7 +121,7 @@ pub fn change_people(
+     iid: MergeRequestIid,
+     change: &PeopleChange,
+ ) -> ChangedPeople {
+-    let changed = asked(repository.root(), glab, iid, change);
++    let changed = asked(repository, glab, iid, change);
+     tracing::info!(
+         iid = iid.0,
+         group = ?change.group,
+@@ -134,8 +132,10 @@ pub fn change_people(
+     changed
+ }
+ 
++/// glab missing → `GlabMissing`; the remembered project; the mutation; its failure's words through
++/// `logged_out_after`.
+ fn asked(
+-    root: &Path,
++    repository: &GitLabRepository,
+     glab: Option<&Glab>,
+     iid: MergeRequestIid,
+     change: &PeopleChange,
+@@ -143,12 +143,19 @@ fn asked(
+     let Some(glab) = glab else {
+         return without_pictures(PeopleChangeReply::GlabMissing);
+     };
+-    let project = match logged_in_project(glab, root) {
++    let project = match repository.logged_in_project(glab) {
+         Ok(project) => project,
+         Err(refused) => return without_pictures(refused.into()),
+     };
+     let body = people_change_body(&project.full_path, iid, change);
+-    answered(glab.post(root, &GRAPHQL_BODY_ARGS, body), &project, change)
++    let ran = glab.post(repository.root(), &GRAPHQL_BODY_ARGS, body);
++    let changed = answered(ran, &project, change);
++    if let PeopleChangeReply::Failed { message } = &changed.reply
++        && let Some(detail) = repository.logged_out_after(glab, message)
++    {
++        return without_pictures(PeopleChangeReply::NotLoggedIn { detail });
++    }
++    changed
+ }
+ 
+ /// The reply to the mutation as glab ran it: glab's failure, GitLab's top-level error, the mutation's own first
+diff --git a/crates/merge-requests/src/people_search.rs b/crates/merge-requests/src/people_search.rs
+index e9d3649..90c53aa 100644
+--- a/crates/merge-requests/src/people_search.rs
++++ b/crates/merge-requests/src/people_search.rs
+@@ -1,5 +1,3 @@
+-use std::path::Path;
+-
+ use serde::{Deserialize, Serialize};
+ use specta::Type;
+ use yamt_gitio::Glab;
+@@ -7,7 +5,7 @@ use yamt_gitio::Glab;
+ use crate::list::one_per_username;
+ use crate::page::{NO_PROJECT, graphql_data};
+ use crate::people::{People, UserNode};
+-use crate::project::{Project, logged_in_project};
++use crate::project::Project;
+ use crate::query::people_search_args;
+ use crate::{GitLabRepository, OfferedPicture, Person};
+ 
+@@ -61,7 +59,7 @@ pub fn search_people(
+     glab: Option<&Glab>,
+     text: &str,
+ ) -> FoundPeople {
+-    let found = searched(repository.root(), glab, text);
++    let found = searched(repository, glab, text);
+     let count = match &found.reply {
+         PeopleSearchReply::Found { people } => people.len(),
+         PeopleSearchReply::GlabMissing
+@@ -76,17 +74,24 @@ pub fn search_people(
+     found
+ }
+ 
+-fn searched(root: &Path, glab: Option<&Glab>, text: &str) -> FoundPeople {
++/// glab missing → `GlabMissing`; the remembered project; the search; its failure's words through `logged_out_after`.
++fn searched(repository: &GitLabRepository, glab: Option<&Glab>, text: &str) -> FoundPeople {
+     let Some(glab) = glab else {
+         return without_pictures(PeopleSearchReply::GlabMissing);
+     };
+-    let project = match logged_in_project(glab, root) {
++    let project = match repository.logged_in_project(glab) {
+         Ok(project) => project,
+         Err(refused) => return without_pictures(refused.into()),
+     };
+     let args = people_search_args(&project.full_path, text);
+     let args: Vec<&str> = args.iter().map(String::as_str).collect();
+-    found_people(glab.get(root, &args), &project)
++    let found = found_people(glab.get(repository.root(), &args), &project);
++    if let PeopleSearchReply::Failed { message } = &found.reply
++        && let Some(detail) = repository.logged_out_after(glab, message)
++    {
++        return without_pictures(PeopleSearchReply::NotLoggedIn { detail });
++    }
++    found
+ }
+ 
+ /// The reply to the search as glab ran it: glab's failure, GitLab's first error, or the people it found.
+diff --git a/crates/merge-requests/src/project.rs b/crates/merge-requests/src/project.rs
+index 1d37126..09e756b 100644
+--- a/crates/merge-requests/src/project.rs
++++ b/crates/merge-requests/src/project.rs
+@@ -1,19 +1,30 @@
+ use std::path::Path;
++use std::sync::{Mutex, MutexGuard, PoisonError};
+ 
+ use serde::Deserialize;
+ use yamt_gitio::{AuthStatus, Glab};
+ 
++use crate::page::NO_PROJECT;
+ use crate::web_page::HTTPS;
+ use crate::{
+-    DescriptionReply, DiscussionThreadReply, DiscussionWriteReply, DiscussionsAnswer, JobLogReply,
+-    LinksReply, ListEnd, MarkdownPreviewReply, OpenReply, PeopleChangeReply, PeopleSearchReply,
+-    RerequestReply, ResolveRefusal,
++    DescriptionReply, DiscussionThreadReply, DiscussionWriteReply, DiscussionsAnswer,
++    GitLabRepository, JobLogReply, LinksReply, ListEnd, MarkdownPreviewReply, OpenReply,
++    PeopleChangeReply, PeopleSearchReply, RerequestReply, ResolveRefusal,
+ };
+ 
+ /// glab fills `:fullpath` with the project of the folder's remotes (glab docs, `glab api`).
+ const PROJECT_ROUTE: &str = "projects/:fullpath";
++/// glab's last line for a REST call GitLab answers 401 ends so (`glab: 401 Unauthorized (HTTP 401)`, measured with
++/// glab 1.126.0 against gitlab.com on 2026-11-04, `tests/glab/README.md`).
++const UNAUTHORIZED: &str = "(HTTP 401)";
++/// glab's whole line for a GraphQL call GitLab answers 401: GitLab's `errors[0].message`, no `(HTTP 401)` (measured
++/// with glab 1.126.0 against gitlab.com on 2026-11-04, `tests/glab/README.md`).
++const GRAPHQL_UNAUTHORIZED: &str = "glab: Invalid token";
++/// GitLab's words for a project it does not find or the reader may not see (`tests/glab/README.md:73-75`).
++const PROJECT_NOT_FOUND: &str = "404 Project Not Found";
+ 
+ /// The GitLab project of the repository's remotes.
++#[derive(Clone)]
+ pub(crate) struct Project {
+     pub full_path: String,
+     /// Its `web_url` after the origin: `/<full_path>` behind any sub-path GitLab is installed under; empty when
+@@ -29,14 +40,95 @@ struct ProjectAnswer {
+     web_url: String,
+ }
+ 
+-/// Why glab named no project: logged out, or a call failed.
++/// Why an action got no answer from GitLab: logged out, or a call failed.
+ pub(crate) enum NoProject {
+     NotLoggedIn { detail: String },
+     Failed { message: String },
+ }
+ 
+-/// The project of the repository's remotes, asked once `glab auth status` says glab is logged in.
+-pub(crate) fn logged_in_project(glab: &Glab, root: &Path) -> Result<Project, NoProject> {
++/// The project glab named for a repository while logged in, kept for the app's run (plan §2 #187). Only this module
++/// reads or writes it.
++#[derive(Default)]
++pub(crate) struct Remembered {
++    project: Mutex<Option<Project>>,
++}
++
++impl Remembered {
++    fn held(&self) -> MutexGuard<'_, Option<Project>> {
++        self.project.lock().unwrap_or_else(PoisonError::into_inner)
++    }
++
++    fn forget(&self, reason: &str) {
++        *self.held() = None;
++        tracing::info!(reason, "forgot GitLab's login and project");
++    }
++}
++
++impl GitLabRepository {
++    /// The remembered project; else `glab auth status` (logged out → `NotLoggedIn` with glab's first line, failed →
++    /// `Failed`) and `glab api projects/:fullpath`, remembered when found. The lock is held while asking, so actions
++    /// started together ask once; a refusal is never remembered. One `tracing::info!` per ask (outcome only).
++    pub(crate) fn logged_in_project(&self, glab: &Glab) -> Result<Project, NoProject> {
++        let mut remembered = self.remembered.held();
++        if let Some(project) = remembered.as_ref() {
++            return Ok(project.clone());
++        }
++        let asked = asked_project(glab, self.root());
++        let outcome = match &asked {
++            Ok(_) => "found",
++            Err(NoProject::NotLoggedIn { .. }) => "notLoggedIn",
++            Err(NoProject::Failed { .. }) => "failed",
++        };
++        tracing::info!(outcome, "asked glab for the login and the project");
++        let project = asked?;
++        *remembered = Some(project.clone());
++        Ok(project)
++    }
++
++    /// Forgets the remembered project (waiting for an ask in flight): the next action asks glab both again. One
++    /// `tracing::info!` with the reason (`refresh`, `login`, `project`).
++    pub fn forget_project(&self) {
++        self.remembered.forget("refresh");
++    }
++
++    /// `words`: the failure an action is about to reply with, after the project was found — a read's `Failed`
++    /// message, a write's `HttpAnswer::glab_line`, or `NO_PROJECT`. When `is_lost(words)`: forgets, then one `glab auth
++    /// status`; `Some(detail)` when it says logged out (the action replies `NotLoggedIn { detail }`), else None (the
++    /// action replies as today). Not lost → None, nothing forgotten, no glab run. Never repeats the action's call (RK54).
++    pub(crate) fn logged_out_after(&self, glab: &Glab, words: &str) -> Option<String> {
++        if !is_lost(words) {
++            return None;
++        }
++        let is_login = words.ends_with(UNAUTHORIZED) || words == GRAPHQL_UNAUTHORIZED;
++        self.remembered
++            .forget(if is_login { "login" } else { "project" });
++        match glab.auth_status(self.root()) {
++            AuthStatus::LoggedOut { detail } => Some(detail),
++            AuthStatus::LoggedIn | AuthStatus::Failed { .. } => None,
++        }
++    }
++
++    /// What an action replies for `message`, a failed call's words after the project was found: `NotLoggedIn` when
++    /// `logged_out_after` says so, else `Failed` with `message`.
++    pub(crate) fn refusal(&self, glab: &Glab, message: String) -> NoProject {
++        match self.logged_out_after(glab, &message) {
++            Some(detail) => NoProject::NotLoggedIn { detail },
++            None => NoProject::Failed { message },
++        }
++    }
++}
++
++/// Whether a failed call's words say the login is gone or the project is missing: they end `UNAUTHORIZED`, are
++/// `GRAPHQL_UNAUTHORIZED`, hold `PROJECT_NOT_FOUND`, or are `page.rs` `NO_PROJECT`. A 403 is not (design §1.4).
++fn is_lost(words: &str) -> bool {
++    words.ends_with(UNAUTHORIZED)
++        || words == GRAPHQL_UNAUTHORIZED
++        || words.contains(PROJECT_NOT_FOUND)
++        || words == NO_PROJECT
++}
++
++/// `glab auth status`, then the project of the repository's remotes once it says glab is logged in.
++fn asked_project(glab: &Glab, root: &Path) -> Result<Project, NoProject> {
+     match glab.auth_status(root) {
+         AuthStatus::LoggedIn => {}
+         AuthStatus::LoggedOut { detail } => return Err(NoProject::NotLoggedIn { detail }),
+@@ -224,4 +316,27 @@ mod tests {
+         let refused = project_from(br#"{"message":"404 Project Not Found"}"#);
+         assert!(refused.is_err());
+     }
++
++    #[test]
++    fn is_lost_reads_glabs_words() {
++        let lost = [
++            "glab: 401 Unauthorized (HTTP 401)",
++            "glab: Invalid token",
++            "glab: 404 Project Not Found (HTTP 404)",
++            NO_PROJECT,
++        ];
++        for words in lost {
++            assert!(is_lost(words), "{words}");
++        }
++        let kept = [
++            "glab: 404 Not Found (HTTP 404)",
++            "glab: 403 Forbidden (HTTP 403)",
++            "glab timed out",
++            "glab: Invalid token for a moment",
++            "",
++        ];
++        for words in kept {
++            assert!(!is_lost(words), "{words}");
++        }
++    }
+ }
+diff --git a/crates/merge-requests/src/rerequest.rs b/crates/merge-requests/src/rerequest.rs
+index 6f295d0..036f3ba 100644
+--- a/crates/merge-requests/src/rerequest.rs
++++ b/crates/merge-requests/src/rerequest.rs
+@@ -7,7 +7,7 @@ use yamt_gitio::Glab;
+ use crate::open::OPENED;
+ use crate::page::{NO_MERGE_REQUEST, NO_PROJECT, Nodes, graphql_data, listed};
+ use crate::people::{People, ReviewerNode, is_awaiting_review, warn_unknown_review_state};
+-use crate::project::{Project, logged_in_project};
++use crate::project::Project;
+ use crate::query::{GRAPHQL_BODY_ARGS, rerequest_body, reviewers_args};
+ use crate::{GitLabRepository, MergeRequestIid, Reviewer};
+ 
+@@ -104,6 +104,8 @@ pub fn rerequest_review(
+     reply
+ }
+ 
++/// glab missing → `GlabMissing`; the remembered project; the fresh reviewers, then the mutation unless the reviewer
++/// already awaits a review; a `Failed` reply's words through `logged_out_after`.
+ fn asked_again(
+     repository: &GitLabRepository,
+     glab: Option<&Glab>,
+@@ -113,12 +115,27 @@ fn asked_again(
+     let Some(glab) = glab else {
+         return RerequestReply::GlabMissing;
+     };
+-    let root = repository.root();
+-    let project = match logged_in_project(glab, root) {
++    let project = match repository.logged_in_project(glab) {
+         Ok(project) => project,
+         Err(refused) => return refused.into(),
+     };
+-    let reviewers = match fresh_reviewers(glab, root, &project, iid) {
++    let reply = rerequested(repository.root(), glab, &project, iid, username);
++    if let RerequestReply::Failed { message } = &reply
++        && let Some(detail) = repository.logged_out_after(glab, message)
++    {
++        return RerequestReply::NotLoggedIn { detail };
++    }
++    reply
++}
++
++fn rerequested(
++    root: &Path,
++    glab: &Glab,
++    project: &Project,
++    iid: MergeRequestIid,
++    username: &str,
++) -> RerequestReply {
++    let reviewers = match fresh_reviewers(glab, root, project, iid) {
+         Ok(reviewers) => reviewers,
+         Err(reply) => return reply,
+     };
+@@ -130,10 +147,10 @@ fn asked_again(
+     };
+     if is_awaiting_review(&asked.reviewer) {
+         let nodes = reviewers.into_iter().map(|fresh| fresh.reviewer);
+-        return requested(&project, nodes.collect());
++        return requested(project, nodes.collect());
+     }
+     let body = rerequest_body(&project.full_path, iid, &asked.id);
+-    rereviewed(glab.post(root, &GRAPHQL_BODY_ARGS, body), &project)
++    rereviewed(glab.post(root, &GRAPHQL_BODY_ARGS, body), project)
+ }
+ 
+ /// The reviewers of merge request `iid` as GitLab has them now; a merge request not open is `NotOpen`.
+diff --git a/crates/merge-requests/src/resolve.rs b/crates/merge-requests/src/resolve.rs
+index 9b92312..3b75b71 100644
+--- a/crates/merge-requests/src/resolve.rs
++++ b/crates/merge-requests/src/resolve.rs
+@@ -1,11 +1,8 @@
+-use std::path::Path;
+-
+ use serde::Deserialize;
+ use yamt_gitio::Glab;
+ 
+ use crate::open::{OPENED, require_branch_name};
+ use crate::page::{NO_PROJECT, graphql_data, is_from_fork};
+-use crate::project::logged_in_project;
+ use crate::query::branches_args;
+ use crate::remote::remote_for;
+ use crate::{GitLabRepository, MergeRequestIid, ResolveRefusal, ResolveTarget};
+@@ -41,9 +38,8 @@ pub fn prepare_resolve(
+     let Some(glab) = glab else {
+         return Err(ResolveRefusal::GlabMissing);
+     };
+-    let root = repository.root();
+-    let full_path = logged_in_project(glab, root)?.full_path;
+-    let branches = branches(glab, root, &full_path, iid)?;
++    let full_path = repository.logged_in_project(glab)?.full_path;
++    let branches = branches(repository, glab, &full_path, iid)?;
+     if branches.state != OPENED {
+         return Err(ResolveRefusal::NotOpen);
+     }
+@@ -56,7 +52,7 @@ pub fn prepare_resolve(
+         return Err(ResolveRefusal::NoRemote { project: full_path });
+     };
+     Ok(ResolveTarget {
+-        root: root.to_owned(),
++        root: repository.root().to_owned(),
+         iid,
+         remote: remote.name.clone(),
+         branch: branches.source_branch,
+@@ -64,18 +60,20 @@ pub fn prepare_resolve(
+     })
+ }
+ 
+-/// The merge request's branches as GitLab has them now; no such merge request is `NotOpen`.
++/// The merge request's branches as GitLab has them now; no such merge request is `NotOpen`; the call's failure,
++/// GraphQL's errors and `NO_PROJECT` through `refusal`.
+ fn branches(
++    repository: &GitLabRepository,
+     glab: &Glab,
+-    root: &Path,
+     full_path: &str,
+     iid: MergeRequestIid,
+ ) -> Result<Branches, ResolveRefusal> {
++    let refused = |message| ResolveRefusal::from(repository.refusal(glab, message));
+     let args = branches_args(full_path, iid);
+     let args: Vec<&str> = args.iter().map(String::as_str).collect();
+-    let json = glab.get(root, &args).map_err(failed)?;
+-    let data: BranchesData = graphql_data(&json).map_err(failed)?;
+-    let project = data.project.ok_or_else(|| failed(NO_PROJECT.to_owned()))?;
++    let json = glab.get(repository.root(), &args).map_err(refused)?;
++    let data: BranchesData = graphql_data(&json).map_err(refused)?;
++    let project = data.project.ok_or_else(|| refused(NO_PROJECT.to_owned()))?;
+     project.merge_request.ok_or(ResolveRefusal::NotOpen)
+ }
+ 
+diff --git a/crates/merge-requests/tests/list.rs b/crates/merge-requests/tests/list.rs
+index 5630a74..64e56bc 100644
+--- a/crates/merge-requests/tests/list.rs
++++ b/crates/merge-requests/tests/list.rs
+@@ -56,22 +56,22 @@ fn listed_with_pictures(
+     (end, sent.try_iter().collect())
+ }
+ 
+-/// Whether a load on `scenario`'s fake glab (none for `None`) hands rows to the local check.
+-fn has_rows_to_check(repository: &GitLabRepository, scenario: Option<&str>) -> bool {
++/// Whether a load on `scenario`'s fake glab (none for `None`) hands rows to the local check, on a repository of its
++/// own: nothing remembered from another load.
++fn has_rows_to_check(scenario: Option<&str>) -> bool {
++    let (_repo, repository) = gitlab_repo();
+     let fake = scenario.map(Fake::new);
+     let glab = fake.as_ref().map(|fake| &fake.glab);
+-    let listed = list_merge_requests(repository, glab, &|_| {});
++    let listed = list_merge_requests(&repository, glab, &|_| {});
+     listed.to_check.is_some()
+ }
+ 
+ #[test]
+ fn only_a_load_that_reached_the_project_hands_rows_to_the_check() {
+-    let (_repo, repository) = gitlab_repo();
+-
+-    assert!(has_rows_to_check(&repository, Some("merge-requests")));
+-    assert!(!has_rows_to_check(&repository, None));
+-    assert!(!has_rows_to_check(&repository, Some("logged-out")));
+-    assert!(!has_rows_to_check(&repository, Some("lined-up")));
++    assert!(has_rows_to_check(Some("merge-requests")));
++    assert!(!has_rows_to_check(None));
++    assert!(!has_rows_to_check(Some("logged-out")));
++    assert!(!has_rows_to_check(Some("lined-up")));
+ }
+ 
+ fn iids(page: &MergeRequestPage) -> Vec<u32> {
+diff --git a/crates/merge-requests/tests/people.rs b/crates/merge-requests/tests/people.rs
+index c204f3b..dea58fe 100644
+--- a/crates/merge-requests/tests/people.rs
++++ b/crates/merge-requests/tests/people.rs
+@@ -216,7 +216,11 @@ fn removing_sends_one_remove_of_one_username() {
+         json!({ "query": SET_REVIEWERS, "variables": variables("chiara") }),
+     ];
+     assert_eq!(bodies(&fake), expected);
+-    assert_eq!(fake.logged("argv: "), [CHANGE_ARGV, CHANGE_ARGV].concat());
++    let second_change = &CHANGE_ARGV[2..];
++    assert_eq!(
++        fake.logged("argv: "),
++        [&CHANGE_ARGV[..], second_change].concat()
++    );
+ }
+ 
+ #[test]
+diff --git a/crates/merge-requests/tests/remembered.rs b/crates/merge-requests/tests/remembered.rs
+new file mode 100644
+index 0000000..7806f7a
+--- /dev/null
++++ b/crates/merge-requests/tests/remembered.rs
+@@ -0,0 +1,324 @@
++#![cfg(test)]
++#![cfg(unix)]
++
++mod fake_glab;
++
++use serde_json::{Value, json};
++use yamt_conflict_repo::{TempDir, git_ok};
++use yamt_merge_requests::{
++    DiscussionId, GitLabRepository, Glab, MergeRequestIid, PeopleAction, PeopleChange, PeopleGroup,
++    ReplyKind, WebPage, change_people, gitlab_repository, list_merge_requests, prepare_open,
++    prepare_resolve, preview_markdown, read_description, read_discussion_thread, read_discussions,
++    read_job_log, read_links, reply_to_discussion, rerequest_review, resolve_discussion,
++    search_people, submit_review,
++};
++
++use fake_glab::Fake;
++
++const GITLAB_REMOTE: &str = "https://gitlab.com/taskboard/taskboard.git";
++const THREADS: &str = "mr-threads";
++const REMEMBERED: &str = "mr-remembered";
++const MR_90: MergeRequestIid = MergeRequestIid(90);
++const AUTH_STATUS: &str = "argv: auth status";
++const PROJECT: &str = "argv: api projects/:fullpath";
++const PREVIEW: &str = "argv: api --method POST markdown --input -";
++const WRITE: &str = "argv: api --include ";
++/// `mr-remembered`'s posts after which each `glab api` answers so, and `glab auth status` says (README).
++const UNAUTHORIZED_LOGGED_OUT: u32 = 1;
++const ANSWERING_LOGGED_IN: u32 = 2;
++const UNAUTHORIZED_LOGGED_IN: u32 = 3;
++const PROJECT_NOT_FOUND: u32 = 4;
++const FORBIDDEN: u32 = 5;
++const PROJECT_NULL: u32 = 6;
++/// `page.rs` `NO_PROJECT`.
++const NO_PROJECT: &str = "GitLab finds no such project, or you may not see it";
++
++/// The fake glab on a scenario, a repository whose `origin` is on gitlab.com, and a folder for range locks.
++struct Setup {
++    fake: Fake,
++    _repo: TempDir,
++    repository: GitLabRepository,
++    range_dir: TempDir,
++}
++
++impl Setup {
++    fn new(scenario: &str) -> Setup {
++        let repo = TempDir::new().unwrap();
++        git_ok(repo.path(), &["init", "-q"]).unwrap();
++        git_ok(repo.path(), &["remote", "add", "origin", GITLAB_REMOTE]).unwrap();
++        Setup {
++            fake: Fake::new(scenario),
++            repository: gitlab_repository(repo.path()).unwrap(),
++            _repo: repo,
++            range_dir: TempDir::new().unwrap(),
++        }
++    }
++
++    fn glab(&self) -> &Glab {
++        &self.fake.glab
++    }
++
++    fn count(&self, argv: &str) -> usize {
++        self.fake.logged(argv).len()
++    }
++}
++
++fn d01() -> DiscussionId {
++    DiscussionId::try_from(format!("{:0>40}", "01")).unwrap()
++}
++
++fn json_of(reply: impl serde::Serialize) -> Value {
++    serde_json::to_value(reply).unwrap()
++}
++
++fn preview(setup: &Setup) -> Value {
++    json_of(preview_markdown(&setup.repository, Some(setup.glab()), MR_90, "Hi").reply)
++}
++
++fn comment(setup: &Setup) -> Value {
++    let kind = ReplyKind::Comment;
++    json_of(reply_to_discussion(
++        &setup.repository,
++        Some(setup.glab()),
++        MR_90,
++        &d01(),
++        kind,
++        "Hi",
++    ))
++}
++
++fn description(setup: &Setup) -> Value {
++    json_of(read_description(&setup.repository, Some(setup.glab()), MR_90).reply)
++}
++
++fn failed(message: &str) -> Value {
++    json!({ "kind": "failed", "message": message })
++}
++
++fn refused(reason: &str) -> Value {
++    json!({ "kind": "refused", "reason": reason })
++}
++
++/// One action as the window asks it: its reply's JSON.
++type Action = fn(&Setup) -> Value;
++
++fn list(setup: &Setup) -> Value {
++    json_of(list_merge_requests(&setup.repository, Some(setup.glab()), &|_| {}).end)
++}
++
++fn links(setup: &Setup) -> Value {
++    json_of(read_links(&setup.repository, Some(setup.glab()), MR_90).reply)
++}
++
++fn discussions(setup: &Setup) -> Value {
++    let read = read_discussions(&setup.repository, Some(setup.glab()), &[MR_90]);
++    json_of(&read.rows[0].answer)
++}
++
++fn job_log(setup: &Setup) -> Value {
++    let job = "https://gitlab.com/taskboard/taskboard/-/jobs/302";
++    let page: WebPage = serde_json::from_value(json!(job)).unwrap();
++    json_of(read_job_log(&setup.repository, Some(setup.glab()), &page))
++}
++
++fn search(setup: &Setup) -> Value {
++    json_of(search_people(&setup.repository, Some(setup.glab()), "er").reply)
++}
++
++fn change(setup: &Setup) -> Value {
++    let change = PeopleChange {
++        group: PeopleGroup::Reviewers,
++        action: PeopleAction::Add,
++        username: "erik".to_owned(),
++    };
++    json_of(change_people(&setup.repository, Some(setup.glab()), MR_90, &change).reply)
++}
++
++fn rerequest(setup: &Setup) -> Value {
++    json_of(rerequest_review(
++        &setup.repository,
++        Some(setup.glab()),
++        MR_90,
++        "ben",
++    ))
++}
++
++fn open(setup: &Setup) -> Value {
++    let range_dir = setup.range_dir.path();
++    json_of(prepare_open(&setup.repository, Some(setup.glab()), MR_90, range_dir).err())
++}
++
++fn resolve_conflicts(setup: &Setup) -> Value {
++    json_of(prepare_resolve(&setup.repository, Some(setup.glab()), MR_90).err())
++}
++
++fn thread(setup: &Setup) -> Value {
++    let glab = Some(setup.glab());
++    json_of(read_discussion_thread(&setup.repository, glab, MR_90, &d01()).reply)
++}
++
++fn resolve(setup: &Setup) -> Value {
++    json_of(resolve_discussion(
++        &setup.repository,
++        Some(setup.glab()),
++        MR_90,
++        &d01(),
++        true,
++    ))
++}
++
++fn submit(setup: &Setup) -> Value {
++    json_of(submit_review(&setup.repository, Some(setup.glab()), MR_90))
++}
++
++/// Each of the 13 actions (the three writes each), by name.
++const ACTIONS: [(&str, Action); 15] = [
++    ("list_merge_requests", list),
++    ("read_description", description),
++    ("read_links", links),
++    ("read_discussions", discussions),
++    ("read_job_log", job_log),
++    ("search_people", search),
++    ("change_people", change),
++    ("rerequest_review", rerequest),
++    ("prepare_open", open),
++    ("prepare_resolve", resolve_conflicts),
++    ("read_discussion_thread", thread),
++    ("reply_to_discussion", comment),
++    ("resolve_discussion", resolve),
++    ("submit_review", submit),
++    ("preview_markdown", preview),
++];
++
++#[test]
++fn a_second_preview_thread_read_and_write_ask_glab_nothing() {
++    let setup = Setup::new(THREADS);
++
++    let previews = [preview(&setup), preview(&setup)];
++    let read = thread(&setup);
++    let sent = comment(&setup);
++
++    assert_eq!(
++        previews.map(|reply| reply["kind"].clone()),
++        ["read", "read"]
++    );
++    assert_eq!(read["kind"], "read");
++    assert_eq!(sent, json!({ "kind": "sent" }));
++    assert_eq!(setup.fake.logged(AUTH_STATUS), [AUTH_STATUS]);
++    assert_eq!(setup.fake.logged(PROJECT), [PROJECT]);
++    assert_eq!(setup.count(PREVIEW), 2);
++    assert_eq!(setup.count(WRITE), 1);
++}
++
++#[test]
++fn two_actions_started_together_ask_once() {
++    let setup = Setup::new(THREADS);
++
++    let replies = std::thread::scope(|scope| {
++        let first = scope.spawn(|| preview(&setup));
++        let second = scope.spawn(|| preview(&setup));
++        [first.join().unwrap(), second.join().unwrap()]
++    });
++
++    assert_eq!(replies.map(|reply| reply["kind"].clone()), ["read", "read"]);
++    assert_eq!(setup.fake.logged(AUTH_STATUS), [AUTH_STATUS]);
++    assert_eq!(setup.fake.logged(PROJECT), [PROJECT]);
++}
++
++#[test]
++fn a_401_forgets_and_answers_not_logged_in() {
++    let logged_out = json!({ "kind": "notLoggedIn", "detail": "gitlab.com" });
++    for (name, action) in ACTIONS {
++        let setup = Setup::new(REMEMBERED);
++        assert_eq!(preview(&setup)["kind"], "read", "{name}");
++        setup.fake.answered_posts(UNAUTHORIZED_LOGGED_OUT);
++
++        let reply = action(&setup);
++
++        assert_eq!(reply, logged_out, "{name}");
++        let argv = setup.fake.logged("argv: ");
++        assert_eq!(argv[..3], [AUTH_STATUS, PROJECT, PREVIEW], "{name}");
++        let [failed_call, asked_again] = &argv[3..] else {
++            panic!("{name}: not one call and one auth status after the preview: {argv:#?}");
++        };
++        assert_ne!(failed_call, AUTH_STATUS, "{name}");
++        assert_eq!(asked_again, AUTH_STATUS, "{name}");
++        setup.fake.answered_posts(ANSWERING_LOGGED_IN);
++        assert_eq!(preview(&setup)["kind"], "read", "{name}");
++        assert_eq!(
++            (setup.count(AUTH_STATUS), setup.count(PROJECT)),
++            (3, 2),
++            "{name}"
++        );
++    }
++}
++
++#[test]
++fn a_401_while_logged_in_keeps_todays_words() {
++    let unauthorized = "glab: 401 Unauthorized (HTTP 401)";
++    let previewed = Setup::new(REMEMBERED);
++    let replied = Setup::new(REMEMBERED);
++    for setup in [&previewed, &replied] {
++        assert_eq!(preview(setup)["kind"], "read");
++        setup.fake.answered_posts(UNAUTHORIZED_LOGGED_IN);
++    }
++
++    assert_eq!(preview(&previewed), failed(unauthorized));
++    assert_eq!(comment(&replied), refused("401 Unauthorized"));
++
++    for setup in [&previewed, &replied] {
++        assert_eq!(setup.count(AUTH_STATUS), 2);
++        assert_eq!(preview(setup), failed(unauthorized));
++        assert_eq!((setup.count(AUTH_STATUS), setup.count(PROJECT)), (3, 2));
++    }
++    assert_eq!(replied.count(WRITE), 1);
++}
++
++#[test]
++fn a_missing_project_forgets() {
++    let not_found = Setup::new(REMEMBERED);
++    let null = Setup::new(REMEMBERED);
++    for setup in [&not_found, &null] {
++        assert_eq!(preview(setup)["kind"], "read");
++    }
++    not_found.fake.answered_posts(PROJECT_NOT_FOUND);
++    null.fake.answered_posts(PROJECT_NULL);
++
++    let missing = preview(&not_found);
++    let no_project = description(&null);
++
++    assert_eq!(missing, failed("glab: 404 Project Not Found (HTTP 404)"));
++    assert_eq!(no_project, failed(NO_PROJECT));
++    for setup in [&not_found, &null] {
++        assert_eq!(setup.count(AUTH_STATUS), 2);
++        setup.fake.answered_posts(PROJECT_NULL);
++        assert_eq!(preview(setup)["kind"], "read");
++        assert_eq!((setup.count(AUTH_STATUS), setup.count(PROJECT)), (3, 2));
++    }
++}
++
++#[test]
++fn a_403_keeps_the_project() {
++    let setup = Setup::new(REMEMBERED);
++    assert_eq!(preview(&setup)["kind"], "read");
++    setup.fake.answered_posts(FORBIDDEN);
++
++    let forbidden = comment(&setup);
++
++    assert_eq!(forbidden, refused("403 Forbidden"));
++    setup.fake.answered_posts(PROJECT_NULL);
++    assert_eq!(preview(&setup)["kind"], "read");
++    assert_eq!(setup.fake.logged(AUTH_STATUS), [AUTH_STATUS]);
++    assert_eq!(setup.fake.logged(PROJECT), [PROJECT]);
++}
++
++#[test]
++fn a_forgotten_project_is_asked_again() {
++    let setup = Setup::new(THREADS);
++    assert_eq!(preview(&setup)["kind"], "read");
++
++    setup.repository.forget_project();
++
++    assert_eq!(preview(&setup)["kind"], "read");
++    assert_eq!((setup.count(AUTH_STATUS), setup.count(PROJECT)), (2, 2));
++}
+diff --git a/scripts/fake-glab/glab b/scripts/fake-glab/glab
+index 4e685a8..36b29b5 100755
+--- a/scripts/fake-glab/glab
++++ b/scripts/fake-glab/glab
+@@ -51,11 +51,27 @@ log "argv: $*"
+ log "cwd: $(pwd -P)"
+ log "env: NO_COLOR=${NO_COLOR-unset} GIT_TERMINAL_PROMPT=${GIT_TERMINAL_PROMPT-unset}"
+ 
++# $1 a file name in the scenario, $2 and $3 suffixes: "$scenario/$1.after-post-<k>" for the largest k ≤ the posts
++# counted for which "<that>$2" or "<that>$3" exists; nothing when there is none.
++after_post() {
++	k=$(text_or "${YAMT_FAKE_GLAB_STATE:-}" 0)
++	k=${k:-0}
++	while [ "$k" -gt 0 ]; do
++		if [ -f "$scenario/$1.after-post-$k$2" ] || [ -f "$scenario/$1.after-post-$k$3" ]; then
++			printf '%s' "$scenario/$1.after-post-$k"
++			return
++		fi
++		k=$((k - 1))
++	done
++}
++
+ auth_status() {
+-	if [ -f "$scenario/auth-status.out" ]; then
+-		cat "$scenario/auth-status.out" >&2
++	answers=$(after_post auth-status .out .exit)
++	answers=${answers:-$scenario/auth-status}
++	if [ -f "$answers.out" ]; then
++		cat "$answers.out" >&2
+ 	fi
+-	exit "$(text_or "$scenario/auth-status.exit" 0)"
++	exit "$(text_or "$answers.exit" 0)"
+ }
+ 
+ include=no
+@@ -64,12 +80,17 @@ input=
+ endpoint=
+ fields=
+ 
+-# $1 status line ("200 OK"), $2 the body, $3 (optional) a file holding what glab prints on stderr for an HTTP
+-# error instead of its own line: printed as glab prints an HTTP answer, then exits as glab does.
+-answer() {
++# $1 status line: what `--include` prints before the body.
++headers() {
+ 	if [ "$include" = yes ]; then
+ 		printf 'HTTP/2.0 %s\r\nContent-Type: application/json\r\n\r\n' "$1"
+ 	fi
++}
++
++# $1 status line ("200 OK"), $2 the body, $3 (optional) a file holding what glab prints on stderr for an HTTP
++# error instead of its own line: printed as glab prints an HTTP answer, then exits as glab does.
++answer() {
++	headers "$1"
+ 	printf '%s' "$2"
+ 	code=${1%% *}
+ 	if [ "$code" -lt 300 ]; then
+@@ -233,6 +254,23 @@ upload() {
+ 	serve_file "$scenario/uploads/${endpoint#projects/}"
+ }
+ 
++# The status line in api-status.after-post-<k>, for the largest k ≤ the posts counted with such a file: every call
++# answers it, a post uncounted. GraphQL answering 401 prints GitLab's error as glab 1.126.0 did against gitlab.com
++# (2026-11-04): no "(HTTP 401)". An empty file, or none, answers as usual.
++api_status() {
++	file=$(after_post api-status '' '')
++	[ -n "$file" ] || return 0
++	status=$(cat "$file")
++	[ -n "$status" ] || return 0
++	if [ "$endpoint" = graphql ] && [ "${status%% *}" = 401 ]; then
++		headers "$status"
++		printf '%s' '{"errors":[{"message":"Invalid token"}]}'
++		printf 'glab: Invalid token\n' >&2
++		exit 1
++	fi
++	answer "$status" "{\"message\":\"$status\"}"
++}
++
+ api() {
+ 	while [ $# -gt 0 ]; do
+ 		case $1 in
+@@ -267,6 +305,7 @@ api() {
+ 	if [ -z "$method" ]; then
+ 		if [ -n "$input" ] || [ -n "$fields" ]; then method=POST; else method=GET; fi
+ 	fi
++	api_status
+ 	case "$method $endpoint" in
+ 	# "Publish all pending draft notes" (docs.gitlab.com/api/draft_notes).
+ 	"POST "*/draft_notes/bulk_publish) post ;;
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index c19bc45..f796f23 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1,3 @@
+ Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114); the compare and range windows also over `yamt_merge_requests` for their merge-request page (plan §2 #128–#135, #137) and over `yamt_local_merge` for resolving a merge request's conflicts in this checkout, which the merge window then finishes, aborts or pushes (plan §2 #139–#143): `lib.rs` (`run`, `export_bindings`) shared by both bins, `from_start_dir` (every window's folder as given, through `appimage.rs` on Linux; the compare window's is `args.rs` `START_FOLDER`); `run` reads `YAMT_AI` (`AI_VAR`) once and hands its value to `args::parse`; `merge(repo)` keeps `Startup::Merge`'s window claim alive until `window::run` returns; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare { ai, start }`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai, start }` through `RangeSpec::parse`, whose error is the usage line; without `--repo` the repository is `START_FOLDER`, the folder yamt was started in; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, `Range` and `Compare` keep it as `Ai` = `Off` | `On`, the compare window only for the range windows its merge-request page opens, plan §2 #108, #144; `parse(args, ai_variable)` starts `ai` from `YAMT_AI`'s value — unset, empty or `0` off, any other value (non-UTF-8 too) on — and `--ai` turns it on regardless; `--mr` sets `StartScreen` = `Files` | `MergeRequests`, carried by `Compare` and `Range` only: without `--diff`/`--diff=<range>` it means `--diff` (so with `--repo` it is `--diff`'s usage error), twice is once), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative window folder is resolved against `OWD` by `repo_from_start_dir`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called through `from_start_dir` for every window; `running_appimage`: the `$APPIMAGE` file only inside the AppImage, else `None`, the program `second_window.rs` starts, since the mount the running binary lives in goes away with this process), `outcome.rs` (start-up decision, exit status 0/1/2: `MergeSession::open`'s error is exit 2; with a live record of a merge yamt started (`yamt_local_merge::find_live`) the window first takes `claim_window` — another window holding it is exit 2 "the merge of !<iid> is already open in another yamt window" (RK47), a git error exit 2 with its line — and opens even on a stop with no file; without a record and no file "nothing to merge in <root>", exit 0; `Startup::Merge { session, claim }`; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` and `Committed` 0 with `<operation> finished` (`merge finished` for `Committed`), `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing; its tests in `outcome/tests.rs`, the start-up ones on a merge yamt started with `merge/tests/merge_request.rs`'s repository helpers), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Committed { root, offer: PushOffer }` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` (also for `Committed`) outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted` (a `Committed` merge still asks whether to push); `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed, plus `merge_request`: the live record's `MergeView`, read fresh by `find_live` on every list (a git error → `Git`, through `ipc_error.rs`); every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` read the live record before they hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; the abort's worker runs git's abort and then, for a recorded merge, `LiveMerge::restore`, answering `AbortReply { leftovers }` (#140); a continue that finishes a recorded merge calls `LiveMerge::committed` and becomes `Committed`, answering `ContinueReply::ReadyToPush { branch }` (#141); `push_merged_branch` takes the offer out of `Committed` only (else `NoOperation`, RK45), pushes through `blocking_reply` while `Running(Merge)` — `Pushed` → `Finished(Merge)`, `Failed` or a panicked worker (`WorkerStopped`) → `Committed` again; `end_committed` (Keep Local): `Committed` → `Finished(Merge)`, any other state stays; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89, #140, #141; its tests in `merge/tests.rs` and, on `scripts/mr-conflict-repo.sh` with the merge started by `yamt_local_merge::start`, `merge/tests/merge_request.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage`, the merge-request page's through `merge_requests::manage` on the range's repository root with the window's `ai`, and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); `range_folder(app_folder)`, the folder pair locks live in, shared with `merge_requests.rs`; its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_in(repo, data, ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping, the private `lock` the only way to the state; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts a background thread that holds the state while `Workspace::remove_own_leftovers` removes this pair's partial and removing folders, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; the thread then releases the state and runs `yamt_agent::sweep_other_pairs` without it (`sweep_own_then_others(state, held, others)`, whose test sees the state free when `others` runs), so the looks at every other pair's kept checkout never hold up a command; `stop_agent_on_page_start(app, event)`: a page that starts loading stops the agent with `try_lock`; while a prepare, a start, a discard or the own-pair sweep holds the state, a thread waits for the lock and stops the agent then (deferred, never dropped), the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a worker command: under the lock it stops and reaps an earlier agent — up to about 3 s — and spawns the new one; a small thread forwards the agent's events into its `Channel` through `servers::forward`), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker, under the lock while the folder is removed; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`); its tests in `ai/tests.rs`), `review.rs` (the range window's threads and posting, plan §2 #117–#119, #121: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its tests in `review/tests.rs`, whose Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `merge_requests.rs` (the merge-request page of the compare and range windows, plan §2 #128–#135, #137, #139, #143, #144, #149, #150, #152, #153, #158, #162, #169, #171–#176, #180–#182: `manage(app, folder, app_folder, ai)` reads `folder`'s remotes once, offline, with `gitlab_repository` and manages `MergeRequestState { gitlab, range_dir, ai, pages: Mutex<BTreeSet<WebPage>>, merged: Mutex<MergedPairs>, pictures: Pictures, job_logs: JobLogs }`, `ai` the window's own `--ai`, `merged` the run's merged pairs; no GitLab remote → every list and open answers the one line `NO_PROJECT`, a re-request, a job log, each asked discussions row, a people search, a people change, a description read, a links read, a thread read, each thread write and a preview `Failed { NO_PROJECT }`, a resolve `GitLabRefused { Failed { NO_PROJECT } }`, a continue `Ended`, `find_local_merge` `Free`, every picture 404; `offer(state, pages, pictures)` (then `Pictures::offer`) and `offer_described(state, pages, uploads)` (then `Pictures::offer_uploads`) are the two writer paths of `pages`, each taking `pages` and then the pictures' shelf, one after the other, never together; `offer` is used by `merge_requests/list.rs` `forward_page` (`row_pages`: a row's page, then its failed jobs' pages), `discussions_reply` and `merge_requests/links.rs` `links_reply`, `offer_described` by `merge_requests/description.rs` `description_reply` and `merge_requests/discussion_thread.rs` `thread_reply` and `preview_reply`; the nineteen commands `find_gitlab_project`, `list_merge_requests` (a worker, `merge_requests/list.rs` `list`: every `MergeRequestPage` then one `ListEnd` as `ListMessage` on the call's `Channel`, the end on the channel too since tauri delivers a large channel message by a later fetch; each page's rows' and failed jobs' pages, and its `ListedPage.pictures`, offered through `offer` before it is sent; then, when the list reached the project, `check_conflicts` under `merged`, held for the whole check so a second load's check waits and merges nothing twice, sending each row the check changed as `ListMessage::Checked` (a send that fails is not logged: the check's one line per load); the command answers after the check), `open_merge_request` (a worker: `prepare_open` checks glab's login, asks glab for the merge request's commits, fetches them only when one is missing (plan §2 #132), tries the pair's lock, then `second_window::start_range` with the state's `ai`), `rerequest_review(iid, username)` (a worker, `rerequested`: `yamt_merge_requests::rerequest_review` on the repository, its `RerequestReply` the answer; the re-request mutation is its only write), `read_job_log(page)` (a worker, `merge_requests/job_logs.rs` `job_log_reply`: a page this window was never sent → `NotOffered` with a warning and no glab run; a `Log` kept for the page → that log without glab; no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_job_log`, and only a `Log` is kept), `read_discussions(iids)` (a worker, `merge_requests/discussions.rs` `discussions_reply`: no project → `unread_discussions(iids, NO_PROJECT)`; else `yamt_merge_requests::read_discussions`, then every answered note's page and the authors' uploaded pictures offered through `offer` before the rows are returned; `pages` never held while glab runs; plan §2 #162, RK60), `search_people(text)` and `change_people(iid, change)` (workers, `merge_requests/people.rs` `search_reply`/`change_reply`: no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::search_people`/`change_people`, then the people found, or everyone in GitLab's answered lists, offered through `Pictures::offer` before the reply is returned; a search writes nothing, a change one `APPEND` or `REMOVE` of one username; plan §2 #169, RK53, RK54), `read_description(iid)` (a worker, in `merge_requests/description.rs`, registered as `merge_requests::description::read_description`; `description_reply`: no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_description`, then its linked pages and its uploads offered through `offer_described` before the reply is returned; nothing written; plan §2 #171–#173, RK41, RK53), `read_links(iid)` (a worker, in `merge_requests/links.rs`, registered as `merge_requests::links::read_links`; `links_reply`: no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_links`, then every line's and parent's page offered through `offer`, with no pictures, before the reply is returned; `pages` never held while glab runs; nothing written; plan §2 #176, RK41), `read_discussion_thread(iid, discussion)`, `reply_to_discussion(iid, discussion, kind, text)`, `resolve_discussion(iid, discussion, resolve)`, `submit_review(iid)` and `preview_markdown(iid, text)` (workers, in `merge_requests/discussion_thread.rs`, registered after `read_links` as `merge_requests::discussion_thread::<name>`; a `discussion` that is not 40 lowercase hex fails deserialisation (`DiscussionId`), so no glab runs; `thread_reply`: no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_discussion_thread`, then the thread's comments' and links' pages and its uploads offered through `offer_described`, then its authors' and editors' uploaded pictures through `Pictures::offer`, each lock held alone, before the reply is returned; `preview_reply`: the same for `yamt_merge_requests::preview_markdown`'s pages and uploads, with no pictures; the three writes go through `written` (no project → `Failed { NO_PROJECT }`) and offer nothing, a write answering no page; each is exactly one glab call of the crate's, a blank reply none; plan §2 #180–#182, RK41, RK53, RK54), `resolve_merge_request` (a worker, `resolved`: `prepare_resolve` → `GitLabRefused`, `yamt_local_merge::start` → `Refused`, then the window start → `Started` or `WindowFailed { started, message }`), `continue_merge_request` (a worker, `continued`: no live record or another merge request's → `Ended` (a git error logged), its window open (`window_is_open`) → `AlreadyOpen`, else the window start → `Opened { branch, target }` or `WindowFailed`; nothing in git changes), `find_local_merge` (a worker: `yamt_local_merge::local_merge` on the repository) and `open_page` (only a merge request's, failed job's or note's page, a description's link, a links reply's line or parent page, a thread's comment or link page or a preview's link this window was sent reaches the browser, else `NotOffered` with the warning "a GitLab page this window was never sent"); `resolved` and `continued` take the window start as a parameter, the commands pass `second_window::start_merge`; glab is `Glab::find()` at each call; `pages` is locked only to add or look; `merge_requests/job_logs.rs` (plan §2 #158, RK57): `JobLogs`, the run's logs, a `Mutex<BTreeMap<WebPage, JobLog>>` holding the latest `Log` per page, a failure never kept so the next ask reads GitLab again; never locked while glab runs nor together with `pages`; `merge_requests/pictures.rs` (plan §2 #152, #173): the `yamt-picture` URI scheme, `PICTURE_SCHEME`, which `commands.rs` `with_commands` registers with `answer_picture`: `yamt-picture://localhost/<name>` answered on a `spawn_blocking` thread by `picture_answer`, the bytes glab fetched for a username (ASCII letters, digits, `.`, `_`, `-`) a list, a discussions reply, a thread reply, a people search or a people change of this run offered, or for an upload key (`UploadKey::is_key`: `upload~` and 32 lowercase hex digits) a description, thread or preview reply offered (its uploads API route, then its web path on 403/404), with their `Content-Type` and `X-Content-Type-Options: nosniff`, else — not offered, no glab, no GitLab remote, a failed fetch (logged with `tracing::warn!` "a picture was not fetched") — 404 with an empty body; `Pictures` is the one gate: a shelf `Mutex` (offered addresses, each fetch, a failure too, so one glab run per picture per run) and a `Condvar` the askers wait on for a running fetch or a free one of `PICTURE_FETCHES` (4), the shelf never locked together with another `Mutex` nor held across a glab run; its tests in `merge_requests/tests.rs` (`through_glab::opens_each`: pages opened through `open_page` and logged by the fake opener in order, skipped on macOS, shared by every page-offering command's test), `merge_requests/tests/resolve.rs`, `tests/rerequest.rs`, `tests/picture_scheme.rs`, `tests/job_log.rs` (a page no list offered, before a list and after one, runs no glab; a kept log runs none; a failure is not kept), `tests/discussions.rs` (a note page offered before the reply and opened, another note `notOffered`; an author's picture 404 → 200; no project fails each row; the command's JSON; the read's one `info` line pinned through `frontend_log::tests::logged`, counts and score only), `tests/people.rs` (a searched person's and every changed person's picture 404 → 200 after the reply, another person's still 404; no project fails search and change; both commands' JSON), `tests/description.rs` (a described page offered before the reply and opened, an address no reply named not; an upload 404 → 200 after the reply, served from its web path after the API's 404, an unoffered key 404 without glab; another site's image never fetched; no project fails the read; the command's JSON), `tests/links.rs` (a line's page and its parent's offered before the reply and opened; a page the reply did not name — a parent on another host, a milestone, another server's issue — `notOffered`; an unseen thing's address offered; no project fails the read; the command's JSON), `tests/discussion_thread.rs` (a thread's comment and link pages `notOffered` and its upload and its editor's picture 404 before the read, opened and served after; a preview's link likewise; the whole thread through the command, with its edits and drafts; a comment, a draft, a resolve, an unresolve and a submit each one logged write with its body; GitLab's refusals and failures as their reason; a blank reply and a discussion id that is not 40 hex run no glab; no project fails all five) and `tests/csp.rs` (`tauri.conf.json`'s `img-src` admits the scheme and any https image only; scripts, frames, media and fonts the app's only), whose Unix-only `through_glab` tests run in a child test process whose PATH starts with `scripts/fake-glab` and `scripts/fake-open`, on `scripts/range-repo.sh` and the scenarios `tests/glab/merge-requests`, `mr-row-details` (`mr-row-details/crowd` for the pictures' fetches), `mr-people`, `ci-job-log`, `mr-discussions`, `mr-description`, `mr-links`, `mr-threads` and `mr-threads-refused`, or on `scripts/mr-conflict-repo.sh` and `tests/glab/mr-conflicts` with a recording or failing window start), `second_window.rs` (a second yamt started by this one, plan §2 #132, #139, #144: `start_range(range, ai)`, `yamt --diff=<spec> --repo <root>`, then `--ai` when `ai` is `On`, a failed start → `OpenReply::StartFailed`; `start_merge(root)`, `yamt --repo <root>`, never `--ai` (the merge window has no AI), `Err` with why it did not start; both through one private `spawn`: in `root`, stdin and stdout closed, stderr inherited, in a process group of its own (Unix `process_group(0)`, Windows `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`) so it outlives this one and the terminal; the program is `appimage.rs` `running_appimage` when there is one, else `current_exe`; a thread reaps it and logs its exit; RK42's tests parse both argument lists with `args::parse`, the range's with and without `--ai`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (private, as is `context()`; `open_with_data_folder` and `window_title` are `pub(crate)` for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview with the start script; `WindowKind` = `Merge` | `Compare { start }` | `Range { ai, start }`, each kind with only the start options its start script reads (`name()`: merge, compare or range); `open_with_data_folder(title, kind, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; `run_compare(folder, ai, start)`: the compare window, titled `Compare — yamt`, manages its `TabStore` and `merge_requests::manage` on `folder` with `ai` (plan §2 #94 as amended for #130, #132; its start script never gets `data-ai`, it has no threads): it reads `folder`'s remotes at start and runs glab, and a fetch if needed, only for the merge-request page, never opens a `MergeSession` or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `start_script.rs` (`start_script(theme, kind)`: sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, `<html data-ai="on">` only for a range window started with `--ai`, and `<html data-open="mergeRequests">` only for a compare or range window started with `--mr`), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped` nor while `Committed`), which ends the event loop without a close request, so the page asks nothing — `abort_operation` only when `leftovers` is empty too (the page shows them first), `push_merged_branch` after `Pushed`; `close_ended_merge` ends a `Committed` merge (Keep Local) and destroys the window when the merge has ended, also after an abort with leftovers; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler, registers the `yamt-picture` scheme (`merge_requests::PICTURE_SCHEME` → `merge_requests::answer_picture`, asynchronous) and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` with the app handle, which does nothing without a `Mutex<AiState>` (every range window manages one, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one; its tests in `commands/tests.rs`), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; `forward`: the one rule that hands a run's events to its Tauri `Channel` and, when a send fails, drops them so the run stops itself, used by `start_server` and `ai::start_agent`; the six language server commands, plan §2 #70: `servers_context`, `start_server`, `send_to_server`, `stop_server`, `find_program`, `project_files`; its Unix-only test helpers `channel_into` and `is_alive` are shared with `ai.rs`), `settings.rs` (`Places` and the ten settings commands, `set_discussion_details` among them (plan §2 #163); `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line), from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`) and from `yamt_local_merge::Error` (`Git` and `LockFailed` → `Git` with their line), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; `blocking_reply`: a worker command's work on `spawn_blocking`, a panic logged and answered `WorkerStopped`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands/tests.rs`, `merge/tests.rs`, `merge/tests/merge_request.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` and `merge_requests/tests.rs` build their own mock windows and call `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`, and, on a merge yamt started, the `WindowClaim` held by `lib.rs` `merge()` for the window's life (a file lock, never a `Mutex`); compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (its long holders: a prepare while git makes the checkout, a start while it reaps the earlier agent (up to about 3 s), a discard while it removes the folder, and the start's own-pair sweep; meanwhile the sync `send_to_agent`/`stop_agent` wait on the main thread); compare and range windows: `MergeRequestState`'s `pages`, `merged` and `job_logs` `Mutex`es and the `Pictures` shelf (`merged` held for a whole local conflict check, never together with `pages`; the shelf and `job_logs` never across a glab run). Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout or sweeps other pairs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `agent`, `merge-requests` and `local-merge` only, never on `gitio` or `merge-core` (arch-check).
++
++The remembered GitLab login and project (plan §2 #187, RK75): `MergeRequestState.gitlab`'s `GitLabRepository`, built once per window, remembers the project glab named while logged in for the app's run (`yamt_merge_requests` `project.rs`); every GitLab action of the commands above reuses it. The twentieth command, `ask_gitlab_again` (a worker, `blocking_reply`, so it waits for a lookup in flight), forgets it for every explicit refresh — the page's Refresh and Retry and the discussions box's reload — so the next action asks `glab auth status` and `projects/:fullpath` again; no GitLab project → `Ok(null)`, nothing to forget, no glab run (`merge_requests/tests/remembered.rs`). The range window's review send keeps its own check.
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index b03c404..9887740 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -74,6 +74,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         ai::diff_texts,
+         clipboard::read_clipboard::<tauri::Wry>,
+         merge_requests::find_gitlab_project,
++        merge_requests::ask_gitlab_again::<tauri::Wry>,
+         merge_requests::list_merge_requests::<tauri::Wry>,
+         merge_requests::open_merge_request::<tauri::Wry>,
+         merge_requests::open_page,
+diff --git a/src-tauri/src/merge_requests.rs b/src-tauri/src/merge_requests.rs
+index c864632..0f26762 100644
+--- a/src-tauri/src/merge_requests.rs
++++ b/src-tauri/src/merge_requests.rs
+@@ -58,12 +58,12 @@ pub(crate) enum ContinueMergeReply {
+     WindowFailed { message: String },
+ }
+ 
+-/// The window's GitLab project, found once at start, the folder pair locks live in, the window's `--ai` that "Show
+-/// Diff" passes on, and every merge request's and failed job's page a list sent, every note's page
+-/// `read_discussions` sent, every page `read_description` sent, every line's and parent's page `read_links` sent,
+-/// every comment's and link's page `read_discussion_thread` sent and every link's page `preview_markdown` sent in
+-/// this run: only those may be opened or have their log read (plan §2 #128–#137); `pages` is never locked together
+-/// with another `Mutex`.
++/// The window's GitLab project, found once at start (glab's login and project remembered in it until
++/// `ask_gitlab_again`), the folder pair locks live in, the window's `--ai` that "Show Diff" passes on, and every
++/// merge request's and failed job's page a list sent, every note's page `read_discussions` sent, every page
++/// `read_description` sent, every line's and parent's page `read_links` sent, every comment's and link's page
++/// `read_discussion_thread` sent and every link's page `preview_markdown` sent in this run: only those may be opened
++/// or have their log read (plan §2 #128–#137); `pages` is never locked together with another `Mutex`.
+ pub(crate) struct MergeRequestState {
+     gitlab: Option<GitLabRepository>,
+     range_dir: PathBuf,
+@@ -230,6 +230,20 @@ pub(crate) fn find_gitlab_project(state: State<'_, MergeRequestState>) -> GitLab
+         .map_or(GitLabProject::None, GitLabRepository::project)
+ }
+ 
++/// Every explicit refresh — the page's Refresh and Retry, the discussions box's reload (plan §2 #187): the next GitLab
++/// action asks glab for the login and the project again; no GitLab project → nothing to forget.
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn ask_gitlab_again<R: Runtime>(window: WebviewWindow<R>) -> Result<(), IpcError> {
++    blocking_reply(move || {
++        if let Some(repository) = &window.state::<MergeRequestState>().gitlab {
++            repository.forget_project();
++        }
++        Ok(())
++    })
++    .await
++}
++
+ // The state comes from the window: tauri-macros 2.7 checks an async command with a borrowed
+ // argument such as `State<'_, _>` by an `unreachable!()` that clippy denies (command/wrapper.rs:222).
+ #[tauri::command]
+diff --git a/src-tauri/src/merge_requests/tests.rs b/src-tauri/src/merge_requests/tests.rs
+index 86edff6..b8f2f97 100644
+--- a/src-tauri/src/merge_requests/tests.rs
++++ b/src-tauri/src/merge_requests/tests.rs
+@@ -140,6 +140,9 @@ mod links;
+ #[cfg(unix)]
+ mod discussion_thread;
+ 
++#[cfg(unix)]
++mod remembered;
++
+ mod csp;
+ 
+ #[cfg(unix)]
+diff --git a/src-tauri/src/merge_requests/tests/discussions.rs b/src-tauri/src/merge_requests/tests/discussions.rs
+index e6d5057..571a330 100644
+--- a/src-tauri/src/merge_requests/tests/discussions.rs
++++ b/src-tauri/src/merge_requests/tests/discussions.rs
+@@ -152,7 +152,8 @@ fn the_log_line_on_paths_glab() {
+     let (_, log) = logged(reply);
+ 
+     let lines: Vec<&str> = log.lines().filter(|line| line.contains(" INFO ")).collect();
++    let asked = " INFO yamt_merge_requests::project: asked glab for the login and the project outcome=\"found\"";
+     let line = " INFO yamt_merge_requests::discussions: read merge requests' open discussions asked=4 \
+                 answered=3 failed=1 queries=2 score=58 limit=250";
+-    assert_eq!(lines, [line], "{log}");
++    assert_eq!(lines, [asked, line], "{log}");
+ }
+diff --git a/src-tauri/src/merge_requests/tests/job_log.rs b/src-tauri/src/merge_requests/tests/job_log.rs
+index 3d95347..34a9e8a 100644
+--- a/src-tauri/src/merge_requests/tests/job_log.rs
++++ b/src-tauri/src/merge_requests/tests/job_log.rs
+@@ -79,8 +79,8 @@ fn a_kept_log_on_paths_glab() {
+     assert_eq!(count(&argv, TRACE_302), 1, "{argv:?}");
+     assert_eq!(
+         count(&argv, AUTH_STATUS),
+-        auth_after_the_list + 1,
+-        "{argv:?}"
++        auth_after_the_list,
++        "the list's project is remembered: {argv:?}"
+     );
+ }
+ 
+diff --git a/src-tauri/src/merge_requests/tests/remembered.rs b/src-tauri/src/merge_requests/tests/remembered.rs
+new file mode 100644
+index 0000000..d8807e9
+--- /dev/null
++++ b/src-tauri/src/merge_requests/tests/remembered.rs
+@@ -0,0 +1,57 @@
++use super::through_glab::{glab_log, run_with_fakes};
++use super::*;
++
++const SCENARIO: &str = "mr-threads";
++const REFRESH_TEST: &str = "merge_requests::tests::remembered::refresh_on_paths_glab";
++const NO_PROJECT_TEST: &str = "merge_requests::tests::remembered::no_project_on_paths_glab";
++const AUTH_STATUS: &str = "argv: auth status";
++const PROJECT: &str = "argv: api projects/:fullpath";
++
++fn preview(window: &MergeRequestWindow) -> Value {
++    let args = json!({ "iid": 90, "text": "Hi" });
++    invoke(window, "preview_markdown", args).unwrap()
++}
++
++fn asked_both() -> (usize, usize) {
++    (glab_log(AUTH_STATUS).len(), glab_log(PROJECT).len())
++}
++
++#[test]
++fn refresh_asks_again() {
++    run_with_fakes(REFRESH_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by refresh_asks_again"]
++fn refresh_on_paths_glab() {
++    let window = open_window_in(gitlab_repo());
++
++    assert_eq!(preview(&window)["kind"], "read");
++    assert_eq!(preview(&window)["kind"], "read");
++    assert_eq!(asked_both(), (1, 1));
++    assert_eq!(
++        invoke(&window, "ask_gitlab_again", json!({})),
++        Ok(Value::Null)
++    );
++    assert_eq!(preview(&window)["kind"], "read");
++    assert_eq!(asked_both(), (2, 2));
++}
++
++#[test]
++fn ask_gitlab_again_without_a_project_does_nothing() {
++    run_with_fakes(NO_PROJECT_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by ask_gitlab_again_without_a_project_does_nothing"]
++fn no_project_on_paths_glab() {
++    let plain = TempDir::new().unwrap();
++    git_ok(plain.path(), &["init", "-q"]).unwrap();
++    let window = open_window_in(plain);
++
++    assert_eq!(
++        invoke(&window, "ask_gitlab_again", json!({})),
++        Ok(Value::Null)
++    );
++    assert_eq!(glab_log(""), Vec::<String>::new());
++}
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index 1df1a09..e63d17e 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -26,6 +26,8 @@ A Rust test that needs post n without making posts 1 to n − 1 first calls `Fak
+ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+ | `auth-status.out`                             | `glab auth status`: printed on **stderr**, as glab prints all of it                                                                                                                                                                                                                                                                                   |
+ | `auth-status.exit`                            | its exit status (missing = 0)                                                                                                                                                                                                                                                                                                                         |
++| `auth-status.after-post-<k>.out`, `.exit`     | once the state file counts n posts, for the largest k ≤ n for which either file exists: they replace `auth-status.out` and `.exit` (a missing one of the pair: no output, exit 0), so glab can log out or in again mid-test                                                                                                                                    |
++| `api-status.after-post-<k>`                   | for the largest k ≤ n with such a file: a status line (`401 Unauthorized`) makes every `glab api` call, any method or endpoint, answer it with the body `{"message":"<status line>"}`, stderr `glab: <status line> (HTTP <code>)` and exit 1 (status line and headers first with `--include`), counting no post; `graphql` answering 401 prints as glab does for GraphQL (below); an empty file answers as usual |
+ | `project.json`                                | `glab api` GET `projects/:fullpath`                                                                                                                                                                                                                                                                                                                   |
+ | `merge-requests.json`                         | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests`                                                                                                                                                                                                                                                                     |
+ | `merge-request-<iid>.json`                    | `glab api` GET `…/merge_requests/<iid>` for that iid                                                                                                                                                                                                                                                                                                  |
+@@ -78,6 +80,13 @@ Measured with `HOME` and `XDG_CONFIG_HOME` in a temporary folder (no token), aga
+   printed `HTTP/2.0 200 OK`, while curl saw a 302, on 2026-11-04; `internal/api/redirect.go`). A 3xx it does not
+   follow (no `Location`) is an error: stdout holds the body, stderr `glab: HTTP <code>` and a newline, exit 1
+   (`internal/commands/api/api.go`, `resp.StatusCode > 299`). The fake answers every 3xx so.
++- A GraphQL call GitLab answers 401 (`GITLAB_TOKEN=glpat-yamt-invalid-token glab api graphql -f query='query {
++  currentUser { username } }'`, glab 1.126.0 against gitlab.com on 2026-11-04): stdout `HTTP/2.0 401 Unauthorized`
++  with `--include`, the body `{"errors":[{"message":"Invalid token"}]}`, stderr `glab: Invalid token` — no
++  `(HTTP 401)` — exit 1. The same token on REST (`glab api projects/…`) prints `{"message":"401 Unauthorized"}` and
++  `glab: 401 Unauthorized (HTTP 401)`, exit 1.
++- Without a login (`HOME` and `XDG_CONFIG_HOME` in a temporary folder), `glab api --method POST markdown --input -`
++  for a public project answers GitLab's preview, exit 0 (2026-11-04).
+ - `glab auth status` with no token: everything on stderr — the instance (`gitlab.com`), the failed API call,
+   "No token found …", the ERROR box — and exit 1. `auth-status.out` in `runner/` is that text (trailing spaces
+   dropped).
+@@ -313,6 +322,12 @@ answered: <address or endpoint>            (a picture or a job's log, after its
+   post 2 `400 Bad Request` with `{"error":"note is missing"}` and its `.err`; post 3 fails before any answer (`.exit`
+   1, a deadline line); post 4 `500 Internal Server Error`. The preview fails: `markdown.exit` 1 with
+   "glab: 401 Unauthorized (HTTP 401)".
++- `mr-remembered/` — glab's login and project asked once, forgotten when wrong (`crates/merge-requests/tests/remembered.rs`):
++  `mr-threads/`'s project (`taskboard/taskboard` on gitlab.com), logged in, `markdown.json` a one-paragraph preview
++  ("Remembered"). What changes after k posts (set by `Fake::answered_posts(k)`): 1 → every api call `401
++  Unauthorized` and `glab auth status` logged out as `logged-out/` (exit 1); 2 → api as usual, logged in again; 3 →
++  api `401 Unauthorized`, still logged in; 4 → api `404 Project Not Found`; 5 → api `403 Forbidden`; 6 → api as
++  usual, `graphql-description-90.after-post-6.json` answering `project: null`.
+ 
+ ## Fake browser opener
+ 
+diff --git a/tests/glab/mr-remembered/api-status.after-post-1 b/tests/glab/mr-remembered/api-status.after-post-1
+new file mode 100644
+index 0000000..5e8804b
+--- /dev/null
++++ b/tests/glab/mr-remembered/api-status.after-post-1
+@@ -0,0 +1 @@
++401 Unauthorized
+diff --git a/tests/glab/mr-remembered/api-status.after-post-2 b/tests/glab/mr-remembered/api-status.after-post-2
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/glab/mr-remembered/api-status.after-post-3 b/tests/glab/mr-remembered/api-status.after-post-3
+new file mode 100644
+index 0000000..5e8804b
+--- /dev/null
++++ b/tests/glab/mr-remembered/api-status.after-post-3
+@@ -0,0 +1 @@
++401 Unauthorized
+diff --git a/tests/glab/mr-remembered/api-status.after-post-4 b/tests/glab/mr-remembered/api-status.after-post-4
+new file mode 100644
+index 0000000..16658f4
+--- /dev/null
++++ b/tests/glab/mr-remembered/api-status.after-post-4
+@@ -0,0 +1 @@
++404 Project Not Found
+diff --git a/tests/glab/mr-remembered/api-status.after-post-5 b/tests/glab/mr-remembered/api-status.after-post-5
+new file mode 100644
+index 0000000..ff6968d
+--- /dev/null
++++ b/tests/glab/mr-remembered/api-status.after-post-5
+@@ -0,0 +1 @@
++403 Forbidden
+diff --git a/tests/glab/mr-remembered/api-status.after-post-6 b/tests/glab/mr-remembered/api-status.after-post-6
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/glab/mr-remembered/auth-status.after-post-1.exit b/tests/glab/mr-remembered/auth-status.after-post-1.exit
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/glab/mr-remembered/auth-status.after-post-1.exit
+@@ -0,0 +1 @@
++1
+diff --git a/tests/glab/mr-remembered/auth-status.after-post-1.out b/tests/glab/mr-remembered/auth-status.after-post-1.out
+new file mode 100644
+index 0000000..de30a11
+--- /dev/null
++++ b/tests/glab/mr-remembered/auth-status.after-post-1.out
+@@ -0,0 +1,11 @@
++gitlab.com
++  x gitlab.com: API call failed: GET https://gitlab.com/api/v4/user: 401 {message: 401 Unauthorized}
++  ✓ Git operations for gitlab.com configured to use ssh protocol.
++  ✓ API calls for gitlab.com are made over https protocol.
++  ✓ REST API Endpoint: https://gitlab.com/api/v4/
++  ✓ GraphQL Endpoint: https://gitlab.com/api/graphql/
++  ! No token found (checked config file, keyring, and environment variables).
++
++   ERROR
++
++  X could not authenticate to one or more of the configured GitLab instances.
+diff --git a/tests/glab/mr-remembered/auth-status.after-post-2.exit b/tests/glab/mr-remembered/auth-status.after-post-2.exit
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/glab/mr-remembered/auth-status.after-post-2.exit
+@@ -0,0 +1 @@
++0
+diff --git a/tests/glab/mr-remembered/graphql-description-90.after-post-6.json b/tests/glab/mr-remembered/graphql-description-90.after-post-6.json
+new file mode 100644
+index 0000000..1442465
+--- /dev/null
++++ b/tests/glab/mr-remembered/graphql-description-90.after-post-6.json
+@@ -0,0 +1 @@
++{"data":{"project":null}}
+diff --git a/tests/glab/mr-remembered/markdown.json b/tests/glab/mr-remembered/markdown.json
+new file mode 100644
+index 0000000..ded7b7b
+--- /dev/null
++++ b/tests/glab/mr-remembered/markdown.json
+@@ -0,0 +1,3 @@
++{
++  "html": "<p data-sourcepos=\"1:1-1:10\" dir=\"auto\">Remembered</p>"
++}
+diff --git a/tests/glab/mr-remembered/project.json b/tests/glab/mr-remembered/project.json
+new file mode 100644
+index 0000000..de14b15
+--- /dev/null
++++ b/tests/glab/mr-remembered/project.json
+@@ -0,0 +1 @@
++{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.com/taskboard/taskboard"}

@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use yamt_gitio::{Glab, HttpCall};
 
-use crate::project::logged_in_project;
 use crate::query::{
     draft_reply_args, draft_reply_body, reply_args, reply_body, resolve_args, resolve_body,
     submit_review_args, submit_review_body,
@@ -125,8 +124,8 @@ fn written(
     logged(iid, write, sent(repository, glab, iid, write))
 }
 
-/// glab missing → `GlabMissing`; `logged_in_project`; then exactly one `Glab::send` of the write's argv and body. The
-/// reply, and GitLab's status when it answered.
+/// glab missing → `GlabMissing`; the remembered project; then exactly one `Glab::send` of the write's argv and body;
+/// a failure's words (`failure_words`) through `logged_out_after`. The reply, and GitLab's status when it answered.
 fn sent(
     repository: &GitLabRepository,
     glab: Option<&Glab>,
@@ -136,14 +135,29 @@ fn sent(
     let Some(glab) = glab else {
         return (DiscussionWriteReply::GlabMissing, None);
     };
-    let root = repository.root();
-    let project = match logged_in_project(glab, root) {
+    let project = match repository.logged_in_project(glab) {
         Ok(project) => project,
         Err(refused) => return (refused.into(), None),
     };
     let (args, body) = request(write, &project.full_path, iid);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    replied(glab.send(root, &args, Some(body)))
+    let call = glab.send(repository.root(), &args, Some(body));
+    let logged_out =
+        failure_words(&call).and_then(|words| repository.logged_out_after(glab, words));
+    let (reply, status) = replied(call);
+    match logged_out {
+        Some(detail) => (DiscussionWriteReply::NotLoggedIn { detail }, status),
+        None => (reply, status),
+    }
+}
+
+/// glab's line of a non-2xx answer, or its words when GitLab never answered; None for a 2xx.
+pub(super) fn failure_words(call: &HttpCall) -> Option<&str> {
+    match call {
+        HttpCall::Answered(answer) if answer.is_success() => None,
+        HttpCall::Answered(answer) => answer.glab_line.as_deref(),
+        HttpCall::NotAnswered(message) => Some(message),
+    }
 }
 
 /// The write's argv and stdin body (`query.rs`).

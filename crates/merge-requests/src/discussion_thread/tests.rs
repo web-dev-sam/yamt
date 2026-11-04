@@ -3,7 +3,7 @@ use yamt_conflict_repo::{TempDir, git_ok};
 use yamt_gitio::{Glab, HttpAnswer, HttpCall};
 
 use super::read::{self, offered, thread_from};
-use super::write::{self, Write, replied, request};
+use super::write::{self, Write, failure_words, replied, request};
 use super::*;
 use crate::discussions::sample::{
     answer, comment, discussion, hex, merge_request, open, project, system_note, with_id,
@@ -623,6 +623,21 @@ fn no_http_answer_or_a_5xx_fails() {
         replied(http(302, "", Some("glab: HTTP 302"))),
         (write_failed("glab: HTTP 302"), Some(302))
     );
+}
+
+#[test]
+fn a_write_s_failure_words_are_glabs_line_or_its_words_never_a_2xx_s() {
+    let unauthorized = "glab: 401 Unauthorized (HTTP 401)";
+    let notice = "A new version of glab is out";
+    let timed_out = HttpCall::NotAnswered("glab: timed out".to_owned());
+
+    assert_eq!(
+        failure_words(&http(401, "", Some(unauthorized))),
+        Some(unauthorized)
+    );
+    assert_eq!(failure_words(&http(500, "", None)), None);
+    assert_eq!(failure_words(&timed_out), Some("glab: timed out"));
+    assert_eq!(failure_words(&http(201, "{}", Some(notice))), None);
 }
 
 #[test]

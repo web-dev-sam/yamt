@@ -7,7 +7,7 @@ use yamt_gitio::Glab;
 use crate::open::OPENED;
 use crate::page::{NO_MERGE_REQUEST, NO_PROJECT, Nodes, graphql_data, listed};
 use crate::people::{People, ReviewerNode, is_awaiting_review, warn_unknown_review_state};
-use crate::project::{Project, logged_in_project};
+use crate::project::Project;
 use crate::query::{GRAPHQL_BODY_ARGS, rerequest_body, reviewers_args};
 use crate::{GitLabRepository, MergeRequestIid, Reviewer};
 
@@ -104,6 +104,8 @@ pub fn rerequest_review(
     reply
 }
 
+/// glab missing → `GlabMissing`; the remembered project; the fresh reviewers, then the mutation unless the reviewer
+/// already awaits a review; a `Failed` reply's words through `logged_out_after`.
 fn asked_again(
     repository: &GitLabRepository,
     glab: Option<&Glab>,
@@ -113,12 +115,27 @@ fn asked_again(
     let Some(glab) = glab else {
         return RerequestReply::GlabMissing;
     };
-    let root = repository.root();
-    let project = match logged_in_project(glab, root) {
+    let project = match repository.logged_in_project(glab) {
         Ok(project) => project,
         Err(refused) => return refused.into(),
     };
-    let reviewers = match fresh_reviewers(glab, root, &project, iid) {
+    let reply = rerequested(repository.root(), glab, &project, iid, username);
+    if let RerequestReply::Failed { message } = &reply
+        && let Some(detail) = repository.logged_out_after(glab, message)
+    {
+        return RerequestReply::NotLoggedIn { detail };
+    }
+    reply
+}
+
+fn rerequested(
+    root: &Path,
+    glab: &Glab,
+    project: &Project,
+    iid: MergeRequestIid,
+    username: &str,
+) -> RerequestReply {
+    let reviewers = match fresh_reviewers(glab, root, project, iid) {
         Ok(reviewers) => reviewers,
         Err(reply) => return reply,
     };
@@ -130,10 +147,10 @@ fn asked_again(
     };
     if is_awaiting_review(&asked.reviewer) {
         let nodes = reviewers.into_iter().map(|fresh| fresh.reviewer);
-        return requested(&project, nodes.collect());
+        return requested(project, nodes.collect());
     }
     let body = rerequest_body(&project.full_path, iid, &asked.id);
-    rereviewed(glab.post(root, &GRAPHQL_BODY_ARGS, body), &project)
+    rereviewed(glab.post(root, &GRAPHQL_BODY_ARGS, body), project)
 }
 
 /// The reviewers of merge request `iid` as GitLab has them now; a merge request not open is `NotOpen`.

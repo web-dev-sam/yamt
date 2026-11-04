@@ -3,7 +3,7 @@ use specta::Type;
 use yamt_gitio::Glab;
 
 use crate::page::NOT_FOUND;
-use crate::project::{Project, logged_in_project};
+use crate::project::Project;
 use crate::web_page::{ESCAPED_SLASH, is_web_path};
 use crate::{GitLabRepository, WebPage};
 
@@ -84,10 +84,15 @@ fn trace(
     if page.job_parts().is_none() {
         return Err(JobLogReply::NotOffered);
     }
-    let root = repository.root();
-    let project = logged_in_project(glab, root).map_err(JobLogReply::from)?;
+    let project = repository.logged_in_project(glab)?;
     let route = trace_route(&project, page).ok_or(JobLogReply::NotOffered)?;
-    glab.get(root, &["api", &route]).map_err(failure_reply)
+    let root = repository.root();
+    glab.get(root, &["api", &route]).map_err(|line| {
+        match repository.logged_out_after(glab, &line) {
+            Some(detail) => JobLogReply::NotLoggedIn { detail },
+            None => failure_reply(line),
+        }
+    })
 }
 
 fn log_reply(trace: &[u8]) -> JobLogReply {

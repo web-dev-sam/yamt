@@ -1,19 +1,30 @@
 use std::path::Path;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::Deserialize;
 use yamt_gitio::{AuthStatus, Glab};
 
+use crate::page::NO_PROJECT;
 use crate::web_page::HTTPS;
 use crate::{
-    DescriptionReply, DiscussionThreadReply, DiscussionWriteReply, DiscussionsAnswer, JobLogReply,
-    LinksReply, ListEnd, MarkdownPreviewReply, OpenReply, PeopleChangeReply, PeopleSearchReply,
-    RerequestReply, ResolveRefusal,
+    DescriptionReply, DiscussionThreadReply, DiscussionWriteReply, DiscussionsAnswer,
+    GitLabRepository, JobLogReply, LinksReply, ListEnd, MarkdownPreviewReply, OpenReply,
+    PeopleChangeReply, PeopleSearchReply, RerequestReply, ResolveRefusal,
 };
 
 /// glab fills `:fullpath` with the project of the folder's remotes (glab docs, `glab api`).
 const PROJECT_ROUTE: &str = "projects/:fullpath";
+/// glab's last line for a REST call GitLab answers 401 ends so (`glab: 401 Unauthorized (HTTP 401)`, measured with
+/// glab 1.126.0 against gitlab.com on 2026-11-04, `tests/glab/README.md`).
+const UNAUTHORIZED: &str = "(HTTP 401)";
+/// glab's whole line for a GraphQL call GitLab answers 401: GitLab's `errors[0].message`, no `(HTTP 401)` (measured
+/// with glab 1.126.0 against gitlab.com on 2026-11-04, `tests/glab/README.md`).
+const GRAPHQL_UNAUTHORIZED: &str = "glab: Invalid token";
+/// GitLab's words for a project it does not find or the reader may not see (`tests/glab/README.md:73-75`).
+const PROJECT_NOT_FOUND: &str = "404 Project Not Found";
 
 /// The GitLab project of the repository's remotes.
+#[derive(Clone)]
 pub(crate) struct Project {
     pub full_path: String,
     /// Its `web_url` after the origin: `/<full_path>` behind any sub-path GitLab is installed under; empty when
@@ -29,14 +40,95 @@ struct ProjectAnswer {
     web_url: String,
 }
 
-/// Why glab named no project: logged out, or a call failed.
+/// Why an action got no answer from GitLab: logged out, or a call failed.
 pub(crate) enum NoProject {
     NotLoggedIn { detail: String },
     Failed { message: String },
 }
 
-/// The project of the repository's remotes, asked once `glab auth status` says glab is logged in.
-pub(crate) fn logged_in_project(glab: &Glab, root: &Path) -> Result<Project, NoProject> {
+/// The project glab named for a repository while logged in, kept for the app's run (plan §2 #187). Only this module
+/// reads or writes it.
+#[derive(Default)]
+pub(crate) struct Remembered {
+    project: Mutex<Option<Project>>,
+}
+
+impl Remembered {
+    fn held(&self) -> MutexGuard<'_, Option<Project>> {
+        self.project.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn forget(&self, reason: &str) {
+        *self.held() = None;
+        tracing::info!(reason, "forgot GitLab's login and project");
+    }
+}
+
+impl GitLabRepository {
+    /// The remembered project; else `glab auth status` (logged out → `NotLoggedIn` with glab's first line, failed →
+    /// `Failed`) and `glab api projects/:fullpath`, remembered when found. The lock is held while asking, so actions
+    /// started together ask once; a refusal is never remembered. One `tracing::info!` per ask (outcome only).
+    pub(crate) fn logged_in_project(&self, glab: &Glab) -> Result<Project, NoProject> {
+        let mut remembered = self.remembered.held();
+        if let Some(project) = remembered.as_ref() {
+            return Ok(project.clone());
+        }
+        let asked = asked_project(glab, self.root());
+        let outcome = match &asked {
+            Ok(_) => "found",
+            Err(NoProject::NotLoggedIn { .. }) => "notLoggedIn",
+            Err(NoProject::Failed { .. }) => "failed",
+        };
+        tracing::info!(outcome, "asked glab for the login and the project");
+        let project = asked?;
+        *remembered = Some(project.clone());
+        Ok(project)
+    }
+
+    /// Forgets the remembered project (waiting for an ask in flight): the next action asks glab both again. One
+    /// `tracing::info!` with the reason (`refresh`, `login`, `project`).
+    pub fn forget_project(&self) {
+        self.remembered.forget("refresh");
+    }
+
+    /// `words`: the failure an action is about to reply with, after the project was found — a read's `Failed`
+    /// message, a write's `HttpAnswer::glab_line`, or `NO_PROJECT`. When `is_lost(words)`: forgets, then one `glab auth
+    /// status`; `Some(detail)` when it says logged out (the action replies `NotLoggedIn { detail }`), else None (the
+    /// action replies as today). Not lost → None, nothing forgotten, no glab run. Never repeats the action's call (RK54).
+    pub(crate) fn logged_out_after(&self, glab: &Glab, words: &str) -> Option<String> {
+        if !is_lost(words) {
+            return None;
+        }
+        let is_login = words.ends_with(UNAUTHORIZED) || words == GRAPHQL_UNAUTHORIZED;
+        self.remembered
+            .forget(if is_login { "login" } else { "project" });
+        match glab.auth_status(self.root()) {
+            AuthStatus::LoggedOut { detail } => Some(detail),
+            AuthStatus::LoggedIn | AuthStatus::Failed { .. } => None,
+        }
+    }
+
+    /// What an action replies for `message`, a failed call's words after the project was found: `NotLoggedIn` when
+    /// `logged_out_after` says so, else `Failed` with `message`.
+    pub(crate) fn refusal(&self, glab: &Glab, message: String) -> NoProject {
+        match self.logged_out_after(glab, &message) {
+            Some(detail) => NoProject::NotLoggedIn { detail },
+            None => NoProject::Failed { message },
+        }
+    }
+}
+
+/// Whether a failed call's words say the login is gone or the project is missing: they end `UNAUTHORIZED`, are
+/// `GRAPHQL_UNAUTHORIZED`, hold `PROJECT_NOT_FOUND`, or are `page.rs` `NO_PROJECT`. A 403 is not (design §1.4).
+fn is_lost(words: &str) -> bool {
+    words.ends_with(UNAUTHORIZED)
+        || words == GRAPHQL_UNAUTHORIZED
+        || words.contains(PROJECT_NOT_FOUND)
+        || words == NO_PROJECT
+}
+
+/// `glab auth status`, then the project of the repository's remotes once it says glab is logged in.
+fn asked_project(glab: &Glab, root: &Path) -> Result<Project, NoProject> {
     match glab.auth_status(root) {
         AuthStatus::LoggedIn => {}
         AuthStatus::LoggedOut { detail } => return Err(NoProject::NotLoggedIn { detail }),
@@ -223,5 +315,28 @@ mod tests {
         assert_eq!(web_path(http), "");
         let refused = project_from(br#"{"message":"404 Project Not Found"}"#);
         assert!(refused.is_err());
+    }
+
+    #[test]
+    fn is_lost_reads_glabs_words() {
+        let lost = [
+            "glab: 401 Unauthorized (HTTP 401)",
+            "glab: Invalid token",
+            "glab: 404 Project Not Found (HTTP 404)",
+            NO_PROJECT,
+        ];
+        for words in lost {
+            assert!(is_lost(words), "{words}");
+        }
+        let kept = [
+            "glab: 404 Not Found (HTTP 404)",
+            "glab: 403 Forbidden (HTTP 403)",
+            "glab timed out",
+            "glab: Invalid token for a moment",
+            "",
+        ];
+        for words in kept {
+            assert!(!is_lost(words), "{words}");
+        }
     }
 }

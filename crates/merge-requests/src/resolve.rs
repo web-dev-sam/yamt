@@ -1,11 +1,8 @@
-use std::path::Path;
-
 use serde::Deserialize;
 use yamt_gitio::Glab;
 
 use crate::open::{OPENED, require_branch_name};
 use crate::page::{NO_PROJECT, graphql_data, is_from_fork};
-use crate::project::logged_in_project;
 use crate::query::branches_args;
 use crate::remote::remote_for;
 use crate::{GitLabRepository, MergeRequestIid, ResolveRefusal, ResolveTarget};
@@ -41,9 +38,8 @@ pub fn prepare_resolve(
     let Some(glab) = glab else {
         return Err(ResolveRefusal::GlabMissing);
     };
-    let root = repository.root();
-    let full_path = logged_in_project(glab, root)?.full_path;
-    let branches = branches(glab, root, &full_path, iid)?;
+    let full_path = repository.logged_in_project(glab)?.full_path;
+    let branches = branches(repository, glab, &full_path, iid)?;
     if branches.state != OPENED {
         return Err(ResolveRefusal::NotOpen);
     }
@@ -56,7 +52,7 @@ pub fn prepare_resolve(
         return Err(ResolveRefusal::NoRemote { project: full_path });
     };
     Ok(ResolveTarget {
-        root: root.to_owned(),
+        root: repository.root().to_owned(),
         iid,
         remote: remote.name.clone(),
         branch: branches.source_branch,
@@ -64,18 +60,20 @@ pub fn prepare_resolve(
     })
 }
 
-/// The merge request's branches as GitLab has them now; no such merge request is `NotOpen`.
+/// The merge request's branches as GitLab has them now; no such merge request is `NotOpen`; the call's failure,
+/// GraphQL's errors and `NO_PROJECT` through `refusal`.
 fn branches(
+    repository: &GitLabRepository,
     glab: &Glab,
-    root: &Path,
     full_path: &str,
     iid: MergeRequestIid,
 ) -> Result<Branches, ResolveRefusal> {
+    let refused = |message| ResolveRefusal::from(repository.refusal(glab, message));
     let args = branches_args(full_path, iid);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let json = glab.get(root, &args).map_err(failed)?;
-    let data: BranchesData = graphql_data(&json).map_err(failed)?;
-    let project = data.project.ok_or_else(|| failed(NO_PROJECT.to_owned()))?;
+    let json = glab.get(repository.root(), &args).map_err(refused)?;
+    let data: BranchesData = graphql_data(&json).map_err(refused)?;
+    let project = data.project.ok_or_else(|| refused(NO_PROJECT.to_owned()))?;
     project.merge_request.ok_or(ResolveRefusal::NotOpen)
 }
 

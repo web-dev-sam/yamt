@@ -79,8 +79,8 @@ fn a_kept_log_on_paths_glab() {
     assert_eq!(count(&argv, TRACE_302), 1, "{argv:?}");
     assert_eq!(
         count(&argv, AUTH_STATUS),
-        auth_after_the_list + 1,
-        "{argv:?}"
+        auth_after_the_list,
+        "the list's project is remembered: {argv:?}"
     );
 }
 
