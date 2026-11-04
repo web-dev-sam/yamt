@@ -264,16 +264,16 @@ test("the_review_orders_the_smoke_expects", () => {
 
   expect(orders(reviewing({ kind: "me" }), FIXTURE_ME)).toEqual({
     normal: "!622 !618 !633 !623 !638 !608 !603",
-    review: "!618 !633 !623 !622 !638 !603 !608",
+    review: "!622 !618 !633 !623 !638 !603 !608",
     failed: null,
   });
   expect(orders(anna, "anna")).toEqual({
     normal: "!622 !602 !632 !630 !617 !612",
-    review: "!602 !622 !630 !612 !632 !617",
+    review: "!622 !602 !630 !612 !632 !617",
     failed: null,
   });
   expect(orders(withDraft(anna, "all"), "anna").review).toBe(
-    "!602 !622 !630 !627 !612 !606 !632 !617",
+    "!622 !602 !630 !627 !612 !632 !617 !606",
   );
   expect(orders(reviewing({ kind: "person", username: "chiara" }), "chiara")).toEqual({
     normal: "!638 !635 !630 !615 !614 !605",

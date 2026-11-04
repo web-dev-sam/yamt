@@ -1711,7 +1711,7 @@ test("review_mode_orders_the_shown_rows_and_a_late_answer_moves_them", async () 
   }));
   await settled();
 
-  expect(iids(live.slice.shownRows.value)).toEqual(iids([later, ...quiet, soonest, ...others]));
+  expect(iids(live.slice.shownRows.value)).toEqual(iids([soonest, later, ...quiet, ...others]));
   expect(live.slice.reviewSort.value).toEqual({ kind: "sorted", loading: 0 });
 });
 

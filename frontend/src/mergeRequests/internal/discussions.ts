@@ -30,7 +30,8 @@ export type Turn =
 export type TurnLine<D extends OpenDiscussion> = { readonly discussion: D; readonly turn: Turn };
 export type TurnCounts = {
   readonly viewersTurn: number;
-  readonly authorsTurn: number;
+  /** D3 (owner's answer 2429): discussions with a comment (`earlier` or `last`) whose author is the viewer. */
+  readonly viewerWrote: number;
   readonly total: number;
 };
 /** Whose turn the box and the review order speak for (request-mr-discussions rule 3, review-mode rule 5). */
@@ -133,16 +134,18 @@ export function discussionTurns<D extends OpenDiscussion>(
     });
 }
 
-/** How many are the viewer's turn (the box's header) and the author's (review mode's "waiting on the author", B5). */
+/** How many are the viewer's turn (the box's header) and how many the viewer wrote in (review mode's D3). */
 export function turnCounts(
   open: readonly OpenDiscussion[],
   viewer: string | null,
   author: string | null,
 ): TurnCounts {
-  const kinds = open.map((discussion) => turnOf(discussion, viewer, author).kind);
   return {
-    viewersTurn: kinds.filter((kind) => kind === "viewer").length,
-    authorsTurn: kinds.filter((kind) => kind === "author").length,
+    viewersTurn: open.filter((discussion) => turnOf(discussion, viewer, author).kind === "viewer")
+      .length,
+    viewerWrote: open.filter((discussion) =>
+      [...discussion.earlier, discussion.last].some((comment) => isUser(comment.author, viewer)),
+    ).length,
     total: open.length,
   };
 }
@@ -175,12 +178,18 @@ export function viewerPossessive(viewer: Viewer, at: "start" | "inside"): string
   return at === "start" ? "Your" : "your";
 }
 
-export function turnText(turn: Turn, viewer: Viewer): string {
+export function viewerAddressed(viewer: Viewer): string {
+  return viewer.kind === "me" ? "you" : viewer.name;
+}
+
+/** A1/A2: `author` is the merge request's author; "author" reads "<displayName(author)>'s turn", "Author's turn"
+ *  when null. Every other kind as today. */
+export function turnText(turn: Turn, viewer: Viewer, author: Person | null): string {
   switch (turn.kind) {
     case "viewer":
       return `${viewerPossessive(viewer, "start")} turn`;
     case "author":
-      return "Author's turn";
+      return author === null ? "Author's turn" : `${displayName(author)}'s turn`;
     case "person":
       return `${turn.name}'s turn`;
     case "waiting":
@@ -198,8 +207,7 @@ export function turnSummaryText({ viewersTurn, total }: TurnCounts, viewer: View
   if (total === 0) {
     return "No open discussions";
   }
-  const whom = viewer.kind === "me" ? "you" : viewer.name;
-  return `${viewersTurn} of ${total} ${viewersTurn === 1 ? "waits" : "wait"} for ${whom}`;
+  return `${viewersTurn} of ${total} ${viewersTurn === 1 ? "waits" : "wait"} for ${viewerAddressed(viewer)}`;
 }
 
 export function placeText(place: DiscussionPlace): string {

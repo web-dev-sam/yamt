@@ -1,0 +1,1035 @@
+diff --git a/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts b/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
+index ab570c5..7629dad 100644
+--- a/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
+@@ -264,16 +264,16 @@ test("the_review_orders_the_smoke_expects", () => {
+ 
+   expect(orders(reviewing({ kind: "me" }), FIXTURE_ME)).toEqual({
+     normal: "!622 !618 !633 !623 !638 !608 !603",
+-    review: "!618 !633 !623 !622 !638 !603 !608",
++    review: "!622 !618 !633 !623 !638 !603 !608",
+     failed: null,
+   });
+   expect(orders(anna, "anna")).toEqual({
+     normal: "!622 !602 !632 !630 !617 !612",
+-    review: "!602 !622 !630 !612 !632 !617",
++    review: "!622 !602 !630 !612 !632 !617",
+     failed: null,
+   });
+   expect(orders(withDraft(anna, "all"), "anna").review).toBe(
+-    "!602 !622 !630 !627 !612 !606 !632 !617",
++    "!622 !602 !630 !627 !612 !632 !617 !606",
+   );
+   expect(orders(reviewing({ kind: "person", username: "chiara" }), "chiara")).toEqual({
+     normal: "!638 !635 !630 !615 !614 !605",
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index eec230f..9003086 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -16,11 +16,11 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ 
+ `search` (request #2150): `searched(rows, text)` keeps a row whose title (as shown, "Draft: " included) contains the trimmed text in any case, or whose iid is a number the text names — a run of digits with no letter or digit beside it (`!1234`, `#1234`, a `…/merge_requests/1234` address, `0042` is 42; `v2`, `abc123`, `12ab`, `1e3` name nothing); blank text returns `rows` itself. Only loaded rows: it never asks GitLab.
+ 
+-Discussions (request `docs/slices/request-mr-discussions.md` rules 2, 3, 5, `docs/slices/request-mr-threads.md` B1–B6, design `docs/slices/briefs/mr-threads-design.md` option A §1.2, §4 items 1, 11, 12, plan §2 #163–#164, #179, RK71): `OpenDiscussion` (a `DiscussionPlace`, `earlier` — the person comments before the last, oldest first, each a `TurnComment { author, mentions }` — and its `last` comment, a `DiscussionNote` with its `mentions`) is structural, so the window's domain type passes in unchanged; a `Mention` is a GitLab user link (`@all`, groups and code never reach here). The turn rule is `turnOf(discussion, viewer, author)`, the viewer and the merge request's author as usernames (null: no viewer / unknown author); the starter is `earlier[0]`, else `last`; a deleted person (null) is never the viewer, the author or mentioned. B1, the viewer wrote the last comment: `author` when the viewer is not the author, else `waiting` when the author or a deleted person started it, else `person` (the starter). B2, else the viewer's turn (`viewer`) when there is a viewer and they are the author, wrote any comment (the starter included) or are mentioned in any. B3, else the first of: the last comment's first mention of someone other than its writer (`author` when that is the author, else `person`); `author` when the last comment is not the author's (a deleted writer included); `person` for a starter who is not the author; `open`. A `person` turn is named by `displayName`. `discussionTurns(open, viewer, author)` orders the viewer's turn first, then every other, newest last comment first within each, equal times in GitLab's order; `turnCounts` gives `viewersTurn` (the box's header), `authorsTurn` (review mode's "waiting on the author") and `total`. `Viewer` is whose turn the words speak for: `me { username | null }` or `person { username, name }`; `viewerOf(review, me, rows)` gives `me` for no review, Me, or a person whose username is `me`, else the person named by `displayName` of the first row reviewer with that username, else the username. Words: `DISCUSSIONS_LABEL` "Open discussions", `turnText(turn, viewer)` "Your turn" / "Anna Berg's turn" (viewer), "Author's turn", "Ben Okafor's turn" (person), "Waiting for an answer", "Open", `turnSummaryText(counts, viewer)` "2 of 5 wait for you", "1 of 5 waits for Anna Berg", "No open discussions" when there are none, `placeText` "Overview", `path:line` or the path alone, `noteAuthorName` the display name or `UNKNOWN_AUTHOR` "Someone", `agoText`. `noteExcerpt`: the body trimmed, its first three lines (`\n` or `\r\n`), at most 280 code points; when anything was left out it is cut there, end-trimmed, plus "…". Plain text: markup and capitals stay as typed.
++Discussions (request `docs/slices/request-mr-discussions.md` rules 2, 3, 5, `docs/slices/request-mr-threads.md` B1–B6, design `docs/slices/briefs/mr-threads-design.md` option A §1.2, §4 items 1, 11, 12, plan §2 #163–#164, #179, request `docs/slices/request-mr-review-fixes.md` A1, A2, D3, RK71): `OpenDiscussion` (a `DiscussionPlace`, `earlier` — the person comments before the last, oldest first, each a `TurnComment { author, mentions }` — and its `last` comment, a `DiscussionNote` with its `mentions`) is structural, so the window's domain type passes in unchanged; a `Mention` is a GitLab user link (`@all`, groups and code never reach here). The turn rule is `turnOf(discussion, viewer, author)`, the viewer and the merge request's author as usernames (null: no viewer / unknown author); the starter is `earlier[0]`, else `last`; a deleted person (null) is never the viewer, the author or mentioned. B1, the viewer wrote the last comment: `author` when the viewer is not the author, else `waiting` when the author or a deleted person started it, else `person` (the starter). B2, else the viewer's turn (`viewer`) when there is a viewer and they are the author, wrote any comment (the starter included) or are mentioned in any. B3, else the first of: the last comment's first mention of someone other than its writer (`author` when that is the author, else `person`); `author` when the last comment is not the author's (a deleted writer included); `person` for a starter who is not the author; `open`. A `person` turn is named by `displayName`. `discussionTurns(open, viewer, author)` orders the viewer's turn first, then every other, newest last comment first within each, equal times in GitLab's order; `turnCounts` gives `viewersTurn` (the box's header and the discussions button's mark), `viewerWrote` (the discussions with a comment, `earlier` or `last`, whose author is the viewer; a mention alone does not count; review mode's D3) and `total`. `Viewer` is whose turn the words speak for: `me { username | null }` or `person { username, name }`; `viewerOf(review, me, rows)` gives `me` for no review, Me, or a person whose username is `me`, else the person named by `displayName` of the first row reviewer with that username, else the username. Words: `DISCUSSIONS_LABEL` "Open discussions", `turnText(turn, viewer, author)` "Your turn" / "Anna Berg's turn" (viewer), "Dmitri Volkov's turn" (author: the merge request's author by `displayName`; "Author's turn" when GitLab gives none), "Ben Okafor's turn" (person), "Waiting for an answer", "Open", `turnSummaryText(counts, viewer)` "2 of 5 wait for you", "1 of 5 waits for Anna Berg", "No open discussions" when there are none, `placeText` "Overview", `path:line` or the path alone, `noteAuthorName` the display name or `UNKNOWN_AUTHOR` "Someone", `agoText`. `noteExcerpt`: the body trimmed, its first three lines (`\n` or `\r\n`), at most 280 code points; when anything was left out it is cut there, end-trimmed, plus "…". Plain text: markup and capitals stay as typed.
+ 
+-The viewer's possessive is `viewerPossessive(viewer, at)` alone ("Your"/"your" by `at`, a person "Anna Berg's"): `turnText` reads it at `start`, `reviewSortedText` and `reviewFailedText` `inside`.
++The viewer's possessive is `viewerPossessive(viewer, at)` alone ("Your"/"your" by `at`, a person "Anna Berg's"): `turnText` reads it at `start`, `reviewSortedText` and `reviewFailedText` `inside`. The viewer addressed is `viewerAddressed(viewer)` alone ("you", a person's name): `turnSummaryText` and `reviewSortedText` read it.
+ 
+-Review mode (request `docs/slices/request-mr-review-mode.md` rules 1–3, 5, 6, design `docs/slices/briefs/mr-review-mode-design.md` option A §1.1–1.5): `ReviewFor` is Me or a person, never "None"; it is `Filters.review` (null: the normal order). `reviewing(who)` is Reviewer = who included, Draft ready, every other filter off; every other edit spreads the filters, so it keeps `review`; `NO_FILTERS` has none, so Clear filters ends it; `isFiltered` counts it. `stored` writes it as a fifth key `review`, `"me"` or `"user:<username>"` (the person words), only while it is set, so the four other keys are exactly what an older yamt reads; "none", junk or a non-string reads as off. `reviewChoices` is the picker: the Reviewer filter's choices without "None", in their order, the chosen one `included`. `reviewOrdered(rows, reviewer, dueOf, detailsOf)` (`reviewOrder`; a row carries its `author`): the normal order (`byDueDate`); the first row in it whose `ReviewDetails` are `failed` gives `failed` with that row and the window's own failure value, the rows left in the normal order; else one stable sort: due rows with at least one discussion that is the reviewer's turn first (keeping the normal order), then the rest by fewest waiting on the author (`turnCounts(…, reviewer, row author).authorsTurn`, the discussions reading "Author's turn", request-mr-threads B5; `none` and `loading` count as no discussion), and `loading` is how many rows have not arrived. Words: `reviewSortedText` "Sorted for your review: due with your turn first, then fewest waiting on the author" (a person: "Sorted for Anna Berg's review: due with their turn first, …"), plus " (the discussions of 1 merge request are still loading; it moves when they arrive)" or "… of 3 merge requests … they move …"; `reviewFailedText` "Not sorted for your review: the discussions of !633 could not be read. <reason>".
++Review mode (request `docs/slices/request-mr-review-mode.md` rules 1–3, 5, 6, `docs/slices/request-mr-review-fixes.md` D1–D5, design `docs/slices/briefs/mr-review-mode-design.md` option A §1.1–1.5): `ReviewFor` is Me or a person, never "None"; it is `Filters.review` (null: the normal order). `reviewing(who)` is Reviewer = who included, Draft ready, every other filter off; every other edit spreads the filters, so it keeps `review`; `NO_FILTERS` has none, so Clear filters ends it; `isFiltered` counts it. `stored` writes it as a fifth key `review`, `"me"` or `"user:<username>"` (the person words), only while it is set, so the four other keys are exactly what an older yamt reads; "none", junk or a non-string reads as off. `reviewChoices` is the picker: the Reviewer filter's choices without "None", in their order, the chosen one `included`. `reviewOrdered(rows, reviewer, dueOf, detailsOf)` (`reviewOrder`; a row carries its `author`): the normal order (`byDueDate`); the first row in it whose `ReviewDetails` are `failed` gives `failed` with that row and the window's own failure value, the rows left in the normal order; else one stable sort of the normal order by `turnCounts(…, reviewer, row author)`: D1 the due day, rows with one first, the soonest on top (`compareDays`; an overdue day is sooner than today's); D2 `viewersTurn`, most first; D3 `viewerWrote`, fewest first; D4 a tie keeps the normal order (newest first). `none` and `loading` count as 0 and 0 (`NO_TURNS`), and `loading` is how many rows have not arrived. Words: `reviewSortedText` "Sorted for your review: soonest due date first, then most discussions waiting for you, then fewest discussions you wrote in" (a person: "Sorted for Anna Berg's review: soonest due date first, then most discussions waiting for Anna Berg, then fewest discussions Anna Berg wrote in"), plus " (the discussions of 1 merge request are still loading; it moves when they arrive)" or "… of 3 merge requests … they move …"; `reviewFailedText` "Not sorted for your review: the discussions of !633 could not be read. <reason>".
+ 
+ Job log (request `docs/slices/request-ci-job-log.md` rules 4–6, design `docs/slices/briefs/ci-job-log-design.md` §1.2, §1.7–1.9, plan §2 #159): `jobLogView(raw)` turns the raw `/trace` text into `LogLine`s of styled `LogRun`s as GitLab's job page shows it (`lib/gitlab/ci/ansi2json/converter.rb`, `parser.rb`, `style.rb`, `line.rb`; bold from `ansi2html.rb`), in one scan: a break is `\r*\n`; the 32-character timestamp prefix is stripped from every line when the first line has it, and a line whose prefix ends in `+` continues the one before (only the `\n` goes, a `\r` before it then clears); `section_start`/`section_end` markers vanish and end a line that has text; a lone `\r` clears the line; only `ESC[…m` (SGR) is applied, by GitLab's exact-text code table (`sgr.ts` `penAfter`: `01` is nothing, `38;5;n` an indexed colour, `38;2;…` no truecolor, its numbers read as codes); every other escape, and C0 controls but tab, vanish; an escape cut off at a line's end drops the rest; 30–37 show bright while bold; the style carries across lines; a line without text is not shown; neighbouring text in equal styles is one run. Run text is text, never markup (RK57). `text` is the shown lines joined by `"\n"`: what the page's `search/` matcher runs over; `hitPlaces` maps its `{ line, from, to }` hits onto runs (a `from` at a run's end starts the next run, a `to` there ends in that run; a hit outside the view is left out). `basicColour` turns a 256-colour index into one of the 16 `AnsiColour`s, 16–255 the nearest on xterm's default palette (the triples classify, never paint: the page maps `AnsiColour` to the `--color-ansi-*` tokens). `jobLogSearch`: `firstHit` the last match, `steppedHit` wraps both ways, `hitCountText` "3 of 17", `NO_RESULTS`; for the page's highlights only the lines near the view count: `firstLineBelow(count, edge, y)` the first line whose growing `edge` is past `y` (binary search), `placesOnLines(places, first, end)` the places on lines `first` to `end` exclusive (binary search on the line order `hitPlaces` gives).
+ 
+diff --git a/frontend/src/mergeRequests/internal/discussions.test.ts b/frontend/src/mergeRequests/internal/discussions.test.ts
+index f055b7a..005e80c 100644
+--- a/frontend/src/mergeRequests/internal/discussions.test.ts
++++ b/frontend/src/mergeRequests/internal/discussions.test.ts
+@@ -25,12 +25,13 @@ type Said = readonly [writer: string | null, ...mentioned: string[]];
+ 
+ const SAM: Person = { username: "sam", name: "Sam Weller" };
+ const ANNA: Person = { username: "anna", name: "Anna Berg" };
++const DMITRI: Person = { username: "dmitri", name: "Dmitri Volkov" };
+ const PEOPLE: Readonly<Record<string, Person>> = {
+   sam: SAM,
+   anna: ANNA,
+   ben: { username: "ben", name: "Ben Okafor" },
+   chiara: { username: "chiara", name: "Chiara Rossi" },
+-  dmitri: { username: "dmitri", name: "Dmitri Volkov" },
++  dmitri: DMITRI,
+   kim: { username: "kim", name: " " },
+ };
+ const ME_SAM: Viewer = { kind: "me", username: "sam" };
+@@ -91,12 +92,13 @@ function words(
+   viewer = ME_SAM,
+   author: string | null = "dmitri",
+ ): string {
+-  return turnText(turnOf(discussion, viewer.username, author), viewer);
++  const person = author === null ? null : mentionOf(author);
++  return turnText(turnOf(discussion, viewer.username, author), viewer, person);
+ }
+ 
+ test("b1_the_viewer_wrote_last_so_it_is_the_authors_turn", () => {
+   expect(turnOf(said(["anna"], ["sam"]), "sam", "dmitri")).toEqual({ kind: "author" });
+-  expect(words(said(["sam"], ["anna", "sam"], ["sam"]))).toBe("Author's turn");
++  expect(words(said(["sam"], ["anna", "sam"], ["sam"]))).toBe("Dmitri Volkov's turn");
+   expect(words(said(["sam"]), ME_SAM, null)).toBe("Author's turn");
+ });
+ 
+@@ -119,7 +121,7 @@ test("b1_the_author_started_and_wrote_last_so_it_waits", () => {
+ 
+ test("b1_a_deleted_starter_waits", () => {
+   expect(words(said([null], ["sam"]), ME_SAM, "sam")).toBe("Waiting for an answer");
+-  expect(words(said([null], ["sam"]))).toBe("Author's turn");
++  expect(words(said([null], ["sam"]))).toBe("Dmitri Volkov's turn");
+ });
+ 
+ test("b2_the_viewer_started_it", () => {
+@@ -131,7 +133,7 @@ test("b2_the_viewer_is_mentioned_by_someone_else_and_never_wrote", () => {
+   expect(words(said(["ben", "sam"], ["chiara"]))).toBe("Your turn");
+   expect(words(said(["ben"], ["dmitri", "anna", "sam"]))).toBe("Your turn");
+   expect(words(said(["ben"], [null, "sam"]))).toBe("Your turn");
+-  expect(words(said(["ben", "anna"], ["chiara"]))).toBe("Author's turn");
++  expect(words(said(["ben", "anna"], ["chiara"]))).toBe("Dmitri Volkov's turn");
+ });
+ 
+ test("b2_a_mention_counts_after_the_viewer_answered", () => {
+@@ -157,12 +159,12 @@ test("b3_the_last_comment_mentions_someone", () => {
+   expect(words(said(["chiara"], ["anna", "ben"]))).toBe("Ben Okafor's turn");
+   expect(words(said(["chiara"], ["anna", "ben", "chiara"]))).toBe("Ben Okafor's turn");
+   expect(words(said(["chiara"], [null, "ben"]))).toBe("Ben Okafor's turn");
+-  expect(words(said(["chiara", "ben"], ["anna"]))).toBe("Author's turn");
++  expect(words(said(["chiara", "ben"], ["anna"]))).toBe("Dmitri Volkov's turn");
+ });
+ 
+ test("b3_the_last_comment_is_not_the_authors", () => {
+-  expect(words(said(["anna"], ["anna"]))).toBe("Author's turn");
+-  expect(words(said(["dmitri"], ["anna"]))).toBe("Author's turn");
++  expect(words(said(["anna"], ["anna"]))).toBe("Dmitri Volkov's turn");
++  expect(words(said(["dmitri"], ["anna"]))).toBe("Dmitri Volkov's turn");
+ });
+ 
+ test("b3_the_author_answered_the_starter", () => {
+@@ -182,15 +184,15 @@ test("b3_only_the_author_wrote_so_it_is_open", () => {
+ 
+ test("b3_a_mention_of_the_author_is_the_authors_turn", () => {
+   expect(turnOf(said(["chiara"], ["ben", "dmitri"]), "sam", "dmitri")).toEqual({ kind: "author" });
+-  expect(words(said(["chiara"], ["ben", "dmitri", "anna"]))).toBe("Author's turn");
++  expect(words(said(["chiara"], ["ben", "dmitri", "anna"]))).toBe("Dmitri Volkov's turn");
+ });
+ 
+ test("b3_all_and_group_mentions_are_no_mentions", () => {
+-  expect(words(said(["ben"], ["chiara"]))).toBe("Author's turn");
++  expect(words(said(["ben"], ["chiara"]))).toBe("Dmitri Volkov's turn");
+ });
+ 
+ test("b3_a_self_mention_is_no_mention", () => {
+-  expect(words(said(["chiara", "chiara"]))).toBe("Author's turn");
++  expect(words(said(["chiara", "chiara"]))).toBe("Dmitri Volkov's turn");
+   expect(words(said(["chiara", "chiara", "ben"]))).toBe("Ben Okafor's turn");
+ });
+ 
+@@ -205,37 +207,52 @@ test("b4_header_counts_only_the_viewers_turn_and_orders_them_first", () => {
+   ];
+   expect(
+     discussionTurns(open, "sam", "dmitri").map(
+-      ({ discussion, turn }) => `${discussion.id} ${turnText(turn, ME_SAM)}`,
++      ({ discussion, turn }) => `${discussion.id} ${turnText(turn, ME_SAM, DMITRI)}`,
+     ),
+   ).toEqual([
+     "mine-new Your turn",
+     "mine-old Your turn",
+     "mine-tied Your turn",
+-    "waiting Author's turn",
++    "waiting Dmitri Volkov's turn",
+     "open Open",
+-    "theirs-old Author's turn",
++    "theirs-old Dmitri Volkov's turn",
+   ]);
+   const counts = turnCounts(open, "sam", "dmitri");
+-  expect(counts).toEqual({ viewersTurn: 3, authorsTurn: 2, total: 6 });
++  expect(counts).toEqual({ viewersTurn: 3, viewerWrote: 3, total: 6 });
+   expect(turnSummaryText(counts, ME_SAM)).toBe("3 of 6 wait for you");
+-  expect(turnCounts([], "sam", "dmitri")).toEqual({ viewersTurn: 0, authorsTurn: 0, total: 0 });
++  expect(turnCounts([], "sam", "dmitri")).toEqual({ viewersTurn: 0, viewerWrote: 0, total: 0 });
++});
++
++test("viewer_wrote_counts_earlier_and_last_comments_never_a_mention_alone", () => {
++  const open = [
++    said(["sam"], ["anna"]),
++    said(["anna"], ["sam"]),
++    said(["anna"], ["sam"], ["anna"], ["sam"]),
++    said(["ben", "sam"], ["ben"]),
++    said(["anna", "sam"]),
++    said(["dmitri"]),
++  ];
++  expect(turnCounts(open, "sam", "dmitri").viewerWrote).toBe(3);
++  expect(turnCounts(open, "anna", "dmitri").viewerWrote).toBe(4);
++  expect(turnCounts(open, null, "dmitri").viewerWrote).toBe(0);
++  expect(turnCounts([said([null], [null])], null, "dmitri").viewerWrote).toBe(0);
+ });
+ 
+ test.each([
+-  [{ viewersTurn: 2, authorsTurn: 0, total: 5 }, "2 of 5 wait for you"],
+-  [{ viewersTurn: 1, authorsTurn: 2, total: 5 }, "1 of 5 waits for you"],
+-  [{ viewersTurn: 1, authorsTurn: 0, total: 1 }, "1 of 1 waits for you"],
+-  [{ viewersTurn: 0, authorsTurn: 3, total: 3 }, "0 of 3 wait for you"],
+-  [{ viewersTurn: 0, authorsTurn: 0, total: 0 }, "No open discussions"],
++  [{ viewersTurn: 2, viewerWrote: 0, total: 5 }, "2 of 5 wait for you"],
++  [{ viewersTurn: 1, viewerWrote: 2, total: 5 }, "1 of 5 waits for you"],
++  [{ viewersTurn: 1, viewerWrote: 0, total: 1 }, "1 of 1 waits for you"],
++  [{ viewersTurn: 0, viewerWrote: 3, total: 3 }, "0 of 3 wait for you"],
++  [{ viewersTurn: 0, viewerWrote: 0, total: 0 }, "No open discussions"],
+ ])("the_summary_counts_words_singular_and_plural: %o reads %s", (counts, text) => {
+   expect(turnSummaryText(counts, ME_SAM)).toBe(text);
+   expect(turnSummaryText(counts, NOBODY)).toBe(text);
+ });
+ 
+ test.each([
+-  [{ viewersTurn: 2, authorsTurn: 1, total: 5 }, "2 of 5 wait for Anna Berg"],
+-  [{ viewersTurn: 1, authorsTurn: 1, total: 5 }, "1 of 5 waits for Anna Berg"],
+-  [{ viewersTurn: 0, authorsTurn: 0, total: 0 }, "No open discussions"],
++  [{ viewersTurn: 2, viewerWrote: 1, total: 5 }, "2 of 5 wait for Anna Berg"],
++  [{ viewersTurn: 1, viewerWrote: 1, total: 5 }, "1 of 5 waits for Anna Berg"],
++  [{ viewersTurn: 0, viewerWrote: 0, total: 0 }, "No open discussions"],
+ ])("the summary for another reviewer: %o reads %s", (counts, text) => {
+   expect(turnSummaryText(counts, AS_ANNA)).toBe(text);
+ });
+@@ -245,7 +262,7 @@ test("b5_review_mode_speaks_for_the_reviewer", () => {
+   expect(turnOf(case6, "ben", "dmitri")).toEqual({ kind: "viewer" });
+   expect(words(case6, AS_BEN)).toBe("Ben Okafor's turn");
+   expect(words(said(["anna"], ["sam"]), AS_ANNA)).toBe("Anna Berg's turn");
+-  expect(words(said(["anna"], ["sam"]), ME_SAM)).toBe("Author's turn");
++  expect(words(said(["anna"], ["sam"]), ME_SAM)).toBe("Dmitri Volkov's turn");
+ });
+ 
+ test("b6_a_deleted_person_is_never_viewer_author_or_mentioned", () => {
+@@ -268,23 +285,30 @@ test("no_viewer_is_never_the_viewers_turn", () => {
+   });
+   expect(turnCounts([said(["anna"], ["ben"]), said(["dmitri"])], null, "dmitri")).toEqual({
+     viewersTurn: 0,
+-    authorsTurn: 1,
++    viewerWrote: 0,
+     total: 2,
+   });
+ });
+ 
+ test("the_turn_words_are_not_swapped", () => {
+-  expect(turnText({ kind: "viewer" }, ME_SAM)).toBe("Your turn");
+-  expect(turnText({ kind: "author" }, ME_SAM)).toBe("Author's turn");
+-  expect(turnText({ kind: "person", username: "ben", name: "Ben Okafor" }, AS_ANNA)).toBe(
++  expect(turnText({ kind: "viewer" }, ME_SAM, DMITRI)).toBe("Your turn");
++  expect(turnText({ kind: "person", username: "ben", name: "Ben Okafor" }, AS_ANNA, DMITRI)).toBe(
+     "Ben Okafor's turn",
+   );
+-  expect(turnText({ kind: "waiting" }, AS_ANNA)).toBe("Waiting for an answer");
+-  expect(turnText({ kind: "open" }, ME_SAM)).toBe("Open");
+-  expect(turnText({ kind: "viewer" }, AS_ANNA)).toBe("Anna Berg's turn");
++  expect(turnText({ kind: "waiting" }, AS_ANNA, DMITRI)).toBe("Waiting for an answer");
++  expect(turnText({ kind: "open" }, ME_SAM, DMITRI)).toBe("Open");
++  expect(turnText({ kind: "viewer" }, AS_ANNA, DMITRI)).toBe("Anna Berg's turn");
+   expect(DISCUSSIONS_LABEL).toBe("Open discussions");
+ });
+ 
++test("the_authors_turn_names_the_author", () => {
++  expect(turnText({ kind: "author" }, ME_SAM, DMITRI)).toBe("Dmitri Volkov's turn");
++  expect(turnText({ kind: "author" }, AS_ANNA, ANNA)).toBe("Anna Berg's turn");
++  expect(turnText({ kind: "author" }, ME_SAM, { username: "kim", name: " " })).toBe("kim's turn");
++  expect(turnText({ kind: "author" }, ME_SAM, null)).toBe("Author's turn");
++  expect(words(said(["sam"]), ME_SAM, null)).toBe("Author's turn");
++});
++
+ test("viewer_of_a_person_who_is_me_is_me", () => {
+   const rows = [reviewedBy(1, [SAM, ANNA])];
+   expect(viewerOf(null, "sam", rows)).toEqual(ME_SAM);
+diff --git a/frontend/src/mergeRequests/internal/discussions.ts b/frontend/src/mergeRequests/internal/discussions.ts
+index 482e5ea..d05ed8c 100644
+--- a/frontend/src/mergeRequests/internal/discussions.ts
++++ b/frontend/src/mergeRequests/internal/discussions.ts
+@@ -30,7 +30,8 @@ export type Turn =
+ export type TurnLine<D extends OpenDiscussion> = { readonly discussion: D; readonly turn: Turn };
+ export type TurnCounts = {
+   readonly viewersTurn: number;
+-  readonly authorsTurn: number;
++  /** D3 (owner's answer 2429): discussions with a comment (`earlier` or `last`) whose author is the viewer. */
++  readonly viewerWrote: number;
+   readonly total: number;
+ };
+ /** Whose turn the box and the review order speak for (request-mr-discussions rule 3, review-mode rule 5). */
+@@ -133,16 +134,18 @@ export function discussionTurns<D extends OpenDiscussion>(
+     });
+ }
+ 
+-/** How many are the viewer's turn (the box's header) and the author's (review mode's "waiting on the author", B5). */
++/** How many are the viewer's turn (the box's header) and how many the viewer wrote in (review mode's D3). */
+ export function turnCounts(
+   open: readonly OpenDiscussion[],
+   viewer: string | null,
+   author: string | null,
+ ): TurnCounts {
+-  const kinds = open.map((discussion) => turnOf(discussion, viewer, author).kind);
+   return {
+-    viewersTurn: kinds.filter((kind) => kind === "viewer").length,
+-    authorsTurn: kinds.filter((kind) => kind === "author").length,
++    viewersTurn: open.filter((discussion) => turnOf(discussion, viewer, author).kind === "viewer")
++      .length,
++    viewerWrote: open.filter((discussion) =>
++      [...discussion.earlier, discussion.last].some((comment) => isUser(comment.author, viewer)),
++    ).length,
+     total: open.length,
+   };
+ }
+@@ -175,12 +178,18 @@ export function viewerPossessive(viewer: Viewer, at: "start" | "inside"): string
+   return at === "start" ? "Your" : "your";
+ }
+ 
+-export function turnText(turn: Turn, viewer: Viewer): string {
++export function viewerAddressed(viewer: Viewer): string {
++  return viewer.kind === "me" ? "you" : viewer.name;
++}
++
++/** A1/A2: `author` is the merge request's author; "author" reads "<displayName(author)>'s turn", "Author's turn"
++ *  when null. Every other kind as today. */
++export function turnText(turn: Turn, viewer: Viewer, author: Person | null): string {
+   switch (turn.kind) {
+     case "viewer":
+       return `${viewerPossessive(viewer, "start")} turn`;
+     case "author":
+-      return "Author's turn";
++      return author === null ? "Author's turn" : `${displayName(author)}'s turn`;
+     case "person":
+       return `${turn.name}'s turn`;
+     case "waiting":
+@@ -198,8 +207,7 @@ export function turnSummaryText({ viewersTurn, total }: TurnCounts, viewer: View
+   if (total === 0) {
+     return "No open discussions";
+   }
+-  const whom = viewer.kind === "me" ? "you" : viewer.name;
+-  return `${viewersTurn} of ${total} ${viewersTurn === 1 ? "waits" : "wait"} for ${whom}`;
++  return `${viewersTurn} of ${total} ${viewersTurn === 1 ? "waits" : "wait"} for ${viewerAddressed(viewer)}`;
+ }
+ 
+ export function placeText(place: DiscussionPlace): string {
+diff --git a/frontend/src/mergeRequests/internal/reviewOrder.test.ts b/frontend/src/mergeRequests/internal/reviewOrder.test.ts
+index 4ed3346..63a64e4 100644
+--- a/frontend/src/mergeRequests/internal/reviewOrder.test.ts
++++ b/frontend/src/mergeRequests/internal/reviewOrder.test.ts
+@@ -36,10 +36,12 @@ function talk(first: Person | null, ...rest: readonly (Person | null)[]): OpenDi
+   return { place: { kind: "overview" }, earlier: said, last: { ...last, createdAt: 0, text: "" } };
+ }
+ 
+-/** On dmitri's merge request: sam's turn and the author's for anna (sam started it, anna answered). */
++/** On dmitri's merge request: sam's turn, sam wrote in it; anna wrote last, so the author's turn for her. */
+ const SAMS = talk(SAM, ANNA);
+-/** The author's turn for sam (sam answered last) and anna's turn (she started it). */
++/** Sam wrote last, so the author's turn for him, sam wrote in it; anna's turn (she started it). */
+ const AUTHORS = talk(ANNA, SAM);
++/** The author answered anna: anna's turn, sam never wrote in it. */
++const OTHERS = talk(ANNA, DMITRI);
+ 
+ function read(...discussions: readonly OpenDiscussion[]): Details {
+   return { kind: "read", discussions };
+@@ -71,101 +73,103 @@ function iids(listed: readonly Row[], reviewer: string | null, setup: Setup): re
+   return order.rows.map((row) => row.iid);
+ }
+ 
+-test("due_rows_with_the_reviewers_turn_come_first_soonest_first", () => {
++test("review_order_d1_soonest_due_first_even_above_more_waiting", () => {
+   const setup: Setup = {
+-    due: { 1: "2026-11-01", 3: "2026-11-05" },
+-    details: { 1: read(SAMS, AUTHORS), 2: read(SAMS), 3: read(SAMS) },
++    due: { 3: "2026-11-05", 1: "2026-11-01" },
++    details: { 3: read(OTHERS), 2: read(SAMS, SAMS, SAMS), 1: read(SAMS) },
+   };
+   expect(iids(rows(3, 2, 1), "sam", setup)).toEqual([1, 3, 2]);
+ });
+ 
+-test("equal_due_days_with_the_reviewers_turn_keep_newest_first", () => {
++test("review_order_d1_an_overdue_day_is_above_todays", () => {
++  const today = "2026-11-05";
++  const overdue = "2026-10-30";
+   const setup: Setup = {
+-    due: { 1: "2026-11-02", 2: "2026-11-02", 3: "2026-11-01" },
+-    details: { 1: read(SAMS), 2: read(SAMS, AUTHORS, AUTHORS), 3: read(AUTHORS) },
++    due: { 2: today, 1: overdue },
++    details: { 2: read(SAMS, SAMS), 1: read(OTHERS) },
+   };
+-  expect(iids(rows(3, 2, 1), "sam", setup)).toEqual([2, 1, 3]);
+-  expect(iids(rows(1, 2, 3), "sam", setup)).toEqual([2, 1, 3]);
++  expect(iids(rows(2, 1), "sam", setup)).toEqual([1, 2]);
+ });
+ 
+-test("a_due_row_without_the_reviewers_turn_sorts_with_the_rest", () => {
++test("review_order_d2_more_waiting_first_within_one_day", () => {
+   const setup: Setup = {
+-    due: { 3: "2026-11-01", 1: "2026-11-04" },
+-    details: { 3: read(AUTHORS), 1: read(SAMS) },
++    due: { 1: "2026-11-02", 2: "2026-11-02", 3: "2026-11-02" },
++    details: {
++      1: read(SAMS),
++      2: read(SAMS, SAMS),
++      3: read(OTHERS),
++      4: read(SAMS),
++      5: read(SAMS, SAMS, SAMS),
++    },
+   };
+-  expect(iids(rows(3, 2, 1), "sam", setup)).toEqual([1, 2, 3]);
++  expect(iids(rows(5, 4, 3, 2, 1), "sam", setup)).toEqual([2, 1, 3, 5, 4]);
+ });
+ 
+-test("the_rest_sort_by_fewest_waiting_on_the_author", () => {
++test("review_order_d3_fewer_written_in_first_within_equal_d1_and_d2", () => {
+   const setup: Setup = {
+-    details: { 4: read(AUTHORS, AUTHORS), 3: read(SAMS, SAMS, SAMS), 2: read(AUTHORS, SAMS) },
++    details: {
++      4: read(SAMS, AUTHORS, AUTHORS),
++      3: read(SAMS, AUTHORS),
++      2: read(SAMS, OTHERS),
++      1: read(SAMS),
++      5: read(OTHERS),
++    },
+   };
+-  expect(iids(rows(4, 3, 2, 1), "sam", setup)).toEqual([3, 1, 2, 4]);
++  expect(iids(rows(5, 4, 3, 2, 1), "sam", setup)).toEqual([2, 1, 3, 4, 5]);
+ });
+ 
+-test("ties_among_the_rest_keep_the_normal_order_due_first_then_newest", () => {
++test("review_order_d4_a_full_tie_keeps_newest_first", () => {
+   const setup: Setup = {
+-    due: { 1: "2026-11-03", 3: "2026-11-02" },
+-    details: { 1: read(AUTHORS), 2: read(SAMS, AUTHORS), 3: read(AUTHORS), 4: read(AUTHORS) },
++    due: { 1: "2026-11-02", 2: "2026-11-02", 3: "2026-11-02" },
++    details: { 1: read(SAMS), 2: read(SAMS), 3: read(SAMS), 4: read(SAMS), 5: read(SAMS) },
+   };
+-  expect(iids(rows(4, 3, 2, 1), "sam", setup)).toEqual([3, 1, 4, 2]);
++  expect(iids(rows(1, 2, 3, 5, 4), "sam", setup)).toEqual([3, 2, 1, 5, 4]);
+ });
+ 
+-test("another_reviewer_gets_their_own_turns_and_waits", () => {
++test("review_order_another_reviewer_changes_d2_and_d3", () => {
+   const setup: Setup = {
+-    due: { 1: "2026-11-01", 2: "2026-11-02" },
+-    details: { 1: read(SAMS), 2: read(AUTHORS), 3: read(AUTHORS, AUTHORS), 4: read(SAMS) },
++    details: { 4: read(AUTHORS, SAMS), 3: read(OTHERS), 2: read(SAMS), 1: read(AUTHORS) },
+   };
+-  expect(iids(rows(4, 3, 2, 1), "sam", setup)).toEqual([1, 4, 2, 3]);
+-  expect(iids(rows(4, 3, 2, 1), "anna", setup)).toEqual([2, 3, 1, 4]);
++  expect(iids(rows(4, 3, 2, 1), "sam", setup)).toEqual([2, 4, 3, 1]);
++  expect(iids(rows(4, 3, 2, 1), "anna", setup)).toEqual([3, 1, 4, 2]);
+ });
+ 
+-test("no_reviewer_has_no_turn_so_nothing_comes_first", () => {
+-  const setup: Setup = {
+-    due: { 1: "2026-11-02", 2: "2026-11-01" },
+-    details: { 1: read(SAMS), 2: read(AUTHORS) },
+-  };
++test("review_order_no_reviewer_keeps_the_normal_order", () => {
++  const setup: Setup = { details: { 1: read(SAMS), 2: read(AUTHORS) } };
+   expect(iids(rows(2, 1), "sam", setup)).toEqual([1, 2]);
+   expect(iids(rows(2, 1), null, setup)).toEqual([2, 1]);
+ });
+ 
+-test("b5_review_order_counts_authors_turns_as_waiting_on_the_author", () => {
+-  const answered = talk(ANNA, DMITRI);
++test("review_order_the_rows_author_weighs_the_turn", () => {
+   const listed: readonly Row[] = [
+-    { iid: 4, createdAt: 4, author: ANNA },
+     { iid: 3, createdAt: 3, author: null },
+     { iid: 2, createdAt: 2, author: DMITRI },
+-    { iid: 1, createdAt: 1, author: DMITRI },
++    { iid: 1, createdAt: 1, author: SAM },
+   ];
+   const setup: Setup = {
+-    details: {
+-      4: read(answered),
+-      3: read(talk(DMITRI)),
+-      2: read(answered, talk(DMITRI), talk(DMITRI)),
+-      1: read(AUTHORS),
+-    },
++    details: { 3: read(talk(ANNA)), 2: read(talk(ANNA)), 1: read(talk(ANNA)) },
+   };
+-  expect(iids(listed, "sam", setup)).toEqual([2, 4, 3, 1]);
++  expect(iids(listed, "sam", setup)).toEqual([1, 3, 2]);
+ });
+ 
+-test("rows_not_arrived_sort_as_none_and_are_counted_loading", () => {
++test("review_order_loading_rows_count_zero_and_zero_and_are_counted", () => {
+   const setup: Setup = {
+     due: { 1: "2026-11-03", 2: "2026-11-02", 3: "2026-11-01" },
+     details: { 4: LOADING, 3: LOADING, 1: read(SAMS), 5: read(AUTHORS) },
+   };
+   expect(ordered(rows(5, 4, 3, 2, 1), "sam", setup)).toEqual({
+     kind: "sorted",
+-    rows: rows(1, 3, 2, 4, 5),
++    rows: rows(3, 2, 1, 4, 5),
+     loading: 2,
+   });
+   expect(ordered(rows(2, 1), "sam", setup)).toEqual({
+     kind: "sorted",
+-    rows: rows(1, 2),
++    rows: rows(2, 1),
+     loading: 0,
+   });
+ });
+ 
+-test("a_failed_row_keeps_the_normal_order_and_is_named", () => {
++test("review_order_a_failed_row_keeps_the_normal_order_and_is_named", () => {
+   const setup: Setup = {
+     due: { 1: "2026-11-01", 3: "2026-11-02", 2: "2026-11-03" },
+     details: {
+@@ -183,22 +187,22 @@ test("a_failed_row_keeps_the_normal_order_and_is_named", () => {
+   });
+ });
+ 
+-test("the sorted words speak for me or name the reviewer", () => {
++test("review_order_d5_words_speak_for_me_or_name_the_reviewer", () => {
+   expect(reviewSortedText(ME, 0)).toBe(
+-    "Sorted for your review: due with your turn first, then fewest waiting on the author",
++    "Sorted for your review: soonest due date first, then most discussions waiting for you, then fewest discussions you wrote in",
+   );
+   expect(reviewSortedText({ kind: "me", username: null }, 0)).toBe(reviewSortedText(ME, 0));
+   expect(reviewSortedText(AS_ANNA, 0)).toBe(
+-    "Sorted for Anna Berg's review: due with their turn first, then fewest waiting on the author",
++    "Sorted for Anna Berg's review: soonest due date first, then most discussions waiting for Anna Berg, then fewest discussions Anna Berg wrote in",
+   );
+ });
+ 
+-test("the sorted words say how many rows are still loading, singular and plural", () => {
++test("review_order_d5_words_say_how_many_rows_are_still_loading", () => {
+   expect(reviewSortedText(ME, 1)).toBe(
+-    "Sorted for your review: due with your turn first, then fewest waiting on the author (the discussions of 1 merge request are still loading; it moves when they arrive)",
++    "Sorted for your review: soonest due date first, then most discussions waiting for you, then fewest discussions you wrote in (the discussions of 1 merge request are still loading; it moves when they arrive)",
+   );
+   expect(reviewSortedText(AS_ANNA, 3)).toBe(
+-    "Sorted for Anna Berg's review: due with their turn first, then fewest waiting on the author (the discussions of 3 merge requests are still loading; they move when they arrive)",
++    "Sorted for Anna Berg's review: soonest due date first, then most discussions waiting for Anna Berg, then fewest discussions Anna Berg wrote in (the discussions of 3 merge requests are still loading; they move when they arrive)",
+   );
+ });
+ 
+@@ -216,7 +220,7 @@ test.each<[string, Viewer]>([
+   ["a named reviewer", AS_ANNA],
+   ["a reviewer named by a lowercase username", { kind: "person", username: "ben", name: "ben" }],
+ ])("the review words name %s as the turn words do", (_case, viewer) => {
+-  const possessive = turnText({ kind: "viewer" }, viewer).replace(/ turn$/u, "");
++  const possessive = turnText({ kind: "viewer" }, viewer, DMITRI).replace(/ turn$/u, "");
+   const inside = viewer.kind === "me" ? possessive.toLowerCase() : possessive;
+   expect(reviewSortedText(viewer, 0)).toMatch(new RegExp(`^Sorted for ${inside} review: `, "u"));
+   expect(reviewFailedText(viewer, 1, "")).toMatch(
+diff --git a/frontend/src/mergeRequests/internal/reviewOrder.ts b/frontend/src/mergeRequests/internal/reviewOrder.ts
+index 3ad982b..f5f28f4 100644
+--- a/frontend/src/mergeRequests/internal/reviewOrder.ts
++++ b/frontend/src/mergeRequests/internal/reviewOrder.ts
+@@ -1,11 +1,12 @@
+ import {
+   turnCounts,
++  viewerAddressed,
+   viewerPossessive,
+   type OpenDiscussion,
+   type TurnCounts,
+   type Viewer,
+ } from "./discussions";
+-import type { CalendarDay } from "./dueDate";
++import { compareDays, type CalendarDay } from "./dueDate";
+ import { byDueDate } from "./order";
+ 
+ /** A row's discussion details as the review order reads them (rule 6). */
+@@ -18,9 +19,9 @@ export type ReviewOrder<R, F> =
+   | { readonly kind: "sorted"; readonly rows: readonly R[]; readonly loading: number }
+   | { readonly kind: "failed"; readonly rows: readonly R[]; readonly row: R; readonly failure: F };
+ 
+-type Ranked<R> = { readonly row: R; readonly first: boolean; readonly waiting: number };
++type Ranked<R> = { readonly row: R; readonly due: CalendarDay | null; readonly counts: TurnCounts };
+ 
+-const NO_TURNS: TurnCounts = { viewersTurn: 0, authorsTurn: 0, total: 0 };
++const NO_TURNS: TurnCounts = { viewersTurn: 0, viewerWrote: 0, total: 0 };
+ 
+ function firstFailed<R extends { readonly iid: number }, F>(
+   rows: readonly R[],
+@@ -35,8 +36,25 @@ function firstFailed<R extends { readonly iid: number }, F>(
+   return null;
+ }
+ 
+-/** Rule 3 for `reviewer` (a username; null: nobody). `rows` in the list's order (newest first). "Waiting on the
+- *  author" is the discussions whose turn is the row's author's (request-mr-threads B5). */
++/** D1 the due day, dated before undated, the soonest first; D2 most waiting for the reviewer; D3 fewest written in;
++ *  0 for a tie (D4: the stable sort keeps the normal order). */
++function reviewFirst<R>(a: Ranked<R>, b: Ranked<R>): number {
++  if (a.due === null || b.due === null) {
++    const undated = Number(a.due === null) - Number(b.due === null);
++    if (undated !== 0) {
++      return undated;
++    }
++  } else {
++    const days = compareDays(a.due, b.due);
++    if (days !== 0) {
++      return days;
++    }
++  }
++  const waiting = b.counts.viewersTurn - a.counts.viewersTurn;
++  return waiting === 0 ? a.counts.viewerWrote - b.counts.viewerWrote : waiting;
++}
++
++/** D1–D4 for `reviewer` (a username; null: nobody). `rows` in the list's order (newest first). */
+ export function reviewOrdered<
+   R extends {
+     readonly iid: number;
+@@ -61,15 +79,9 @@ export function reviewOrdered<
+       details.kind === "read"
+         ? turnCounts(details.discussions, reviewer, row.author?.username ?? null)
+         : NO_TURNS;
+-    const first = dueOf(row.iid) !== null && counts.viewersTurn > 0;
+-    return { row, first, waiting: counts.authorsTurn };
+-  });
+-  const sorted = ranked.toSorted((a, b) => {
+-    if (a.first !== b.first) {
+-      return a.first ? -1 : 1;
+-    }
+-    return a.first ? 0 : a.waiting - b.waiting;
++    return { row, due: dueOf(row.iid), counts };
+   });
++  const sorted = ranked.toSorted(reviewFirst);
+   const loading = normal.filter((row) => detailsOf(row.iid).kind === "loading").length;
+   return { kind: "sorted", rows: sorted.map(({ row }) => row), loading };
+ }
+@@ -84,8 +96,8 @@ function loadingText(loading: number): string {
+ }
+ 
+ export function reviewSortedText(viewer: Viewer, loading: number): string {
+-  const whose = viewer.kind === "me" ? "your" : "their";
+-  return `Sorted for ${viewerPossessive(viewer, "inside")} review: due with ${whose} turn first, then fewest waiting on the author${loadingText(loading)}`;
++  const whom = viewerAddressed(viewer);
++  return `Sorted for ${viewerPossessive(viewer, "inside")} review: soonest due date first, then most discussions waiting for ${whom}, then fewest discussions ${whom} wrote in${loadingText(loading)}`;
+ }
+ 
+ export function reviewFailedText(viewer: Viewer, iid: number, reason: string): string {
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 4c739ac..f513b28 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -44,23 +44,23 @@ Themes (plan §2 #102): `useThemeAttribute` (`settingsStore.ts`, every root) is
+ 
+ Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`store.ts` `search` + `liveResults` from `mergeSearch.ts`, `rangeStore.ts` `search` from `rangeSearch.ts`), the only writer of the query, case, filters and closed groups; the runner in `searchRun.ts` writes only `results` and `running` (full runs by generation, each with its own `Working` matcher, ranks and results, 8 ms slices, one-file re-runs by `changed` after `SEARCH_PAUSE_MS`, stale replies dropped per path; `onFullRun` lets `searching.ts` open every group and count `fullRuns`, one per new search). The merge source's `loadFile` replies go through `landed` with the stop they were sent in (`currentStop`). Matching and rows are `search/`'s only. `SideColumn.vue` holds the left column's width and handle (`usePanelWidth`, "File list width"), its visibility and the islands' overlap between the shown panel and list, with `SearchPanel.vue` (box, Match Case, pane toggles from `searchIcons.ts`, summary words in `searchText.ts`, `SearchResults.vue`'s virtual list, `overflow-x-hidden`: WebKitGTK's overlay scrollbar would take the clicks on the last row, #1719; its keys in `searchListKeys.ts` `stepSearchList`) above `FileList.vue`; both roots call `search.toggleKey` after `fileListKey` (`windowKey`, the one guard). `SearchResults.vue` alone owns the list's scroll position and its active row: each new search (`fullRuns`) scrolls to the top and clears the active row, so Down from the box starts at the first row; rows that shrink below the scroll position clamp it to the end; `keepInView` follows the keys. Hiding the panel while the keyboard is in it or on `<body>`: with a file on screen (both roots pass `SearchPanel` the shown path only while `screen.kind === 'files'`), the pane focused at show — CodeMirror's content element, `role=textbox aria-multiline` — when still connected and the same path is shown, else `focusShownFile`; with no file on screen (Settings, a server log), the element focused at show when still connected, never a go-to. A row asks `goTo` and opens its file; the shown view takes it through `took`. `opening.ts` holds the merge store's file opening (`open`, `pick`, `thenMoveOn`).
+ 
+-Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. What the page shows from the loaded rows is `mergeRequestsShown.ts` `shownOf`: the remembered filters, `shownRows` (`datedFirst(searched(filtered(…)))`, or the review order while `filters.review` is set; one computed gives it and `reviewSort`), the checklists' `choices` (over every loaded row, never searched; `choices.review` is the picker's, `reviewChoices`), the summary, `viewer` (`viewerOf`) and `reviewSort` (null without review mode). Its filter row starts with `MergeRequestSearch.vue` (request #2150: the title or any `!number` named in the text, `mergeRequests/` `searched`; the slice's `search`, written by `setSearch` and emptied by `show`, kept through Refresh, never stored, not cleared by "Clear filters"; × and Escape with text empty it and keep the focus, Escape in the empty field closes the page as before because the field prevents only the Escape it used), then three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; presentational: the View holds their one menu; `menuitemcheckbox` items keep it open; the menu is a `MergeRequestMenu.vue`, below; × clears), review mode's button and sort icon (below), and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the people stack, the "+N" labels chip, the due date, the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box through `useHoverBox` on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
++Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount; a click, or Enter/Space on it) closes it, never Escape (request `docs/slices/request-mr-review-fixes.md` C1, C2: `escapePressed` only closes an open filter menu), and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. What the page shows from the loaded rows is `mergeRequestsShown.ts` `shownOf`: the remembered filters, `shownRows` (`datedFirst(searched(filtered(…)))`, or the review order while `filters.review` is set; one computed gives it and `reviewSort`), the checklists' `choices` (over every loaded row, never searched; `choices.review` is the picker's, `reviewChoices`), the summary, `viewer` (`viewerOf`) and `reviewSort` (null without review mode). Its filter row starts with `MergeRequestSearch.vue` (request #2150: the title or any `!number` named in the text, `mergeRequests/` `searched`; the slice's `search`, written by `setSearch` and emptied by `show`, kept through Refresh, never stored, not cleared by "Clear filters"; × and Escape with text empty it and keep the focus; the field prevents only the Escape it used), then three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; presentational: the View holds their one menu; `menuitemcheckbox` items keep it open; the menu is a `MergeRequestMenu.vue`, below; × clears), review mode's button and sort icon (below), and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the people stack, the "+N" labels chip, the due date, the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box through `useHoverBox` on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
+ 
+ The list's age (request `docs/slices/request-mr-starts.md` part A): the slice's `listedAt` is when the list now on screen finished loading, null until one has; `ended` writes it (its only writer) only on an end without a failure text, the end that swaps the rows in, so a Refresh in flight, a failed or thrown call and a failure end keep it (`listing`'s `at`, the stale reload's clock, is every end's). Left of Refresh, in one `ml-auto` group with it, the header shows `useListAge(listedAt)`: `mergeRequests/` `agoText(listedAt, now)` in `text-fg-muted` with `timeTitle` as its `v-tooltip` (`HH:MM` on today's local day, else `dateTimeText`), nothing while null. Its `now` is its own: read when `listedAt` changes and by a timeout set for the next whole minute after `listedAt` (rule A1: "just now" only under a minute), so the rows keep the page's minute `now` and never re-render for the header.
+ 
+ The start screen (request `docs/slices/request-mr-starts.md` part B, plan §2 #167): `yamt --mr` reaches the window as `<html data-open="mergeRequests">` (the fixture page: `?open=mergeRequests`); `main.ts` reads it once through `startScreen.ts` `startScreenOf` (only that word means the page) into the one `WindowStart { theme, screen }` both `createCompareStore` and `createRangeStore` take. `openAtStart` (the stores' start-up step beside `loadSettings`) awaits `findProject` and calls the slice's `show` only when started on the page and the project is `found`, so no project or a failed lookup leaves the window on its files with the lookup's problem as before. No other code opens the page at start.
+ 
+-Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). WebKit sends no pointer events to a disabled button, so a control that can be disabled (a CI job without a log, the row action, open changes while fetching) carries its tip on a wrapper and the button `disabled:pointer-events-none`. `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); it and the due-date box close on a scroll outside them (`useScrollOutside`, capture phase, the one copy of that rule). `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter | "review">` for the three filters and review mode's picker (at most one list open), finds each part's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click; Escape with a list open closes the list, not the page. `MergeRequestMenu.vue` is the one menu box of the filters and the picker (generic over the choice's value): the container (placed `above` or below, `keydown` → `menuKey`), above `NARROW_FROM` choices the narrowing box (`narrowLabel`/`narrowPlaceholder` of the list's name, emptied on each opening), and its default slot gets the `shown` choices (`narrowed` by the typed text); each menu exposes the box's `menu`/`narrowBox` as its own (detector `MergeRequestFilter.test.ts`: both menus render the same box).
++Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). WebKit sends no pointer events to a disabled button, so a control that can be disabled (a CI job without a log, the row action, open changes while fetching) carries its tip on a wrapper and the button `disabled:pointer-events-none`. `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); it and the due-date box close on a scroll outside them (`useScrollOutside`, capture phase, the one copy of that rule). `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter | "review">` for the three filters and review mode's picker (at most one list open), finds each part's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click; Escape with a list open closes the list, the page's only Escape (`MergeRequestsPage.test.ts`). `MergeRequestMenu.vue` is the one menu box of the filters and the picker (generic over the choice's value): the container (placed `above` or below, `keydown` → `menuKey`), above `NARROW_FROM` choices the narrowing box (`narrowLabel`/`narrowPlaceholder` of the list's name, emptied on each opening), and its default slot gets the `shown` choices (`narrowed` by the typed text); each menu exposes the box's `menu`/`narrowBox` as its own (detector `MergeRequestFilter.test.ts`: both menus render the same box).
+ 
+ Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (the "created … ago" hover is `dateTimeText`, "30.10.2026, 15:04", no locale; labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date `DD.MM.YYYY` over the days left in the error colour when overdue; its `role="dialog"` box "Choose a due date" holds a text field on its own draft (`v-model`, set to the shown date when the box opens, so a re-render never rewrites it) that `typedDay` reads on Enter — a refused text stays as typed, sets `aria-invalid` and the error border, saves nothing —, `MergeRequestCalendar.vue` and Today (`PICK_TODAY`) / Clear; only Enter, a click or a footer button saves, never blur), then discussions and approvals (`approversText`, one name per line). `MergeRequestCalendar.vue` (`selected`, `today`, emits `pick`) is shadcn's Calendar: it owns the focused day, and the shown month is the focused day's (`monthOf`); the caption between the Previous / Next month chevrons, `WEEKDAYS` and `monthGrid`'s six weeks as `role="grid"` labelled by the caption, each day a button named `dayName` (`aria-selected` on its gridcell, `aria-current="date"` today); one tab stop (roving `tabindex`), the WAI-ARIA date-picker keys by `movedDay` (arrows, Home/End, PageUp/PageDown, Shift for a year; Enter/Space are the button's click), and it focuses its day when it mounts. Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)` with the click's `shiftKey`; while Shift is held (`useShiftHeld.ts` `useShiftHeld()`, one state per window shared by every filter and every CI box through vueuse `createSharedComposable`: the rule `shiftAfter` over `ShiftState` — `up` or `held { alone }`, both with a `taps` count — on `keyHold.ts`'s one listener set, `useKeyHold(KeyHold<S>)`, generic over its state, which the shell Alt's boolean hold uses too; held from Shift's keydown to its keyup by key name, since WebKitGTK on X11 reports Shift still set on its own release; up on blur, a hidden page, or a pointer event without `shiftKey`, none of which counts a tap) every value shows a muted `circle-minus`, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`, by `dueOf`, the one day lookup the review order reads too); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
+ 
+ Job logs (request `docs/slices/request-ci-job-log.md`, plan §2 #158–#161): `mergeRequestJobLogs.ts` holds the window's one log box (`jobLog`): Shift over the job already loading or shown changes nothing; any other job writes a new `loading` entry, and a reply is written only into the entry it was asked for (parsed once by `mergeRequests/` `jobLogView`); `closeJobLog` sets null. The search texts are remembered per job name, no repository key (`jobSearch`/`setJobSearch`, key `yamt.mergeRequests.jobSearches`); "" forgets one. A Shift tap is `useShiftTaps()` (`useShiftHeld.ts`): Shift down then up with no other key and no pointer press between, so Shift+Tab, Shift+click and a typed capital never count. `CiStatusBox.vue` watches the count, never `open && held` (a Shift held as the box opens would count), and asks for the pointed job (its `<li>`, since a disabled button gets no pointer events), else the focused one, only while its box is open, the job has a page and focus is in no text field (`typingTarget.ts` `isTypingTarget`, window-neutral; the log's own field included, so Shift there types a capital and switches nothing). The pointed and focused jobs are forgotten when the CI box closes (Escape removes the `<li>` without its `pointerleave`). The job whose log is shown has no hover tip (its tip would cover the log's header; a Shift press does not hide a tip). `CiStatusJobLog.vue` is a DOM child of the CI box's hover area, after the box, so `useHoverBox`'s one inside rule holds both and a scroll inside the log closes nothing; it sits left of the CI box, tops level (`useMenuPlacement`, clamped), is keyed by the job's page and closes when the CI box does. Escape in the log is the log's: it prevents the default and closes, and `CiStatusBox` puts focus on that job's button (found by its `data-job-page`); `useHoverBox` ignores an Escape already `defaultPrevented`, so a second Escape closes the CI box. A refused or failed log moves focus from the field to the log body, so Shift over the job asks again as its words say. Lines are static: one `div` per line, one `span` per run with `mergeRequestLogLook.ts` `runClasses` and the run's text as text (never markup); a run with an ANSI background takes the panel colour as its text colour (every `--color-ansi-*` is ≥ 4.5:1 against `--color-panel`, so the pair is too); the log opens at its end (`useFollowEnd`). The search (`search/` `matcherOf`, case-insensitive, mapped onto runs by `hitPlaces`) paints CSS Custom Highlights `job-log-match` and `job-log-current` over those text nodes, with no DOM change; every hit counts and is stepped, but `job-log-match` holds only the hits on lines in view ± one screen (`mergeRequests/` `firstLineBelow` on the lines' `offsetTop`, `placesOnLines`), rebuilt at once on a search and once per animation frame on a scroll or a step (tens of thousands of live ranges freeze WebKitGTK for seconds); the current hit starts at the last one and is centred by `scrollTop` only; Enter / Shift+Enter step it. Each name is registered once per log with one `Highlight`, cleared and refilled on every rebuild: WebKitGTK 2.54 leaves the ranges of a `Highlight` that `CSS.highlights.set` replaces painted (#2191). Both are deleted when the log unmounts. Opening fills the field with the remembered text, selected and searched. Words in `mergeRequestLogText.ts`.
+ 
+-Discussions (request `docs/slices/request-mr-discussions.md`, design `docs/slices/briefs/mr-discussions-design.md` option A, plan §2 #163, #164): `mergeRequestDiscussions.ts` owns `discussions` (its only writer), one entry per asked row while the list stands. One call at a time; a generation is raised by `replaced` and by "off", so an older answer is dropped. "Load fully": the rows with a count above 0 are queued from `received` (`listed`), all again at `ended`'s swap (`replaced`: a Refresh, or a show 30 s or more after the last load, `RECHECK_PAUSE_MS`), and a watch on the setting asks them when it turns to full, with no reload. "Load lazily": `askDiscussions(iid)` puts that row first and asks it once. "Off": every entry and any call in flight dropped. Log `mergeRequests.discussions_read` (counts only). A refused or failed entry is a `DiscussionFailure` (`mergeRequestDiscussions.ts`). `MergeRequestDiscussions.vue` is the row's count: with "Off" or a count of 0 the plain count (`vTooltip` `discussionsText`, muted at 0), no box and no ask; else the people box's shape (`useHoverBox`, an opener button named by `discussionsText` with no tooltip, #154) whose entry comes from `useRowDiscussions`, which calls `askDiscussions` when the box opens and again when an open box loses its entry (a swap), so a hover and keyboard focus both ask. The box speaks for the slice's `viewer` (me, or review mode's person). Its `role="status"` header is `DISCUSSIONS_LOADING` with no entry or while loading, `turnSummaryText(turnCounts(…))` once read, else `discussionsFailedText` (`mergeRequestsText.ts`: `glabRefusalText`, the glab words of the list, the box and a re-request reply, or `problemText` at step `discussions`) in the error colour — never the problem bar. Its list is `discussionTurns(…)` (the viewer's turn first, newest first); each line shows the author's picture and `noteAuthorName`, `agoText`, `turnText` (the viewer's turn in `text-primary`), `placeText`, and `noteExcerpt` clamped to 3 lines. All of its text is interpolated, never `v-html` (RK60). `MergeRequestDiscussionSetting.vue` is Settings → "Discussion details" (`DISCUSSION_DETAILS_OPTIONS` through `ChoiceButtons`, `setDiscussionDetails` on the settings seam, the hint under it); the compare and the range root put it into `SettingsView`'s slot, and the merge window, which has no merge-request page, has no such section.
++Discussions (request `docs/slices/request-mr-discussions.md`, design `docs/slices/briefs/mr-discussions-design.md` option A, plan §2 #163, #164): `mergeRequestDiscussions.ts` owns `discussions` (its only writer), one entry per asked row while the list stands. One call at a time; a generation is raised by `replaced` and by "off", so an older answer is dropped. "Load fully": the rows with a count above 0 are queued from `received` (`listed`), all again at `ended`'s swap (`replaced`: a Refresh, or a show 30 s or more after the last load, `RECHECK_PAUSE_MS`), and a watch on the setting asks them when it turns to full, with no reload. "Load lazily": `askDiscussions(iid)` puts that row first and asks it once. "Off": every entry and any call in flight dropped. Log `mergeRequests.discussions_read` (counts only). A refused or failed entry is a `DiscussionFailure` (`mergeRequestDiscussions.ts`). `MergeRequestDiscussions.vue` is the row's count: with "Off" or a count of 0 the plain count (`vTooltip` `discussionsText`, muted at 0), no box and no ask; else the people box's shape (`useHoverBox`, an opener button named by `discussionsText` with no tooltip, #154) whose entry comes from `useRowDiscussions`, which calls `askDiscussions` when the box opens and again when an open box loses its entry (a swap), so a hover and keyboard focus both ask. The box speaks for the slice's `viewer` (me, or review mode's person). One `counts` computed, `turnCounts` of the read entry's unmarked discussions (none without a read entry), feeds both the header and the opener's mark (request `docs/slices/request-mr-review-fixes.md` B1–B3): the opener button carries the turn words' `font-semibold text-primary` exactly while `viewersTurn > 0`, so a discussion resolved in the box stops counting at once, review mode's reviewer moves the marks, and a row whose discussions were not read ("Load lazily" before its box opened, "Off") is never marked. Its `role="status"` header is `DISCUSSIONS_LOADING` with no entry or while loading, `turnSummaryText(counts)` once read, else `discussionsFailedText` (`mergeRequestsText.ts`: `glabRefusalText`, the glab words of the list, the box and a re-request reply, or `problemText` at step `discussions`) in the error colour — never the problem bar. Its list is `discussionTurns(…)` (the viewer's turn first, newest first); each line shows the author's picture and `noteAuthorName`, `agoText`, `turnText` with the row's `author` (the viewer's turn in `font-semibold text-primary`; the author's turn names the author), `placeText`, and `noteExcerpt` clamped to 3 lines. All of its text is interpolated, never `v-html` (RK60). `MergeRequestDiscussionSetting.vue` is Settings → "Discussion details" (`DISCUSSION_DETAILS_OPTIONS` through `ChoiceButtons`, `setDiscussionDetails` on the settings seam, the hint under it); the compare and the range root put it into `SettingsView`'s slot, and the merge window, which has no merge-request page, has no such section.
+ 
+ The box's thread side (request `docs/slices/request-mr-threads.md` B4, C1, C2, C10, C11, D1, D2, design `docs/slices/briefs/mr-threads-design.md` option A §1.3, §4 items 5, 10, 13, RK59, RK73): the words speak for the slice's `viewer` on the row's `author` (`turnOf`/`discussionTurns`/`turnCounts` with `row.author?.username ?? null`). Every line is a `<button>` keyed by `discussion.id`, with `data-discussion-id`, `aria-keyshortcuts="Shift"` and the tip `SHOW_THREAD_KEY`; a click still opens the last comment's page (`aria-disabled` without one); the shown line has `aria-current="true"` and `bg-row-selected`; a line marked resolved since its answer (`DiscussionLoad.resolved`) reads `Check` + `RESOLVED` (`mergeRequestThreadText.ts`) muted instead of its turn. The header counts the unmarked discussions only; at its right `RELOAD_DISCUSSIONS` (Lucide `refresh-cw`, spinning while `reloads.get(iid)` is `running`) calls `refreshDiscussions` (below); a failed reload replaces the summary by `discussionsFailedText` in the error colour and keeps the lines. Shift is `watch(useShiftTaps())` as `CiStatusBox.vue`: the pointed line, else the focused one, only while the box is open and `!isTypingTarget(document.activeElement)` → `showThread(iid, id)`. The panel `MergeRequestThread.vue` is a DOM child of the hover area (`v-if` open and this row's thread shown, keyed by the discussion id; `anchor` the box's `useElementBounding` left/top; place and turn words from the entry's discussion, else the thread's); its `close` calls `closeThread` and focuses that line's button. While it shows, `useHoverBox`'s `pinned` holds the box: the pointer or focus leaving, a window blur and a scroll outside never close it; a `pointerdown` outside the area (a `document` listener present only while open and pinned) closes both, except one on or inside a `[data-refreshes-list]` element (Refresh and the failed list's Retry read the list again under the open box and panel). The count stays a box while its panel shows even at 0 (`boxed`, design §4 item 10). When the box closes, and when the row unmounts with its box open (the page left): `closeThread` if its thread was shown, then `boxClosed(iid)` (marked lines leave, the count drops, C10). When another row's thread is shown, an open box closes itself (`useHoverBox`'s `close`), so only the shown thread's box stays. With "Off" there is no box and so no panel (C11).
+ 
+-The thread panel (request `docs/slices/request-mr-threads.md` C1–C11, plan §2 #180–#183, #185, RK33, RK72, RK73): `mergeRequestThread.ts` `createThreads`, spread into the slice by `discussingOf`, owns `thread` — the window's one shown thread (`ThreadLoad` loading | read { thread, refreshing } | refused | failed, its `sending`, its `preview`; a read's answer lands only for the latest generation, which every show, close and re-read raises) — and `replyTexts` by `DiscussionId` for the window's life (cleared only by a write GitLab took whose text is still the one sent); `showThread` (the shown one: nothing), `closeThread`, `retryThread`, one write at a time in the window (`sendReply(kind)`, `setResolved(resolve)`, `submitReview()`), `showPreview`/`showWrite`; `refreshed(iid)` re-reads the shown thread at its row's reload or a list swap. `MergeRequestThread.vue` is a non-modal `role="dialog"` placed by `useBesidePlacement` that takes focus on mount: header (place, turn words or "Resolved", "Open on GitLab", "Submit review" with the pending count, "Close"), the comments through `MergeRequestThreadComment.vue`, the viewer's drafts under "Pending", or Loading, a refusal or a failure with Retry. `MergeRequestReplyField.vue` is its bottom: Write / Preview, the field (`replyTexts` through `setReplyText`, 3 to 12 lines by its measured `scrollHeight`, `boxKeydown`: Mod-Enter adds the comment, Escape closes the panel), "Add review", "Add comment", "Resolve thread"/"Unresolve thread", each off while not writable, blank or not allowed (the reason as tip), a failed send's sentence under the row. Focus stays in the panel across a send and Retry: a pressed button that turns disabled, or Retry removed by the read, drops WebKit's focus to the body without a `focusout` (the HTML focus fixup rule), and the next Escape would reach the page; so the add and resolve buttons focus the field first, or in Preview (the field hidden) emit `focusPanel`, and Submit review (`publish`) and Retry (`retry`) focus the panel before they call. Escape while a thread is shown is the panel's: `MergeRequestsView.vue`'s `escapePressed` leaves it alone while `thread` is set (as while `description` is), the panel's element `keydown` takes an Escape inside it (so `useHoverBox`'s area keydown never closes the box under it), and a window `keydown` listener for the component's life closes it on any Escape nothing took (`defaultPrevented`) while its thread is shown, focus on the body included. That listener does nothing while a question is open (`asking`, passed View → Row → Discussions → Thread, as the description gets it) or while `description` is set (window listeners run in mount order, so the panel's would run before a later description's): that Escape is the question's or the description's, and the next one closes the panel. The close focuses the row's line, the next Escape closes the box, the one after leaves the page. Every word is `mergeRequestThreadText.ts`.
++The thread panel (request `docs/slices/request-mr-threads.md` C1–C11, plan §2 #180–#183, #185, RK33, RK72, RK73): `mergeRequestThread.ts` `createThreads`, spread into the slice by `discussingOf`, owns `thread` — the window's one shown thread (`ThreadLoad` loading | read { thread, refreshing } | refused | failed, its `sending`, its `preview`; a read's answer lands only for the latest generation, which every show, close and re-read raises) — and `replyTexts` by `DiscussionId` for the window's life (cleared only by a write GitLab took whose text is still the one sent); `showThread` (the shown one: nothing), `closeThread`, `retryThread`, one write at a time in the window (`sendReply(kind)`, `setResolved(resolve)`, `submitReview()`), `showPreview`/`showWrite`; `refreshed(iid, asked?)` re-reads the shown thread at its row's reload or a list swap. `MergeRequestThread.vue` is a non-modal `role="dialog"` placed by `useBesidePlacement` that takes focus on mount: header (place, turn words or "Resolved", "Open on GitLab", "Submit review" with the pending count, "Close"), the comments through `MergeRequestThreadComment.vue`, the viewer's drafts under "Pending", or Loading, a refusal or a failure with Retry. `MergeRequestReplyField.vue` is its bottom: Write / Preview, the field (`replyTexts` through `setReplyText`, 3 to 12 lines by its measured `scrollHeight`, `boxKeydown`: Mod-Enter adds the comment, Escape closes the panel), "Add review", "Add comment", "Resolve thread"/"Unresolve thread", each off while not writable, blank or not allowed (the reason as tip), a failed send's sentence under the row. Focus stays in the panel across a send and Retry: a pressed button that turns disabled, or Retry removed by the read, drops WebKit's focus to the body without a `focusout` (the HTML focus fixup rule), and the next Escape would miss the panel; so the add and resolve buttons focus the field first, or in Preview (the field hidden) emit `focusPanel`, and Submit review (`publish`) and Retry (`retry`) focus the panel before they call. Escape while a thread is shown is the panel's (`MergeRequestsView.vue`'s `escapePressed` acts only on an open filter menu): the panel's element `keydown` takes an Escape inside it (so `useHoverBox`'s area keydown never closes the box under it), and a window `keydown` listener for the component's life closes it on any Escape nothing took (`defaultPrevented`) while its thread is shown, focus on the body included. That listener does nothing while a question is open (`asking`, passed View → Row → Discussions → Thread, as the description gets it) or while `description` is set (window listeners run in mount order, so the panel's would run before a later description's): that Escape is the question's or the description's, and the next one closes the panel. The close focuses the row's line and the next Escape closes the box; no Escape leaves the page (request `docs/slices/request-mr-review-fixes.md` C1). Every word is `mergeRequestThreadText.ts`.
+ 
+ The instant preview and the explicit refreshes (request `docs/slices/request-mr-fast-preview.md` A1–A4, B2, plan §2 #186, #187, owner #2423): `preview` asks `mergeRequestPreview.ts` `previewHere(iid, text)` — `empty` for a blank text, else `localPreview` from `editor/index.ts`, the one owner of "renders as GitLab would" — whose non-null answer (a local read is the same `{ kind: "read", preview }` GitLab's becomes) is set at once with no `loading` and no call (so the reply field never draws "Loading…"), a local read logged `mergeRequests.preview_local { iid, blocks }` (counts only); null goes to `readPreview` as before (`loading`, `previewMarkdown`, `preview_read`), and a late GitLab answer lands only while its own `loading` is still shown, so it never replaces a later local read. `mergeRequestsRefresh.ts` `createRefreshes` (spread into the slice) holds the buttons that ask GitLab for the login and the project again first, and each shows its work at the press, before the ask: `refresh` (the page's Refresh and its Retry) is `loadList(state, askAgain)`, which sets `listing` loading (the button disabled and spinning; a press while loading does nothing), then awaits `askGitLabAgain` through `attempt`, then lists; `refreshDiscussions(iid)` (the discussions box's reload button) is the queue's `reloadDiscussions(iid, askFirst)`, which marks the row (`reloads` `running`, or a `loading` entry) at once, then runs `askFirst` (the ask, then the shown thread's re-read) and sends the row's read only after it, unless a refresh or "Off" dropped the queue meanwhile; a press on a marked row asks nothing. With "Off" the queue reads nothing and the box stays only for a shown thread, so the press is that thread's alone: `threadsRefreshed(iid, asked)` marks it refreshing at once (the button spins while `isBeingRead`), awaits the ask, then reads it; a press while it `isBeingRead` (loading or refreshing) asks nothing. A failed ask logs `mergeRequests.ask_again_failed { kind }` and the reload runs anyway. The window's slice has no reload without the ask: `discussionsOf` gives it the queue's `Discussions` only. `show` (the first load, the 30 s stale reload) and the reload a submit triggers (`mergeRequestThread.ts`, the queue's `reloadDiscussions(iid)` with no `askFirst`) never ask again: no button was pressed.
+ 
+@@ -74,7 +74,7 @@ The merge window of a merge request (plan §2 #138–#143): `question.ts` is wha
+ 
+ People on a merge request (request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, plan §2 #169, #170): `useMergeRequests()` carries `peopleSearch`/`searchPeople`/`endPeopleSearch` (the window's one search, 250 ms after the last call, newest answer only), `peopleAsks`/`changePeople` (`mergeRequestPeople.ts`: one change at a time per merge request, `queue[0]` running, `notDone` kept until the box closes; `rowPeopleAsks(peopleAsks, iid)` is the one reader of a row's asks, empty for a row with none) and `openPeopleBoxes`/`peopleBoxOpened`/`peopleBoxClosed`: `shownRows` keeps a row whose box is open (rule 9), so `MergeRequestPeople.vue` calls Opened when `useHoverBox`'s `open` turns true and Closed when it turns false or the box unmounts open. On a row with `mayRerequest` the box always shows both groups ("None" when empty; a row with nobody opens it from the dimmed icon), each header with a `user-plus` add button that opens `MergeRequestPeopleSearch.vue` under it (one field per box, `adding`): a `role="combobox"` field over a `role="listbox"` of `mergeRequestPeopleLines.ts` `pickList` (the core's `peopleSuggestions` while empty, else the search's people; "Already an assignee/reviewer" lines `aria-disabled`, a queued add spinning), arrows over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines change (`keptHighlight`), Enter or a click (its `mousedown` prevented) adds, and once that add is answered the field clears unless its text changed meanwhile (not at the pick, so the picked line shows its spinner) and takes focus back only from `document.body`, never from a control the user moved to while waiting; Escape closes the field (focus to its add button), a second Escape the box. Each assignee and reviewer line ends with `MergeRequestPersonMenu.vue` (`ellipsis-vertical`, one `useDropdownMenu<true>` menu with "Remove assignee/reviewer", `position: fixed` inside the box so the hover box holds it; the spinner, `aria-disabled` and no menu while that remove is queued or running). A change GitLab did not make is one `peopleChangeText` sentence (`personState` under the listed person for a remove, else `groupNotices` under the group). Every control of a line carries `data-control`, its key built once on the line (`BoxLine`'s `review.rerequest.control` and `menuControl`, null when not shown) and bound by the template; when a reply removes the focused one (`lineControls` over the same lines), focus moves to the box.
+ 
+-A merge request's description (request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, plan §2 #171–#174): the row's info column (`w-7`, between the approvals and the links column, always rendered so the column stays) holds a button only when `row.hasDescription`; it calls `toggleDescription({ iid, title })` and carries `data-description-opener="<iid>"`. `MergeRequestsView.vue` renders the window's one `MergeRequestDescription.vue` after the list while `description` is set, keyed by the iid (a replace is a new panel), and closes it when the page unmounts. The panel is a non-modal `role="dialog"` that takes focus on mount; Escape and the close button call `closeDescription` and return focus to the row's opener when it is still listed. Escape is a window `keydown` listener in the bubble phase that acts only on an Escape nothing took (`defaultPrevented`) and not while a question is asked (a modal `dialog`'s cancel is the keydown's default action, so its Escape reaches the window unprevented): a focused field or box (the search field with text, a people box, a job log) handles Escape first, and the page's own listener, registered before the panel's, closes an open filter menu first and otherwise leaves Escape to the panel while `description` (or a thread, above) is set. A press outside it closes it (`onClickOutside`), ignoring every opener (whose toggle closes or replaces) and every element with `data-refreshes-list` (Refresh and the failed list's Retry: rule 2 keeps the panel over a list refresh, and onClickOutside would close it on their clicks, keyboard ones included); `useHoverBox`'s pinned rule reads the same attribute, so a refresh keeps a pinned discussions box and its thread panel too; a new refresh trigger carries the attribute. A scroll leaves it open. Its renderers use interpolation only and never `href`, `v-html`, `innerHTML` or `title` (RK66): `MergeRequestDescriptionBlocks.vue` and `MergeRequestDescriptionInlines.vue` each render nested content by referring to themselves, with `editor/theme.css`'s `markdown-*` classes; a link is an `a` with `role="link"`, `tabindex="0"` and no `href`, whose click or Enter calls `openPage("link", page)` for a `page` link (branded in `ipc/descriptionDomain.ts` `toDescriptionReply` by `ipc/domain.ts` `isLinkedPage`, http or https) and does nothing for a `refused` one; task boxes are Lucide icons with `role="img"` and their word; `MergeRequestDescriptionImage.vue` loads `imageAddress(image)` with `referrerpolicy="no-referrer"` and shows the caption (else the `web` address, else "picture") when that is null or the image fails; its `style` is `mergeRequestImageSize.ts` `imageStyle(size, natural)` (plan §2 #184: GitLab's width as given, never wider than the column, with its proportions; a pixel height scaled from the natural ratio once the image loaded; both by their ratio; a height in % ignored; no size: `max-width: 100%`, `height: auto`); `MergeRequestDescriptionCode.vue` hosts one `MarkdownView` through `useMarkdownCode`. The words are `mergeRequestDescriptionText.ts`. The thread panel's comments and previews render through the same blocks and inlines.
++A merge request's description (request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, plan §2 #171–#174): the row's info column (`w-7`, between the approvals and the links column, always rendered so the column stays) holds a button only when `row.hasDescription`; it calls `toggleDescription({ iid, title })` and carries `data-description-opener="<iid>"`. `MergeRequestsView.vue` renders the window's one `MergeRequestDescription.vue` after the list while `description` is set, keyed by the iid (a replace is a new panel), and closes it when the page unmounts. The panel is a non-modal `role="dialog"` that takes focus on mount; Escape and the close button call `closeDescription` and return focus to the row's opener when it is still listed. Escape is a window `keydown` listener in the bubble phase that acts only on an Escape nothing took (`defaultPrevented`) and not while a question is asked (a modal `dialog`'s cancel is the keydown's default action, so its Escape reaches the window unprevented): a focused field or box (the search field with text, a people box, a job log) handles Escape first, and the page's own listener, registered before the panel's, closes an open filter menu and otherwise leaves every Escape alone. A press outside it closes it (`onClickOutside`), ignoring every opener (whose toggle closes or replaces) and every element with `data-refreshes-list` (Refresh and the failed list's Retry: rule 2 keeps the panel over a list refresh, and onClickOutside would close it on their clicks, keyboard ones included); `useHoverBox`'s pinned rule reads the same attribute, so a refresh keeps a pinned discussions box and its thread panel too; a new refresh trigger carries the attribute. A scroll leaves it open. Its renderers use interpolation only and never `href`, `v-html`, `innerHTML` or `title` (RK66): `MergeRequestDescriptionBlocks.vue` and `MergeRequestDescriptionInlines.vue` each render nested content by referring to themselves, with `editor/theme.css`'s `markdown-*` classes; a link is an `a` with `role="link"`, `tabindex="0"` and no `href`, whose click or Enter calls `openPage("link", page)` for a `page` link (branded in `ipc/descriptionDomain.ts` `toDescriptionReply` by `ipc/domain.ts` `isLinkedPage`, http or https) and does nothing for a `refused` one; task boxes are Lucide icons with `role="img"` and their word; `MergeRequestDescriptionImage.vue` loads `imageAddress(image)` with `referrerpolicy="no-referrer"` and shows the caption (else the `web` address, else "picture") when that is null or the image fails; its `style` is `mergeRequestImageSize.ts` `imageStyle(size, natural)` (plan §2 #184: GitLab's width as given, never wider than the column, with its proportions; a pixel height scaled from the natural ratio once the image loaded; both by their ratio; a height in % ignored; no size: `max-width: 100%`, `height: auto`); `MergeRequestDescriptionCode.vue` hosts one `MarkdownView` through `useMarkdownCode`. The words are `mergeRequestDescriptionText.ts`. The thread panel's comments and previews render through the same blocks and inlines.
+ 
+ A merge request's links (request `docs/slices/request-mr-links.md`, design `docs/slices/briefs/mr-links-design.md` option A, plan §2 #176, #177, RK70): the row's links column (`w-7`, directly after the info column and before the CI box, always rendered so the column stays) holds `MergeRequestLinks.vue` only when `row.hasDescription`: Lucide `link` opening a hover box (`useHoverBox`, the discussions box's rules and look; `@click.stop`, so a click never opens the row's page). Its state is the slice's `links` (`mergeRequestLinks.ts`, written only by its queue: one call at a time, newest ask first, dropped with the list on a refresh); `useRowLinks` asks when the box opens and the row has no entry or a failed one, and Retry calls `keepFocus()` (below), then `askLinks(iid)`. Every word and line is `mergeRequestLinkLines.ts` `linkBox(load, platform)`: "Loading…", the empty sentence, the failure sentence (`linksFailedText`, `problemText` step `links` for a thrown call; the glab Retry sentences are `glab.ts` `glabRetryText`, shared with the description panel) with Retry, or the non-empty groups Epics, Issues, Commits; a line (group icon, reference, title and "Closed", or "Not found or no access") calls `openPage("link", page)` and the box stays; an issue GitLab shows with a parent has a second button (Lucide `arrow-up-to-line`, `parentTooltip`) opening the parent's page.
+ 
+diff --git a/frontend/src/ui/MergeRequestDiscussions.vue b/frontend/src/ui/MergeRequestDiscussions.vue
+index 595bf1b..35c1949 100644
+--- a/frontend/src/ui/MergeRequestDiscussions.vue
++++ b/frontend/src/ui/MergeRequestDiscussions.vue
+@@ -76,6 +76,10 @@ const spinning = computed(() => {
+   const shown = thread.value;
+   return shownId.value !== null && shown !== null && isBeingRead(shown.load);
+ });
++const counts = computed(() =>
++  turnCounts(unmarkedOf(load.value), viewer.value.username, author.value),
++);
++const marked = computed(() => counts.value.viewersTurn > 0);
+ const header = computed(() => headerOf(load.value));
+ const lines = computed(() => {
+   const shown = load.value;
+@@ -90,7 +94,7 @@ const lines = computed(() => {
+       name: noteAuthorName(discussion.last.author),
+       ago: agoText(discussion.last.createdAt, props.now),
+       resolved: shown.resolved.has(discussion.id),
+-      turn: turnText(turn, viewer.value),
++      turn: turnText(turn, viewer.value, props.row.author),
+       viewersTurn: turn.kind === "viewer",
+       place: placeText(discussion.place),
+       excerpt: noteExcerpt(discussion.last.text),
+@@ -149,7 +153,7 @@ function headerOf(shown: DiscussionLoad | undefined): Header {
+     case "loading":
+       return { text: DISCUSSIONS_LOADING, failed: false };
+     case "read":
+-      return readHeader(shown);
++      return readHeader();
+     case "refused":
+     case "failed":
+       return { text: discussionsFailedText(shown, navigator.platform), failed: true };
+@@ -160,14 +164,19 @@ function headerOf(shown: DiscussionLoad | undefined): Header {
+   }
+ }
+ 
+-function readHeader(shown: Extract<DiscussionLoad, { readonly kind: "read" }>): Header {
++function unmarkedOf(shown: DiscussionLoad | undefined): readonly OpenDiscussion[] {
++  if (shown?.kind !== "read") {
++    return [];
++  }
++  return shown.discussions.filter((discussion) => !shown.resolved.has(discussion.id));
++}
++
++function readHeader(): Header {
+   const failure = reload.value;
+   if (failure !== undefined && failure.kind !== "running") {
+     return { text: discussionsFailedText(failure, navigator.platform), failed: true };
+   }
+-  const unmarked = shown.discussions.filter((discussion) => !shown.resolved.has(discussion.id));
+-  const counts = turnCounts(unmarked, viewer.value.username, author.value);
+-  return { text: turnSummaryText(counts, viewer.value), failed: false };
++  return { text: turnSummaryText(counts.value, viewer.value), failed: false };
+ }
+ 
+ function shownDiscussion(): OpenDiscussion | null {
+@@ -186,7 +195,10 @@ function wordsOf(discussion: OpenDiscussion | null): Words {
+     return { place: "", turn: "" };
+   }
+   const turn = turnOf(discussion, viewer.value.username, author.value);
+-  return { place: placeText(discussion.place), turn: turnText(turn, viewer.value) };
++  return {
++    place: placeText(discussion.place),
++    turn: turnText(turn, viewer.value, props.row.author),
++  };
+ }
+ 
+ async function openLine(page: WebPage | null): Promise<void> {
+@@ -249,6 +261,7 @@ function threadClosed(): void {
+       :aria-expanded="open"
+       :aria-label="label"
+       class="flex items-center gap-1 rounded p-0.5 hover:bg-hover"
++      :class="{ 'font-semibold text-primary': marked }"
+     >
+       <MessageSquare class="size-4" aria-hidden="true" />
+       <span aria-hidden="true">{{ count }}</span>
+diff --git a/frontend/src/ui/MergeRequestDiscussionsBox.test.ts b/frontend/src/ui/MergeRequestDiscussionsBox.test.ts
+index 9d526b0..e1db440 100644
+--- a/frontend/src/ui/MergeRequestDiscussionsBox.test.ts
++++ b/frontend/src/ui/MergeRequestDiscussionsBox.test.ts
+@@ -156,6 +156,20 @@ function headerOf(html: string): string {
+   return `${text} | ${tone.includes("text-problem-error") ? "error" : "muted"}`;
+ }
+ 
++/** Whether the discussions opener button carries the turn words' mark. */
++function isMarked(html: string): boolean {
++  const opener = /<button [^>]*aria-expanded[^>]*>/u.exec(html)?.[0] ?? "";
++  return opener.includes("font-semibold text-primary");
++}
++
++async function resolve(serial: number): Promise<void> {
++  slice.showThread(iid(THREADS), d(serial));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  const resolving = slice.setResolved(true);
++  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
++  await resolving;
++}
++
+ test("rows_are_buttons_keyed_by_id_with_the_shift_tip", async () => {
+   await discussionsRead();
+   const html = await box();
+@@ -165,15 +179,15 @@ test("rows_are_buttons_keyed_by_id_with_the_shift_tip", async () => {
+     "d03 Your turn",
+     "d04 Your turn",
+     "d05 Your turn",
+-    "d02 Author's turn",
++    "d02 Dmitri Volkov's turn",
+     "d06 Ben Okafor's turn",
+-    "d07 Author's turn",
++    "d07 Dmitri Volkov's turn",
+     "d08 Anna Berg's turn",
+     "d09 Open",
+-    "d10 Author's turn",
+-    "d11 Author's turn",
+-    "d12 Author's turn",
+-    "d13 Author's turn",
++    "d10 Dmitri Volkov's turn",
++    "d11 Dmitri Volkov's turn",
++    "d12 Dmitri Volkov's turn",
++    "d13 Dmitri Volkov's turn",
+   ]);
+   expect(headerOf(html)).toBe("4 of 13 wait for you | muted");
+   const buttons = html.split("<li").slice(1);
+@@ -198,7 +212,7 @@ test("a_marked_row_reads_resolved_and_leaves_the_count", async () => {
+   const html = await box();
+ 
+   expect(rows(html)).toContain("d02 Resolved");
+-  expect(rows(html)).not.toContain("d02 Author's turn");
++  expect(rows(html)).not.toContain("d02 Dmitri Volkov's turn");
+   const marked = html
+     .split("<li")
+     .find((line) => line.includes('data-discussion-id="0000000000000000000000000000000000000002"'));
+@@ -254,3 +268,31 @@ test("a_failed_reload_keeps_the_rows", async () => {
+   expect(rows(html)[0]).toBe("d01 Your turn");
+   expect(headerOf(html)).toMatch(/glab timed out.* \| error$/u);
+ });
++
++test("a_row_with_the_viewers_turn_has_a_marked_button", async () => {
++  await slice.refresh();
++  expect(isMarked(await box())).toBe(false);
++  slice.askDiscussions(iid(THREADS));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  const read = await box();
++  expect([headerOf(read), isMarked(read)]).toEqual(["4 of 13 wait for you | muted", true]);
++
++  mode.value = "full";
++  await slice.findProject();
++  slice.review({ kind: "person", username: "anna" });
++  const anna = await box();
++  expect([headerOf(anna), isMarked(anna)]).toEqual(["2 of 13 wait for Anna Berg | muted", true]);
++  slice.review({ kind: "person", username: "zoe" });
++  const zoe = await box();
++  expect([headerOf(zoe), isMarked(zoe)]).toEqual(["0 of 13 wait for zoe | muted", false]);
++  slice.review({ kind: "me" });
++
++  for (const serial of [1, 3, 4]) {
++    await resolve(serial);
++  }
++  const last = await box();
++  expect([headerOf(last), isMarked(last)]).toEqual(["1 of 10 waits for you | muted", true]);
++  await resolve(5);
++  const none = await box();
++  expect([headerOf(none), isMarked(none)]).toEqual(["0 of 9 wait for you | muted", false]);
++});
+diff --git a/frontend/src/ui/MergeRequestsPage.test.ts b/frontend/src/ui/MergeRequestsPage.test.ts
+new file mode 100644
+index 0000000..ab346b8
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestsPage.test.ts
+@@ -0,0 +1,172 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { createSSRApp, h, shallowRef, type ShallowRef } from "vue";
++import { renderToString } from "vue/server-renderer";
++
++import {
++  createFixtureCompareSource,
++  isDiscussionId,
++  isMergeRequestIid,
++  log,
++  type DiscussionId,
++  type MergeRequestIid,
++} from "../ipc";
++import { createMergeRequests, type MergeRequests } from "./mergeRequests";
++import { registerMergeRequests } from "./mergeRequestsStore";
++import MergeRequestsView from "./MergeRequestsView.vue";
++import type { Screen } from "./screen";
++
++vi.mock("./tooltip", () => ({
++  vTooltip: {
++    getSSRProps: ({ value }: { value: string | null }) => ({ "data-tooltip": value }),
++  },
++}));
++/** The page's filter menu, held by the test: SSR renders no opener to point at. */
++const menu = vi.hoisted(() => {
++  const openFor: { value: string | null } = { value: null };
++  return { openFor, dismissed: 0 };
++});
++vi.mock("./useHoverMenu", () => ({
++  useHoverMenu: () => ({
++    openFor: menu.openFor,
++    above: false,
++    pointerEntered: () => undefined,
++    pointerLeft: () => undefined,
++    openerClicked: async () => undefined,
++    menuKey: () => undefined,
++    dismiss: async () => {
++      menu.dismissed += 1;
++      menu.openFor.value = null;
++    },
++    close: async () => {
++      menu.openFor.value = null;
++    },
++  }),
++}));
++
++const PAUSE_MS = 400;
++const THREADS = 637;
++
++class FakeKeyboardEvent extends Event {
++  readonly key: string;
++
++  constructor(key: string) {
++    super("keydown", { cancelable: true });
++    this.key = key;
++  }
++}
++
++let screen: ShallowRef<Screen>;
++let slice: MergeRequests;
++
++beforeEach(() => {
++  const document = new EventTarget();
++  vi.stubGlobal("document", document);
++  vi.stubGlobal("window", Object.assign(new EventTarget(), { document }));
++  vi.useFakeTimers();
++  vi.spyOn(log, "info").mockImplementation(() => undefined);
++  menu.openFor.value = null;
++  menu.dismissed = 0;
++  screen = shallowRef<Screen>({ kind: "files" });
++  slice = createMergeRequests({
++    source: createFixtureCompareSource(log, "?mr=list", {}),
++    screen,
++    report: () => undefined,
++    discussionDetails: () => "lazy",
++  });
++  registerMergeRequests(slice);
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++  vi.unstubAllGlobals();
++  vi.restoreAllMocks();
++});
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is not an iid`);
++  }
++  return value;
++}
++
++function d(serial: number): DiscussionId {
++  const id = String(serial).padStart(40, "0");
++  if (!isDiscussionId(id)) {
++    throw new Error(`${id} is not a discussion id`);
++  }
++  return id;
++}
++
++/** The page's window `keydown` listener, taken from its registration: Vue's SSR runs `useEventListener`'s
++ *  immediate watch once and stops it before the render ends (runtime-core `doWatch`, `isInSSRComponentSetup`),
++ *  so a dispatch on the window would reach nothing. The page registers before any child. */
++async function pageKeys(asking: boolean): Promise<(event: Event) => void> {
++  const added = vi.spyOn(window, "addEventListener");
++  slice.show();
++  await vi.advanceTimersByTimeAsync(0);
++  await renderToString(createSSRApp({ render: () => h(MergeRequestsView, { asking }) }));
++  const listener = added.mock.calls.find(([type]) => type === "keydown")?.[1];
++  if (typeof listener !== "function") {
++    throw new Error("the page listens to no keydown");
++  }
++  return listener;
++}
++
++/** An Escape reaching the page's listener; `taken`: a box or a field took it first. */
++function escape(keys: (event: Event) => void, taken = false): FakeKeyboardEvent {
++  const event = new FakeKeyboardEvent("Escape");
++  if (taken) {
++    event.preventDefault();
++  }
++  keys(event);
++  return event;
++}
++
++test("escape_never_leaves_the_page", async () => {
++  const keys = await pageKeys(false);
++  const onBack = escape(keys);
++  const onBody = escape(keys);
++  const closingBox = escape(keys, true);
++  const afterBox = escape(keys);
++  await slice.refresh();
++  slice.showThread(iid(THREADS), d(1));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  slice.closeThread();
++  const afterThread = escape(keys);
++
++  expect(
++    [onBack, onBody, closingBox, afterBox, afterThread].map((event) => event.defaultPrevented),
++  ).toEqual([false, false, true, false, false]);
++  expect([screen.value.kind, menu.dismissed]).toEqual(["mergeRequests", 0]);
++});
++
++test("escape_still_closes_an_open_filter_menu", async () => {
++  const keys = await pageKeys(false);
++  menu.openFor.value = "assignee";
++  const closing = escape(keys);
++  expect([closing.defaultPrevented, menu.dismissed, menu.openFor.value]).toEqual([true, 1, null]);
++  const after = escape(keys);
++  expect([after.defaultPrevented, menu.dismissed]).toEqual([false, 1]);
++
++  menu.openFor.value = "review";
++  const taken = escape(keys, true);
++  expect([taken.defaultPrevented, menu.dismissed, menu.openFor.value]).toEqual([true, 1, "review"]);
++  const other = new FakeKeyboardEvent("Enter");
++  keys(other);
++  expect([other.defaultPrevented, menu.dismissed, screen.value.kind]).toEqual([
++    false,
++    1,
++    "mergeRequests",
++  ]);
++});
++
++test("escape_with_a_question_open_is_the_questions", async () => {
++  const keys = await pageKeys(true);
++  menu.openFor.value = "label";
++  const pressed = escape(keys);
++  expect([pressed.defaultPrevented, menu.dismissed, menu.openFor.value]).toEqual([
++    false,
++    0,
++    "label",
++  ]);
++});
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index 69a7fbf..8e765de 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -65,7 +65,6 @@ const {
+   viewer,
+   reviewSort,
+   description,
+-  thread,
+ } = requests;
+ const back = useTemplateRef<HTMLButtonElement>("back");
+ const bars = useTemplateRef<FilterBar[]>("bars");
+@@ -100,19 +99,11 @@ async function goBack(): Promise<void> {
+ }
+ 
+ function escapePressed(event: KeyboardEvent): void {
+-  if (event.key !== "Escape" || event.defaultPrevented || props.asking) {
+-    return;
+-  }
+-  if (openFor.value !== null) {
+-    event.preventDefault();
+-    void dismiss();
+-    return;
+-  }
+-  if (description.value !== null || thread.value !== null) {
++  if (event.key !== "Escape" || event.defaultPrevented || props.asking || openFor.value === null) {
+     return;
+   }
+   event.preventDefault();
+-  void goBack();
++  void dismiss();
+ }
+ 
+ function windowFocused(): void {
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index e8c893c..2894185 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -1711,7 +1711,7 @@ test("review_mode_orders_the_shown_rows_and_a_late_answer_moves_them", async ()
+   }));
+   await settled();
+ 
+-  expect(iids(live.slice.shownRows.value)).toEqual(iids([later, ...quiet, soonest, ...others]));
++  expect(iids(live.slice.shownRows.value)).toEqual(iids([soonest, later, ...quiet, ...others]));
+   expect(live.slice.reviewSort.value).toEqual({ kind: "sorted", loading: 0 });
+ });
+ 

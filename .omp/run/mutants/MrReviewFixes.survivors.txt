@@ -1,0 +1,6 @@
+just mutants HEAD → 290 killed, 0 timeout, 17 survived, 4 no-cov; discussions.ts 93.07%, reviewOrder.ts 93.75%; no Rust changes
+reviewOrder.ts:42 `|| b.due === null`→false — equivalent: rows reach the sort already in byDueDate order and V8's comparison order never pairs a dated a with an undated b
+reviewOrder.ts:43 `Number(a.due === null)`→1 — equivalent, same reason (only differs for a dated a and an undated b)
+reviewOrder.ts:100 viewerPossessive 'inside'→'' — equivalent: viewerPossessive treats every `at` except 'start' as inside
+reviewOrder.ts:24 NO_TURNS→{} — killed when applied by hand (loading test fails); Stryker cannot switch a module-level constant on
+discussions.ts survivors (42–53 constants, 59, 199/219 default) are on unchanged lines

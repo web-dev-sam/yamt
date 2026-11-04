@@ -65,7 +65,6 @@ const {
   viewer,
   reviewSort,
   description,
-  thread,
 } = requests;
 const back = useTemplateRef<HTMLButtonElement>("back");
 const bars = useTemplateRef<FilterBar[]>("bars");
@@ -100,19 +99,11 @@ async function goBack(): Promise<void> {
 }
 
 function escapePressed(event: KeyboardEvent): void {
-  if (event.key !== "Escape" || event.defaultPrevented || props.asking) {
-    return;
-  }
-  if (openFor.value !== null) {
-    event.preventDefault();
-    void dismiss();
-    return;
-  }
-  if (description.value !== null || thread.value !== null) {
+  if (event.key !== "Escape" || event.defaultPrevented || props.asking || openFor.value === null) {
     return;
   }
   event.preventDefault();
-  void goBack();
+  void dismiss();
 }
 
 function windowFocused(): void {

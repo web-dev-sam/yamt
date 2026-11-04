@@ -36,10 +36,12 @@ function talk(first: Person | null, ...rest: readonly (Person | null)[]): OpenDi
   return { place: { kind: "overview" }, earlier: said, last: { ...last, createdAt: 0, text: "" } };
 }
 
-/** On dmitri's merge request: sam's turn and the author's for anna (sam started it, anna answered). */
+/** On dmitri's merge request: sam's turn, sam wrote in it; anna wrote last, so the author's turn for her. */
 const SAMS = talk(SAM, ANNA);
-/** The author's turn for sam (sam answered last) and anna's turn (she started it). */
+/** Sam wrote last, so the author's turn for him, sam wrote in it; anna's turn (she started it). */
 const AUTHORS = talk(ANNA, SAM);
+/** The author answered anna: anna's turn, sam never wrote in it. */
+const OTHERS = talk(ANNA, DMITRI);
 
 function read(...discussions: readonly OpenDiscussion[]): Details {
   return { kind: "read", discussions };
@@ -71,101 +73,103 @@ function iids(listed: readonly Row[], reviewer: string | null, setup: Setup): re
   return order.rows.map((row) => row.iid);
 }
 
-test("due_rows_with_the_reviewers_turn_come_first_soonest_first", () => {
+test("review_order_d1_soonest_due_first_even_above_more_waiting", () => {
   const setup: Setup = {
-    due: { 1: "2026-11-01", 3: "2026-11-05" },
-    details: { 1: read(SAMS, AUTHORS), 2: read(SAMS), 3: read(SAMS) },
+    due: { 3: "2026-11-05", 1: "2026-11-01" },
+    details: { 3: read(OTHERS), 2: read(SAMS, SAMS, SAMS), 1: read(SAMS) },
   };
   expect(iids(rows(3, 2, 1), "sam", setup)).toEqual([1, 3, 2]);
 });
 
-test("equal_due_days_with_the_reviewers_turn_keep_newest_first", () => {
+test("review_order_d1_an_overdue_day_is_above_todays", () => {
+  const today = "2026-11-05";
+  const overdue = "2026-10-30";
   const setup: Setup = {
-    due: { 1: "2026-11-02", 2: "2026-11-02", 3: "2026-11-01" },
-    details: { 1: read(SAMS), 2: read(SAMS, AUTHORS, AUTHORS), 3: read(AUTHORS) },
+    due: { 2: today, 1: overdue },
+    details: { 2: read(SAMS, SAMS), 1: read(OTHERS) },
   };
-  expect(iids(rows(3, 2, 1), "sam", setup)).toEqual([2, 1, 3]);
-  expect(iids(rows(1, 2, 3), "sam", setup)).toEqual([2, 1, 3]);
+  expect(iids(rows(2, 1), "sam", setup)).toEqual([1, 2]);
 });
 
-test("a_due_row_without_the_reviewers_turn_sorts_with_the_rest", () => {
+test("review_order_d2_more_waiting_first_within_one_day", () => {
   const setup: Setup = {
-    due: { 3: "2026-11-01", 1: "2026-11-04" },
-    details: { 3: read(AUTHORS), 1: read(SAMS) },
+    due: { 1: "2026-11-02", 2: "2026-11-02", 3: "2026-11-02" },
+    details: {
+      1: read(SAMS),
+      2: read(SAMS, SAMS),
+      3: read(OTHERS),
+      4: read(SAMS),
+      5: read(SAMS, SAMS, SAMS),
+    },
   };
-  expect(iids(rows(3, 2, 1), "sam", setup)).toEqual([1, 2, 3]);
+  expect(iids(rows(5, 4, 3, 2, 1), "sam", setup)).toEqual([2, 1, 3, 5, 4]);
 });
 
-test("the_rest_sort_by_fewest_waiting_on_the_author", () => {
+test("review_order_d3_fewer_written_in_first_within_equal_d1_and_d2", () => {
   const setup: Setup = {
-    details: { 4: read(AUTHORS, AUTHORS), 3: read(SAMS, SAMS, SAMS), 2: read(AUTHORS, SAMS) },
+    details: {
+      4: read(SAMS, AUTHORS, AUTHORS),
+      3: read(SAMS, AUTHORS),
+      2: read(SAMS, OTHERS),
+      1: read(SAMS),
+      5: read(OTHERS),
+    },
   };
-  expect(iids(rows(4, 3, 2, 1), "sam", setup)).toEqual([3, 1, 2, 4]);
+  expect(iids(rows(5, 4, 3, 2, 1), "sam", setup)).toEqual([2, 1, 3, 4, 5]);
 });
 
-test("ties_among_the_rest_keep_the_normal_order_due_first_then_newest", () => {
+test("review_order_d4_a_full_tie_keeps_newest_first", () => {
   const setup: Setup = {
-    due: { 1: "2026-11-03", 3: "2026-11-02" },
-    details: { 1: read(AUTHORS), 2: read(SAMS, AUTHORS), 3: read(AUTHORS), 4: read(AUTHORS) },
+    due: { 1: "2026-11-02", 2: "2026-11-02", 3: "2026-11-02" },
+    details: { 1: read(SAMS), 2: read(SAMS), 3: read(SAMS), 4: read(SAMS), 5: read(SAMS) },
   };
-  expect(iids(rows(4, 3, 2, 1), "sam", setup)).toEqual([3, 1, 4, 2]);
+  expect(iids(rows(1, 2, 3, 5, 4), "sam", setup)).toEqual([3, 2, 1, 5, 4]);
 });
 
-test("another_reviewer_gets_their_own_turns_and_waits", () => {
+test("review_order_another_reviewer_changes_d2_and_d3", () => {
   const setup: Setup = {
-    due: { 1: "2026-11-01", 2: "2026-11-02" },
-    details: { 1: read(SAMS), 2: read(AUTHORS), 3: read(AUTHORS, AUTHORS), 4: read(SAMS) },
+    details: { 4: read(AUTHORS, SAMS), 3: read(OTHERS), 2: read(SAMS), 1: read(AUTHORS) },
   };
-  expect(iids(rows(4, 3, 2, 1), "sam", setup)).toEqual([1, 4, 2, 3]);
-  expect(iids(rows(4, 3, 2, 1), "anna", setup)).toEqual([2, 3, 1, 4]);
+  expect(iids(rows(4, 3, 2, 1), "sam", setup)).toEqual([2, 4, 3, 1]);
+  expect(iids(rows(4, 3, 2, 1), "anna", setup)).toEqual([3, 1, 4, 2]);
 });
 
-test("no_reviewer_has_no_turn_so_nothing_comes_first", () => {
-  const setup: Setup = {
-    due: { 1: "2026-11-02", 2: "2026-11-01" },
-    details: { 1: read(SAMS), 2: read(AUTHORS) },
-  };
+test("review_order_no_reviewer_keeps_the_normal_order", () => {
+  const setup: Setup = { details: { 1: read(SAMS), 2: read(AUTHORS) } };
   expect(iids(rows(2, 1), "sam", setup)).toEqual([1, 2]);
   expect(iids(rows(2, 1), null, setup)).toEqual([2, 1]);
 });
 
-test("b5_review_order_counts_authors_turns_as_waiting_on_the_author", () => {
-  const answered = talk(ANNA, DMITRI);
+test("review_order_the_rows_author_weighs_the_turn", () => {
   const listed: readonly Row[] = [
-    { iid: 4, createdAt: 4, author: ANNA },
     { iid: 3, createdAt: 3, author: null },
     { iid: 2, createdAt: 2, author: DMITRI },
-    { iid: 1, createdAt: 1, author: DMITRI },
+    { iid: 1, createdAt: 1, author: SAM },
   ];
   const setup: Setup = {
-    details: {
-      4: read(answered),
-      3: read(talk(DMITRI)),
-      2: read(answered, talk(DMITRI), talk(DMITRI)),
-      1: read(AUTHORS),
-    },
+    details: { 3: read(talk(ANNA)), 2: read(talk(ANNA)), 1: read(talk(ANNA)) },
   };
-  expect(iids(listed, "sam", setup)).toEqual([2, 4, 3, 1]);
+  expect(iids(listed, "sam", setup)).toEqual([1, 3, 2]);
 });
 
-test("rows_not_arrived_sort_as_none_and_are_counted_loading", () => {
+test("review_order_loading_rows_count_zero_and_zero_and_are_counted", () => {
   const setup: Setup = {
     due: { 1: "2026-11-03", 2: "2026-11-02", 3: "2026-11-01" },
     details: { 4: LOADING, 3: LOADING, 1: read(SAMS), 5: read(AUTHORS) },
   };
   expect(ordered(rows(5, 4, 3, 2, 1), "sam", setup)).toEqual({
     kind: "sorted",
-    rows: rows(1, 3, 2, 4, 5),
+    rows: rows(3, 2, 1, 4, 5),
     loading: 2,
   });
   expect(ordered(rows(2, 1), "sam", setup)).toEqual({
     kind: "sorted",
-    rows: rows(1, 2),
+    rows: rows(2, 1),
     loading: 0,
   });
 });
 
-test("a_failed_row_keeps_the_normal_order_and_is_named", () => {
+test("review_order_a_failed_row_keeps_the_normal_order_and_is_named", () => {
   const setup: Setup = {
     due: { 1: "2026-11-01", 3: "2026-11-02", 2: "2026-11-03" },
     details: {
@@ -183,22 +187,22 @@ test("a_failed_row_keeps_the_normal_order_and_is_named", () => {
   });
 });
 
-test("the sorted words speak for me or name the reviewer", () => {
+test("review_order_d5_words_speak_for_me_or_name_the_reviewer", () => {
   expect(reviewSortedText(ME, 0)).toBe(
-    "Sorted for your review: due with your turn first, then fewest waiting on the author",
+    "Sorted for your review: soonest due date first, then most discussions waiting for you, then fewest discussions you wrote in",
   );
   expect(reviewSortedText({ kind: "me", username: null }, 0)).toBe(reviewSortedText(ME, 0));
   expect(reviewSortedText(AS_ANNA, 0)).toBe(
-    "Sorted for Anna Berg's review: due with their turn first, then fewest waiting on the author",
+    "Sorted for Anna Berg's review: soonest due date first, then most discussions waiting for Anna Berg, then fewest discussions Anna Berg wrote in",
   );
 });
 
-test("the sorted words say how many rows are still loading, singular and plural", () => {
+test("review_order_d5_words_say_how_many_rows_are_still_loading", () => {
   expect(reviewSortedText(ME, 1)).toBe(
-    "Sorted for your review: due with your turn first, then fewest waiting on the author (the discussions of 1 merge request are still loading; it moves when they arrive)",
+    "Sorted for your review: soonest due date first, then most discussions waiting for you, then fewest discussions you wrote in (the discussions of 1 merge request are still loading; it moves when they arrive)",
   );
   expect(reviewSortedText(AS_ANNA, 3)).toBe(
-    "Sorted for Anna Berg's review: due with their turn first, then fewest waiting on the author (the discussions of 3 merge requests are still loading; they move when they arrive)",
+    "Sorted for Anna Berg's review: soonest due date first, then most discussions waiting for Anna Berg, then fewest discussions Anna Berg wrote in (the discussions of 3 merge requests are still loading; they move when they arrive)",
   );
 });
 
@@ -216,7 +220,7 @@ test.each<[string, Viewer]>([
   ["a named reviewer", AS_ANNA],
   ["a reviewer named by a lowercase username", { kind: "person", username: "ben", name: "ben" }],
 ])("the review words name %s as the turn words do", (_case, viewer) => {
-  const possessive = turnText({ kind: "viewer" }, viewer).replace(/ turn$/u, "");
+  const possessive = turnText({ kind: "viewer" }, viewer, DMITRI).replace(/ turn$/u, "");
   const inside = viewer.kind === "me" ? possessive.toLowerCase() : possessive;
   expect(reviewSortedText(viewer, 0)).toMatch(new RegExp(`^Sorted for ${inside} review: `, "u"));
   expect(reviewFailedText(viewer, 1, "")).toMatch(

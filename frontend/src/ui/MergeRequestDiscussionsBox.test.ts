@@ -156,6 +156,20 @@ function headerOf(html: string): string {
   return `${text} | ${tone.includes("text-problem-error") ? "error" : "muted"}`;
 }
 
+/** Whether the discussions opener button carries the turn words' mark. */
+function isMarked(html: string): boolean {
+  const opener = /<button [^>]*aria-expanded[^>]*>/u.exec(html)?.[0] ?? "";
+  return opener.includes("font-semibold text-primary");
+}
+
+async function resolve(serial: number): Promise<void> {
+  slice.showThread(iid(THREADS), d(serial));
+  await vi.advanceTimersByTimeAsync(PAUSE_MS);
+  const resolving = slice.setResolved(true);
+  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
+  await resolving;
+}
+
 test("rows_are_buttons_keyed_by_id_with_the_shift_tip", async () => {
   await discussionsRead();
   const html = await box();
@@ -165,15 +179,15 @@ test("rows_are_buttons_keyed_by_id_with_the_shift_tip", async () => {
     "d03 Your turn",
     "d04 Your turn",
     "d05 Your turn",
-    "d02 Author's turn",
+    "d02 Dmitri Volkov's turn",
     "d06 Ben Okafor's turn",
-    "d07 Author's turn",
+    "d07 Dmitri Volkov's turn",
     "d08 Anna Berg's turn",
     "d09 Open",
-    "d10 Author's turn",
-    "d11 Author's turn",
-    "d12 Author's turn",
-    "d13 Author's turn",
+    "d10 Dmitri Volkov's turn",
+    "d11 Dmitri Volkov's turn",
+    "d12 Dmitri Volkov's turn",
+    "d13 Dmitri Volkov's turn",
   ]);
   expect(headerOf(html)).toBe("4 of 13 wait for you | muted");
   const buttons = html.split("<li").slice(1);
@@ -198,7 +212,7 @@ test("a_marked_row_reads_resolved_and_leaves_the_count", async () => {
   const html = await box();
 
   expect(rows(html)).toContain("d02 Resolved");
-  expect(rows(html)).not.toContain("d02 Author's turn");
+  expect(rows(html)).not.toContain("d02 Dmitri Volkov's turn");
   const marked = html
     .split("<li")
     .find((line) => line.includes('data-discussion-id="0000000000000000000000000000000000000002"'));
@@ -253,4 +267,32 @@ test("a_failed_reload_keeps_the_rows", async () => {
   expect(rows(html)).toHaveLength(13);
   expect(rows(html)[0]).toBe("d01 Your turn");
   expect(headerOf(html)).toMatch(/glab timed out.* \| error$/u);
+});
+
+test("a_row_with_the_viewers_turn_has_a_marked_button", async () => {
+  await slice.refresh();
+  expect(isMarked(await box())).toBe(false);
+  slice.askDiscussions(iid(THREADS));
+  await vi.advanceTimersByTimeAsync(PAUSE_MS);
+  const read = await box();
+  expect([headerOf(read), isMarked(read)]).toEqual(["4 of 13 wait for you | muted", true]);
+
+  mode.value = "full";
+  await slice.findProject();
+  slice.review({ kind: "person", username: "anna" });
+  const anna = await box();
+  expect([headerOf(anna), isMarked(anna)]).toEqual(["2 of 13 wait for Anna Berg | muted", true]);
+  slice.review({ kind: "person", username: "zoe" });
+  const zoe = await box();
+  expect([headerOf(zoe), isMarked(zoe)]).toEqual(["0 of 13 wait for zoe | muted", false]);
+  slice.review({ kind: "me" });
+
+  for (const serial of [1, 3, 4]) {
+    await resolve(serial);
+  }
+  const last = await box();
+  expect([headerOf(last), isMarked(last)]).toEqual(["1 of 10 waits for you | muted", true]);
+  await resolve(5);
+  const none = await box();
+  expect([headerOf(none), isMarked(none)]).toEqual(["0 of 9 wait for you | muted", false]);
 });

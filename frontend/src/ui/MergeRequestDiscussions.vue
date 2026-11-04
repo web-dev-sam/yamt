@@ -76,6 +76,10 @@ const spinning = computed(() => {
   const shown = thread.value;
   return shownId.value !== null && shown !== null && isBeingRead(shown.load);
 });
+const counts = computed(() =>
+  turnCounts(unmarkedOf(load.value), viewer.value.username, author.value),
+);
+const marked = computed(() => counts.value.viewersTurn > 0);
 const header = computed(() => headerOf(load.value));
 const lines = computed(() => {
   const shown = load.value;
@@ -90,7 +94,7 @@ const lines = computed(() => {
       name: noteAuthorName(discussion.last.author),
       ago: agoText(discussion.last.createdAt, props.now),
       resolved: shown.resolved.has(discussion.id),
-      turn: turnText(turn, viewer.value),
+      turn: turnText(turn, viewer.value, props.row.author),
       viewersTurn: turn.kind === "viewer",
       place: placeText(discussion.place),
       excerpt: noteExcerpt(discussion.last.text),
@@ -149,7 +153,7 @@ function headerOf(shown: DiscussionLoad | undefined): Header {
     case "loading":
       return { text: DISCUSSIONS_LOADING, failed: false };
     case "read":
-      return readHeader(shown);
+      return readHeader();
     case "refused":
     case "failed":
       return { text: discussionsFailedText(shown, navigator.platform), failed: true };
@@ -160,14 +164,19 @@ function headerOf(shown: DiscussionLoad | undefined): Header {
   }
 }
 
-function readHeader(shown: Extract<DiscussionLoad, { readonly kind: "read" }>): Header {
+function unmarkedOf(shown: DiscussionLoad | undefined): readonly OpenDiscussion[] {
+  if (shown?.kind !== "read") {
+    return [];
+  }
+  return shown.discussions.filter((discussion) => !shown.resolved.has(discussion.id));
+}
+
+function readHeader(): Header {
   const failure = reload.value;
   if (failure !== undefined && failure.kind !== "running") {
     return { text: discussionsFailedText(failure, navigator.platform), failed: true };
   }
-  const unmarked = shown.discussions.filter((discussion) => !shown.resolved.has(discussion.id));
-  const counts = turnCounts(unmarked, viewer.value.username, author.value);
-  return { text: turnSummaryText(counts, viewer.value), failed: false };
+  return { text: turnSummaryText(counts.value, viewer.value), failed: false };
 }
 
 function shownDiscussion(): OpenDiscussion | null {
@@ -186,7 +195,10 @@ function wordsOf(discussion: OpenDiscussion | null): Words {
     return { place: "", turn: "" };
   }
   const turn = turnOf(discussion, viewer.value.username, author.value);
-  return { place: placeText(discussion.place), turn: turnText(turn, viewer.value) };
+  return {
+    place: placeText(discussion.place),
+    turn: turnText(turn, viewer.value, props.row.author),
+  };
 }
 
 async function openLine(page: WebPage | null): Promise<void> {
@@ -249,6 +261,7 @@ function threadClosed(): void {
       :aria-expanded="open"
       :aria-label="label"
       class="flex items-center gap-1 rounded p-0.5 hover:bg-hover"
+      :class="{ 'font-semibold text-primary': marked }"
     >
       <MessageSquare class="size-4" aria-hidden="true" />
       <span aria-hidden="true">{{ count }}</span>

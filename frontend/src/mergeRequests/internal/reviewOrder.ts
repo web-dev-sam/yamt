@@ -1,11 +1,12 @@
 import {
   turnCounts,
+  viewerAddressed,
   viewerPossessive,
   type OpenDiscussion,
   type TurnCounts,
   type Viewer,
 } from "./discussions";
-import type { CalendarDay } from "./dueDate";
+import { compareDays, type CalendarDay } from "./dueDate";
 import { byDueDate } from "./order";
 
 /** A row's discussion details as the review order reads them (rule 6). */
@@ -18,9 +19,9 @@ export type ReviewOrder<R, F> =
   | { readonly kind: "sorted"; readonly rows: readonly R[]; readonly loading: number }
   | { readonly kind: "failed"; readonly rows: readonly R[]; readonly row: R; readonly failure: F };
 
-type Ranked<R> = { readonly row: R; readonly first: boolean; readonly waiting: number };
+type Ranked<R> = { readonly row: R; readonly due: CalendarDay | null; readonly counts: TurnCounts };
 
-const NO_TURNS: TurnCounts = { viewersTurn: 0, authorsTurn: 0, total: 0 };
+const NO_TURNS: TurnCounts = { viewersTurn: 0, viewerWrote: 0, total: 0 };
 
 function firstFailed<R extends { readonly iid: number }, F>(
   rows: readonly R[],
@@ -35,8 +36,25 @@ function firstFailed<R extends { readonly iid: number }, F>(
   return null;
 }
 
-/** Rule 3 for `reviewer` (a username; null: nobody). `rows` in the list's order (newest first). "Waiting on the
- *  author" is the discussions whose turn is the row's author's (request-mr-threads B5). */
+/** D1 the due day, dated before undated, the soonest first; D2 most waiting for the reviewer; D3 fewest written in;
+ *  0 for a tie (D4: the stable sort keeps the normal order). */
+function reviewFirst<R>(a: Ranked<R>, b: Ranked<R>): number {
+  if (a.due === null || b.due === null) {
+    const undated = Number(a.due === null) - Number(b.due === null);
+    if (undated !== 0) {
+      return undated;
+    }
+  } else {
+    const days = compareDays(a.due, b.due);
+    if (days !== 0) {
+      return days;
+    }
+  }
+  const waiting = b.counts.viewersTurn - a.counts.viewersTurn;
+  return waiting === 0 ? a.counts.viewerWrote - b.counts.viewerWrote : waiting;
+}
+
+/** D1–D4 for `reviewer` (a username; null: nobody). `rows` in the list's order (newest first). */
 export function reviewOrdered<
   R extends {
     readonly iid: number;
@@ -61,15 +79,9 @@ export function reviewOrdered<
       details.kind === "read"
         ? turnCounts(details.discussions, reviewer, row.author?.username ?? null)
         : NO_TURNS;
-    const first = dueOf(row.iid) !== null && counts.viewersTurn > 0;
-    return { row, first, waiting: counts.authorsTurn };
+    return { row, due: dueOf(row.iid), counts };
   });
-  const sorted = ranked.toSorted((a, b) => {
-    if (a.first !== b.first) {
-      return a.first ? -1 : 1;
-    }
-    return a.first ? 0 : a.waiting - b.waiting;
-  });
+  const sorted = ranked.toSorted(reviewFirst);
   const loading = normal.filter((row) => detailsOf(row.iid).kind === "loading").length;
   return { kind: "sorted", rows: sorted.map(({ row }) => row), loading };
 }
@@ -84,8 +96,8 @@ function loadingText(loading: number): string {
 }
 
 export function reviewSortedText(viewer: Viewer, loading: number): string {
-  const whose = viewer.kind === "me" ? "your" : "their";
-  return `Sorted for ${viewerPossessive(viewer, "inside")} review: due with ${whose} turn first, then fewest waiting on the author${loadingText(loading)}`;
+  const whom = viewerAddressed(viewer);
+  return `Sorted for ${viewerPossessive(viewer, "inside")} review: soonest due date first, then most discussions waiting for ${whom}, then fewest discussions ${whom} wrote in${loadingText(loading)}`;
 }
 
 export function reviewFailedText(viewer: Viewer, iid: number, reason: string): string {
