@@ -72,7 +72,8 @@ merge-requests page. Every step in yamt Dark and yamt Light (`--settings '{"them
    clears, the comment shows last, d01's row reads "Author's turn". "Add review" with "Later": one `fixture_write {
    kind: draft }`, the draft shows "Pending" at the end, the header "3 pending". Both disabled while empty and while
    sending. `refuse it`: "Could not add the comment: 403 Forbidden", the text stays. !636's buttons disabled with the
-   locked reason; its d14 resolve disabled with "You may not resolve this thread.".
+   locked reason, and Ctrl+Enter with text in its field logs no `fixture_write` (#2376); its d14 resolve disabled
+   with "You may not resolve this thread.". Escape in the field closes the panel (focus back on its row).
 8. **C9 Submit.** "Submit review" (tooltip "Publish your 3 pending comments on this merge request"): one
    `fixture_write { kind: submit }`, the drafts show as comments, no "Submit review" left, the row reloaded (one
    `fixture_discussions { iids: 637 }`).

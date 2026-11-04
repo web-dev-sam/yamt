@@ -11,24 +11,20 @@
       "frontend/src/ui/mergeRequestsText.test.ts",
       "frontend/src/ui/AGENTS.md",
       "frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts",
-      "frontend/src/ipc/index.ts"
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ui/mergeRequests.test.ts",
+      "frontend/src/ui/MergeRequestDiscussionsBox.test.ts"
     ]
   },
-  "MrThreadsPanelR1": {
+  "MrThreadsPanelR2": {
     "owned": [
-      "frontend/src/ui/MergeRequestThread.vue",
-      "frontend/src/ui/MergeRequestThreadComment.vue",
-      "frontend/src/ui/MergeRequestReplyField.vue",
-      "frontend/src/ui/MergeRequestThreadPanel.test.ts",
-      "frontend/src/ui/mergeRequestThreadText.ts",
-      "frontend/src/ui/mergeRequestThreadText.test.ts",
-      "frontend/src/ui/mergeRequestImageSize.ts",
-      "frontend/src/ui/mergeRequestImageSize.test.ts",
-      "frontend/src/ui/MergeRequestDescriptionImage.vue",
-      "frontend/src/ui/MergeRequestDescriptionInlines.vue",
-      "frontend/src/ui/useMenuPlacement.ts",
-      "frontend/src/ui/useMenuPlacement.test.ts",
-      "frontend/src/ui/CiStatusJobLog.vue"
+      "frontend/src/ui/rangeKeys.ts",
+      "frontend/src/ui/rangeKeys.test.ts",
+      "frontend/src/ui/boxKeys.ts",
+      "frontend/src/ui/boxKeys.test.ts",
+      "frontend/src/ui/RangeThreadBox.vue",
+      "frontend/src/ui/RangeMessageEditor.vue",
+      "frontend/src/ui/MergeRequestReplyField.vue"
     ]
   }
 }
