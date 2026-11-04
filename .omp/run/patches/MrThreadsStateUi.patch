@@ -1,0 +1,2163 @@
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 3e7affd..92c57b9 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -72,7 +72,14 @@ export {
+   nextColumnVersion,
+ } from "./domain";
+ export type { AbortReply, Leftover, MergeView, PushReply, ReturnTo } from "./localMergeDomain";
+-export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
++export type {
++  AgentSessionId,
++  DiscussionId,
++  MergeRequestIid,
++  MessageId,
++  ThreadId,
++  WebPage,
++} from "./domain";
+ export type {
+   Description,
+   DescriptionBlock,
+@@ -84,7 +91,16 @@ export type {
+   DescriptionReply,
+   DescriptionRow,
+ } from "./descriptionDomain";
+-export type { DiscussionsAnswer, OpenDiscussion, RowDiscussions } from "./discussionDomain";
++export type {
++  DiscussionsAnswer,
++  DiscussionThread,
++  DiscussionThreadReply,
++  DiscussionWriteReply,
++  MarkdownPreviewReply,
++  OpenDiscussion,
++  ReplyKind,
++  RowDiscussions,
++} from "./discussionDomain";
+ export type {
+   DescriptionLinks,
+   LinkedCommit,
+diff --git a/frontend/src/ui/mergeRequestDiscussionRows.ts b/frontend/src/ui/mergeRequestDiscussionRows.ts
+new file mode 100644
+index 0000000..010d009
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestDiscussionRows.ts
+@@ -0,0 +1,119 @@
++import type { ComputedRef, ShallowRef } from "vue";
++
++import type {
++  DiscussionDetails,
++  DiscussionId,
++  DiscussionsAnswer,
++  MergeRequestIid,
++  OpenDiscussion,
++} from "../ipc";
++import { setRow, useAskedRow } from "./mergeRequestActions";
++import type { ProblemCause } from "./problem";
++
++export type DiscussionLoad =
++  | { readonly kind: "loading" }
++  | {
++      readonly kind: "read";
++      readonly discussions: readonly OpenDiscussion[];
++      /** Resolved through the panel since this answer: shown marked until the box closes (C10). */
++      readonly resolved: ReadonlySet<DiscussionId>;
++    }
++  | {
++      readonly kind: "refused";
++      readonly answer: Exclude<DiscussionsAnswer, { readonly kind: "open" }>;
++    }
++  | { readonly kind: "failed"; readonly cause: ProblemCause };
++export type DiscussionFailure = Extract<DiscussionLoad, { readonly kind: "refused" | "failed" }>;
++export type Answered = Exclude<DiscussionLoad, { readonly kind: "loading" }>;
++/** A row's reload (D1): running, or why its answer was not taken (the old entry stays, D2). */
++export type Reload = { readonly kind: "running" } | DiscussionFailure;
++export type Discussions = {
++  /** Each asked row's discussions while this list stands; no entry: not asked, or (count 0) none open. */
++  readonly discussions: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>>;
++  /** Settings' "Discussion details" in use. */
++  readonly discussionDetails: ComputedRef<DiscussionDetails>;
++  /** A count's box opened: with "lazy", asks this row first unless it has an entry; else nothing. */
++  askDiscussions(iid: MergeRequestIid): void;
++  readonly reloads: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Reload>>>;
++  /** D1: asks GitLab again for `iid` alone, first in the queue; the entry stays as it is until the answer. */
++  reloadDiscussions(iid: MergeRequestIid): void;
++  /** A thread's answer (C8.3, C10): `discussion` replaces the entry's discussion with its id (none: nothing);
++   *  `resolved` adds or removes its mark. Nothing for an entry that is not `read`. */
++  threadRead(iid: MergeRequestIid, discussion: OpenDiscussion, resolved: boolean): void;
++  /** C10: the box of `iid` closed: marked discussions leave its entry, and the row's count becomes the rest. */
++  boxClosed(iid: MergeRequestIid): void;
++};
++
++export function loadOf(answer: DiscussionsAnswer): Answered {
++  return answer.kind === "open"
++    ? { kind: "read", discussions: answer.discussions, resolved: new Set() }
++    : { kind: "refused", answer };
++}
++
++export function answerKind(load: Answered): string {
++  switch (load.kind) {
++    case "read":
++      return "open";
++    case "refused":
++      return load.answer.kind;
++    case "failed":
++      return load.cause.kind;
++    default: {
++      const _exhaustive: never = load;
++      return _exhaustive;
++    }
++  }
++}
++
++type Entries = ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>;
++
++export function threadRead(
++  entries: Entries,
++  iid: MergeRequestIid,
++  discussion: OpenDiscussion,
++  resolved: boolean,
++): void {
++  const entry = entries.value.get(iid);
++  if (entry?.kind !== "read" || !entry.discussions.some((each) => each.id === discussion.id)) {
++    return;
++  }
++  const marks = new Set(entry.resolved);
++  if (resolved) {
++    marks.add(discussion.id);
++  } else {
++    marks.delete(discussion.id);
++  }
++  const discussions = entry.discussions.map((each) =>
++    each.id === discussion.id ? discussion : each,
++  );
++  setRow(entries, iid, { kind: "read", discussions, resolved: marks });
++}
++
++export function boxClosed(
++  entries: Entries,
++  iid: MergeRequestIid,
++  counted: (iid: MergeRequestIid, count: number) => void,
++): void {
++  const entry = entries.value.get(iid);
++  if (entry?.kind !== "read" || entry.resolved.size === 0) {
++    return;
++  }
++  const discussions = entry.discussions.filter((each) => !entry.resolved.has(each.id));
++  setRow(entries, iid, { kind: "read", discussions, resolved: new Set<DiscussionId>() });
++  counted(iid, discussions.length);
++}
++
++export function useRowDiscussions(
++  discussions: Discussions,
++  iid: () => MergeRequestIid,
++  open: () => boolean,
++): ComputedRef<DiscussionLoad | undefined> {
++  return useAskedRow({
++    rows: discussions.discussions,
++    ask: (asked) => {
++      discussions.askDiscussions(asked);
++    },
++    iid,
++    open,
++  });
++}
+diff --git a/frontend/src/ui/mergeRequestDiscussions.test.ts b/frontend/src/ui/mergeRequestDiscussions.test.ts
+index 4e3b9d1..4dc7c4e 100644
+--- a/frontend/src/ui/mergeRequestDiscussions.test.ts
++++ b/frontend/src/ui/mergeRequestDiscussions.test.ts
+@@ -20,6 +20,7 @@ import {
+   useRowDiscussions,
+   type DiscussionLoad,
+   type DiscussionQueue,
++  type Reload,
+ } from "./mergeRequestDiscussions";
+ 
+ type Call = {
+@@ -33,15 +34,18 @@ type Rig = {
+   readonly calls: Call[];
+   readonly mode: ShallowRef<DiscussionDetails>;
+   readonly rows: ShallowRef<readonly MergeRequestRow[]>;
++  readonly counts: [MergeRequestIid, number][];
+ };
+ 
+ const MICROTASKS = 10;
+ const STOPPED: SourceFailure = { kind: "WorkerStopped" };
+ const LOADING: DiscussionLoad = { kind: "loading" };
++const RUNNING: Reload = { kind: "running" };
+ const NOTE_TEXT = "Please rename this, Anna";
+ 
+ let ROWS: readonly MergeRequestRow[] = [];
+ let DISCUSSION: OpenDiscussion;
++let OTHER: OpenDiscussion;
+ 
+ beforeAll(async () => {
+   const rows: MergeRequestRow[] = [];
+@@ -54,9 +58,12 @@ beforeAll(async () => {
+   ROWS = rows;
+   const author = rows.find((row) => row.author !== null)?.author ?? null;
+   const page = rows.find((row) => row.page !== null)?.page ?? null;
+-  const id = "0000000000000000000000000000000000000001";
+-  if (!isDiscussionId(id)) {
+-    throw new Error(`${id} is not a discussion id`);
++  const [id, other] = [
++    "0000000000000000000000000000000000000001",
++    "0000000000000000000000000000000000000002",
++  ];
++  if (!isDiscussionId(id) || !isDiscussionId(other)) {
++    throw new Error(`${id} or ${other} is not a discussion id`);
+   }
+   DISCUSSION = {
+     id,
+@@ -64,6 +71,7 @@ beforeAll(async () => {
+     earlier: [],
+     last: { author, createdAt: 0, text: NOTE_TEXT, page, mentions: [] },
+   };
++  OTHER = { ...DISCUSSION, id: other, place: { kind: "overview" } };
+ });
+ 
+ afterEach(() => {
+@@ -81,6 +89,7 @@ function rig(start: DiscussionDetails = "full"): Rig {
+   const calls: Call[] = [];
+   const mode = shallowRef<DiscussionDetails>(start);
+   const rows = shallowRef<readonly MergeRequestRow[]>([]);
++  const counts: [MergeRequestIid, number][] = [];
+   const source = {
+     ...createFixtureCompareSource(log, "", {}),
+     readDiscussions: (iids: readonly MergeRequestIid[]) =>
+@@ -88,8 +97,15 @@ function rig(start: DiscussionDetails = "full"): Rig {
+         calls.push({ iids: [...iids], answer: resolve, fail: reject });
+       }),
+   };
+-  const queue = createDiscussions({ source, mode: () => mode.value, rows: () => rows.value });
+-  return { queue, calls, mode, rows };
++  const queue = createDiscussions({
++    source,
++    mode: () => mode.value,
++    rows: () => rows.value,
++    counted: (asked, count) => {
++      counts.push([asked, count]);
++    },
++  });
++  return { queue, calls, mode, rows, counts };
+ }
+ 
+ async function settled(): Promise<void> {
+@@ -132,7 +148,7 @@ function entry(live: Rig, value: number): DiscussionLoad | undefined {
+ }
+ 
+ function read(): DiscussionLoad {
+-  return { kind: "read", discussions: [DISCUSSION] };
++  return { kind: "read", discussions: [DISCUSSION], resolved: new Set() };
+ }
+ 
+ test("full_queues_each_page_with_open_discussions_as_it_arrives", async () => {
+@@ -446,7 +462,7 @@ test("a_refused_answer_is_kept_per_row", async () => {
+   for (const [value, answer] of refusals) {
+     expect(entry(live, value)).toEqual({ kind: "refused", answer });
+   }
+-  expect(entry(live, 635)).toEqual({ kind: "read", discussions: [] });
++  expect(entry(live, 635)).toEqual({ kind: "read", discussions: [], resolved: new Set() });
+   expect(live.calls).toHaveLength(1);
+ });
+ 
+@@ -506,3 +522,291 @@ test("the_log_event_never_carries_text_or_names", async () => {
+   }
+   expect(logged).not.toContain("gitlab.example");
+ });
++
++function both(): SourceResult<readonly RowDiscussions[]> {
++  return {
++    ok: true,
++    value: [{ iid: iid(639), answer: { kind: "open", discussions: [DISCUSSION, OTHER] } }],
++  };
++}
++
++async function readFirstRows(live: Rig): Promise<void> {
++  live.queue.listed(ROWS.slice(0, 3));
++  await answered(live, 0);
++}
++
++test("a_reload_keeps_the_rows_until_its_answer", async () => {
++  const live = rig();
++  await readFirstRows(live);
++  const before = live.queue.discussions.value;
++
++  live.queue.reloadDiscussions(iid(639));
++  expect(live.queue.discussions.value).toBe(before);
++  expect(entry(live, 639)).toEqual(read());
++  expect(live.queue.reloads.value.get(iid(639))).toEqual(RUNNING);
++  expect(callAt(live, 1).iids).toEqual([639]);
++
++  callAt(live, 1).answer(both());
++  await settled();
++  expect(entry(live, 639)).toEqual({
++    kind: "read",
++    discussions: [DISCUSSION, OTHER],
++    resolved: new Set(),
++  });
++  expect(live.queue.reloads.value.size).toBe(0);
++  expect(live.calls).toHaveLength(2);
++});
++
++test("a_reload_sets_the_rows_count", async () => {
++  const info = vi.spyOn(log, "info");
++  const live = rig();
++  await readFirstRows(live);
++  expect(live.counts).toEqual([]);
++
++  live.queue.reloadDiscussions(iid(639));
++  callAt(live, 1).answer(both());
++  await settled();
++  expect(live.counts).toEqual([[639, 2]]);
++  expect(info).toHaveBeenCalledWith("mergeRequests.discussions_reloaded", {
++    iid: 639,
++    kind: "open",
++    ms: expect.any(Number),
++  });
++  const reloaded = info.mock.calls.filter(
++    ([event]) => event === "mergeRequests.discussions_reloaded",
++  );
++  expect(reloaded).toHaveLength(1);
++  expect(JSON.stringify(info.mock.calls)).not.toContain(NOTE_TEXT);
++});
++
++test("a_failed_reload_keeps_the_rows_and_says_why", async () => {
++  const info = vi.spyOn(log, "info");
++  const live = rig();
++  await readFirstRows(live);
++  const refused = { kind: "notLoggedIn", detail: "gitlab.example: no token" } as const;
++
++  live.queue.reloadDiscussions(iid(639));
++  callAt(live, 1).answer({ ok: true, value: [{ iid: iid(639), answer: refused }] });
++  await settled();
++  expect(entry(live, 639)).toEqual(read());
++  expect(live.queue.reloads.value.get(iid(639))).toEqual({ kind: "refused", answer: refused });
++
++  live.queue.reloadDiscussions(iid(639));
++  expect(live.queue.reloads.value.get(iid(639))).toEqual(RUNNING);
++  callAt(live, 2).answer({ ok: false, failure: STOPPED });
++  await settled();
++  expect(entry(live, 639)).toEqual(read());
++  expect(live.queue.reloads.value.get(iid(639))).toEqual({ kind: "failed", cause: STOPPED });
++  expect(live.counts).toEqual([]);
++  expect(live.calls).toHaveLength(3);
++  const kinds = info.mock.calls
++    .filter(([event]) => event === "mergeRequests.discussions_reloaded")
++    .map(([, fields]) => fields?.["kind"]);
++  expect(kinds).toEqual(["notLoggedIn", "WorkerStopped"]);
++  expect(JSON.stringify(info.mock.calls)).not.toContain("gitlab.example");
++});
++
++test("a_reload_goes_first_and_once", async () => {
++  const live = rig("lazy");
++  live.queue.askDiscussions(iid(639));
++  await answered(live, 0);
++  live.queue.askDiscussions(iid(638));
++  live.queue.askDiscussions(iid(636));
++  live.queue.askDiscussions(iid(635));
++
++  live.queue.reloadDiscussions(iid(639));
++  live.queue.reloadDiscussions(iid(639));
++  expect(live.calls).toHaveLength(2);
++  await answered(live, 1);
++  expect(callAt(live, 2).iids).toEqual([639, 635, 636]);
++
++  await answered(live, 2, [iid(639)]);
++  expect(callAt(live, 3).iids).toEqual([635, 636]);
++});
++
++test("a_reload_answered_in_part_stays_asked_until_its_answer", async () => {
++  const live = rig("lazy");
++  live.queue.askDiscussions(iid(639));
++  await answered(live, 0);
++  live.queue.askDiscussions(iid(638));
++  live.queue.reloadDiscussions(iid(639));
++
++  await answered(live, 1);
++  await answered(live, 2, []);
++  expect(live.queue.reloads.value.get(iid(639))).toEqual(RUNNING);
++  expect(callAt(live, 3).iids).toEqual([639]);
++});
++
++test("a_reload_without_an_entry_asks_like_a_hover_and_off_asks_nothing", async () => {
++  const live = rig();
++  live.queue.reloadDiscussions(iid(640));
++  expect(entry(live, 640)).toEqual(LOADING);
++  expect(live.queue.reloads.value.size).toBe(0);
++  await answered(live, 0);
++  expect(entry(live, 640)).toEqual(read());
++  expect(live.counts).toEqual([]);
++
++  live.queue.listed(ROWS.slice(0, 3));
++  live.queue.reloadDiscussions(iid(639));
++  expect(live.queue.reloads.value.size).toBe(0);
++  expect(callAt(live, 1).iids).toEqual(openIids(ROWS.slice(0, 3)).filter((each) => each !== 640));
++  expect(callAt(live, 1).iids[0]).toBe(639);
++
++  live.mode.value = "off";
++  await nextTick();
++  live.queue.reloadDiscussions(iid(639));
++  expect(live.queue.discussions.value.size).toBe(0);
++  expect(live.queue.reloads.value.size).toBe(0);
++  await answered(live, 1);
++  expect(live.calls).toHaveLength(2);
++});
++
++test("a_reload_of_a_row_sent_before_lazy_keeps_it_asked", async () => {
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 3));
++  live.mode.value = "lazy";
++  await nextTick();
++  live.queue.reloadDiscussions(iid(638));
++  await answered(live, 0, [iid(639)]);
++  expect(entry(live, 638)).toEqual(LOADING);
++  expect(callAt(live, 1).iids).toEqual([638]);
++});
++
++test("switching_to_lazy_keeps_a_waiting_reload", async () => {
++  const live = rig();
++  await readFirstRows(live);
++  live.queue.listed(ROWS.slice(3, 6));
++  live.queue.reloadDiscussions(iid(639));
++  live.mode.value = "lazy";
++  await nextTick();
++
++  expect(entry(live, 639)).toEqual(read());
++  await answered(live, 1);
++  expect(callAt(live, 2).iids).toEqual([639]);
++  callAt(live, 2).answer(both());
++  await settled();
++  expect(live.counts).toEqual([[639, 2]]);
++});
++
++test("a_reload_in_flight_while_switching_to_lazy_keeps_the_rows", async () => {
++  const live = rig();
++  await readFirstRows(live);
++  live.queue.reloadDiscussions(iid(639));
++  live.mode.value = "lazy";
++  await nextTick();
++
++  callAt(live, 1).answer({ ok: true, value: [] });
++  await settled();
++  expect(entry(live, 639)).toEqual(read());
++  expect(live.queue.reloads.value.get(iid(639))).toEqual(RUNNING);
++});
++
++test("a_reload_after_a_refresh_is_dropped", async () => {
++  const live = rig();
++  await readFirstRows(live);
++  live.queue.reloadDiscussions(iid(639));
++  live.queue.replaced(ROWS.slice(0, 3));
++  expect(live.queue.reloads.value.size).toBe(0);
++
++  callAt(live, 1).answer(both());
++  await settled();
++  expect(entry(live, 639)).toEqual(LOADING);
++  expect(live.counts).toEqual([]);
++  expect(callAt(live, 2).iids).toEqual(openIids(ROWS.slice(0, 3)));
++});
++
++test("a_resolved_row_stays_until_the_box_closes_then_the_count_drops", async () => {
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 3));
++  callAt(live, 0).answer(both());
++  await settled();
++
++  live.queue.threadRead(iid(639), DISCUSSION, true);
++  expect(entry(live, 639)).toEqual({
++    kind: "read",
++    discussions: [DISCUSSION, OTHER],
++    resolved: new Set([DISCUSSION.id]),
++  });
++  expect(live.counts).toEqual([]);
++
++  live.queue.boxClosed(iid(639));
++  expect(entry(live, 639)).toEqual({ kind: "read", discussions: [OTHER], resolved: new Set() });
++  expect(live.counts).toEqual([[639, 1]]);
++});
++
++test("an_unresolved_row_loses_its_mark", async () => {
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 3));
++  callAt(live, 0).answer(both());
++  await settled();
++  live.queue.threadRead(iid(639), DISCUSSION, true);
++  live.queue.threadRead(iid(639), OTHER, true);
++
++  live.queue.threadRead(iid(639), DISCUSSION, false);
++  expect(entry(live, 639)).toEqual({
++    kind: "read",
++    discussions: [DISCUSSION, OTHER],
++    resolved: new Set([OTHER.id]),
++  });
++});
++
++test("a_thread_answer_replaces_its_discussion_in_the_box", async () => {
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 3));
++  callAt(live, 0).answer({
++    ok: true,
++    value: [{ iid: iid(639), answer: { kind: "open", discussions: [DISCUSSION, OTHER] } }],
++  });
++  await settled();
++  const answeredLater = { ...OTHER, last: { ...OTHER.last, createdAt: 1 } };
++
++  live.queue.threadRead(iid(639), answeredLater, false);
++  expect(entry(live, 639)).toEqual({
++    kind: "read",
++    discussions: [DISCUSSION, answeredLater],
++    resolved: new Set(),
++  });
++
++  const before = live.queue.discussions.value;
++  live.queue.threadRead(
++    iid(639),
++    { ...answeredLater, id: DISCUSSION.id, place: OTHER.place },
++    false,
++  );
++  expect(entry(live, 639)).toEqual({
++    kind: "read",
++    discussions: [{ ...answeredLater, id: DISCUSSION.id }, answeredLater],
++    resolved: new Set(),
++  });
++  expect(live.queue.discussions.value).not.toBe(before);
++});
++
++test("a_thread_answer_for_no_such_row_or_discussion_changes_nothing", async () => {
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 3));
++  await settled();
++  const loading = live.queue.discussions.value;
++  live.queue.threadRead(iid(639), DISCUSSION, true);
++  live.queue.threadRead(iid(640), DISCUSSION, true);
++  expect(live.queue.discussions.value).toBe(loading);
++
++  await answered(live, 0);
++  const afterRead = live.queue.discussions.value;
++  live.queue.threadRead(iid(639), OTHER, true);
++  expect(live.queue.discussions.value).toBe(afterRead);
++  live.queue.boxClosed(iid(639));
++  expect(live.counts).toEqual([]);
++});
++
++test("closing_a_box_without_marks_changes_nothing", async () => {
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 3));
++  live.queue.boxClosed(iid(639));
++  await answered(live, 0);
++  const before = live.queue.discussions.value;
++
++  live.queue.boxClosed(iid(639));
++  live.queue.boxClosed(iid(640));
++  expect(live.queue.discussions.value).toBe(before);
++  expect(live.counts).toEqual([]);
++});
+diff --git a/frontend/src/ui/mergeRequestDiscussions.ts b/frontend/src/ui/mergeRequestDiscussions.ts
+index c7d39ae..18ed73b 100644
+--- a/frontend/src/ui/mergeRequestDiscussions.ts
++++ b/frontend/src/ui/mergeRequestDiscussions.ts
+@@ -1,35 +1,33 @@
+-import { computed, shallowRef, watch, type ComputedRef, type ShallowRef } from "vue";
++import { computed, shallowRef, watch, type ShallowRef } from "vue";
+ 
+ import {
+   log,
+   type DiscussionDetails,
+-  type DiscussionsAnswer,
+   type MergeRequestIid,
+   type MergeRequestRow,
+   type MergeRequestSource,
+-  type OpenDiscussion,
+   type RowDiscussions,
+ } from "../ipc";
+-import { setRow, useAskedRow } from "./mergeRequestActions";
+-import { attempt, type Outcome, type ProblemCause } from "./problem";
++import { setRow } from "./mergeRequestActions";
++import {
++  answerKind,
++  boxClosed,
++  loadOf,
++  threadRead,
++  type Answered,
++  type DiscussionLoad,
++  type Discussions,
++  type Reload,
++} from "./mergeRequestDiscussionRows";
++import { attempt, type Outcome } from "./problem";
+ 
+-export type DiscussionLoad =
+-  | { readonly kind: "loading" }
+-  | { readonly kind: "read"; readonly discussions: readonly OpenDiscussion[] }
+-  | {
+-      readonly kind: "refused";
+-      readonly answer: Exclude<DiscussionsAnswer, { readonly kind: "open" }>;
+-    }
+-  | { readonly kind: "failed"; readonly cause: ProblemCause };
+-export type DiscussionFailure = Extract<DiscussionLoad, { readonly kind: "refused" | "failed" }>;
+-export type Discussions = {
+-  /** Each asked row's discussions while this list stands; no entry: not asked, or (count 0) none open. */
+-  readonly discussions: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>>;
+-  /** Settings' "Discussion details" in use. */
+-  readonly discussionDetails: ComputedRef<DiscussionDetails>;
+-  /** A count's box opened: with "lazy", asks this row first unless it has an entry; else nothing. */
+-  askDiscussions(iid: MergeRequestIid): void;
+-};
++export type {
++  DiscussionFailure,
++  DiscussionLoad,
++  Discussions,
++  Reload,
++} from "./mergeRequestDiscussionRows";
++export { useRowDiscussions } from "./mergeRequestDiscussionRows";
+ export type DiscussionQueue = Discussions & {
+   /** Rows the list now shows: with "full", queues each with `openDiscussions > 0` and no entry. */
+   listed(rows: readonly MergeRequestRow[]): void;
+@@ -37,13 +35,14 @@ export type DiscussionQueue = Discussions & {
+   replaced(rows: readonly MergeRequestRow[]): void;
+ };
+ 
+-type Entries = ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>;
+ type Call = { readonly generation: number; readonly iids: readonly MergeRequestIid[] };
+ type Queue = {
+   readonly source: MergeRequestSource;
+   readonly mode: () => DiscussionDetails;
+-  readonly entries: Entries;
+-  /** Every `loading` entry's iid, in the order they are sent; the running call's stay until answered. */
++  readonly counted: (iid: MergeRequestIid, count: number) => void;
++  readonly entries: ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>;
++  readonly reloads: ShallowRef<ReadonlyMap<MergeRequestIid, Reload>>;
++  /** Each `loading` entry's and `running` reload's iid in send order; the running call's stay until answered. */
+   queued: readonly MergeRequestIid[];
+   /** The running call's iids at a switch to "lazy" not hovered since: dropped unless its answer has them. */
+   unhovered: Set<MergeRequestIid>;
+@@ -53,12 +52,6 @@ type Queue = {
+ 
+ const LOADING: DiscussionLoad = { kind: "loading" };
+ 
+-function loadOf(answer: DiscussionsAnswer): DiscussionLoad {
+-  return answer.kind === "open"
+-    ? { kind: "read", discussions: answer.discussions }
+-    : { kind: "refused", answer };
+-}
+-
+ function loggedFields(
+   asked: number,
+   outcome: Outcome<readonly RowDiscussions[]>,
+@@ -71,19 +64,33 @@ function loggedFields(
+   return { asked, answered: outcome.value.length, refused, ms };
+ }
+ 
++function isReloading(queue: Queue, iid: MergeRequestIid): boolean {
++  return queue.reloads.value.get(iid)?.kind === "running";
++}
++
+ function settle(
+   queue: Queue,
+   asked: readonly MergeRequestIid[],
+   outcome: Outcome<readonly RowDiscussions[]>,
++  ms: number,
+ ): void {
+   const next = new Map(queue.entries.value);
+-  if (outcome.ok) {
+-    for (const { iid, answer } of outcome.value) {
+-      next.set(iid, loadOf(answer));
++  const reloads = new Map(queue.reloads.value);
++  const answers: readonly (readonly [MergeRequestIid, Answered])[] = outcome.ok
++    ? outcome.value.map(({ iid, answer }) => [iid, loadOf(answer)])
++    : asked.map((iid) => [iid, { kind: "failed", cause: outcome.cause }]);
++  for (const [iid, load] of answers) {
++    if (reloads.get(iid)?.kind !== "running") {
++      next.set(iid, load);
++      continue;
+     }
+-  } else {
+-    for (const iid of asked) {
+-      next.set(iid, { kind: "failed", cause: outcome.cause });
++    log.info("mergeRequests.discussions_reloaded", { iid, kind: answerKind(load), ms });
++    if (load.kind === "read") {
++      next.set(iid, load);
++      reloads.delete(iid);
++      queue.counted(iid, load.discussions.length);
++    } else {
++      reloads.set(iid, load);
+     }
+   }
+   const answered = new Set(outcome.ok ? outcome.value.map((row) => row.iid) : []);
+@@ -94,7 +101,10 @@ function settle(
+   }
+   queue.unhovered = new Set();
+   queue.entries.value = next;
+-  queue.queued = queue.queued.filter((iid) => next.get(iid)?.kind === "loading");
++  queue.reloads.value = reloads;
++  queue.queued = queue.queued.filter(
++    (iid) => next.get(iid)?.kind === "loading" || isReloading(queue, iid),
++  );
+ }
+ 
+ async function send(queue: Queue): Promise<void> {
+@@ -109,7 +119,7 @@ async function send(queue: Queue): Promise<void> {
+   const ms = Math.round(performance.now() - started);
+   log.info("mergeRequests.discussions_read", loggedFields(call.iids.length, outcome, ms));
+   if (call.generation === queue.generation) {
+-    settle(queue, call.iids, outcome);
++    settle(queue, call.iids, outcome, ms);
+   }
+   await send(queue);
+ }
+@@ -137,6 +147,7 @@ function listed(queue: Queue, rows: readonly MergeRequestRow[]): void {
+ function dropped(queue: Queue): void {
+   queue.generation += 1;
+   queue.entries.value = new Map();
++  queue.reloads.value = new Map();
+   queue.queued = [];
+   queue.unhovered = new Set();
+ }
+@@ -144,13 +155,16 @@ function dropped(queue: Queue): void {
+ function becameLazy(queue: Queue): void {
+   const { running, generation } = queue;
+   const sent = new Set(running?.generation === generation ? running.iids : []);
++  function kept(iid: MergeRequestIid): boolean {
++    return sent.has(iid) || isReloading(queue, iid);
++  }
+   const next = new Map(queue.entries.value);
+-  for (const iid of queue.queued.filter((each) => !sent.has(each))) {
++  for (const iid of queue.queued.filter((each) => !kept(each))) {
+     next.delete(iid);
+   }
+   queue.entries.value = next;
+-  queue.queued = queue.queued.filter((iid) => sent.has(iid));
+-  queue.unhovered = sent;
++  queue.queued = queue.queued.filter(kept);
++  queue.unhovered = new Set([...sent].filter((iid) => !isReloading(queue, iid)));
+ }
+ 
+ function switched(queue: Queue, mode: DiscussionDetails, rows: readonly MergeRequestRow[]): void {
+@@ -172,6 +186,11 @@ function switched(queue: Queue, mode: DiscussionDetails, rows: readonly MergeReq
+   }
+ }
+ 
++function sentFirst(queue: Queue, iid: MergeRequestIid): void {
++  queue.queued = [iid, ...queue.queued.filter((each) => each !== iid)];
++  void send(queue);
++}
++
+ function asked(queue: Queue, iid: MergeRequestIid): void {
+   if (queue.mode() !== "lazy") {
+     return;
+@@ -184,44 +203,82 @@ function asked(queue: Queue, iid: MergeRequestIid): void {
+     return;
+   }
+   setRow(queue.entries, iid, LOADING);
+-  queue.queued = [iid, ...queue.queued];
+-  void send(queue);
++  sentFirst(queue, iid);
+ }
+ 
+-export function discussionsOf(queue: DiscussionQueue): Discussions {
++function reload(queue: Queue, iid: MergeRequestIid): void {
++  const entry = queue.entries.value.get(iid);
++  if (queue.mode() === "off" || isReloading(queue, iid)) {
++    return;
++  }
++  if (entry === undefined) {
++    setRow(queue.entries, iid, LOADING);
++  } else if (entry.kind === "loading") {
++    queue.unhovered.delete(iid);
++  } else {
++    setRow(queue.reloads, iid, { kind: "running" });
++  }
++  sentFirst(queue, iid);
++}
++
++export function discussionsOf(
++  queue: DiscussionQueue,
++  reloaded: (iid: MergeRequestIid) => void,
++): Discussions {
++  const { discussions, discussionDetails, reloads } = queue;
+   return {
+-    discussions: queue.discussions,
+-    discussionDetails: queue.discussionDetails,
++    discussions,
++    discussionDetails,
++    reloads,
+     askDiscussions: (iid) => {
+       queue.askDiscussions(iid);
+     },
++    reloadDiscussions: (iid) => {
++      queue.reloadDiscussions(iid);
++      reloaded(iid);
++    },
++    threadRead: (iid, discussion, resolved) => {
++      queue.threadRead(iid, discussion, resolved);
++    },
++    boxClosed: (iid) => {
++      queue.boxClosed(iid);
++    },
+   };
+ }
+ 
+-export function useRowDiscussions(
+-  discussions: Discussions,
+-  iid: () => MergeRequestIid,
+-  open: () => boolean,
+-): ComputedRef<DiscussionLoad | undefined> {
+-  return useAskedRow({
+-    rows: discussions.discussions,
+-    ask: (asked) => {
+-      discussions.askDiscussions(asked);
++function membersOf(queue: Queue): Discussions {
++  return {
++    discussions: queue.entries,
++    discussionDetails: computed(queue.mode),
++    reloads: queue.reloads,
++    askDiscussions: (iid) => {
++      asked(queue, iid);
+     },
+-    iid,
+-    open,
+-  });
++    reloadDiscussions: (iid) => {
++      reload(queue, iid);
++    },
++    threadRead: (iid, discussion, resolved) => {
++      threadRead(queue.entries, iid, discussion, resolved);
++    },
++    boxClosed: (iid) => {
++      boxClosed(queue.entries, iid, queue.counted);
++    },
++  };
+ }
+ 
+ export function createDiscussions(deps: {
+   readonly source: MergeRequestSource;
+   readonly mode: () => DiscussionDetails;
+   readonly rows: () => readonly MergeRequestRow[];
++  /** The row's open-discussions count as a reload or a box close found it (D2, C10). */
++  readonly counted: (iid: MergeRequestIid, count: number) => void;
+ }): DiscussionQueue {
+   const queue: Queue = {
+     source: deps.source,
+     mode: deps.mode,
++    counted: deps.counted,
+     entries: shallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>(new Map()),
++    reloads: shallowRef<ReadonlyMap<MergeRequestIid, Reload>>(new Map()),
+     queued: [],
+     unhovered: new Set(),
+     running: null,
+@@ -231,11 +288,7 @@ export function createDiscussions(deps: {
+     switched(queue, mode, deps.rows());
+   });
+   return {
+-    discussions: queue.entries,
+-    discussionDetails: computed(deps.mode),
+-    askDiscussions: (iid) => {
+-      asked(queue, iid);
+-    },
++    ...membersOf(queue),
+     listed: (rows) => {
+       listed(queue, rows);
+     },
+diff --git a/frontend/src/ui/mergeRequestPreview.ts b/frontend/src/ui/mergeRequestPreview.ts
+new file mode 100644
+index 0000000..7d88a01
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestPreview.ts
+@@ -0,0 +1,39 @@
++import {
++  log,
++  type Description,
++  type MarkdownPreviewReply,
++  type MergeRequestIid,
++  type MergeRequestSource,
++} from "../ipc";
++import { attempt, type ProblemCause } from "./problem";
++
++export type Preview =
++  | { readonly kind: "writing" }
++  | { readonly kind: "empty" }
++  | { readonly kind: "loading" }
++  | { readonly kind: "read"; readonly preview: Description }
++  | {
++      readonly kind: "refused";
++      readonly reply: Exclude<MarkdownPreviewReply, { readonly kind: "read" }>;
++    }
++  | { readonly kind: "failed"; readonly cause: ProblemCause };
++
++/** C7: `text` as GitLab renders it in merge request `iid`'s project; the caller words a blank text itself. */
++export async function readPreview(
++  source: MergeRequestSource,
++  iid: MergeRequestIid,
++  text: string,
++): Promise<Preview> {
++  const started = performance.now();
++  const outcome = await attempt(() => source.previewMarkdown(iid, text));
++  const ms = Math.round(performance.now() - started);
++  if (!outcome.ok) {
++    log.info("mergeRequests.preview_read", { iid, kind: outcome.cause.kind, ms });
++    return { kind: "failed", cause: outcome.cause };
++  }
++  const reply = outcome.value;
++  log.info("mergeRequests.preview_read", { iid, kind: reply.kind, ms });
++  return reply.kind === "read"
++    ? { kind: "read", preview: reply.preview }
++    : { kind: "refused", reply };
++}
+diff --git a/frontend/src/ui/mergeRequestReload.test.ts b/frontend/src/ui/mergeRequestReload.test.ts
+new file mode 100644
+index 0000000..d8b327a
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestReload.test.ts
+@@ -0,0 +1,202 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { shallowRef } from "vue";
++
++import {
++  createFixtureCompareSource,
++  isMergeRequestIid,
++  log,
++  type DiscussionId,
++  type ListEnd,
++  type MergeRequestIid,
++  type MergeRequestPage,
++  type MergeRequestRow,
++  type MergeRequestSource,
++  type SourceResult,
++} from "../ipc";
++import { createMergeRequests, type MergeRequests } from "./mergeRequests";
++import type { Screen } from "./screen";
++
++type Rig = {
++  readonly slice: MergeRequests;
++  readonly source: MergeRequestSource;
++  readonly threadReads: MergeRequestIid[];
++  /** The second and later list loads: their page is sent; the end waits for the test. */
++  readonly held: ((end: SourceResult<ListEnd>) => void)[];
++};
++
++const PAUSE_MS = 400;
++const WRITE_MS = 300;
++const THREADS = 637;
++const QUIET = 636;
++const TEXT = "my unsent answer";
++
++beforeEach(() => {
++  vi.useFakeTimers();
++  vi.spyOn(log, "info").mockImplementation(() => undefined);
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++  vi.restoreAllMocks();
++});
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is not an iid`);
++  }
++  return value;
++}
++
++function rig(): Rig {
++  const fixture = createFixtureCompareSource(log, "?mr=list", {});
++  const threadReads: MergeRequestIid[] = [];
++  const held: ((end: SourceResult<ListEnd>) => void)[] = [];
++  let first: MergeRequestPage | null = null;
++  const source: MergeRequestSource = {
++    ...fixture,
++    listMergeRequests: async (onPage, onChecked) => {
++      if (first !== null) {
++        onPage(first);
++        return new Promise((resolve) => {
++          held.push(resolve);
++        });
++      }
++      return fixture.listMergeRequests((page) => {
++        first ??= page;
++        onPage(page);
++      }, onChecked);
++    },
++    readDiscussionThread: (asked, discussion) => {
++      threadReads.push(asked);
++      return fixture.readDiscussionThread(asked, discussion);
++    },
++  };
++  const slice = createMergeRequests({
++    source,
++    screen: shallowRef<Screen>({ kind: "files" }),
++    report: () => undefined,
++    discussionDetails: () => "lazy",
++  });
++  return { slice, source, threadReads, held };
++}
++
++function rowOf(live: Rig, value: number): MergeRequestRow {
++  const found = live.slice.rows.value.find((row) => row.iid === value);
++  if (found === undefined) {
++    throw new Error(`no row !${value}`);
++  }
++  return found;
++}
++
++function readIds(live: Rig, value: number): DiscussionId[] {
++  const entry = live.slice.discussions.value.get(iid(value));
++  if (entry?.kind !== "read") {
++    throw new Error(`!${value} is ${entry?.kind ?? "not asked"}`);
++  }
++  return entry.discussions.map((discussion) => discussion.id);
++}
++
++/** The list read, !637's discussions read, and its first discussion's thread shown and read. */
++async function threadShown(live: Rig): Promise<DiscussionId> {
++  await live.slice.refresh();
++  live.slice.askDiscussions(iid(THREADS));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  const [shown] = readIds(live, THREADS);
++  if (shown === undefined) {
++    throw new Error(`!${THREADS} has no discussion`);
++  }
++  live.slice.showThread(iid(THREADS), shown);
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  expect(live.slice.thread.value?.load.kind).toBe("read");
++  return shown;
++}
++
++async function resolvedElsewhere(live: Rig, discussion: DiscussionId): Promise<void> {
++  const resolving = live.source.resolveDiscussion(iid(THREADS), discussion, true);
++  await vi.advanceTimersByTimeAsync(WRITE_MS);
++  expect(await resolving).toEqual({ ok: true, value: { kind: "sent" } });
++}
++
++test("a_reload_reads_the_shown_thread_again", async () => {
++  const live = rig();
++  await threadShown(live);
++  expect(live.threadReads).toEqual([THREADS]);
++
++  live.slice.reloadDiscussions(iid(QUIET));
++  expect(live.threadReads).toEqual([THREADS]);
++  live.slice.reloadDiscussions(iid(THREADS));
++  expect(live.threadReads).toEqual([THREADS, THREADS]);
++  expect(live.slice.thread.value?.load).toMatchObject({ kind: "read", refreshing: true });
++  expect(live.slice.reloads.value.get(iid(THREADS))).toEqual({ kind: "running" });
++
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * 2);
++  expect(live.slice.thread.value?.load).toMatchObject({ kind: "read", refreshing: false });
++  expect(live.slice.reloads.value.size).toBe(0);
++  expect(rowOf(live, THREADS).openDiscussions).toBe(readIds(live, THREADS).length);
++});
++
++test("a_thread_resolved_elsewhere_reads_resolved_and_keeps_its_text", async () => {
++  const live = rig();
++  const shown = await threadShown(live);
++  const before = readIds(live, THREADS).length;
++  live.slice.setReplyText(shown, TEXT);
++  await resolvedElsewhere(live, shown);
++
++  live.slice.reloadDiscussions(iid(THREADS));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  const load = live.slice.thread.value?.load;
++  expect(load?.kind === "read" && load.thread.resolved).toBe(true);
++  expect(live.slice.thread.value?.shown.discussion).toBe(shown);
++  expect(live.slice.replyTexts.value.get(shown)).toBe(TEXT);
++  expect(readIds(live, THREADS)).not.toContain(shown);
++  expect(rowOf(live, THREADS).openDiscussions).toBe(before - 1);
++});
++
++test("a_list_refresh_rereads_the_shown_thread", async () => {
++  const live = rig();
++  const shown = await threadShown(live);
++  const refreshing = live.slice.refresh();
++  expect(live.threadReads).toHaveLength(1);
++
++  live.held[0]?.({ ok: true, value: { kind: "loaded" } });
++  await refreshing;
++  expect(live.threadReads).toEqual([THREADS, THREADS]);
++  expect(live.slice.thread.value?.shown.discussion).toBe(shown);
++  expect(live.slice.thread.value?.load).toMatchObject({ kind: "read", refreshing: true });
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  expect(live.slice.thread.value?.load).toMatchObject({ kind: "read", refreshing: false });
++});
++
++test("withRow_patches_the_buffer_of_a_buffering_refresh", async () => {
++  const live = rig();
++  const shown = await threadShown(live);
++  const listed = rowOf(live, THREADS).openDiscussions;
++  await resolvedElsewhere(live, shown);
++  const refreshing = live.slice.refresh();
++
++  live.slice.reloadDiscussions(iid(THREADS));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  expect(rowOf(live, THREADS).openDiscussions).toBe(listed - 1);
++
++  live.held[0]?.({ ok: true, value: { kind: "loaded" } });
++  await refreshing;
++  expect(rowOf(live, THREADS).openDiscussions).toBe(listed - 1);
++});
++
++test("a_resolve_in_the_panel_marks_the_row_until_the_box_closes", async () => {
++  const live = rig();
++  const shown = await threadShown(live);
++  const listed = rowOf(live, THREADS).openDiscussions;
++  const resolving = live.slice.setResolved(true);
++  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
++  await resolving;
++
++  const entry = live.slice.discussions.value.get(iid(THREADS));
++  expect(entry?.kind === "read" && [...entry.resolved]).toEqual([shown]);
++  expect(readIds(live, THREADS)).toContain(shown);
++  expect(rowOf(live, THREADS).openDiscussions).toBe(listed);
++
++  live.slice.boxClosed(iid(THREADS));
++  expect(readIds(live, THREADS)).not.toContain(shown);
++  expect(rowOf(live, THREADS).openDiscussions).toBe(listed - 1);
++});
+diff --git a/frontend/src/ui/mergeRequestThread.test.ts b/frontend/src/ui/mergeRequestThread.test.ts
+new file mode 100644
+index 0000000..f16f64e
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestThread.test.ts
+@@ -0,0 +1,565 @@
++import { afterEach, expect, test, vi } from "vitest";
++
++import {
++  createFixtureCompareSource,
++  isDiscussionId,
++  isMergeRequestIid,
++  log,
++  type Description,
++  type DiscussionId,
++  type DiscussionThread,
++  type DiscussionThreadReply,
++  type DiscussionWriteReply,
++  type MarkdownPreviewReply,
++  type MergeRequestIid,
++  type MergeRequestSource,
++  type OpenDiscussion,
++  type SourceFailure,
++  type SourceResult,
++} from "../ipc";
++import type { Preview } from "./mergeRequestPreview";
++import {
++  createThreads,
++  type Sending,
++  type ShownThread,
++  type Thread,
++  type ThreadLoad,
++  type Threads,
++  type WriteFailure,
++  type WriteKind,
++} from "./mergeRequestThread";
++
++type Ask<T> = {
++  readonly args: readonly unknown[];
++  readonly answer: (result: SourceResult<T>) => void;
++  readonly fail: (error: unknown) => void;
++};
++
++type Rig = {
++  readonly threads: Threads & { readonly refreshed: (iid: MergeRequestIid | null) => void };
++  readonly reads: Ask<DiscussionThreadReply>[];
++  readonly writes: Ask<DiscussionWriteReply>[];
++  readonly previews: Ask<MarkdownPreviewReply>[];
++  readonly boxReads: [MergeRequestIid, DiscussionId, boolean][];
++  readonly reloads: MergeRequestIid[];
++};
++
++const MICROTASKS = 10;
++const STOPPED: SourceFailure = { kind: "WorkerStopped" };
++const LOADING: ThreadLoad = { kind: "loading" };
++const WRITING: Preview = { kind: "writing" };
++const SECRET = "the secret words of the reply";
++const RENDERED: Description = {
++  blocks: [{ kind: "paragraph", inlines: [{ kind: "text", text: SECRET }] }],
++};
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is not an iid`);
++  }
++  return value;
++}
++
++function discussionId(serial: string): DiscussionId {
++  const id = serial.padStart(40, "0");
++  if (!isDiscussionId(id)) {
++    throw new Error(`${id} is not a discussion id`);
++  }
++  return id;
++}
++
++const MR = iid(637);
++const D1 = discussionId("1");
++const D2 = discussionId("2");
++const SHOWN: ShownThread = { iid: MR, discussion: D1 };
++
++function discussionOf(id: DiscussionId, text = "Rename this"): OpenDiscussion {
++  return {
++    id,
++    place: { kind: "overview" },
++    earlier: [],
++    last: { author: null, createdAt: 0, text, page: null, mentions: [] },
++  };
++}
++
++function threadOf(id: DiscussionId, changes: Partial<DiscussionThread> = {}): DiscussionThread {
++  return {
++    discussion: discussionOf(id),
++    resolved: false,
++    comments: [],
++    drafts: [],
++    pending: 0,
++    commenting: "allowed",
++    mayResolve: true,
++    ...changes,
++  };
++}
++
++function asked<T>(list: Ask<T>[], ...args: readonly unknown[]): Promise<SourceResult<T>> {
++  return new Promise((resolve, reject) => {
++    list.push({ args, answer: resolve, fail: reject });
++  });
++}
++
++function rig(): Rig {
++  const reads: Ask<DiscussionThreadReply>[] = [];
++  const writes: Ask<DiscussionWriteReply>[] = [];
++  const previews: Ask<MarkdownPreviewReply>[] = [];
++  const boxReads: [MergeRequestIid, DiscussionId, boolean][] = [];
++  const reloads: MergeRequestIid[] = [];
++  const source: MergeRequestSource = {
++    ...createFixtureCompareSource(log, "", {}),
++    readDiscussionThread: (...args) => asked(reads, ...args),
++    replyToDiscussion: (...args) => asked(writes, "reply", ...args),
++    resolveDiscussion: (...args) => asked(writes, "resolve", ...args),
++    submitReview: (...args) => asked(writes, "submit", ...args),
++    previewMarkdown: (...args) => asked(previews, ...args),
++  };
++  const threads = createThreads({
++    source,
++    discussions: {
++      threadRead: (row, discussion, resolved) => {
++        boxReads.push([row, discussion.id, resolved]);
++      },
++      reloadDiscussions: (row) => {
++        reloads.push(row);
++      },
++    },
++  });
++  return { threads, reads, writes, previews, boxReads, reloads };
++}
++
++async function settled(): Promise<void> {
++  for (let turn = 0; turn < MICROTASKS; turn += 1) {
++    await Promise.resolve();
++  }
++}
++
++function at<T>(list: readonly Ask<T>[], index: number): Ask<T> {
++  const ask = list[index];
++  if (ask === undefined) {
++    throw new Error(`no ask ${index}; ${list.length} made`);
++  }
++  return ask;
++}
++
++function shownOf(live: Rig): Thread | null {
++  return live.threads.thread.value;
++}
++
++function loadOf(live: Rig): ThreadLoad | undefined {
++  return shownOf(live)?.load;
++}
++
++function textOf(live: Rig, id: DiscussionId): string | undefined {
++  return live.threads.replyTexts.value.get(id);
++}
++
++async function readAt(live: Rig, index: number, thread: DiscussionThread): Promise<void> {
++  at(live.reads, index).answer({ ok: true, value: { kind: "read", thread } });
++  await settled();
++}
++
++async function writeAt(live: Rig, index: number, reply: DiscussionWriteReply): Promise<void> {
++  at(live.writes, index).answer({ ok: true, value: reply });
++  await settled();
++}
++
++async function shownAndRead(live: Rig, id: DiscussionId = D1): Promise<void> {
++  live.threads.showThread(MR, id);
++  await readAt(live, live.reads.length - 1, threadOf(id));
++}
++
++function read(thread: DiscussionThread, refreshing = false): ThreadLoad {
++  return { kind: "read", thread, refreshing };
++}
++
++function failed(what: WriteKind, failure: WriteFailure): Sending {
++  return { kind: "failed", what, failure };
++}
++
++test("each_open_reads_the_thread_afresh", async () => {
++  const live = rig();
++  live.threads.showThread(MR, D1);
++  expect(shownOf(live)).toEqual({
++    shown: SHOWN,
++    load: LOADING,
++    sending: { kind: "idle" },
++    preview: WRITING,
++  });
++  expect(at(live.reads, 0).args).toEqual([MR, D1]);
++
++  live.threads.showThread(MR, D1);
++  expect(live.reads).toHaveLength(1);
++  await readAt(live, 0, threadOf(D1));
++  expect(loadOf(live)).toEqual(read(threadOf(D1)));
++  expect(live.boxReads).toEqual([[MR, D1, false]]);
++
++  live.threads.closeThread();
++  expect(shownOf(live)).toBeNull();
++  live.threads.showThread(MR, D1);
++  expect(loadOf(live)).toEqual(LOADING);
++  expect(live.reads).toHaveLength(2);
++  live.threads.showThread(iid(636), D1);
++  expect(at(live.reads, 2).args).toEqual([636, D1]);
++});
++
++test("a_failed_read_retries", async () => {
++  const live = rig();
++  live.threads.retryThread();
++  expect(live.reads).toEqual([]);
++
++  live.threads.showThread(MR, D1);
++  at(live.reads, 0).answer({ ok: false, failure: STOPPED });
++  await settled();
++  expect(loadOf(live)).toEqual({ kind: "failed", cause: STOPPED });
++
++  live.threads.retryThread();
++  expect(loadOf(live)).toEqual(LOADING);
++  at(live.reads, 1).answer({ ok: true, value: { kind: "notFound" } });
++  await settled();
++  expect(loadOf(live)).toEqual({ kind: "refused", reply: { kind: "notFound" } });
++  expect(live.boxReads).toEqual([]);
++
++  live.threads.retryThread();
++  at(live.reads, 2).fail(new Error("unreadable answer"));
++  await settled();
++  expect(loadOf(live)).toEqual({
++    kind: "failed",
++    cause: { kind: "Unexpected", message: "unreadable answer" },
++  });
++  live.threads.retryThread();
++  await readAt(live, 3, threadOf(D1));
++  expect(loadOf(live)).toEqual(read(threadOf(D1)));
++});
++
++test("an_answer_for_a_thread_no_longer_shown_changes_only_the_box", async () => {
++  const live = rig();
++  live.threads.showThread(MR, D1);
++  live.threads.showThread(MR, D2);
++  await readAt(live, 0, threadOf(D1));
++  expect(shownOf(live)?.shown.discussion).toBe(D2);
++  expect(loadOf(live)).toEqual(LOADING);
++  expect(live.boxReads).toEqual([[MR, D1, false]]);
++
++  live.threads.closeThread();
++  live.threads.showThread(MR, D2);
++  await readAt(live, 1, threadOf(D2, { resolved: true }));
++  expect(loadOf(live)).toEqual(LOADING);
++  expect(live.boxReads).toEqual([
++    [MR, D1, false],
++    [MR, D2, true],
++  ]);
++
++  live.threads.closeThread();
++  await readAt(live, 2, threadOf(D2));
++  expect(shownOf(live)).toBeNull();
++  expect(live.boxReads).toHaveLength(3);
++});
++
++test("texts_are_kept_per_discussion_until_sent", async () => {
++  const live = rig();
++  live.threads.setReplyText(D1, "first");
++  live.threads.setReplyText(D2, SECRET);
++  await shownAndRead(live, D2);
++  live.threads.closeThread();
++  await shownAndRead(live, D1);
++  expect(textOf(live, D1)).toBe("first");
++  expect(textOf(live, D2)).toBe(SECRET);
++
++  void live.threads.sendReply("comment");
++  expect(at(live.writes, 0).args).toEqual(["reply", MR, D1, "comment", "first"]);
++  await writeAt(live, 0, { kind: "sent" });
++  expect(textOf(live, D1)).toBe("");
++  expect(textOf(live, D2)).toBe(SECRET);
++
++  await readAt(live, 2, threadOf(D1));
++  live.threads.setReplyText(D1, "second");
++  void live.threads.sendReply("draft");
++  live.threads.setReplyText(D1, "second, longer");
++  await writeAt(live, 1, { kind: "sent" });
++  expect(at(live.writes, 1).args).toEqual(["reply", MR, D1, "draft", "second"]);
++  expect(textOf(live, D1)).toBe("second, longer");
++});
++
++test("a_second_send_while_one_runs_sends_nothing", async () => {
++  const live = rig();
++  await live.threads.sendReply("comment");
++  await live.threads.setResolved(true);
++  await live.threads.submitReview();
++  live.threads.showThread(MR, D1);
++  live.threads.setReplyText(D1, "first");
++  await live.threads.sendReply("comment");
++  expect(live.writes).toEqual([]);
++
++  await readAt(live, 0, threadOf(D1));
++  live.threads.showThread(MR, D2);
++  await readAt(live, 1, threadOf(D2));
++  await live.threads.sendReply("comment");
++  expect(live.writes).toEqual([]);
++  live.threads.showThread(MR, D1);
++  await readAt(live, 2, threadOf(D1));
++  live.threads.setReplyText(D1, "  \n ");
++  await live.threads.sendReply("comment");
++  expect(live.writes).toEqual([]);
++
++  live.threads.setReplyText(D1, "first");
++  void live.threads.sendReply("comment");
++  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "comment" });
++  void live.threads.sendReply("comment");
++  void live.threads.setResolved(true);
++  void live.threads.submitReview();
++  live.threads.showThread(MR, D2);
++  await readAt(live, 3, threadOf(D2));
++  live.threads.setReplyText(D2, "other");
++  void live.threads.sendReply("draft");
++  expect(live.writes).toHaveLength(1);
++
++  await writeAt(live, 0, { kind: "sent" });
++  void live.threads.sendReply("draft");
++  expect(live.writes).toHaveLength(2);
++});
++
++test("a_refused_send_keeps_the_text_and_reads_nothing", async () => {
++  const live = rig();
++  await shownAndRead(live);
++  live.threads.setReplyText(D1, "first");
++  void live.threads.sendReply("comment");
++  await writeAt(live, 0, { kind: "refused", reason: "403 Forbidden" });
++
++  expect(shownOf(live)?.sending).toEqual(
++    failed("comment", { kind: "refused", reason: "403 Forbidden" }),
++  );
++  expect(textOf(live, D1)).toBe("first");
++  expect(live.reads).toHaveLength(1);
++  expect(loadOf(live)).toEqual(read(threadOf(D1)));
++
++  void live.threads.sendReply("comment");
++  expect(live.writes).toHaveLength(2);
++  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "comment" });
++});
++
++test("a_failed_send_reads_the_thread_again_before_another_send", async () => {
++  const live = rig();
++  await shownAndRead(live);
++  live.threads.setReplyText(D1, "first");
++  void live.threads.sendReply("comment");
++  await writeAt(live, 0, { kind: "failed", message: "glab timed out" });
++
++  expect(shownOf(live)?.sending).toEqual(
++    failed("comment", { kind: "failed", message: "glab timed out" }),
++  );
++  expect(textOf(live, D1)).toBe("first");
++  expect(loadOf(live)).toEqual(read(threadOf(D1), true));
++  expect(live.reads).toHaveLength(2);
++  await live.threads.sendReply("comment");
++  expect(live.writes).toHaveLength(1);
++
++  await readAt(live, 1, threadOf(D1, { pending: 1 }));
++  expect(loadOf(live)).toEqual(read(threadOf(D1, { pending: 1 })));
++  void live.threads.sendReply("comment");
++  at(live.writes, 1).answer({ ok: false, failure: STOPPED });
++  await settled();
++  expect(shownOf(live)?.sending).toEqual(failed("comment", { kind: "ipc", cause: STOPPED }));
++  expect(live.reads).toHaveLength(3);
++  await readAt(live, 2, threadOf(D1));
++  void live.threads.sendReply("comment");
++  await writeAt(live, 2, { kind: "notLoggedIn", detail: "gitlab.example: no token" });
++  expect(live.reads).toHaveLength(4);
++});
++
++test("submit_publishes_then_reloads_the_thread_and_the_row", async () => {
++  const live = rig();
++  await shownAndRead(live);
++  live.threads.setReplyText(D1, "unsent");
++  void live.threads.submitReview();
++  expect(at(live.writes, 0).args).toEqual(["submit", MR]);
++  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "submit" });
++  expect(live.reloads).toEqual([]);
++
++  await writeAt(live, 0, { kind: "sent" });
++  expect(live.reloads).toEqual([MR]);
++  expect(shownOf(live)?.sending).toEqual({ kind: "idle" });
++  expect(loadOf(live)).toEqual(read(threadOf(D1), true));
++  expect(textOf(live, D1)).toBe("unsent");
++  await readAt(live, 1, threadOf(D1, { pending: 0 }));
++  expect(loadOf(live)).toEqual(read(threadOf(D1)));
++});
++
++test("a_failed_submit_keeps_the_drafts_pending", async () => {
++  const live = rig();
++  live.threads.showThread(MR, D1);
++  const drafted = threadOf(D1, { drafts: [{ text: "a draft" }], pending: 3 });
++  await readAt(live, 0, drafted);
++  void live.threads.submitReview();
++  await writeAt(live, 0, { kind: "glabMissing" });
++
++  expect(shownOf(live)?.sending).toEqual(failed("submit", { kind: "glabMissing" }));
++  expect(live.reloads).toEqual([]);
++  expect(loadOf(live)).toEqual(read(drafted, true));
++  await readAt(live, 1, drafted);
++  expect(loadOf(live)).toEqual(read(drafted));
++
++  void live.threads.submitReview();
++  await writeAt(live, 1, { kind: "refused", reason: "404 Not Found" });
++  expect(live.reloads).toEqual([]);
++  expect(live.reads).toHaveLength(2);
++});
++
++test("resolve_sends_no_text_and_rereads", async () => {
++  const live = rig();
++  await shownAndRead(live);
++  live.threads.setReplyText(D1, "kept");
++  void live.threads.setResolved(true);
++  expect(at(live.writes, 0).args).toEqual(["resolve", MR, D1, true]);
++  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "resolve" });
++  await writeAt(live, 0, { kind: "sent" });
++  expect(textOf(live, D1)).toBe("kept");
++  expect(live.reloads).toEqual([]);
++  await readAt(live, 1, threadOf(D1, { resolved: true }));
++  expect(live.boxReads.at(-1)).toEqual([MR, D1, true]);
++
++  void live.threads.setResolved(false);
++  expect(at(live.writes, 1).args).toEqual(["resolve", MR, D1, false]);
++  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "unresolve" });
++});
++
++test("a_blank_preview_is_empty_without_a_call", async () => {
++  const live = rig();
++  live.threads.showPreview();
++  live.threads.showWrite();
++  expect(shownOf(live)).toBeNull();
++
++  await shownAndRead(live);
++  live.threads.showPreview();
++  expect(shownOf(live)?.preview).toEqual({ kind: "empty" });
++  live.threads.setReplyText(D1, " \n\t");
++  live.threads.showPreview();
++  expect(shownOf(live)?.preview).toEqual({ kind: "empty" });
++  expect(live.previews).toEqual([]);
++  live.threads.showWrite();
++  expect(shownOf(live)?.preview).toEqual(WRITING);
++});
++
++test("a_preview_shows_gitlabs_rendering_of_the_text", async () => {
++  const live = rig();
++  await shownAndRead(live);
++  live.threads.setReplyText(D1, SECRET);
++  live.threads.showPreview();
++  expect(shownOf(live)?.preview).toEqual({ kind: "loading" });
++  expect(at(live.previews, 0).args).toEqual([MR, SECRET]);
++  at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
++  await settled();
++  expect(shownOf(live)?.preview).toEqual({ kind: "read", preview: RENDERED });
++
++  live.threads.showPreview();
++  at(live.previews, 1).answer({ ok: true, value: { kind: "glabMissing" } });
++  await settled();
++  expect(shownOf(live)?.preview).toEqual({ kind: "refused", reply: { kind: "glabMissing" } });
++});
++
++test("a_preview_failure_keeps_the_text", async () => {
++  const live = rig();
++  await shownAndRead(live);
++  live.threads.setReplyText(D1, SECRET);
++  live.threads.showPreview();
++  at(live.previews, 0).answer({ ok: false, failure: STOPPED });
++  await settled();
++  expect(shownOf(live)?.preview).toEqual({ kind: "failed", cause: STOPPED });
++  expect(textOf(live, D1)).toBe(SECRET);
++});
++
++test("typing_while_a_preview_loads_drops_its_answer", async () => {
++  const live = rig();
++  await shownAndRead(live);
++  live.threads.setReplyText(D1, "first");
++  live.threads.showPreview();
++  live.threads.setReplyText(D1, "first, longer");
++  expect(shownOf(live)?.preview).toEqual(WRITING);
++  at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
++  await settled();
++  expect(shownOf(live)?.preview).toEqual(WRITING);
++
++  live.threads.setReplyText(D2, "elsewhere");
++  live.threads.showPreview();
++  live.threads.setReplyText(D2, "elsewhere, longer");
++  expect(shownOf(live)?.preview).toEqual({ kind: "loading" });
++});
++
++test("refreshed_rereads_only_the_shown_merge_request", async () => {
++  const live = rig();
++  live.threads.refreshed(null);
++  expect(live.reads).toEqual([]);
++
++  live.threads.showThread(MR, D1);
++  live.threads.refreshed(MR);
++  expect(loadOf(live)).toEqual(LOADING);
++  expect(live.reads).toHaveLength(2);
++  await readAt(live, 0, threadOf(D1));
++  expect(loadOf(live)).toEqual(LOADING);
++  await readAt(live, 1, threadOf(D1));
++
++  live.threads.refreshed(iid(636));
++  expect(live.reads).toHaveLength(2);
++  live.threads.refreshed(null);
++  expect(loadOf(live)).toEqual(read(threadOf(D1), true));
++  expect(live.reads).toHaveLength(3);
++});
++
++test("the_thread_logs_carry_no_text_names_or_ids", async () => {
++  const info = vi.spyOn(log, "info");
++  const times = [1000, 1250, 2000, 2008, 3000, 3100, 4000, 4030];
++  vi.spyOn(performance, "now").mockImplementation(() => times.shift() ?? 0);
++  const live = rig();
++  const comment = { author: null, createdAt: 0, edited: null, body: RENDERED, page: null };
++  live.threads.showThread(MR, D1);
++  await readAt(live, 0, threadOf(D1, { comments: [comment, comment] }));
++  live.threads.setReplyText(D1, SECRET);
++  void live.threads.sendReply("comment");
++  await writeAt(live, 0, { kind: "refused", reason: "403 Forbidden" });
++  live.threads.showPreview();
++  at(live.previews, 0).answer({ ok: false, failure: STOPPED });
++  await settled();
++  live.threads.showPreview();
++  at(live.previews, 1).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
++  await settled();
++
++  expect(info.mock.calls).toEqual([
++    ["mergeRequests.thread_read", { iid: MR, kind: "read", comments: 2, ms: 250 }],
++    ["mergeRequests.thread_write", { iid: MR, what: "comment", kind: "refused", ms: 8 }],
++    ["mergeRequests.preview_read", { iid: MR, kind: "WorkerStopped", ms: 100 }],
++    ["mergeRequests.preview_read", { iid: MR, kind: "read", ms: 30 }],
++  ]);
++  const logged = JSON.stringify(info.mock.calls);
++  for (const secret of [SECRET, D1, "Rename this", "403 Forbidden"]) {
++    expect(logged).not.toContain(secret);
++  }
++});
++
++test("an_old_read_of_the_same_thread_never_reaches_the_panel", async () => {
++  const live = rig();
++  live.threads.showThread(MR, D1);
++  live.threads.closeThread();
++  live.threads.showThread(MR, D1);
++  live.threads.refreshed(null);
++  live.threads.refreshed(MR);
++  await readAt(live, 0, threadOf(D1, { pending: 5 }));
++  expect(loadOf(live)).toEqual(LOADING);
++  await readAt(live, 3, threadOf(D1));
++  expect(loadOf(live)).toEqual(read(threadOf(D1)));
++});
++
++test("a_preview_answered_after_the_panel_closed_changes_nothing", async () => {
++  const live = rig();
++  await shownAndRead(live);
++  live.threads.setReplyText(D1, SECRET);
++  live.threads.showPreview();
++  live.threads.closeThread();
++  at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
++  await settled();
++  expect(shownOf(live)).toBeNull();
++});
+diff --git a/frontend/src/ui/mergeRequestThread.ts b/frontend/src/ui/mergeRequestThread.ts
+new file mode 100644
+index 0000000..404816a
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestThread.ts
+@@ -0,0 +1,290 @@
++import { shallowRef, type ShallowRef } from "vue";
++
++import {
++  log,
++  type DiscussionId,
++  type DiscussionThread,
++  type DiscussionThreadReply,
++  type DiscussionWriteReply,
++  type MergeRequestIid,
++  type MergeRequestSource,
++  type ReplyKind,
++  type SourceResult,
++} from "../ipc";
++import type { Discussions } from "./mergeRequestDiscussionRows";
++import { readPreview, type Preview } from "./mergeRequestPreview";
++import { attempt, type Outcome, type ProblemCause } from "./problem";
++
++export type ShownThread = { readonly iid: MergeRequestIid; readonly discussion: DiscussionId };
++export type ThreadLoad =
++  | { readonly kind: "loading" }
++  /** `refreshing`: read again (after a write, a reload, a refresh); the old thread stays shown meanwhile. */
++  | { readonly kind: "read"; readonly thread: DiscussionThread; readonly refreshing: boolean }
++  | {
++      readonly kind: "refused";
++      readonly reply: Exclude<DiscussionThreadReply, { readonly kind: "read" }>;
++    }
++  | { readonly kind: "failed"; readonly cause: ProblemCause };
++export type WriteKind = "comment" | "draft" | "resolve" | "unresolve" | "submit";
++export type WriteFailure =
++  | Exclude<DiscussionWriteReply, { readonly kind: "sent" }>
++  | { readonly kind: "ipc"; readonly cause: ProblemCause };
++export type Sending =
++  | { readonly kind: "idle" }
++  | { readonly kind: "sending"; readonly what: WriteKind }
++  | { readonly kind: "failed"; readonly what: WriteKind; readonly failure: WriteFailure };
++export type Thread = {
++  readonly shown: ShownThread;
++  readonly load: ThreadLoad;
++  readonly sending: Sending;
++  readonly preview: Preview;
++};
++export type Threads = {
++  /** The window's one thread panel; null when none is shown. */
++  readonly thread: Readonly<ShallowRef<Thread | null>>;
++  /** C6: each discussion's unsent text for the window's life; cleared only by a `sent` reply or draft. */
++  readonly replyTexts: Readonly<ShallowRef<ReadonlyMap<DiscussionId, string>>>;
++  setReplyText(discussion: DiscussionId, text: string): void;
++  /** C1, C5: shows `discussion` and reads it afresh (loading first); the one already shown: nothing. */
++  showThread(iid: MergeRequestIid, discussion: DiscussionId): void;
++  closeThread(): void;
++  retryThread(): void;
++  /** C8: one send at a time; a blank text or a send under way → nothing. */
++  sendReply(kind: ReplyKind): Promise<void>;
++  /** C10: resolve (true) or reopen (false); never sends the text. */
++  setResolved(resolve: boolean): Promise<void>;
++  /** C9: publishes every pending draft of the merge request. */
++  submitReview(): Promise<void>;
++  showPreview(): void;
++  showWrite(): void;
++};
++
++type State = {
++  readonly source: MergeRequestSource;
++  readonly discussions: Pick<Discussions, "threadRead" | "reloadDiscussions">;
++  readonly thread: ShallowRef<Thread | null>;
++  readonly replyTexts: ShallowRef<ReadonlyMap<DiscussionId, string>>;
++  /** Bumped by every show, close and re-read: an older read's answer reaches only the box. */
++  generation: number;
++  /** A write is under way, whichever thread is shown: one at a time in the window. */
++  writing: boolean;
++};
++
++const LOADING: ThreadLoad = { kind: "loading" };
++const IDLE: Sending = { kind: "idle" };
++const WRITING: Preview = { kind: "writing" };
++
++function isShown(state: State, shown: ShownThread): boolean {
++  const current = state.thread.value?.shown;
++  return current?.iid === shown.iid && current.discussion === shown.discussion;
++}
++
++function patch(state: State, shown: ShownThread, change: Partial<Omit<Thread, "shown">>): void {
++  const current = state.thread.value;
++  if (current !== null && isShown(state, shown)) {
++    state.thread.value = { ...current, ...change };
++  }
++}
++
++function replyKind<T extends { readonly kind: string }>(outcome: Outcome<T>): string {
++  return outcome.ok ? outcome.value.kind : outcome.cause.kind;
++}
++
++function threadLoadOf(outcome: Outcome<DiscussionThreadReply>): ThreadLoad {
++  if (!outcome.ok) {
++    return { kind: "failed", cause: outcome.cause };
++  }
++  const reply = outcome.value;
++  return reply.kind === "read"
++    ? { kind: "read", thread: reply.thread, refreshing: false }
++    : { kind: "refused", reply };
++}
++
++/** Reads `shown`; the panel takes the answer only while `generation` is the latest (null: the box alone). */
++async function read(state: State, shown: ShownThread, generation: number | null): Promise<void> {
++  const started = performance.now();
++  const outcome = await attempt(() =>
++    state.source.readDiscussionThread(shown.iid, shown.discussion),
++  );
++  const load = threadLoadOf(outcome);
++  const comments = load.kind === "read" ? load.thread.comments.length : 0;
++  const ms = Math.round(performance.now() - started);
++  log.info("mergeRequests.thread_read", { iid: shown.iid, kind: replyKind(outcome), comments, ms });
++  if (load.kind === "read") {
++    state.discussions.threadRead(shown.iid, load.thread.discussion, load.thread.resolved);
++  }
++  if (generation === state.generation) {
++    patch(state, shown, { load });
++  }
++}
++
++function reread(state: State, shown: ShownThread): void {
++  const current = state.thread.value;
++  if (current === null || !isShown(state, shown)) {
++    void read(state, shown, null);
++    return;
++  }
++  const { load } = current;
++  state.generation += 1;
++  state.thread.value = {
++    ...current,
++    load: load.kind === "read" ? { ...load, refreshing: true } : LOADING,
++  };
++  void read(state, shown, state.generation);
++}
++
++function show(state: State, shown: ShownThread): void {
++  state.generation += 1;
++  state.thread.value = { shown, load: LOADING, sending: IDLE, preview: WRITING };
++  void read(state, shown, state.generation);
++}
++
++function setText(state: State, discussion: DiscussionId, text: string): void {
++  state.replyTexts.value = new Map(state.replyTexts.value).set(discussion, text);
++  const current = state.thread.value;
++  if (current?.shown.discussion === discussion) {
++    state.thread.value = { ...current, preview: WRITING };
++  }
++}
++
++/** Why a write did not land; null when GitLab took it. */
++function failureOf(outcome: Outcome<DiscussionWriteReply>): WriteFailure | null {
++  if (!outcome.ok) {
++    return { kind: "ipc", cause: outcome.cause };
++  }
++  const reply = outcome.value;
++  return reply.kind === "sent" ? null : reply;
++}
++
++async function write(
++  state: State,
++  what: WriteKind,
++  call: (shown: ShownThread) => Promise<SourceResult<DiscussionWriteReply>>,
++  text: string | null,
++): Promise<void> {
++  const current = state.thread.value;
++  if (current?.load.kind !== "read" || current.load.refreshing || state.writing) {
++    return;
++  }
++  const { shown } = current;
++  state.writing = true;
++  patch(state, shown, { sending: { kind: "sending", what } });
++  const started = performance.now();
++  const outcome = await attempt(() => call(shown));
++  state.writing = false;
++  const ms = Math.round(performance.now() - started);
++  log.info("mergeRequests.thread_write", { iid: shown.iid, what, kind: replyKind(outcome), ms });
++  const failure = failureOf(outcome);
++  patch(state, shown, { sending: failure === null ? IDLE : { kind: "failed", what, failure } });
++  if (failure === null && state.replyTexts.value.get(shown.discussion) === text) {
++    setText(state, shown.discussion, "");
++  }
++  if (failure?.kind !== "refused") {
++    reread(state, shown);
++  }
++  if (failure === null && what === "submit") {
++    state.discussions.reloadDiscussions(shown.iid);
++  }
++}
++
++async function preview(state: State): Promise<void> {
++  const current = state.thread.value;
++  if (current === null) {
++    return;
++  }
++  const { shown } = current;
++  const text = state.replyTexts.value.get(shown.discussion) ?? "";
++  if (text.trim() === "") {
++    patch(state, shown, { preview: { kind: "empty" } });
++    return;
++  }
++  const loading: Preview = { kind: "loading" };
++  patch(state, shown, { preview: loading });
++  const answer = await readPreview(state.source, shown.iid, text);
++  if (state.thread.value?.preview === loading) {
++    patch(state, shown, { preview: answer });
++  }
++}
++
++function writesOf(state: State): Pick<Threads, "sendReply" | "setResolved" | "submitReview"> {
++  return {
++    sendReply: async (kind) => {
++      const discussion = state.thread.value?.shown.discussion;
++      const text = discussion === undefined ? "" : (state.replyTexts.value.get(discussion) ?? "");
++      if (text.trim() !== "") {
++        await write(
++          state,
++          kind,
++          (shown) => state.source.replyToDiscussion(shown.iid, shown.discussion, kind, text),
++          text,
++        );
++      }
++    },
++    setResolved: (resolve) =>
++      write(
++        state,
++        resolve ? "resolve" : "unresolve",
++        (shown) => state.source.resolveDiscussion(shown.iid, shown.discussion, resolve),
++        null,
++      ),
++    submitReview: () =>
++      write(state, "submit", (shown) => state.source.submitReview(shown.iid), null),
++  };
++}
++
++function panelOf(state: State): Omit<Threads, "sendReply" | "setResolved" | "submitReview"> {
++  return {
++    thread: state.thread,
++    replyTexts: state.replyTexts,
++    setReplyText: (discussion, text) => {
++      setText(state, discussion, text);
++    },
++    showThread: (iid, discussion) => {
++      if (!isShown(state, { iid, discussion })) {
++        show(state, { iid, discussion });
++      }
++    },
++    closeThread: () => {
++      state.generation += 1;
++      state.thread.value = null;
++    },
++    retryThread: () => {
++      const current = state.thread.value;
++      if (current !== null) {
++        show(state, current.shown);
++      }
++    },
++    showPreview: () => {
++      void preview(state);
++    },
++    showWrite: () => {
++      const current = state.thread.value;
++      if (current !== null) {
++        state.thread.value = { ...current, preview: WRITING };
++      }
++    },
++  };
++}
++
++export function createThreads(deps: {
++  readonly source: MergeRequestSource;
++  readonly discussions: Pick<Discussions, "threadRead" | "reloadDiscussions">;
++}): Threads & { readonly refreshed: (iid: MergeRequestIid | null) => void } {
++  const state: State = {
++    ...deps,
++    thread: shallowRef<Thread | null>(null),
++    replyTexts: shallowRef<ReadonlyMap<DiscussionId, string>>(new Map()),
++    generation: 0,
++    writing: false,
++  };
++  return {
++    ...panelOf(state),
++    ...writesOf(state),
++    refreshed: (iid) => {
++      const shown = state.thread.value?.shown;
++      if (shown !== undefined && (iid === null || iid === shown.iid)) {
++        reread(state, shown);
++      }
++    },
++  };
++}
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 883e2a7..ff20a20 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -5,7 +5,6 @@ import type {
+   DiscussionDetails,
+   GitLabProject,
+   MergeRequestIid,
+-  MergeRequestPeople,
+   MergeRequestRow,
+   MergeRequestSource,
+   OpenReply,
+@@ -29,6 +28,7 @@ import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
+ import { loadList, type ListLoad, type ListState } from "./mergeRequestsList";
+ import { shownOf, type Shown } from "./mergeRequestsShown";
+ import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
++import { createThreads, type Threads } from "./mergeRequestThread";
+ import { attempt, type Problem } from "./problem";
+ import type { Screen } from "./screen";
+ 
+@@ -51,6 +51,7 @@ export type MergeRequests = RowActions &
+   JobLogs &
+   Descriptions &
+   Discussions &
++  Threads &
+   Links &
+   Shown &
+   PeopleChanges & {
+@@ -94,11 +95,15 @@ type State = Deps &
+     readonly rowActions: RowActions;
+     readonly discussionQueue: DiscussionQueue;
+     readonly linkQueue: LinkQueue;
++    readonly threads: Threads;
++    readonly threadsRefreshed: (iid: MergeRequestIid | null) => void;
+   };
+ 
+-function withPeople(state: State, iid: MergeRequestIid, people: Partial<MergeRequestPeople>): void {
++type RowPatch = Partial<Pick<MergeRequestRow, "assignees" | "reviewers" | "openDiscussions">>;
++
++function withRow(state: State, iid: MergeRequestIid, partial: RowPatch): void {
+   function changed(rows: readonly MergeRequestRow[]): readonly MergeRequestRow[] {
+-    return rows.map((row) => (row.iid === iid ? { ...row, ...people } : row));
++    return rows.map((row) => (row.iid === iid ? { ...row, ...partial } : row));
+   }
+   state.rows.value = changed(state.rows.value);
+   if (state.running?.buffered === true) {
+@@ -113,13 +118,13 @@ function peopleOf(state: State): Rerequests & PeopleChanges {
+       source,
+       report,
+       replaced: (iid, reviewers) => {
+-        withPeople(state, iid, { reviewers });
++        withRow(state, iid, { reviewers });
+       },
+     }),
+     ...createPeopleChanges({
+       source,
+       replaced: (iid, people) => {
+-        withPeople(state, iid, people);
++        withRow(state, iid, people);
+       },
+     }),
+   };
+@@ -168,16 +173,32 @@ async function openPage(state: State, clicked: PageKind, page: WebPage): Promise
+   state.pageProblem.value = pageProblemText(outcome.value, clicked);
+ }
+ 
++function discussingOf(
++  deps: Deps,
++  rows: () => readonly MergeRequestRow[],
++  counted: (iid: MergeRequestIid, count: number) => void,
++): Pick<State, "discussionQueue" | "threads" | "threadsRefreshed"> {
++  const { source, discussionDetails: mode } = deps;
++  const discussionQueue = createDiscussions({ source, mode, rows, counted });
++  const { refreshed, ...threads } = createThreads({ source, discussions: discussionQueue });
++  return { discussionQueue, threads, threadsRefreshed: refreshed };
++}
++
+ function createState(deps: Deps): State {
+   const project = shallowRef<GitLabProject>({ kind: "none" });
+   const repository = computed(() =>
+     project.value.kind === "found" ? project.value.repository : null,
+   );
+   const rows = shallowRef<readonly MergeRequestRow[]>([]);
+-  const mode = deps.discussionDetails;
+-  const discussionQueue = createDiscussions({ ...deps, mode, rows: () => rows.value });
++  const discussing = discussingOf(
++    deps,
++    () => rows.value,
++    (iid, openDiscussions) => {
++      withRow(state, iid, { openDiscussions });
++    },
++  );
+   const linkQueue = createLinks(deps);
+-  return {
++  const state: State = {
+     ...deps,
+     project,
+     repository,
+@@ -191,15 +212,17 @@ function createState(deps: Deps): State {
+     pageProblem: shallowRef<string | null>(null),
+     dueDates: createDueDates(repository, deps.storage),
+     rowActions: createRowActions(deps),
+-    discussionQueue,
++    ...discussing,
+     linkQueue,
+     rowsReplaced: (replaced) => {
+-      discussionQueue.replaced(replaced);
++      discussing.discussionQueue.replaced(replaced);
+       linkQueue.dropped();
++      discussing.threadsRefreshed(null);
+     },
+     shown: null,
+     running: null,
+   };
++  return state;
+ }
+ 
+ function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setDueDate"> {
+@@ -257,7 +280,8 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     ...people,
+     ...createJobLogs(deps),
+     ...createDescriptions(deps),
+-    ...discussionsOf(state.discussionQueue),
++    ...discussionsOf(state.discussionQueue, state.threadsRefreshed),
++    ...state.threads,
+     ...linksOf(state.linkQueue),
+   };
+ }
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index dcd322e..1e8feb4 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -53,7 +53,14 @@ export type MergeRequestStep =
+   | "changePeople"
+   | "description"
+   | "link"
+-  | "links";
++  | "links"
++  | "thread"
++  | "reply"
++  | "draft"
++  | "resolveThread"
++  | "unresolveThread"
++  | "submitReview"
++  | "preview";
+ 
+ export type Problem =
+   | { readonly action: "list"; readonly cause: ProblemCause }
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index 4c1e22e..fddef22 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -335,6 +335,13 @@ test.each([
+   ["description", "Could not read the description: yamt's worker stopped; try again."],
+   ["link", "Could not open the link: yamt's worker stopped; try again."],
+   ["links", "Could not read the links: yamt's worker stopped; try again."],
++  ["thread", "Could not read the thread: yamt's worker stopped; try again."],
++  ["reply", "Could not add the comment: yamt's worker stopped; try again."],
++  ["draft", "Could not add the review comment: yamt's worker stopped; try again."],
++  ["resolveThread", "Could not resolve the thread: yamt's worker stopped; try again."],
++  ["unresolveThread", "Could not unresolve the thread: yamt's worker stopped; try again."],
++  ["submitReview", "Could not submit the review: yamt's worker stopped; try again."],
++  ["preview", "Could not preview: yamt's worker stopped; try again."],
+ ] as const)("a failed merge-request call at %s says what failed", (step, words) => {
+   expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
+ });
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 32d9945..e5fcd13 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -88,6 +88,13 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
+   description: "Could not read the description",
+   link: "Could not open the link",
+   links: "Could not read the links",
++  thread: "Could not read the thread",
++  reply: "Could not add the comment",
++  draft: "Could not add the review comment",
++  resolveThread: "Could not resolve the thread",
++  unresolveThread: "Could not unresolve the thread",
++  submitReview: "Could not submit the review",
++  preview: "Could not preview",
+ };
+ 
+ const FIXED_ATTEMPT_WORDS: Readonly<

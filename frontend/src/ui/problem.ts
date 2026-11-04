@@ -53,7 +53,14 @@ export type MergeRequestStep =
   | "changePeople"
   | "description"
   | "link"
-  | "links";
+  | "links"
+  | "thread"
+  | "reply"
+  | "draft"
+  | "resolveThread"
+  | "unresolveThread"
+  | "submitReview"
+  | "preview";
 
 export type Problem =
   | { readonly action: "list"; readonly cause: ProblemCause }

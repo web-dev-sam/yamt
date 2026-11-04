@@ -1,0 +1,10 @@
+just mutants HEAD — 9 TS files, 948 mutants: 917 killed, 16 survived, 11 no coverage, 4 errors (no Rust changes)
+mergeRequestThread.ts:84 patch `current !== null` → true / || — equivalent: with no thread isShown is already false; the check is only there for TS narrowing
+mergeRequestThread.ts:123 reread `current === null` → false — equivalent: isShown is false when no thread is shown; the check is only there for TS narrowing
+mergeRequestThread.ts:213 sendReply `discussion === undefined ? ""` → false / "Stryker" — equivalent: with no thread, write() returns before any call
+mergeRequestDiscussions.ts:96 settle `: []` → ["Stryker was here"] — equivalent: a string is never an iid in `unhovered`
+mergeRequestDiscussions.ts:157 becameLazy `: []` → ["Stryker"] — equivalent: a string is never a queued iid
+mergeRequestDiscussions.ts:148 dropped `generation += 1` → -= 1 (old line) — equivalent: values still never repeat, and only equality is compared
+mergeRequestDiscussions.ts:240-241 discussionsOf threadRead wrapper (NoCoverage) — wiring: forwards to the queue's threadRead, which the queue tests cover
+mergeRequestDiscussions.ts:182, mergeRequestDiscussionRows.ts:61 exhaustive `default: never` (NoCoverage) — equivalent: unreachable by type
+ipc/index.ts:211/215, mergeRequests.ts:138/208, problemText.ts:171/181/196 — not changed lines (only re-export lines in index.ts and lines next to the edits were touched)

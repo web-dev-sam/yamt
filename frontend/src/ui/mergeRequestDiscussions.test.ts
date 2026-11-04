@@ -20,6 +20,7 @@ import {
   useRowDiscussions,
   type DiscussionLoad,
   type DiscussionQueue,
+  type Reload,
 } from "./mergeRequestDiscussions";
 
 type Call = {
@@ -33,15 +34,18 @@ type Rig = {
   readonly calls: Call[];
   readonly mode: ShallowRef<DiscussionDetails>;
   readonly rows: ShallowRef<readonly MergeRequestRow[]>;
+  readonly counts: [MergeRequestIid, number][];
 };
 
 const MICROTASKS = 10;
 const STOPPED: SourceFailure = { kind: "WorkerStopped" };
 const LOADING: DiscussionLoad = { kind: "loading" };
+const RUNNING: Reload = { kind: "running" };
 const NOTE_TEXT = "Please rename this, Anna";
 
 let ROWS: readonly MergeRequestRow[] = [];
 let DISCUSSION: OpenDiscussion;
+let OTHER: OpenDiscussion;
 
 beforeAll(async () => {
   const rows: MergeRequestRow[] = [];
@@ -54,9 +58,12 @@ beforeAll(async () => {
   ROWS = rows;
   const author = rows.find((row) => row.author !== null)?.author ?? null;
   const page = rows.find((row) => row.page !== null)?.page ?? null;
-  const id = "0000000000000000000000000000000000000001";
-  if (!isDiscussionId(id)) {
-    throw new Error(`${id} is not a discussion id`);
+  const [id, other] = [
+    "0000000000000000000000000000000000000001",
+    "0000000000000000000000000000000000000002",
+  ];
+  if (!isDiscussionId(id) || !isDiscussionId(other)) {
+    throw new Error(`${id} or ${other} is not a discussion id`);
   }
   DISCUSSION = {
     id,
@@ -64,6 +71,7 @@ beforeAll(async () => {
     earlier: [],
     last: { author, createdAt: 0, text: NOTE_TEXT, page, mentions: [] },
   };
+  OTHER = { ...DISCUSSION, id: other, place: { kind: "overview" } };
 });
 
 afterEach(() => {
@@ -81,6 +89,7 @@ function rig(start: DiscussionDetails = "full"): Rig {
   const calls: Call[] = [];
   const mode = shallowRef<DiscussionDetails>(start);
   const rows = shallowRef<readonly MergeRequestRow[]>([]);
+  const counts: [MergeRequestIid, number][] = [];
   const source = {
     ...createFixtureCompareSource(log, "", {}),
     readDiscussions: (iids: readonly MergeRequestIid[]) =>
@@ -88,8 +97,15 @@ function rig(start: DiscussionDetails = "full"): Rig {
         calls.push({ iids: [...iids], answer: resolve, fail: reject });
       }),
   };
-  const queue = createDiscussions({ source, mode: () => mode.value, rows: () => rows.value });
-  return { queue, calls, mode, rows };
+  const queue = createDiscussions({
+    source,
+    mode: () => mode.value,
+    rows: () => rows.value,
+    counted: (asked, count) => {
+      counts.push([asked, count]);
+    },
+  });
+  return { queue, calls, mode, rows, counts };
 }
 
 async function settled(): Promise<void> {
@@ -132,7 +148,7 @@ function entry(live: Rig, value: number): DiscussionLoad | undefined {
 }
 
 function read(): DiscussionLoad {
-  return { kind: "read", discussions: [DISCUSSION] };
+  return { kind: "read", discussions: [DISCUSSION], resolved: new Set() };
 }
 
 test("full_queues_each_page_with_open_discussions_as_it_arrives", async () => {
@@ -446,7 +462,7 @@ test("a_refused_answer_is_kept_per_row", async () => {
   for (const [value, answer] of refusals) {
     expect(entry(live, value)).toEqual({ kind: "refused", answer });
   }
-  expect(entry(live, 635)).toEqual({ kind: "read", discussions: [] });
+  expect(entry(live, 635)).toEqual({ kind: "read", discussions: [], resolved: new Set() });
   expect(live.calls).toHaveLength(1);
 });
 
@@ -505,4 +521,292 @@ test("the_log_event_never_carries_text_or_names", async () => {
     expect(logged).not.toContain(secret);
   }
   expect(logged).not.toContain("gitlab.example");
+});
+
+function both(): SourceResult<readonly RowDiscussions[]> {
+  return {
+    ok: true,
+    value: [{ iid: iid(639), answer: { kind: "open", discussions: [DISCUSSION, OTHER] } }],
+  };
+}
+
+async function readFirstRows(live: Rig): Promise<void> {
+  live.queue.listed(ROWS.slice(0, 3));
+  await answered(live, 0);
+}
+
+test("a_reload_keeps_the_rows_until_its_answer", async () => {
+  const live = rig();
+  await readFirstRows(live);
+  const before = live.queue.discussions.value;
+
+  live.queue.reloadDiscussions(iid(639));
+  expect(live.queue.discussions.value).toBe(before);
+  expect(entry(live, 639)).toEqual(read());
+  expect(live.queue.reloads.value.get(iid(639))).toEqual(RUNNING);
+  expect(callAt(live, 1).iids).toEqual([639]);
+
+  callAt(live, 1).answer(both());
+  await settled();
+  expect(entry(live, 639)).toEqual({
+    kind: "read",
+    discussions: [DISCUSSION, OTHER],
+    resolved: new Set(),
+  });
+  expect(live.queue.reloads.value.size).toBe(0);
+  expect(live.calls).toHaveLength(2);
+});
+
+test("a_reload_sets_the_rows_count", async () => {
+  const info = vi.spyOn(log, "info");
+  const live = rig();
+  await readFirstRows(live);
+  expect(live.counts).toEqual([]);
+
+  live.queue.reloadDiscussions(iid(639));
+  callAt(live, 1).answer(both());
+  await settled();
+  expect(live.counts).toEqual([[639, 2]]);
+  expect(info).toHaveBeenCalledWith("mergeRequests.discussions_reloaded", {
+    iid: 639,
+    kind: "open",
+    ms: expect.any(Number),
+  });
+  const reloaded = info.mock.calls.filter(
+    ([event]) => event === "mergeRequests.discussions_reloaded",
+  );
+  expect(reloaded).toHaveLength(1);
+  expect(JSON.stringify(info.mock.calls)).not.toContain(NOTE_TEXT);
+});
+
+test("a_failed_reload_keeps_the_rows_and_says_why", async () => {
+  const info = vi.spyOn(log, "info");
+  const live = rig();
+  await readFirstRows(live);
+  const refused = { kind: "notLoggedIn", detail: "gitlab.example: no token" } as const;
+
+  live.queue.reloadDiscussions(iid(639));
+  callAt(live, 1).answer({ ok: true, value: [{ iid: iid(639), answer: refused }] });
+  await settled();
+  expect(entry(live, 639)).toEqual(read());
+  expect(live.queue.reloads.value.get(iid(639))).toEqual({ kind: "refused", answer: refused });
+
+  live.queue.reloadDiscussions(iid(639));
+  expect(live.queue.reloads.value.get(iid(639))).toEqual(RUNNING);
+  callAt(live, 2).answer({ ok: false, failure: STOPPED });
+  await settled();
+  expect(entry(live, 639)).toEqual(read());
+  expect(live.queue.reloads.value.get(iid(639))).toEqual({ kind: "failed", cause: STOPPED });
+  expect(live.counts).toEqual([]);
+  expect(live.calls).toHaveLength(3);
+  const kinds = info.mock.calls
+    .filter(([event]) => event === "mergeRequests.discussions_reloaded")
+    .map(([, fields]) => fields?.["kind"]);
+  expect(kinds).toEqual(["notLoggedIn", "WorkerStopped"]);
+  expect(JSON.stringify(info.mock.calls)).not.toContain("gitlab.example");
+});
+
+test("a_reload_goes_first_and_once", async () => {
+  const live = rig("lazy");
+  live.queue.askDiscussions(iid(639));
+  await answered(live, 0);
+  live.queue.askDiscussions(iid(638));
+  live.queue.askDiscussions(iid(636));
+  live.queue.askDiscussions(iid(635));
+
+  live.queue.reloadDiscussions(iid(639));
+  live.queue.reloadDiscussions(iid(639));
+  expect(live.calls).toHaveLength(2);
+  await answered(live, 1);
+  expect(callAt(live, 2).iids).toEqual([639, 635, 636]);
+
+  await answered(live, 2, [iid(639)]);
+  expect(callAt(live, 3).iids).toEqual([635, 636]);
+});
+
+test("a_reload_answered_in_part_stays_asked_until_its_answer", async () => {
+  const live = rig("lazy");
+  live.queue.askDiscussions(iid(639));
+  await answered(live, 0);
+  live.queue.askDiscussions(iid(638));
+  live.queue.reloadDiscussions(iid(639));
+
+  await answered(live, 1);
+  await answered(live, 2, []);
+  expect(live.queue.reloads.value.get(iid(639))).toEqual(RUNNING);
+  expect(callAt(live, 3).iids).toEqual([639]);
+});
+
+test("a_reload_without_an_entry_asks_like_a_hover_and_off_asks_nothing", async () => {
+  const live = rig();
+  live.queue.reloadDiscussions(iid(640));
+  expect(entry(live, 640)).toEqual(LOADING);
+  expect(live.queue.reloads.value.size).toBe(0);
+  await answered(live, 0);
+  expect(entry(live, 640)).toEqual(read());
+  expect(live.counts).toEqual([]);
+
+  live.queue.listed(ROWS.slice(0, 3));
+  live.queue.reloadDiscussions(iid(639));
+  expect(live.queue.reloads.value.size).toBe(0);
+  expect(callAt(live, 1).iids).toEqual(openIids(ROWS.slice(0, 3)).filter((each) => each !== 640));
+  expect(callAt(live, 1).iids[0]).toBe(639);
+
+  live.mode.value = "off";
+  await nextTick();
+  live.queue.reloadDiscussions(iid(639));
+  expect(live.queue.discussions.value.size).toBe(0);
+  expect(live.queue.reloads.value.size).toBe(0);
+  await answered(live, 1);
+  expect(live.calls).toHaveLength(2);
+});
+
+test("a_reload_of_a_row_sent_before_lazy_keeps_it_asked", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 3));
+  live.mode.value = "lazy";
+  await nextTick();
+  live.queue.reloadDiscussions(iid(638));
+  await answered(live, 0, [iid(639)]);
+  expect(entry(live, 638)).toEqual(LOADING);
+  expect(callAt(live, 1).iids).toEqual([638]);
+});
+
+test("switching_to_lazy_keeps_a_waiting_reload", async () => {
+  const live = rig();
+  await readFirstRows(live);
+  live.queue.listed(ROWS.slice(3, 6));
+  live.queue.reloadDiscussions(iid(639));
+  live.mode.value = "lazy";
+  await nextTick();
+
+  expect(entry(live, 639)).toEqual(read());
+  await answered(live, 1);
+  expect(callAt(live, 2).iids).toEqual([639]);
+  callAt(live, 2).answer(both());
+  await settled();
+  expect(live.counts).toEqual([[639, 2]]);
+});
+
+test("a_reload_in_flight_while_switching_to_lazy_keeps_the_rows", async () => {
+  const live = rig();
+  await readFirstRows(live);
+  live.queue.reloadDiscussions(iid(639));
+  live.mode.value = "lazy";
+  await nextTick();
+
+  callAt(live, 1).answer({ ok: true, value: [] });
+  await settled();
+  expect(entry(live, 639)).toEqual(read());
+  expect(live.queue.reloads.value.get(iid(639))).toEqual(RUNNING);
+});
+
+test("a_reload_after_a_refresh_is_dropped", async () => {
+  const live = rig();
+  await readFirstRows(live);
+  live.queue.reloadDiscussions(iid(639));
+  live.queue.replaced(ROWS.slice(0, 3));
+  expect(live.queue.reloads.value.size).toBe(0);
+
+  callAt(live, 1).answer(both());
+  await settled();
+  expect(entry(live, 639)).toEqual(LOADING);
+  expect(live.counts).toEqual([]);
+  expect(callAt(live, 2).iids).toEqual(openIids(ROWS.slice(0, 3)));
+});
+
+test("a_resolved_row_stays_until_the_box_closes_then_the_count_drops", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 3));
+  callAt(live, 0).answer(both());
+  await settled();
+
+  live.queue.threadRead(iid(639), DISCUSSION, true);
+  expect(entry(live, 639)).toEqual({
+    kind: "read",
+    discussions: [DISCUSSION, OTHER],
+    resolved: new Set([DISCUSSION.id]),
+  });
+  expect(live.counts).toEqual([]);
+
+  live.queue.boxClosed(iid(639));
+  expect(entry(live, 639)).toEqual({ kind: "read", discussions: [OTHER], resolved: new Set() });
+  expect(live.counts).toEqual([[639, 1]]);
+});
+
+test("an_unresolved_row_loses_its_mark", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 3));
+  callAt(live, 0).answer(both());
+  await settled();
+  live.queue.threadRead(iid(639), DISCUSSION, true);
+  live.queue.threadRead(iid(639), OTHER, true);
+
+  live.queue.threadRead(iid(639), DISCUSSION, false);
+  expect(entry(live, 639)).toEqual({
+    kind: "read",
+    discussions: [DISCUSSION, OTHER],
+    resolved: new Set([OTHER.id]),
+  });
+});
+
+test("a_thread_answer_replaces_its_discussion_in_the_box", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 3));
+  callAt(live, 0).answer({
+    ok: true,
+    value: [{ iid: iid(639), answer: { kind: "open", discussions: [DISCUSSION, OTHER] } }],
+  });
+  await settled();
+  const answeredLater = { ...OTHER, last: { ...OTHER.last, createdAt: 1 } };
+
+  live.queue.threadRead(iid(639), answeredLater, false);
+  expect(entry(live, 639)).toEqual({
+    kind: "read",
+    discussions: [DISCUSSION, answeredLater],
+    resolved: new Set(),
+  });
+
+  const before = live.queue.discussions.value;
+  live.queue.threadRead(
+    iid(639),
+    { ...answeredLater, id: DISCUSSION.id, place: OTHER.place },
+    false,
+  );
+  expect(entry(live, 639)).toEqual({
+    kind: "read",
+    discussions: [{ ...answeredLater, id: DISCUSSION.id }, answeredLater],
+    resolved: new Set(),
+  });
+  expect(live.queue.discussions.value).not.toBe(before);
+});
+
+test("a_thread_answer_for_no_such_row_or_discussion_changes_nothing", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 3));
+  await settled();
+  const loading = live.queue.discussions.value;
+  live.queue.threadRead(iid(639), DISCUSSION, true);
+  live.queue.threadRead(iid(640), DISCUSSION, true);
+  expect(live.queue.discussions.value).toBe(loading);
+
+  await answered(live, 0);
+  const afterRead = live.queue.discussions.value;
+  live.queue.threadRead(iid(639), OTHER, true);
+  expect(live.queue.discussions.value).toBe(afterRead);
+  live.queue.boxClosed(iid(639));
+  expect(live.counts).toEqual([]);
+});
+
+test("closing_a_box_without_marks_changes_nothing", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 3));
+  live.queue.boxClosed(iid(639));
+  await answered(live, 0);
+  const before = live.queue.discussions.value;
+
+  live.queue.boxClosed(iid(639));
+  live.queue.boxClosed(iid(640));
+  expect(live.queue.discussions.value).toBe(before);
+  expect(live.counts).toEqual([]);
 });

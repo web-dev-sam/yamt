@@ -88,6 +88,13 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
   description: "Could not read the description",
   link: "Could not open the link",
   links: "Could not read the links",
+  thread: "Could not read the thread",
+  reply: "Could not add the comment",
+  draft: "Could not add the review comment",
+  resolveThread: "Could not resolve the thread",
+  unresolveThread: "Could not unresolve the thread",
+  submitReview: "Could not submit the review",
+  preview: "Could not preview",
 };
 
 const FIXED_ATTEMPT_WORDS: Readonly<

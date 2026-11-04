@@ -72,7 +72,14 @@ export {
   nextColumnVersion,
 } from "./domain";
 export type { AbortReply, Leftover, MergeView, PushReply, ReturnTo } from "./localMergeDomain";
-export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
+export type {
+  AgentSessionId,
+  DiscussionId,
+  MergeRequestIid,
+  MessageId,
+  ThreadId,
+  WebPage,
+} from "./domain";
 export type {
   Description,
   DescriptionBlock,
@@ -84,7 +91,16 @@ export type {
   DescriptionReply,
   DescriptionRow,
 } from "./descriptionDomain";
-export type { DiscussionsAnswer, OpenDiscussion, RowDiscussions } from "./discussionDomain";
+export type {
+  DiscussionsAnswer,
+  DiscussionThread,
+  DiscussionThreadReply,
+  DiscussionWriteReply,
+  MarkdownPreviewReply,
+  OpenDiscussion,
+  ReplyKind,
+  RowDiscussions,
+} from "./discussionDomain";
 export type {
   DescriptionLinks,
   LinkedCommit,

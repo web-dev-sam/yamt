@@ -335,6 +335,13 @@ test.each([
   ["description", "Could not read the description: yamt's worker stopped; try again."],
   ["link", "Could not open the link: yamt's worker stopped; try again."],
   ["links", "Could not read the links: yamt's worker stopped; try again."],
+  ["thread", "Could not read the thread: yamt's worker stopped; try again."],
+  ["reply", "Could not add the comment: yamt's worker stopped; try again."],
+  ["draft", "Could not add the review comment: yamt's worker stopped; try again."],
+  ["resolveThread", "Could not resolve the thread: yamt's worker stopped; try again."],
+  ["unresolveThread", "Could not unresolve the thread: yamt's worker stopped; try again."],
+  ["submitReview", "Could not submit the review: yamt's worker stopped; try again."],
+  ["preview", "Could not preview: yamt's worker stopped; try again."],
 ] as const)("a failed merge-request call at %s says what failed", (step, words) => {
   expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
 });

@@ -5,7 +5,6 @@ import type {
   DiscussionDetails,
   GitLabProject,
   MergeRequestIid,
-  MergeRequestPeople,
   MergeRequestRow,
   MergeRequestSource,
   OpenReply,
@@ -29,6 +28,7 @@ import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
 import { loadList, type ListLoad, type ListState } from "./mergeRequestsList";
 import { shownOf, type Shown } from "./mergeRequestsShown";
 import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
+import { createThreads, type Threads } from "./mergeRequestThread";
 import { attempt, type Problem } from "./problem";
 import type { Screen } from "./screen";
 
@@ -51,6 +51,7 @@ export type MergeRequests = RowActions &
   JobLogs &
   Descriptions &
   Discussions &
+  Threads &
   Links &
   Shown &
   PeopleChanges & {
@@ -94,11 +95,15 @@ type State = Deps &
     readonly rowActions: RowActions;
     readonly discussionQueue: DiscussionQueue;
     readonly linkQueue: LinkQueue;
+    readonly threads: Threads;
+    readonly threadsRefreshed: (iid: MergeRequestIid | null) => void;
   };
 
-function withPeople(state: State, iid: MergeRequestIid, people: Partial<MergeRequestPeople>): void {
+type RowPatch = Partial<Pick<MergeRequestRow, "assignees" | "reviewers" | "openDiscussions">>;
+
+function withRow(state: State, iid: MergeRequestIid, partial: RowPatch): void {
   function changed(rows: readonly MergeRequestRow[]): readonly MergeRequestRow[] {
-    return rows.map((row) => (row.iid === iid ? { ...row, ...people } : row));
+    return rows.map((row) => (row.iid === iid ? { ...row, ...partial } : row));
   }
   state.rows.value = changed(state.rows.value);
   if (state.running?.buffered === true) {
@@ -113,13 +118,13 @@ function peopleOf(state: State): Rerequests & PeopleChanges {
       source,
       report,
       replaced: (iid, reviewers) => {
-        withPeople(state, iid, { reviewers });
+        withRow(state, iid, { reviewers });
       },
     }),
     ...createPeopleChanges({
       source,
       replaced: (iid, people) => {
-        withPeople(state, iid, people);
+        withRow(state, iid, people);
       },
     }),
   };
@@ -168,16 +173,32 @@ async function openPage(state: State, clicked: PageKind, page: WebPage): Promise
   state.pageProblem.value = pageProblemText(outcome.value, clicked);
 }
 
+function discussingOf(
+  deps: Deps,
+  rows: () => readonly MergeRequestRow[],
+  counted: (iid: MergeRequestIid, count: number) => void,
+): Pick<State, "discussionQueue" | "threads" | "threadsRefreshed"> {
+  const { source, discussionDetails: mode } = deps;
+  const discussionQueue = createDiscussions({ source, mode, rows, counted });
+  const { refreshed, ...threads } = createThreads({ source, discussions: discussionQueue });
+  return { discussionQueue, threads, threadsRefreshed: refreshed };
+}
+
 function createState(deps: Deps): State {
   const project = shallowRef<GitLabProject>({ kind: "none" });
   const repository = computed(() =>
     project.value.kind === "found" ? project.value.repository : null,
   );
   const rows = shallowRef<readonly MergeRequestRow[]>([]);
-  const mode = deps.discussionDetails;
-  const discussionQueue = createDiscussions({ ...deps, mode, rows: () => rows.value });
+  const discussing = discussingOf(
+    deps,
+    () => rows.value,
+    (iid, openDiscussions) => {
+      withRow(state, iid, { openDiscussions });
+    },
+  );
   const linkQueue = createLinks(deps);
-  return {
+  const state: State = {
     ...deps,
     project,
     repository,
@@ -191,15 +212,17 @@ function createState(deps: Deps): State {
     pageProblem: shallowRef<string | null>(null),
     dueDates: createDueDates(repository, deps.storage),
     rowActions: createRowActions(deps),
-    discussionQueue,
+    ...discussing,
     linkQueue,
     rowsReplaced: (replaced) => {
-      discussionQueue.replaced(replaced);
+      discussing.discussionQueue.replaced(replaced);
       linkQueue.dropped();
+      discussing.threadsRefreshed(null);
     },
     shown: null,
     running: null,
   };
+  return state;
 }
 
 function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setDueDate"> {
@@ -257,7 +280,8 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     ...people,
     ...createJobLogs(deps),
     ...createDescriptions(deps),
-    ...discussionsOf(state.discussionQueue),
+    ...discussionsOf(state.discussionQueue, state.threadsRefreshed),
+    ...state.threads,
     ...linksOf(state.linkQueue),
   };
 }
