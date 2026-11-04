@@ -6,6 +6,10 @@ use crate::program::program_in;
 use crate::run::{Waited, argv, run_with_deadline};
 use crate::{Error, Result};
 
+mod http;
+
+pub use http::{HttpAnswer, HttpCall, http_call};
+
 /// One glab call's deadline: glab talks to a GitLab server over the network (plan §2 #118).
 pub const GLAB_TIMEOUT: Duration = Duration::from_secs(20);
 /// What a glab call that ran past its deadline came to.
@@ -106,6 +110,12 @@ impl Glab {
     /// What `glab <args>` printed with `body` on its stdin; `Err` as for `get`.
     pub fn post(&self, cwd: &Path, args: &[&str], body: Vec<u8>) -> Result<Vec<u8>, String> {
         printed_or_failure(self.run(cwd, args, Some(body)))
+    }
+
+    /// `glab <args>` with `body` on stdin (None: stdin closed), read as an HTTP answer. `args` must hold `--include`.
+    #[must_use]
+    pub fn send(&self, cwd: &Path, args: &[&str], body: Option<Vec<u8>>) -> HttpCall {
+        http_call(self.run(cwd, args, body).map_err(|error| error.to_string()))
     }
 
     #[must_use]

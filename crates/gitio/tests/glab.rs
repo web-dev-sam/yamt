@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, run_ignored_in_child};
-use yamt_gitio::{AuthStatus, Error, Glab, GlabRun, TIMED_OUT};
+use yamt_gitio::{AuthStatus, Error, Glab, GlabRun, HttpAnswer, HttpCall, TIMED_OUT};
 
 const SHORT_TIMEOUT: Duration = Duration::from_millis(300);
 const HANG_SECONDS: u64 = 5;
@@ -106,6 +106,27 @@ fn stdin_reaches_glab_and_stdout_comes_back() {
 
     let answer = without_final_newline(runner_file("post-1.json"));
     assert_eq!(ran, GlabRun::Printed { stdout: answer });
+    let logged = format!("stdin: {}\n", String::from_utf8_lossy(body));
+    assert!(fake.log().ends_with(&logged), "{}", fake.log());
+}
+
+#[test]
+fn send_writes_the_body_on_stdin() {
+    let fake = Fake::new(0);
+    let body = br#"{"note":"Why 300?","position":{"new_line":12}}"#;
+    let mut with_headers = vec!["api", "--include"];
+    with_headers.extend_from_slice(&POST[1..]);
+
+    let call = fake
+        .glab
+        .send(fake.dir.path(), &with_headers, Some(body.to_vec()));
+
+    let created = HttpAnswer {
+        status: 201,
+        body: without_final_newline(runner_file("post-1.json")),
+        glab_line: None,
+    };
+    assert_eq!(call, HttpCall::Answered(created));
     let logged = format!("stdin: {}\n", String::from_utf8_lossy(body));
     assert!(fake.log().ends_with(&logged), "{}", fake.log());
 }

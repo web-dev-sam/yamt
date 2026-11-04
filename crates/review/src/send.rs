@@ -10,7 +10,7 @@ use crate::gitlab::{
     draft_notes, listed_from, merge_request_details, merge_request_from,
     merge_requests_from_branch, merge_requests_of_commit, post_draft_note,
 };
-use crate::glab_answer::{Outcome, answer, posted, run};
+use crate::glab_answer::{Outcome, answer, posted, sent};
 use crate::lines_up::{Found, LinedUp, candidates, lines_up};
 use crate::position::{FileDiff, PostBody, line_place, multi_line, same_draft};
 use crate::right_branch::right_branch;
@@ -173,7 +173,7 @@ fn outcome(
         return Ok(Outcome::Drafted(drafts.swap_remove(index).id));
     }
     let args = post_draft_note(&target.merge_request);
-    Ok(posted(run(glab, range.root(), &args, Some(body.json()))))
+    Ok(posted(sent(glab, range.root(), &args, body.json())))
 }
 
 /// GitLab's ends of a place on several lines, numbered from the file's differences as the range shows them now;

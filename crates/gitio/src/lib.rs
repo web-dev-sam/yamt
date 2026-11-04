@@ -6,7 +6,7 @@
 //! (`fetch.rs`); creates, checks out, moves and deletes a branch and starts a merge (`branch.rs`); pushes a branch
 //! (`push.rs`); lists a remote's refs (`ls_remote.rs`), finds which commits the object store lacks (`objects.rs`) and
 //! tells whether two commits merge cleanly without a worktree (`merge_tree.rs`); runs glab, GitLab's command line,
-//! the same way.
+//! the same way, and reads the HTTP answer `glab api --include` prints (`glab/http.rs`).
 #![forbid(unsafe_code)]
 
 mod abort_continue;
@@ -41,7 +41,10 @@ pub use checkout::StatusEntry;
 pub use diff::{Changed, ChangedFile, Numstat, TreeSide};
 pub use entry::{Oid, Stage, StageEntry};
 pub use fetch::FETCH_TIMEOUT;
-pub use glab::{AuthStatus, GLAB_TIMEOUT, Glab, GlabRun, TIMED_OUT, first_line, last_line};
+pub use glab::{
+    AuthStatus, GLAB_TIMEOUT, Glab, GlabRun, HttpAnswer, HttpCall, TIMED_OUT, first_line,
+    http_call, last_line,
+};
 pub use ls_remote::RemoteRef;
 pub use merge_config::MergeConfig;
 pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};

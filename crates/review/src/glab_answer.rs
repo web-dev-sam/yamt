@@ -1,10 +1,8 @@
 use std::path::Path;
 
-use yamt_gitio::{Glab, GlabRun, TIMED_OUT, last_line};
+use yamt_gitio::{Glab, HttpCall};
 
-use crate::gitlab::{draft_id_from, error_message_from};
-
-const NO_HTTP_ANSWER: &str = "glab printed no HTTP answer";
+use crate::gitlab::draft_id_from;
 
 /// What one message's post came to.
 #[derive(Debug, PartialEq, Eq)]
@@ -14,29 +12,11 @@ pub(crate) enum Outcome {
     Stop(String),
 }
 
-/// What `glab api --include` printed: the HTTP status and the body after the headers.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct HttpAnswer {
-    status: u16,
-    body: Vec<u8>,
-}
-
 /// A 2xx is a draft; another 4xx a refusal of this message; anything else stops the send.
-pub(crate) fn posted(run: std::result::Result<GlabRun, String>) -> Outcome {
-    let (stdout, stderr) = match run {
-        Err(reason) => return Outcome::Stop(reason),
-        Ok(GlabRun::TimedOut) => return Outcome::Stop(TIMED_OUT.to_owned()),
-        Ok(GlabRun::Printed { stdout }) => (stdout, Vec::new()),
-        Ok(GlabRun::Failed { stdout, stderr, .. }) => (stdout, stderr),
-    };
-    let Some(answer) = http_answer_from(&stdout) else {
-        let reason = last_line(&stderr).unwrap_or_else(|| NO_HTTP_ANSWER.to_owned());
-        return Outcome::Stop(reason);
-    };
-    let reason = || {
-        error_message_from(&answer.body)
-            .or_else(|| last_line(&stderr))
-            .unwrap_or_else(|| format!("HTTP {}", answer.status))
+pub(crate) fn posted(call: HttpCall) -> Outcome {
+    let answer = match call {
+        HttpCall::NotAnswered(reason) => return Outcome::Stop(reason),
+        HttpCall::Answered(answer) => answer,
     };
     match answer.status {
         200..=299 => match draft_id_from(&answer.body) {
@@ -44,31 +24,10 @@ pub(crate) fn posted(run: std::result::Result<GlabRun, String>) -> Outcome {
             Err(reason) => Outcome::Stop(reason),
         },
         // 401, 403 and 429 are about the user or the rate, not the message: the rest would fail the same way.
-        401 | 403 | 429 => Outcome::Stop(reason()),
-        400..=499 => Outcome::Refused(reason()),
-        _ => Outcome::Stop(reason()),
+        401 | 403 | 429 => Outcome::Stop(answer.reason()),
+        400..=499 => Outcome::Refused(answer.reason()),
+        _ => Outcome::Stop(answer.reason()),
     }
-}
-
-/// The status line and body `glab api --include` prints: `HTTP/2.0 201 Created`, headers, an empty line, each
-/// ending in CRLF, then the body (glab 1.124.0, measured in `tests/glab/README.md`).
-fn http_answer_from(stdout: &[u8]) -> Option<HttpAnswer> {
-    const HEADERS_END: &[u8] = b"\r\n\r\n";
-    let status_line = stdout.split(|byte| *byte == b'\n').next()?;
-    let status_line = std::str::from_utf8(status_line).ok()?;
-    let mut words = status_line.split_whitespace();
-    if !words.next()?.starts_with("HTTP/") {
-        return None;
-    }
-    let status = words.next()?.parse().ok()?;
-    let body = stdout
-        .windows(HEADERS_END.len())
-        .position(|window| window == HEADERS_END)
-        .map_or(&[][..], |end| &stdout[end + HEADERS_END.len()..]);
-    Some(HttpAnswer {
-        status,
-        body: body.to_vec(),
-    })
 }
 
 /// What a GET printed; `Err` holds what went wrong, glab's own line when it printed one.
@@ -80,15 +39,9 @@ pub(crate) fn answer(
     glab.get(root, &as_strs(args))
 }
 
-/// `Err` when glab could not run at all, in gitio's words.
-pub(crate) fn run(
-    glab: &Glab,
-    root: &Path,
-    args: &[String],
-    stdin: Option<Vec<u8>>,
-) -> std::result::Result<GlabRun, String> {
-    glab.run(root, &as_strs(args), stdin)
-        .map_err(|error| error.to_string())
+/// `glab <args>` with `body` on stdin, read as an HTTP answer.
+pub(crate) fn sent(glab: &Glab, root: &Path, args: &[String], body: Vec<u8>) -> HttpCall {
+    glab.send(root, &as_strs(args), Some(body))
 }
 
 fn as_strs(args: &[String]) -> Vec<&str> {
@@ -97,20 +50,12 @@ fn as_strs(args: &[String]) -> Vec<&str> {
 
 #[cfg(test)]
 mod tests {
+    use yamt_gitio::{GlabRun, TIMED_OUT, http_call};
+
     use super::*;
 
-    #[test]
-    fn the_http_status_and_body_come_from_the_included_headers() {
-        let read = |printed: &[u8]| http_answer_from(printed).map(|got| (got.status, got.body));
-        let headers = b"HTTP/2.0 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{}";
-        assert_eq!(read(headers), Some((400, b"{}".to_vec())));
-        assert_eq!(
-            read(b"HTTP/1.1 204 No Content\r\n"),
-            Some((204, Vec::new()))
-        );
-        assert_eq!(read(b"{\"id\":1}"), None);
-        assert_eq!(read(b"HTTP/2.0 OK\r\n\r\n"), None);
-        assert_eq!(read(b""), None);
+    fn posted_run(run: std::result::Result<GlabRun, String>) -> Outcome {
+        posted(http_call(run))
     }
 
     #[test]
@@ -119,7 +64,7 @@ mod tests {
             let stdout = format!("HTTP/2.0 {status}\r\n\r\n{{\"message\":\"{status}\"}}");
             let stdout = stdout.into_bytes();
             let stderr = Vec::new();
-            posted(Ok(GlabRun::Failed {
+            posted_run(Ok(GlabRun::Failed {
                 status: Some(1),
                 stdout,
                 stderr,
@@ -140,13 +85,18 @@ mod tests {
         }
         let created = b"HTTP/2.0 201 Created\r\n\r\n{\"id\":7}".to_vec();
         assert_eq!(
-            posted(Ok(GlabRun::Printed { stdout: created })),
+            posted_run(Ok(GlabRun::Printed { stdout: created })),
             Outcome::Drafted(7)
         );
         let accepted = b"HTTP/2.0 299 Fine\r\n\r\n{\"id\":8}".to_vec();
         assert_eq!(
-            posted(Ok(GlabRun::Printed { stdout: accepted })),
+            posted_run(Ok(GlabRun::Printed { stdout: accepted })),
             Outcome::Drafted(8)
+        );
+        let no_id = b"HTTP/2.0 201 Created\r\n\r\n{\"id\":-1}".to_vec();
+        assert_eq!(
+            posted_run(Ok(GlabRun::Printed { stdout: no_id })),
+            stop("unexpected answer from GitLab: `id` is not a number")
         );
     }
 
@@ -159,9 +109,12 @@ mod tests {
             stderr: stderr.to_vec(),
         };
         let with_notice = no_answer(b"What's new\n  glab: no route  \n\n");
-        assert_eq!(posted(Ok(with_notice)), stop("glab: no route"));
-        assert_eq!(posted(Ok(no_answer(b""))), stop(NO_HTTP_ANSWER));
-        assert_eq!(posted(Ok(GlabRun::TimedOut)), stop(TIMED_OUT));
-        assert_eq!(posted(Err("gone".to_owned())), stop("gone"));
+        assert_eq!(posted_run(Ok(with_notice)), stop("glab: no route"));
+        assert_eq!(
+            posted_run(Ok(no_answer(b""))),
+            stop("glab printed no HTTP answer")
+        );
+        assert_eq!(posted_run(Ok(GlabRun::TimedOut)), stop(TIMED_OUT));
+        assert_eq!(posted_run(Err("gone".to_owned())), stop("gone"));
     }
 }

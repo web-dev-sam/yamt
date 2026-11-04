@@ -144,16 +144,6 @@ pub(crate) fn draft_id_from(json: &[u8]) -> Result<u64, String> {
     number_at(&value_from(json)?, "id")
 }
 
-/// GitLab's words in an error body: its `message`, or its `error`.
-pub(crate) fn error_message_from(json: &[u8]) -> Option<String> {
-    let value = serde_json::from_slice::<Value>(json).ok()?;
-    match value.get("message") {
-        Some(Value::String(message)) => Some(message.clone()),
-        Some(Value::Null) | None => value.get("error")?.as_str().map(str::to_owned),
-        Some(message) => Some(message.to_string()),
-    }
-}
-
 fn value_from(json: &[u8]) -> Result<Value, String> {
     serde_json::from_slice(json).map_err(|error| format!("GitLab's answer is not JSON: {error}"))
 }
@@ -243,29 +233,6 @@ mod tests {
             draft_id_from(br#"{"id":-1}"#),
             Err("unexpected answer from GitLab: `id` is not a number".to_owned())
         );
-    }
-
-    #[test]
-    fn gitlab_s_words_are_its_message_or_its_error() {
-        let words = |json: &[u8]| error_message_from(json);
-        assert_eq!(
-            words(br#"{"message":"400 Bad request"}"#),
-            Some("400 Bad request".to_owned())
-        );
-        assert_eq!(
-            words(br#"{"message":{"note":["is too long"]}}"#),
-            Some(r#"{"note":["is too long"]}"#.to_owned())
-        );
-        assert_eq!(
-            words(br#"{"error":"invalid_token"}"#),
-            Some("invalid_token".to_owned())
-        );
-        assert_eq!(
-            words(br#"{"message":null,"error":"x"}"#),
-            Some("x".to_owned())
-        );
-        assert_eq!(words(b"{}"), None);
-        assert_eq!(words(b"Bad Gateway"), None);
     }
 
     #[test]
