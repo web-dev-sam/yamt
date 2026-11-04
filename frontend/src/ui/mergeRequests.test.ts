@@ -1622,9 +1622,13 @@ test("review_mode_orders_the_shown_rows_and_a_late_answer_moves_them", async () 
   expect(live.slice.reviewSort.value).toEqual({ kind: "sorted", loading: discussed.length });
 
   const other = personOf("anna");
+  const answered: OpenDiscussion = {
+    ...lastBy(other),
+    earlier: [{ author: personOf("sam"), mentions: [] }],
+  };
   answerFirstCall(live, (asked) => ({
     kind: "open",
-    discussions: [lastBy(asked === later.iid ? other : personOf("sam"))],
+    discussions: [asked === later.iid ? answered : lastBy(personOf("sam"))],
   }));
   await settled();
 

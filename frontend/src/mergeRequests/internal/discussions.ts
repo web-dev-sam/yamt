@@ -4,18 +4,35 @@ import { displayName } from "./people";
 export type DiscussionPlace =
   | { readonly kind: "overview" }
   | { readonly kind: "file"; readonly path: string; readonly line: number | null };
+export type Mention = { readonly username: string; readonly name: string };
 export type DiscussionNote = {
   readonly author: Person | null;
   readonly createdAt: number;
   readonly text: string;
+  readonly mentions: readonly Mention[];
 };
-export type OpenDiscussion = { readonly place: DiscussionPlace; readonly last: DiscussionNote };
+export type TurnComment = { readonly author: Person | null; readonly mentions: readonly Mention[] };
+export type OpenDiscussion = {
+  readonly place: DiscussionPlace;
+  /** Person comments before `last`, oldest first; the starter is earlier[0], else last. */
+  readonly earlier: readonly TurnComment[];
+  readonly last: DiscussionNote;
+};
 
-/** "viewer": the last comment is not the viewer's (an unknown author too), so it is the viewer's turn; "waiting":
- *  the viewer wrote it and waits for an answer (request rule 3). */
-export type Turn = "viewer" | "waiting";
+/** Whose turn a discussion is (request-mr-threads B1–B3): `person` names someone who is neither the viewer nor the
+ *  author; `waiting`: the viewer is the author and waits on nobody named; `open`: on nobody. */
+export type Turn =
+  | { readonly kind: "viewer" }
+  | { readonly kind: "author" }
+  | { readonly kind: "person"; readonly username: string; readonly name: string }
+  | { readonly kind: "waiting" }
+  | { readonly kind: "open" };
 export type TurnLine<D extends OpenDiscussion> = { readonly discussion: D; readonly turn: Turn };
-export type TurnCounts = { readonly viewersTurn: number; readonly waiting: number };
+export type TurnCounts = {
+  readonly viewersTurn: number;
+  readonly authorsTurn: number;
+  readonly total: number;
+};
 /** Whose turn the box and the review order speak for (request-mr-discussions rule 3, review-mode rule 5). */
 export type Viewer =
   | { readonly kind: "me"; readonly username: string | null }
@@ -27,34 +44,107 @@ export const UNKNOWN_AUTHOR = "Someone";
 const EXCERPT_LINES = 3;
 const EXCERPT_CHARACTERS = 280;
 
-const TURN_RANK: Readonly<Record<Turn, number>> = { viewer: 0, waiting: 1 };
+const VIEWER: Turn = { kind: "viewer" };
+const AUTHOR: Turn = { kind: "author" };
+const WAITING: Turn = { kind: "waiting" };
+const OPEN: Turn = { kind: "open" };
 
 const WAITING_TEXT = "Waiting for an answer";
 
-function turnOf(last: DiscussionNote, viewer: string | null): Turn {
-  return last.author !== null && last.author.username === viewer ? "waiting" : "viewer";
+/** Who a discussion's turn is weighed for: usernames, null for nobody (no viewer) or unknown (no author). */
+type Sides = { readonly viewer: string | null; readonly author: string | null };
+
+function isPerson(person: Person | null, username: string | null): person is Person {
+  return username !== null && person !== null && person.username === username;
 }
 
-/** Each discussion with its turn for `viewer` (a username; null: nobody, so every one is the viewer's turn): the
- *  viewer's turn first, then the rest; within each, the newest last comment first; equal times keep `open`'s order. */
+function personsTurn(person: Person): Turn {
+  return { kind: "person", username: person.username, name: displayName(person) };
+}
+
+function starterOf(discussion: OpenDiscussion): Person | null {
+  return (discussion.earlier[0] ?? discussion.last).author;
+}
+
+/** B1: the viewer wrote the last comment. */
+function waitedOn(discussion: OpenDiscussion, { viewer, author }: Sides): Turn {
+  if (viewer !== author) {
+    return AUTHOR;
+  }
+  const starter = starterOf(discussion);
+  return starter === null || isPerson(starter, author) ? WAITING : personsTurn(starter);
+}
+
+/** B2, with B1 false. B2.1 (the viewer started it) is B2.4 (the viewer wrote a comment); a mention of the viewer in
+ *  any comment is B2.2, or B2.4 when the viewer wrote it; B2.3 the viewer is the author. */
+function isViewersTurn(discussion: OpenDiscussion, { viewer, author }: Sides): boolean {
+  return (
+    viewer !== null &&
+    (viewer === author ||
+      [...discussion.earlier, discussion.last].some(
+        (comment) =>
+          isPerson(comment.author, viewer) ||
+          comment.mentions.some((mention) => mention.username === viewer),
+      ))
+  );
+}
+
+/** B3: neither B1 nor B2. */
+function othersTurn(discussion: OpenDiscussion, author: string | null): Turn {
+  const { last } = discussion;
+  const mentioned = last.mentions.find((mention) => mention.username !== last.author?.username);
+  if (mentioned !== undefined) {
+    return mentioned.username === author ? AUTHOR : personsTurn(mentioned);
+  }
+  if (!isPerson(last.author, author)) {
+    return AUTHOR;
+  }
+  const starter = starterOf(discussion);
+  return starter === null || isPerson(starter, author) ? OPEN : personsTurn(starter);
+}
+
+/** Request B1–B3 for `viewer` (a username; null: no one — never the viewer's turn, design §4 item 11) on a merge
+ *  request by `author` (a username; null: unknown). A deleted person (null author) is never the viewer, never the
+ *  author and never mentioned (B6). */
+export function turnOf(
+  discussion: OpenDiscussion,
+  viewer: string | null,
+  author: string | null,
+): Turn {
+  const sides: Sides = { viewer, author };
+  if (isPerson(discussion.last.author, viewer)) {
+    return waitedOn(discussion, sides);
+  }
+  return isViewersTurn(discussion, sides) ? VIEWER : othersTurn(discussion, author);
+}
+
+/** B4: each discussion with its turn, the viewer's turn first, then every other; within each, the newest last
+ *  comment first; equal times keep `open`'s order. */
 export function discussionTurns<D extends OpenDiscussion>(
   open: readonly D[],
   viewer: string | null,
+  author: string | null,
 ): readonly TurnLine<D>[] {
   return open
-    .map((discussion) => ({ discussion, turn: turnOf(discussion.last, viewer) }))
+    .map((discussion) => ({ discussion, turn: turnOf(discussion, viewer, author) }))
     .toSorted((a, b) => {
-      const turns = TURN_RANK[a.turn] - TURN_RANK[b.turn];
+      const turns = Number(b.turn.kind === "viewer") - Number(a.turn.kind === "viewer");
       return turns === 0 ? b.discussion.last.createdAt - a.discussion.last.createdAt : turns;
     });
 }
 
-/** How many are `viewer`'s turn and how many wait on others (review mode's order uses both). */
-export function turnCounts(open: readonly OpenDiscussion[], viewer: string | null): TurnCounts {
-  const viewersTurn = open.filter(
-    (discussion) => turnOf(discussion.last, viewer) === "viewer",
-  ).length;
-  return { viewersTurn, waiting: open.length - viewersTurn };
+/** How many are the viewer's turn (the box's header) and the author's (review mode's "waiting on the author", B5). */
+export function turnCounts(
+  open: readonly OpenDiscussion[],
+  viewer: string | null,
+  author: string | null,
+): TurnCounts {
+  const kinds = open.map((discussion) => turnOf(discussion, viewer, author).kind);
+  return {
+    viewersTurn: kinds.filter((kind) => kind === "viewer").length,
+    authorsTurn: kinds.filter((kind) => kind === "author").length,
+    total: open.length,
+  };
 }
 
 /** null or Me → me; a person whose username is `me` → me; else the person, named by displayName of the first row
@@ -86,14 +176,25 @@ export function viewerPossessive(viewer: Viewer, at: "start" | "inside"): string
 }
 
 export function turnText(turn: Turn, viewer: Viewer): string {
-  if (turn === "waiting") {
-    return WAITING_TEXT;
+  switch (turn.kind) {
+    case "viewer":
+      return `${viewerPossessive(viewer, "start")} turn`;
+    case "author":
+      return "Author's turn";
+    case "person":
+      return `${turn.name}'s turn`;
+    case "waiting":
+      return WAITING_TEXT;
+    case "open":
+      return "Open";
+    default: {
+      const _exhaustive: never = turn;
+      return _exhaustive;
+    }
   }
-  return `${viewerPossessive(viewer, "start")} turn`;
 }
 
-export function turnSummaryText({ viewersTurn, waiting }: TurnCounts, viewer: Viewer): string {
-  const total = viewersTurn + waiting;
+export function turnSummaryText({ viewersTurn, total }: TurnCounts, viewer: Viewer): string {
   if (total === 0) {
     return "No open discussions";
   }

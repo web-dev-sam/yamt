@@ -56,6 +56,8 @@ import {
   rerequestLabel,
   rerequestReplyText,
   REVIEW_MODE,
+  RELOAD_DISCUSSIONS,
+  SHOW_THREAD_KEY,
   REVIEWERS,
   SEARCH_PEOPLE,
   SEARCH_PEOPLE_PLACEHOLDER,
@@ -146,6 +148,8 @@ test("review mode's button is named as the request names it", () => {
 
 test("the discussion box's and setting's words are the request's (a renamed choice or hint)", () => {
   expect(DISCUSSIONS_LOADING).toBe("Loading discussions…");
+  expect(RELOAD_DISCUSSIONS).toBe("Reload discussions");
+  expect(SHOW_THREAD_KEY).toBe("Shift: show the thread");
   expect(DISCUSSION_DETAILS).toBe("Discussion details");
   expect(DISCUSSION_DETAILS_OPTIONS).toEqual([
     { value: "full", label: "Load fully" },

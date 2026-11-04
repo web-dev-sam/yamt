@@ -20,7 +20,7 @@ export type ReviewOrder<R, F> =
 
 type Ranked<R> = { readonly row: R; readonly first: boolean; readonly waiting: number };
 
-const NO_TURNS: TurnCounts = { viewersTurn: 0, waiting: 0 };
+const NO_TURNS: TurnCounts = { viewersTurn: 0, authorsTurn: 0, total: 0 };
 
 function firstFailed<R extends { readonly iid: number }, F>(
   rows: readonly R[],
@@ -35,8 +35,16 @@ function firstFailed<R extends { readonly iid: number }, F>(
   return null;
 }
 
-/** Rule 3 for `reviewer` (a username; null: nobody). `rows` in the list's order (newest first). */
-export function reviewOrdered<R extends { readonly iid: number; readonly createdAt: number }, F>(
+/** Rule 3 for `reviewer` (a username; null: nobody). `rows` in the list's order (newest first). "Waiting on the
+ *  author" is the discussions whose turn is the row's author's (request-mr-threads B5). */
+export function reviewOrdered<
+  R extends {
+    readonly iid: number;
+    readonly createdAt: number;
+    readonly author: { readonly username: string } | null;
+  },
+  F,
+>(
   rows: readonly R[],
   reviewer: string | null,
   dueOf: (iid: number) => CalendarDay | null,
@@ -49,9 +57,12 @@ export function reviewOrdered<R extends { readonly iid: number; readonly created
   }
   const ranked = normal.map((row): Ranked<R> => {
     const details = detailsOf(row.iid);
-    const counts = details.kind === "read" ? turnCounts(details.discussions, reviewer) : NO_TURNS;
+    const counts =
+      details.kind === "read"
+        ? turnCounts(details.discussions, reviewer, row.author?.username ?? null)
+        : NO_TURNS;
     const first = dueOf(row.iid) !== null && counts.viewersTurn > 0;
-    return { row, first, waiting: counts.waiting };
+    return { row, first, waiting: counts.authorsTurn };
   });
   const sorted = ranked.toSorted((a, b) => {
     if (a.first !== b.first) {

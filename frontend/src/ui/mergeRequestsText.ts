@@ -56,6 +56,8 @@ export const PICK_TODAY = "Today";
 export const PREVIOUS_MONTH = "Previous month";
 export const NEXT_MONTH = "Next month";
 export const DISCUSSIONS_LOADING = "Loading discussions…";
+export const RELOAD_DISCUSSIONS = "Reload discussions";
+export const SHOW_THREAD_KEY = "Shift: show the thread";
 export const DISCUSSION_DETAILS = "Discussion details";
 export const DISCUSSION_DETAILS_OPTIONS: readonly {
   readonly value: DiscussionDetails;

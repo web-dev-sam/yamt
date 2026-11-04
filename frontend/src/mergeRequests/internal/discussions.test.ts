@@ -8,21 +8,35 @@ import {
   noteExcerpt,
   placeText,
   turnCounts,
+  turnOf,
   turnSummaryText,
   turnText,
   viewerOf,
-  type DiscussionPlace,
   type ListedRequest,
+  type Mention,
   type OpenDiscussion,
   type Person,
+  type TurnComment,
   type Viewer,
 } from "../index";
 
-const SAM: Person = { username: "sam", name: "Sam Lee" };
+/** A comment as the cases write it: its writer (null: a deleted account), then the usernames it mentions. */
+type Said = readonly [writer: string | null, ...mentioned: string[]];
+
+const SAM: Person = { username: "sam", name: "Sam Weller" };
 const ANNA: Person = { username: "anna", name: "Anna Berg" };
-const OVERVIEW: DiscussionPlace = { kind: "overview" };
+const PEOPLE: Readonly<Record<string, Person>> = {
+  sam: SAM,
+  anna: ANNA,
+  ben: { username: "ben", name: "Ben Okafor" },
+  chiara: { username: "chiara", name: "Chiara Rossi" },
+  dmitri: { username: "dmitri", name: "Dmitri Volkov" },
+  kim: { username: "kim", name: " " },
+};
 const ME_SAM: Viewer = { kind: "me", username: "sam" };
 const AS_ANNA: Viewer = { kind: "person", username: "anna", name: "Anna Berg" };
+const AS_BEN: Viewer = { kind: "person", username: "ben", name: "Ben Okafor" };
+const NOBODY: Viewer = { kind: "me", username: null };
 
 function reviewedBy(iid: number, reviewers: readonly Person[]): ListedRequest {
   return {
@@ -35,112 +49,240 @@ function reviewedBy(iid: number, reviewers: readonly Person[]): ListedRequest {
   };
 }
 
-function discussion(
+function mentionOf(username: string): Mention {
+  const person = PEOPLE[username];
+  if (person === undefined) {
+    throw new Error(`no person ${username}`);
+  }
+  return person;
+}
+
+function comment([writer, ...mentioned]: Said): TurnComment {
+  return {
+    author: writer === null ? null : mentionOf(writer),
+    mentions: mentioned.map(mentionOf),
+  };
+}
+
+/** A discussion of the comments, oldest first, its last written at `createdAt`; `id` names it in the tests. */
+function dated(
   id: string,
-  author: Person | null,
   createdAt: number,
+  first: Said,
+  ...rest: readonly Said[]
 ): OpenDiscussion & { id: string } {
-  return { id, place: OVERVIEW, last: { author, createdAt, text: id } };
+  const comments = [first, ...rest].map(comment);
+  const last = comments.pop() ?? comment(first);
+  return {
+    id,
+    place: { kind: "overview" },
+    earlier: comments,
+    last: { ...last, createdAt, text: id },
+  };
 }
 
-const BY_SAM = discussion("by-sam", SAM, 10);
-const BY_ANNA = discussion("by-anna", ANNA, 20);
-const BY_NOBODY = discussion("by-nobody", null, 30);
-const MIXED = [BY_SAM, BY_ANNA, BY_NOBODY];
-
-function turns(
-  open: readonly (OpenDiscussion & { id: string })[],
-  viewer: string | null,
-): string[] {
-  return discussionTurns(open, viewer).map((line) => `${line.discussion.id} ${line.turn}`);
+function said(first: Said, ...rest: readonly Said[]): OpenDiscussion {
+  return dated("case", 0, first, ...rest);
 }
 
-test("the_viewers_own_last_comment_is_waiting_any_other_is_the_viewers_turn", () => {
-  expect(turns(MIXED, "sam")).toEqual(["by-nobody viewer", "by-anna viewer", "by-sam waiting"]);
+/** The turn's words for `viewer` on a merge request by `author` (the cases' default: sam on dmitri's). */
+function words(
+  discussion: OpenDiscussion,
+  viewer = ME_SAM,
+  author: string | null = "dmitri",
+): string {
+  return turnText(turnOf(discussion, viewer.username, author), viewer);
+}
+
+test("b1_the_viewer_wrote_last_so_it_is_the_authors_turn", () => {
+  expect(turnOf(said(["anna"], ["sam"]), "sam", "dmitri")).toEqual({ kind: "author" });
+  expect(words(said(["sam"], ["anna", "sam"], ["sam"]))).toBe("Author's turn");
+  expect(words(said(["sam"]), ME_SAM, null)).toBe("Author's turn");
 });
 
-test("a_reviewer_other_than_me_gets_the_turns_from_their_side", () => {
-  expect(turns(MIXED, "anna")).toEqual(["by-nobody viewer", "by-sam viewer", "by-anna waiting"]);
+test("b1_the_author_wrote_last_so_it_is_the_starters_turn", () => {
+  expect(turnOf(said(["anna"], ["sam"]), "sam", "sam")).toEqual({
+    kind: "person",
+    username: "anna",
+    name: "Anna Berg",
+  });
+  expect(words(said(["anna"], ["ben"], ["sam", "ben"]), ME_SAM, "sam")).toBe("Anna Berg's turn");
+  expect(words(said(["kim"], ["sam"]), ME_SAM, "sam")).toBe("kim's turn");
+  expect(words(said(["chiara", "kim"]))).toBe("kim's turn");
 });
 
-test("a_null_viewer_has_every_turn", () => {
-  expect(turns(MIXED, null)).toEqual(["by-nobody viewer", "by-anna viewer", "by-sam viewer"]);
-  expect(turnCounts(MIXED, null)).toEqual({ viewersTurn: 3, waiting: 0 });
+test("b1_the_author_started_and_wrote_last_so_it_waits", () => {
+  expect(turnOf(said(["sam"], ["sam"]), "sam", "sam")).toEqual({ kind: "waiting" });
+  expect(words(said(["sam"], ["anna"], ["sam"]), ME_SAM, "sam")).toBe("Waiting for an answer");
+  expect(words(said(["sam"]), ME_SAM, "sam")).toBe("Waiting for an answer");
 });
 
-test("the_viewers_turn_comes_first_then_newest_first_within_each", () => {
+test("b1_a_deleted_starter_waits", () => {
+  expect(words(said([null], ["sam"]), ME_SAM, "sam")).toBe("Waiting for an answer");
+  expect(words(said([null], ["sam"]))).toBe("Author's turn");
+});
+
+test("b2_the_viewer_started_it", () => {
+  expect(turnOf(said(["sam"], ["anna"]), "sam", "dmitri")).toEqual({ kind: "viewer" });
+  expect(words(said(["sam"], ["anna", "ben"]))).toBe("Your turn");
+});
+
+test("b2_the_viewer_is_mentioned_by_someone_else_and_never_wrote", () => {
+  expect(words(said(["ben", "sam"], ["chiara"]))).toBe("Your turn");
+  expect(words(said(["ben"], ["dmitri", "anna", "sam"]))).toBe("Your turn");
+  expect(words(said(["ben"], [null, "sam"]))).toBe("Your turn");
+  expect(words(said(["ben", "anna"], ["chiara"]))).toBe("Author's turn");
+});
+
+test("b2_a_mention_counts_after_the_viewer_answered", () => {
+  expect(words(said(["anna", "sam"], ["sam"], ["anna"]))).toBe("Your turn");
+});
+
+test("b2_the_viewer_is_the_author", () => {
+  expect(words(said(["anna"], ["anna"]), ME_SAM, "sam")).toBe("Your turn");
+  expect(words(said(["dmitri"]), AS_BEN, "ben")).toBe("Ben Okafor's turn");
+});
+
+test("b2_the_viewer_wrote_in_the_middle", () => {
+  expect(words(said(["anna", "ben"], ["sam"], ["dmitri"], ["anna"]))).toBe("Your turn");
+  expect(words(said(["anna"], ["sam"], ["dmitri"]))).toBe("Your turn");
+});
+
+test("b3_the_last_comment_mentions_someone", () => {
+  expect(turnOf(said(["chiara"], ["anna", "ben"]), "sam", "dmitri")).toEqual({
+    kind: "person",
+    username: "ben",
+    name: "Ben Okafor",
+  });
+  expect(words(said(["chiara"], ["anna", "ben"]))).toBe("Ben Okafor's turn");
+  expect(words(said(["chiara"], ["anna", "ben", "chiara"]))).toBe("Ben Okafor's turn");
+  expect(words(said(["chiara"], [null, "ben"]))).toBe("Ben Okafor's turn");
+  expect(words(said(["chiara", "ben"], ["anna"]))).toBe("Author's turn");
+});
+
+test("b3_the_last_comment_is_not_the_authors", () => {
+  expect(words(said(["anna"], ["anna"]))).toBe("Author's turn");
+  expect(words(said(["dmitri"], ["anna"]))).toBe("Author's turn");
+});
+
+test("b3_the_author_answered_the_starter", () => {
+  expect(turnOf(said(["anna"], ["dmitri"]), "sam", "dmitri")).toEqual({
+    kind: "person",
+    username: "anna",
+    name: "Anna Berg",
+  });
+  expect(words(said(["anna"], ["chiara"], ["dmitri"]))).toBe("Anna Berg's turn");
+});
+
+test("b3_only_the_author_wrote_so_it_is_open", () => {
+  expect(turnOf(said(["dmitri"]), "sam", "dmitri")).toEqual({ kind: "open" });
+  expect(words(said(["dmitri"], ["anna"], ["dmitri"]))).toBe("Open");
+  expect(words(said(["dmitri"], ["dmitri"]))).toBe("Open");
+});
+
+test("b3_a_mention_of_the_author_is_the_authors_turn", () => {
+  expect(turnOf(said(["chiara"], ["ben", "dmitri"]), "sam", "dmitri")).toEqual({ kind: "author" });
+  expect(words(said(["chiara"], ["ben", "dmitri", "anna"]))).toBe("Author's turn");
+});
+
+test("b3_all_and_group_mentions_are_no_mentions", () => {
+  expect(words(said(["ben"], ["chiara"]))).toBe("Author's turn");
+});
+
+test("b3_a_self_mention_is_no_mention", () => {
+  expect(words(said(["chiara", "chiara"]))).toBe("Author's turn");
+  expect(words(said(["chiara", "chiara", "ben"]))).toBe("Ben Okafor's turn");
+});
+
+test("b4_header_counts_only_the_viewers_turn_and_orders_them_first", () => {
   const open = [
-    discussion("mine-old", SAM, 1),
-    discussion("theirs-old", ANNA, 2),
-    discussion("mine-new", SAM, 50),
-    discussion("theirs-new", ANNA, 40),
-    discussion("theirs-mid", null, 3),
+    dated("theirs-old", 1, ["anna"], ["chiara"]),
+    dated("mine-old", 2, ["sam"], ["anna"]),
+    dated("waiting", 50, ["anna"], ["sam"]),
+    dated("mine-new", 40, ["ben", "sam"], ["ben"]),
+    dated("open", 30, ["dmitri"]),
+    dated("mine-tied", 2, ["anna"], ["sam"], ["anna"]),
   ];
-  expect(turns(open, "sam")).toEqual([
-    "theirs-new viewer",
-    "theirs-mid viewer",
-    "theirs-old viewer",
-    "mine-new waiting",
-    "mine-old waiting",
+  expect(
+    discussionTurns(open, "sam", "dmitri").map(
+      ({ discussion, turn }) => `${discussion.id} ${turnText(turn, ME_SAM)}`,
+    ),
+  ).toEqual([
+    "mine-new Your turn",
+    "mine-old Your turn",
+    "mine-tied Your turn",
+    "waiting Author's turn",
+    "open Open",
+    "theirs-old Author's turn",
   ]);
-});
-
-test("equal_times_keep_gitlabs_order", () => {
-  const open = [
-    discussion("first", ANNA, 5),
-    discussion("mine", SAM, 5),
-    discussion("second", null, 5),
-    discussion("third", ANNA, 5),
-  ];
-  expect(turns(open, "sam")).toEqual([
-    "first viewer",
-    "second viewer",
-    "third viewer",
-    "mine waiting",
-  ]);
-  expect(turns([...open].reverse(), "sam")).toEqual([
-    "third viewer",
-    "second viewer",
-    "first viewer",
-    "mine waiting",
-  ]);
-});
-
-test("the_counts_add_up_to_the_open_discussions", () => {
-  const open = [...MIXED, discussion("again-sam", SAM, 40)];
-  expect(turnCounts(open, "sam")).toEqual({ viewersTurn: 2, waiting: 2 });
-  expect(turnCounts(open, "anna")).toEqual({ viewersTurn: 3, waiting: 1 });
-  expect(turnCounts([], "sam")).toEqual({ viewersTurn: 0, waiting: 0 });
+  const counts = turnCounts(open, "sam", "dmitri");
+  expect(counts).toEqual({ viewersTurn: 3, authorsTurn: 2, total: 6 });
+  expect(turnSummaryText(counts, ME_SAM)).toBe("3 of 6 wait for you");
+  expect(turnCounts([], "sam", "dmitri")).toEqual({ viewersTurn: 0, authorsTurn: 0, total: 0 });
 });
 
 test.each([
-  [{ viewersTurn: 2, waiting: 3 }, "2 of 5 wait for you"],
-  [{ viewersTurn: 1, waiting: 4 }, "1 of 5 waits for you"],
-  [{ viewersTurn: 1, waiting: 0 }, "1 of 1 waits for you"],
-  [{ viewersTurn: 0, waiting: 3 }, "0 of 3 wait for you"],
-  [{ viewersTurn: 0, waiting: 0 }, "No open discussions"],
+  [{ viewersTurn: 2, authorsTurn: 0, total: 5 }, "2 of 5 wait for you"],
+  [{ viewersTurn: 1, authorsTurn: 2, total: 5 }, "1 of 5 waits for you"],
+  [{ viewersTurn: 1, authorsTurn: 0, total: 1 }, "1 of 1 waits for you"],
+  [{ viewersTurn: 0, authorsTurn: 3, total: 3 }, "0 of 3 wait for you"],
+  [{ viewersTurn: 0, authorsTurn: 0, total: 0 }, "No open discussions"],
 ])("the_summary_counts_words_singular_and_plural: %o reads %s", (counts, text) => {
   expect(turnSummaryText(counts, ME_SAM)).toBe(text);
-  expect(turnSummaryText(counts, { kind: "me", username: null })).toBe(text);
+  expect(turnSummaryText(counts, NOBODY)).toBe(text);
 });
 
 test.each([
-  [{ viewersTurn: 2, waiting: 3 }, "2 of 5 wait for Anna Berg"],
-  [{ viewersTurn: 1, waiting: 4 }, "1 of 5 waits for Anna Berg"],
-  [{ viewersTurn: 0, waiting: 0 }, "No open discussions"],
+  [{ viewersTurn: 2, authorsTurn: 1, total: 5 }, "2 of 5 wait for Anna Berg"],
+  [{ viewersTurn: 1, authorsTurn: 1, total: 5 }, "1 of 5 waits for Anna Berg"],
+  [{ viewersTurn: 0, authorsTurn: 0, total: 0 }, "No open discussions"],
 ])("the summary for another reviewer: %o reads %s", (counts, text) => {
   expect(turnSummaryText(counts, AS_ANNA)).toBe(text);
 });
 
-test("the_turn_words_are_not_swapped", () => {
-  expect(turnText("viewer", ME_SAM)).toBe("Your turn");
-  expect(turnText("waiting", ME_SAM)).toBe("Waiting for an answer");
-  expect(DISCUSSIONS_LABEL).toBe("Open discussions");
+test("b5_review_mode_speaks_for_the_reviewer", () => {
+  const case6 = said(["chiara"], ["anna", "ben"]);
+  expect(turnOf(case6, "ben", "dmitri")).toEqual({ kind: "viewer" });
+  expect(words(case6, AS_BEN)).toBe("Ben Okafor's turn");
+  expect(words(said(["anna"], ["sam"]), AS_ANNA)).toBe("Anna Berg's turn");
+  expect(words(said(["anna"], ["sam"]), ME_SAM)).toBe("Author's turn");
 });
 
-test("the_turn_words_name_another_reviewer", () => {
-  expect(turnText("viewer", AS_ANNA)).toBe("Anna Berg's turn");
-  expect(turnText("waiting", AS_ANNA)).toBe("Waiting for an answer");
+test("b6_a_deleted_person_is_never_viewer_author_or_mentioned", () => {
+  const case10 = said([null], [null]);
+  expect(turnOf(case10, "sam", "dmitri")).toEqual({ kind: "author" });
+  expect(turnOf(case10, null, "dmitri")).toEqual({ kind: "author" });
+  expect(turnOf(case10, null, null)).toEqual({ kind: "author" });
+  expect(turnOf(said(["anna"], [null]), "sam", null)).toEqual({ kind: "author" });
+  expect(turnOf(said([null], ["dmitri"]), "sam", "dmitri")).toEqual({ kind: "open" });
+});
+
+test("no_viewer_is_never_the_viewers_turn", () => {
+  expect(turnOf(said(["anna"], ["ben"]), null, "dmitri")).toEqual({ kind: "author" });
+  expect(turnOf(said(["anna"], ["ben"]), null, null)).toEqual({ kind: "author" });
+  expect(turnOf(said(["dmitri"]), null, null)).toEqual({ kind: "author" });
+  expect(turnOf(said(["anna"], ["dmitri"]), null, "dmitri")).toEqual({
+    kind: "person",
+    username: "anna",
+    name: "Anna Berg",
+  });
+  expect(turnCounts([said(["anna"], ["ben"]), said(["dmitri"])], null, "dmitri")).toEqual({
+    viewersTurn: 0,
+    authorsTurn: 1,
+    total: 2,
+  });
+});
+
+test("the_turn_words_are_not_swapped", () => {
+  expect(turnText({ kind: "viewer" }, ME_SAM)).toBe("Your turn");
+  expect(turnText({ kind: "author" }, ME_SAM)).toBe("Author's turn");
+  expect(turnText({ kind: "person", username: "ben", name: "Ben Okafor" }, AS_ANNA)).toBe(
+    "Ben Okafor's turn",
+  );
+  expect(turnText({ kind: "waiting" }, AS_ANNA)).toBe("Waiting for an answer");
+  expect(turnText({ kind: "open" }, ME_SAM)).toBe("Open");
+  expect(turnText({ kind: "viewer" }, AS_ANNA)).toBe("Anna Berg's turn");
+  expect(DISCUSSIONS_LABEL).toBe("Open discussions");
 });
 
 test("viewer_of_a_person_who_is_me_is_me", () => {
@@ -152,7 +294,7 @@ test("viewer_of_a_person_who_is_me_is_me", () => {
   expect(viewerOf({ kind: "person", username: "sam" }, null, rows)).toEqual({
     kind: "person",
     username: "sam",
-    name: "Sam Lee",
+    name: "Sam Weller",
   });
 });
 

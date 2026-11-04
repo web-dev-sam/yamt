@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, useTemplateRef } from "vue";
+import { useElementBounding } from "@vueuse/core";
+import { computed, shallowRef, useTemplateRef, watch } from "vue";
+import Check from "~icons/lucide/check";
 import MessageSquare from "~icons/lucide/message-square";
+import RefreshCw from "~icons/lucide/refresh-cw";
 
-import type { MergeRequestRow, WebPage } from "../ipc";
+import type { DiscussionId, MergeRequestRow, OpenDiscussion, WebPage } from "../ipc";
 import {
   agoText,
   discussionTurns,
@@ -11,57 +14,104 @@ import {
   noteExcerpt,
   placeText,
   turnCounts,
+  turnOf,
   turnSummaryText,
   turnText,
 } from "../mergeRequests";
 import { useRowDiscussions, type DiscussionLoad } from "./mergeRequestDiscussions";
 import MergeRequestPicture from "./MergeRequestPicture.vue";
 import { useMergeRequests } from "./mergeRequestsStore";
-import { discussionsFailedText, discussionsText, DISCUSSIONS_LOADING } from "./mergeRequestsText";
+import {
+  discussionsFailedText,
+  discussionsText,
+  DISCUSSIONS_LOADING,
+  RELOAD_DISCUSSIONS,
+  SHOW_THREAD_KEY,
+} from "./mergeRequestsText";
+import MergeRequestThread from "./MergeRequestThread.vue";
+import { RESOLVED } from "./mergeRequestThreadText";
 import { vTooltip } from "./tooltip";
+import { isTypingTarget } from "./typingTarget";
 import { useHoverBox } from "./useHoverBox";
+import { useShiftTaps } from "./useShiftHeld";
 
 type Header = { readonly text: string; readonly failed: boolean };
+type Words = { readonly place: string; readonly turn: string };
 
 const props = defineProps<{ row: MergeRequestRow; now: number }>();
 
 const mergeRequests = useMergeRequests();
-const { discussionDetails, viewer, openPage } = mergeRequests;
+const { discussionDetails, viewer, openPage, reloads, thread } = mergeRequests;
 const area = useTemplateRef<HTMLSpanElement>("area");
 const opener = useTemplateRef<HTMLButtonElement>("opener");
 const box = useTemplateRef<HTMLDivElement>("box");
+const shownId = computed(() =>
+  thread.value?.shown.iid === props.row.iid ? thread.value.shown.discussion : null,
+);
 const { open, placement, on } = useHoverBox({
   area: () => area.value,
   opener: () => opener.value,
   box,
+  pinned: () => shownId.value !== null,
 });
+const boxBounds = useElementBounding(box);
 const load = useRowDiscussions(
   mergeRequests,
   () => props.row.iid,
   () => open.value,
 );
+const pointed = shallowRef<DiscussionId | null>(null);
+const focused = shallowRef<DiscussionId | null>(null);
 
 const count = computed(() => props.row.openDiscussions);
 const label = computed(() => discussionsText(count.value));
-const boxed = computed(() => discussionDetails.value !== "off" && count.value > 0);
-const header = computed(() => headerOf(load.value));
-const lines = computed(() =>
-  load.value?.kind === "read"
-    ? discussionTurns(load.value.discussions, viewer.value.username).map(
-        ({ discussion, turn }, index) => ({
-          key: index,
-          page: discussion.last.page,
-          author: discussion.last.author,
-          name: noteAuthorName(discussion.last.author),
-          ago: agoText(discussion.last.createdAt, props.now),
-          turn: turnText(turn, viewer.value),
-          viewersTurn: turn === "viewer",
-          place: placeText(discussion.place),
-          excerpt: noteExcerpt(discussion.last.text),
-        }),
-      )
-    : [],
+const author = computed(() => props.row.author?.username ?? null);
+const boxed = computed(
+  () => (discussionDetails.value !== "off" && count.value > 0) || shownId.value !== null,
 );
+const reload = computed(() => reloads.value.get(props.row.iid));
+const header = computed(() => headerOf(load.value));
+const lines = computed(() => {
+  const shown = load.value;
+  if (shown?.kind !== "read") {
+    return [];
+  }
+  return discussionTurns(shown.discussions, viewer.value.username, author.value).map(
+    ({ discussion, turn }) => ({
+      id: discussion.id,
+      page: discussion.last.page,
+      author: discussion.last.author,
+      name: noteAuthorName(discussion.last.author),
+      ago: agoText(discussion.last.createdAt, props.now),
+      resolved: shown.resolved.has(discussion.id),
+      turn: turnText(turn, viewer.value),
+      viewersTurn: turn.kind === "viewer",
+      place: placeText(discussion.place),
+      excerpt: noteExcerpt(discussion.last.text),
+    }),
+  );
+});
+const panelWords = computed((): Words => wordsOf(shownDiscussion()));
+const anchor = computed(() => ({ left: boxBounds.left.value, top: boxBounds.top.value }));
+
+watch(useShiftTaps(), () => {
+  const id = pointed.value ?? focused.value;
+  if (!open.value || id === null || isTypingTarget(document.activeElement)) {
+    return;
+  }
+  mergeRequests.showThread(props.row.iid, id);
+});
+watch(open, (now) => {
+  if (now) {
+    return;
+  }
+  pointed.value = null;
+  focused.value = null;
+  if (shownId.value !== null) {
+    mergeRequests.closeThread();
+  }
+  mergeRequests.boxClosed(props.row.iid);
+});
 
 function headerOf(shown: DiscussionLoad | undefined): Header {
   if (shown === undefined) {
@@ -71,10 +121,7 @@ function headerOf(shown: DiscussionLoad | undefined): Header {
     case "loading":
       return { text: DISCUSSIONS_LOADING, failed: false };
     case "read":
-      return {
-        text: turnSummaryText(turnCounts(shown.discussions, viewer.value.username), viewer.value),
-        failed: false,
-      };
+      return readHeader(shown);
     case "refused":
     case "failed":
       return { text: discussionsFailedText(shown, navigator.platform), failed: true };
@@ -85,9 +132,62 @@ function headerOf(shown: DiscussionLoad | undefined): Header {
   }
 }
 
+function readHeader(shown: Extract<DiscussionLoad, { readonly kind: "read" }>): Header {
+  const failure = reload.value;
+  if (failure !== undefined && failure.kind !== "running") {
+    return { text: discussionsFailedText(failure, navigator.platform), failed: true };
+  }
+  const unmarked = shown.discussions.filter((discussion) => !shown.resolved.has(discussion.id));
+  const counts = turnCounts(unmarked, viewer.value.username, author.value);
+  return { text: turnSummaryText(counts, viewer.value), failed: false };
+}
+
+function shownDiscussion(): OpenDiscussion | null {
+  const id = shownId.value;
+  const entry = load.value;
+  const listed =
+    entry?.kind === "read"
+      ? entry.discussions.find((discussion) => discussion.id === id)
+      : undefined;
+  const shownLoad = thread.value?.load;
+  return listed ?? (shownLoad?.kind === "read" ? shownLoad.thread.discussion : null);
+}
+
+function wordsOf(discussion: OpenDiscussion | null): Words {
+  if (discussion === null) {
+    return { place: "", turn: "" };
+  }
+  const turn = turnOf(discussion, viewer.value.username, author.value);
+  return { place: placeText(discussion.place), turn: turnText(turn, viewer.value) };
+}
+
 async function openLine(page: WebPage | null): Promise<void> {
   if (page !== null) {
     await openPage("discussion", page);
+  }
+}
+
+function point(id: DiscussionId): void {
+  pointed.value = id;
+}
+
+function unpoint(): void {
+  pointed.value = null;
+}
+
+function focus(id: DiscussionId): void {
+  focused.value = id;
+}
+
+function unfocus(): void {
+  focused.value = null;
+}
+
+function threadClosed(): void {
+  const id = shownId.value;
+  mergeRequests.closeThread();
+  if (id !== null) {
+    box.value?.querySelector<HTMLButtonElement>(`[data-discussion-id="${id}"]`)?.focus();
   }
 }
 </script>
@@ -129,30 +229,59 @@ async function openLine(page: WebPage | null): Promise<void> {
       v-if="open"
       ref="box"
       tabindex="-1"
-      class="fixed z-10 max-h-[60vh] w-max max-w-[30rem] overflow-y-auto rounded-md border border-control-border bg-panel-inline p-1 text-fg shadow-lg outline-none"
+      class="fixed z-10 flex max-h-[60vh] w-max max-w-[30rem] flex-col rounded-md border border-control-border bg-panel-inline p-1 text-fg shadow-lg outline-none"
       :style="placement"
     >
-      <p
-        role="status"
-        class="px-2 pt-1 pb-0.5"
-        :class="header.failed ? 'text-problem-error' : 'text-fg-muted'"
-      >
-        {{ header.text }}
-      </p>
-      <ul :aria-label="DISCUSSIONS_LABEL">
-        <li v-for="line in lines" :key="line.key">
-          <component
-            :is="line.page === null ? 'div' : 'button'"
-            :type="line.page === null ? undefined : 'button'"
-            class="block w-full rounded px-2 py-1 text-left"
-            :class="{ 'cursor-pointer hover:bg-hover': line.page !== null }"
+      <div class="flex shrink-0 items-start gap-2 pt-1 pr-1 pb-0.5 pl-2">
+        <p
+          role="status"
+          class="flex-1"
+          :class="header.failed ? 'text-problem-error' : 'text-fg-muted'"
+        >
+          {{ header.text }}
+        </p>
+        <button
+          v-tooltip="RELOAD_DISCUSSIONS"
+          type="button"
+          :aria-label="RELOAD_DISCUSSIONS"
+          class="shrink-0 rounded p-0.5 hover:bg-hover"
+          @click="mergeRequests.reloadDiscussions(row.iid)"
+        >
+          <RefreshCw
+            class="size-4"
+            :class="{ 'animate-spin': reload?.kind === 'running' }"
+            aria-hidden="true"
+          />
+        </button>
+      </div>
+      <ul :aria-label="DISCUSSIONS_LABEL" class="min-h-0 overflow-y-auto">
+        <li
+          v-for="line in lines"
+          :key="line.id"
+          @pointerenter="point(line.id)"
+          @pointerleave="unpoint"
+        >
+          <button
+            v-tooltip="SHOW_THREAD_KEY"
+            type="button"
+            :data-discussion-id="line.id"
+            aria-keyshortcuts="Shift"
+            :aria-disabled="line.page === null ? 'true' : undefined"
+            :aria-current="line.id === shownId ? 'true' : undefined"
+            class="block w-full rounded px-2 py-1 text-left outline-none not-aria-disabled:cursor-pointer hover:bg-hover focus:bg-row-selected aria-current:bg-row-selected"
+            :class="{ 'text-fg-muted': line.resolved }"
             @click="openLine(line.page)"
+            @focus="focus(line.id)"
+            @blur="unfocus"
           >
             <span class="flex items-center gap-2">
               <MergeRequestPicture :person="line.author" size="box" aria-hidden="true" />
               <span>{{ line.name }}</span>
-              {{ " " }}<span class="text-fg-muted">{{ line.ago }}</span> {{ " "
-              }}<span
+              {{ " " }}<span class="text-fg-muted">{{ line.ago }}</span> {{ " " }}
+              <span v-if="line.resolved" class="ml-auto flex items-center gap-1 pl-4 text-fg-muted"
+                ><Check class="size-4" aria-hidden="true" />{{ RESOLVED }}</span
+              ><span
+                v-else
                 class="ml-auto pl-4"
                 :class="line.viewersTurn ? 'font-semibold text-primary' : 'text-fg-muted'"
                 >{{ line.turn }}</span
@@ -163,9 +292,20 @@ async function openLine(page: WebPage | null): Promise<void> {
             }}<span class="line-clamp-3 wrap-break-word whitespace-pre-line">{{
               line.excerpt
             }}</span>
-          </component>
+          </button>
         </li>
       </ul>
     </div>
+    <MergeRequestThread
+      v-if="open && shownId !== null"
+      :key="shownId"
+      :iid="row.iid"
+      :author
+      :place="panelWords.place"
+      :turn="panelWords.turn"
+      :anchor
+      :now
+      @close="threadClosed"
+    />
   </span>
 </template>

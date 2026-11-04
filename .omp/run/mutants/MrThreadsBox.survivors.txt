@@ -1,0 +1,9 @@
+just mutants HEAD — TS only (no Rust): 589 mutants, 560 killed, 17 survived, 12 no coverage (95.08%)
+discussions.ts:41-52 DISCUSSIONS_LABEL/UNKNOWN_AUTHOR/VIEWER/AUTHOR/WAITING/OPEN/WAITING_TEXT literals — gate-covered: module-level constants the vitest runner never re-evaluates (#732); the b* tests assert each word and kind
+discussions.ts:58 `username !== null` → true — equivalent: a Person's username is a string, so it never equals null
+discussions.ts:190, 211 exhaustive default (NoCoverage) — equivalent: unreachable by type
+reviewOrder.ts:23 NO_TURNS {} — gate-covered: module constant (#732)
+reviewOrder.ts:88, 92 viewerPossessive 'inside' — lines not changed by this slice (they only moved)
+useHoverBox.ts:131 `() => false` → `() => undefined` — equivalent: both are falsy at every use
+useHoverBox.ts:133 at {} — a line that only moved; not changed
+mergeRequestsText.ts:160,211,252,274 exhaustive defaults (NoCoverage) — lines not changed, unreachable by type

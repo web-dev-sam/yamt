@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { effectScope, type EffectScope } from "vue";
+import { effectScope, nextTick, shallowRef, type EffectScope } from "vue";
 
 import { useHoverBox, useScrollOutside, type HoverBox } from "./useHoverBox";
 
@@ -34,9 +34,10 @@ class FakeKeyboardEvent extends Event {
   }
 }
 
-const page: { focused: unknown; window: EventTarget } = {
+const page: { focused: unknown; window: EventTarget; document: EventTarget } = {
   focused: null,
   window: new EventTarget(),
+  document: new EventTarget(),
 };
 
 let scope: EffectScope;
@@ -55,11 +56,10 @@ beforeEach(() => {
   vi.stubGlobal("KeyboardEvent", FakeKeyboardEvent);
   page.window = new EventTarget();
   vi.stubGlobal("window", page.window);
-  vi.stubGlobal("document", {
-    get activeElement() {
-      return page.focused;
-    },
+  page.document = Object.defineProperty(new EventTarget(), "activeElement", {
+    get: () => page.focused,
   });
+  vi.stubGlobal("document", page.document);
   area = new FakeNode();
   opener = Object.assign(new FakeNode(), { left: 10, bottom: 40 });
   boxNode = new FakeNode();
@@ -85,12 +85,13 @@ function asElement(fake: FakeNode): HTMLElement {
   throw new Error("HTMLElement is not the stub");
 }
 
-function hoverBox(box: FakeNode | null = null): HoverBox {
+function hoverBox(box: FakeNode | null = null, pinned?: () => boolean): HoverBox {
   const made = scope.run(() =>
     useHoverBox({
       area: () => (areaShown ? asElement(area) : null),
       opener: () => (openerShown ? asElement(opener) : null),
       box: box === null ? null : asElement(box),
+      ...(pinned === undefined ? {} : { pinned }),
     }),
   );
   if (made === undefined) {
@@ -119,6 +120,12 @@ function scroll(target: EventTarget): void {
   const event = new Event("scroll");
   Object.defineProperty(event, "target", { value: target });
   page.window.dispatchEvent(event);
+}
+
+function press(target: EventTarget): void {
+  const event = new Event("pointerdown");
+  Object.defineProperty(event, "target", { value: target });
+  page.document.dispatchEvent(event);
 }
 
 test("the pointer entering opens the box at once below the opener's left edge", () => {
@@ -380,4 +387,77 @@ test("keepFocus without a box leaves focus where it is", () => {
   box.keepFocus();
 
   expect(page.focused).toBe(item);
+});
+
+test("a_pinned_box_stays_when_the_pointer_and_focus_leave", () => {
+  const pin = shallowRef(true);
+  const box = hoverBox(boxNode, () => pin.value);
+  box.on.pointerenter();
+  box.on.focusin(focusEvent("focusin", outside));
+
+  box.on.pointerleave();
+  box.on.focusout(focusEvent("focusout", null));
+  expect(box.open.value).toBe(true);
+  pin.value = false;
+  expect(box.open.value).toBe(true);
+  box.on.pointerenter();
+  box.on.pointerleave();
+
+  expect(box.open.value).toBe(false);
+});
+
+test("a_pinned_box_ignores_an_outside_scroll", () => {
+  const pin = shallowRef(true);
+  const box = hoverBox(boxNode, () => pin.value);
+  box.on.pointerenter();
+
+  scroll(outside);
+  expect(box.open.value).toBe(true);
+  pin.value = false;
+  scroll(outside);
+
+  expect(box.open.value).toBe(false);
+});
+
+test("a_press_outside_closes_a_pinned_box", async () => {
+  const listen = vi.spyOn(page.document, "addEventListener");
+  const pin = shallowRef(true);
+  const box = hoverBox(boxNode, () => pin.value);
+  await nextTick();
+  expect(listen).not.toHaveBeenCalled();
+  box.on.pointerenter();
+  await nextTick();
+  expect(listen.mock.calls.map(([type, , options]) => [type, options])).toEqual([
+    ["pointerdown", { capture: true }],
+  ]);
+
+  press(item);
+  press(opener);
+  expect(box.open.value).toBe(true);
+  press(outside);
+
+  expect(box.open.value).toBe(false);
+});
+
+test("an_unpinned_box_keeps_todays_rule", async () => {
+  const listen = vi.spyOn(page.document, "addEventListener");
+  const pin = shallowRef(false);
+  const box = hoverBox(boxNode, () => pin.value);
+  box.on.pointerenter();
+  await nextTick();
+
+  press(outside);
+  expect([box.open.value, listen.mock.calls.length]).toEqual([true, 0]);
+  pin.value = true;
+  await nextTick();
+  pin.value = false;
+  await nextTick();
+  press(outside);
+  expect(box.open.value).toBe(true);
+  scroll(outside);
+  expect(box.open.value).toBe(false);
+  box.on.pointerenter();
+  box.on.pointerleave();
+
+  expect(box.open.value).toBe(false);
 });

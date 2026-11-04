@@ -8,9 +8,13 @@ type HoverBoxParts = {
   readonly area: () => HTMLElement | null;
   readonly opener: () => HTMLElement | null;
   readonly box: MaybeRefOrGetter<HTMLElement | null>;
+  /** While true (a side panel is open): leaving with the pointer or focus, a window blur and a scroll outside never
+   *  close the box; a `pointerdown` outside the area closes it (C2, RK73). Absent: today's rule. */
+  readonly pinned?: () => boolean;
 };
 
-type Held = HoverBoxParts & {
+type Held = Omit<HoverBoxParts, "pinned"> & {
+  readonly pinned: () => boolean;
   readonly open: ShallowRef<boolean>;
   readonly at: ShallowRef<Point>;
   pointerInside: boolean;
@@ -41,7 +45,7 @@ function show(held: Held): void {
 }
 
 function hideUnlessHeld(held: Held): void {
-  if (!held.pointerInside && !held.focusInside) {
+  if (!held.pointerInside && !held.focusInside && !held.pinned()) {
     held.open.value = false;
   }
 }
@@ -124,16 +128,27 @@ export function useScrollOutside(area: () => HTMLElement | null, scrolled: () =>
 export function useHoverBox(parts: HoverBoxParts): HoverBox {
   const held: Held = {
     ...parts,
+    pinned: parts.pinned ?? (() => false),
     open: shallowRef(false),
     at: shallowRef({ x: 0, y: 0 }),
     pointerInside: false,
     focusInside: false,
   };
   useScrollOutside(parts.area, () => {
-    if (held.open.value) {
+    if (held.open.value && !held.pinned()) {
       close(held);
     }
   });
+  useEventListener(
+    () => (held.open.value && held.pinned() ? document : null),
+    "pointerdown",
+    (event) => {
+      if (!contains(held.area(), event.target)) {
+        close(held);
+      }
+    },
+    { capture: true },
+  );
   return {
     open: held.open,
     placement: useMenuPlacement(parts.box, held.at),
