@@ -42,7 +42,7 @@ export type Thread = {
 export type Threads = {
   /** The window's one thread panel; null when none is shown. */
   readonly thread: Readonly<ShallowRef<Thread | null>>;
-  /** C6: each discussion's unsent text for the window's life; cleared only by a `sent` reply or draft. */
+  /** C6: each discussion's unsent text for the window's life (absent: none); cleared only by a `sent` reply or draft. */
   readonly replyTexts: Readonly<ShallowRef<ReadonlyMap<DiscussionId, string>>>;
   setReplyText(discussion: DiscussionId, text: string): void;
   /** C1, C5: shows `discussion` and reads it afresh (loading first); the one already shown: nothing. */
@@ -66,8 +66,8 @@ type State = {
   readonly replyTexts: ShallowRef<ReadonlyMap<DiscussionId, string>>;
   /** Bumped by every show, close and re-read: an older read's answer reaches only the box. */
   generation: number;
-  /** A write is under way, whichever thread is shown: one at a time in the window. */
-  writing: boolean;
+  /** The write under way, one at a time in the window: every thread shown meanwhile reports it as `sending`. */
+  writing: WriteKind | null;
 };
 
 const LOADING: ThreadLoad = { kind: "loading" };
@@ -135,12 +135,15 @@ function reread(state: State, shown: ShownThread): void {
 
 function show(state: State, shown: ShownThread): void {
   state.generation += 1;
-  state.thread.value = { shown, load: LOADING, sending: IDLE, preview: WRITING };
+  const sending: Sending = state.writing === null ? IDLE : { kind: "sending", what: state.writing };
+  state.thread.value = { shown, load: LOADING, sending, preview: WRITING };
   void read(state, shown, state.generation);
 }
 
 function setText(state: State, discussion: DiscussionId, text: string): void {
-  state.replyTexts.value = new Map(state.replyTexts.value).set(discussion, text);
+  const texts = new Map(state.replyTexts.value);
+  texts.delete(discussion);
+  state.replyTexts.value = text === "" ? texts : texts.set(discussion, text);
   const current = state.thread.value;
   if (current?.shown.discussion === discussion) {
     state.thread.value = { ...current, preview: WRITING };
@@ -163,19 +166,23 @@ async function write(
   text: string | null,
 ): Promise<void> {
   const current = state.thread.value;
-  if (current?.load.kind !== "read" || current.load.refreshing || state.writing) {
+  if (current?.load.kind !== "read" || current.load.refreshing || state.writing !== null) {
     return;
   }
   const { shown } = current;
-  state.writing = true;
+  state.writing = what;
   patch(state, shown, { sending: { kind: "sending", what } });
   const started = performance.now();
   const outcome = await attempt(() => call(shown));
-  state.writing = false;
   const ms = Math.round(performance.now() - started);
   log.info("mergeRequests.thread_write", { iid: shown.iid, what, kind: replyKind(outcome), ms });
   const failure = failureOf(outcome);
+  state.writing = null;
   patch(state, shown, { sending: failure === null ? IDLE : { kind: "failed", what, failure } });
+  const after = state.thread.value;
+  if (after?.sending.kind === "sending") {
+    state.thread.value = { ...after, sending: IDLE };
+  }
   if (failure === null && state.replyTexts.value.get(shown.discussion) === text) {
     setText(state, shown.discussion, "");
   }
@@ -275,7 +282,7 @@ export function createThreads(deps: {
     thread: shallowRef<Thread | null>(null),
     replyTexts: shallowRef<ReadonlyMap<DiscussionId, string>>(new Map()),
     generation: 0,
-    writing: false,
+    writing: null,
   };
   return {
     ...panelOf(state),

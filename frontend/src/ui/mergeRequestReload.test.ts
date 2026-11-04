@@ -200,3 +200,16 @@ test("a_resolve_in_the_panel_marks_the_row_until_the_box_closes", async () => {
   expect(readIds(live, THREADS)).not.toContain(shown);
   expect(rowOf(live, THREADS).openDiscussions).toBe(listed - 1);
 });
+
+test("a_box_thread_answer_through_the_slice_marks_its_row", async () => {
+  const live = rig();
+  await threadShown(live);
+  const entry = live.slice.discussions.value.get(iid(THREADS));
+  const second = entry?.kind === "read" ? entry.discussions[1] : undefined;
+  if (second === undefined) {
+    throw new Error(`!${THREADS} has no second discussion`);
+  }
+  live.slice.threadRead(iid(THREADS), second, true);
+  const marked = live.slice.discussions.value.get(iid(THREADS));
+  expect(marked?.kind === "read" && [...marked.resolved]).toEqual([second.id]);
+});

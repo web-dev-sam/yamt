@@ -95,6 +95,7 @@ type State = Deps &
     readonly rowActions: RowActions;
     readonly discussionQueue: DiscussionQueue;
     readonly linkQueue: LinkQueue;
+    readonly rowDiscussions: Discussions;
     readonly threads: Threads;
     readonly threadsRefreshed: (iid: MergeRequestIid | null) => void;
   };
@@ -177,11 +178,18 @@ function discussingOf(
   deps: Deps,
   rows: () => readonly MergeRequestRow[],
   counted: (iid: MergeRequestIid, count: number) => void,
-): Pick<State, "discussionQueue" | "threads" | "threadsRefreshed"> {
+): Pick<State, "discussionQueue" | "rowDiscussions" | "threads" | "threadsRefreshed"> {
   const { source, discussionDetails: mode } = deps;
   const discussionQueue = createDiscussions({ source, mode, rows, counted });
   const { refreshed, ...threads } = createThreads({ source, discussions: discussionQueue });
-  return { discussionQueue, threads, threadsRefreshed: refreshed };
+  const rowDiscussions: Discussions = {
+    ...discussionsOf(discussionQueue),
+    reloadDiscussions: (iid) => {
+      discussionQueue.reloadDiscussions(iid);
+      refreshed(iid);
+    },
+  };
+  return { discussionQueue, rowDiscussions, threads, threadsRefreshed: refreshed };
 }
 
 function createState(deps: Deps): State {
@@ -280,7 +288,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     ...people,
     ...createJobLogs(deps),
     ...createDescriptions(deps),
-    ...discussionsOf(state.discussionQueue, state.threadsRefreshed),
+    ...state.rowDiscussions,
     ...state.threads,
     ...linksOf(state.linkQueue),
   };

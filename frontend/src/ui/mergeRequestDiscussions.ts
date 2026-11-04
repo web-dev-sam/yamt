@@ -221,10 +221,7 @@ function reload(queue: Queue, iid: MergeRequestIid): void {
   sentFirst(queue, iid);
 }
 
-export function discussionsOf(
-  queue: DiscussionQueue,
-  reloaded: (iid: MergeRequestIid) => void,
-): Discussions {
+export function discussionsOf(queue: DiscussionQueue): Omit<Discussions, "reloadDiscussions"> {
   const { discussions, discussionDetails, reloads } = queue;
   return {
     discussions,
@@ -232,10 +229,6 @@ export function discussionsOf(
     reloads,
     askDiscussions: (iid) => {
       queue.askDiscussions(iid);
-    },
-    reloadDiscussions: (iid) => {
-      queue.reloadDiscussions(iid);
-      reloaded(iid);
     },
     threadRead: (iid, discussion, resolved) => {
       queue.threadRead(iid, discussion, resolved);

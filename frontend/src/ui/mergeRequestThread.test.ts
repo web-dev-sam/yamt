@@ -274,7 +274,7 @@ test("texts_are_kept_per_discussion_until_sent", async () => {
   void live.threads.sendReply("comment");
   expect(at(live.writes, 0).args).toEqual(["reply", MR, D1, "comment", "first"]);
   await writeAt(live, 0, { kind: "sent" });
-  expect(textOf(live, D1)).toBe("");
+  expect(live.threads.replyTexts.value.has(D1)).toBe(false);
   expect(textOf(live, D2)).toBe(SECRET);
 
   await readAt(live, 2, threadOf(D1));
@@ -284,6 +284,54 @@ test("texts_are_kept_per_discussion_until_sent", async () => {
   await writeAt(live, 1, { kind: "sent" });
   expect(at(live.writes, 1).args).toEqual(["reply", MR, D1, "draft", "second"]);
   expect(textOf(live, D1)).toBe("second, longer");
+  live.threads.setReplyText(D2, "");
+  expect([...live.threads.replyTexts.value.keys()]).toEqual([D1]);
+});
+
+test("a_thread_shown_during_another_threads_write_reports_it", async () => {
+  const live = rig();
+  await shownAndRead(live, D1);
+  live.threads.setReplyText(D1, "first");
+  void live.threads.sendReply("comment");
+  live.threads.showThread(MR, D2);
+  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "comment" });
+  await readAt(live, 1, threadOf(D2));
+  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "comment" });
+
+  live.threads.retryThread();
+  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "comment" });
+  live.threads.showThread(MR, D1);
+  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "comment" });
+  await writeAt(live, 0, { kind: "refused", reason: "403 Forbidden" });
+  expect(shownOf(live)?.sending).toEqual(
+    failed("comment", { kind: "refused", reason: "403 Forbidden" }),
+  );
+  live.threads.showThread(MR, D2);
+  expect(shownOf(live)?.sending).toEqual({ kind: "idle" });
+});
+
+test("a_failed_write_answered_after_a_switch_leaves_the_shown_thread_idle", async () => {
+  const live = rig();
+  await shownAndRead(live, D1);
+  void live.threads.setResolved(true);
+  live.threads.showThread(MR, D2);
+  await readAt(live, 1, threadOf(D2));
+  await writeAt(live, 0, { kind: "failed", message: "glab timed out" });
+
+  expect(shownOf(live)).toMatchObject({
+    shown: { iid: MR, discussion: D2 },
+    load: read(threadOf(D2)),
+    sending: { kind: "idle" },
+  });
+  expect(at(live.reads, 2).args).toEqual([MR, D1]);
+  live.threads.setReplyText(D2, "other");
+  const drafting = live.threads.sendReply("draft");
+  expect(at(live.writes, 1).args).toEqual(["reply", MR, D2, "draft", "other"]);
+
+  live.threads.closeThread();
+  await writeAt(live, 1, { kind: "failed", message: "glab timed out" });
+  await drafting;
+  expect(shownOf(live)).toBeNull();
 });
 
 test("a_second_send_while_one_runs_sends_nothing", async () => {

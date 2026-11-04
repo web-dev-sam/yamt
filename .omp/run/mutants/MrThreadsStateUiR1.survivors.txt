@@ -1,0 +1,5 @@
+just mutants HEAD — 3 TS files: 587 killed, 9 survived, 2 no coverage, 4 errors (98.16%)
+mergeRequestThread.ts:84 `current !== null` → true — equivalent, and not changed this round: isShown is already false when nothing is shown. The `||` mutant is now killed (#2368)
+mergeRequestThread.ts:123, :220 (×2) — not changed this round; equivalent as reported in round 1 (TS narrowing; with no thread, write() returns first)
+mergeRequestDiscussions.ts:96, :148, :157, :182 (NoCoverage default:never) — not changed this round; equivalent as in round 1
+mergeRequests.ts:139, :216 — not changed this round (list staleness, search default)
