@@ -91,7 +91,10 @@ merge-requests page. Every step in yamt Dark and yamt Light (`--settings '{"them
     stay and the thread is read again; after "Resolve thread", "Add comment" and "Submit review" the focus stays in
     the panel, so Escape closes the panel, not the page (#2383/#2389); the same after Retry of a failed read and with
     focus on the page's Refresh (#2400/#2401); leaving the page with the panel open and coming back: no box, and the
-    resolved row gone (the fixture's listed count is fixed, so the count drop shows only in the real app, #2404).
+    resolved row gone (the fixture's listed count is fixed, so the count drop shows only in the real app, #2404). With
+    the panel shown: Tab to the row's "Show description", Enter, Escape → the description closes, the panel stays;
+    a question over the panel (close a Compare tab with text, by script) and Escape → the question goes, the panel
+    stays; the next Escape closes the panel (#2410/#2411).
 11. **D Refresh.** "Reload discussions": the icon turns, the rows stay, then the new answer; only `iids: 637` in the
     log; with d01's panel open also one `fixture_thread`.
 12. **C11 Off.** Discussion details "Off": no box, no panel; "Load lazily": both work.

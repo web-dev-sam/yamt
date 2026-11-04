@@ -2229,7 +2229,8 @@ window has no such section.
 
 **The thread panel** (plan §2 #180–#183, #185, RK33, RK72, RK73; request `docs/slices/request-mr-threads.md` C1–C11):
 `MergeRequestThread.vue` (props `iid`, `author`, the box's `place` and `turn` words, `anchor` — the box's left and top
-—, `now`) is a DOM child of the discussions box's hover area, so `useHoverBox`'s one inside rule holds both, rendered
+—, `now`, `asking` — a question is open, passed View → Row → Discussions → Thread as the description gets it) is a DOM
+child of the discussions box's hover area, so `useHoverBox`'s one inside rule holds both, rendered
 while that row's thread is shown and keyed by the discussion id; `useMenuPlacement.ts` `useBesidePlacement` puts its
 right edge on the box's left, tops aligned, clamped to the window (`besideLeft`, shared with `CiStatusJobLog`). A
 non-modal `role="dialog"` of `min(40rem, 100vw − 2rem)` × `min(48rem, 100vh − 2rem)` that takes focus on mount; its
@@ -2253,7 +2254,9 @@ types a line). While a thread is shown, Escape is the panel's: `MergeRequestsVie
 filter menu and otherwise leaves Escape alone while `thread` (or `description`) is set; the panel's element `keydown`
 takes an Escape inside it, so `useHoverBox`'s area keydown never sees it; a window `keydown` listener, for the
 component's life, closes it on any Escape nothing took (`defaultPrevented`) while its thread is shown, focus on the body
-included. A close focuses the row's line; the next Escape closes the box, the one after leaves the page. Every word is `ui/mergeRequestThreadText.ts`;
+included, and does nothing while `asking` or while `description` is set (that Escape is the question's or the
+description's own; window listeners run in mount order, so the panel's would run before a later description's); the
+next Escape closes the panel. A close focuses the row's line; the next Escape closes the box, the one after leaves the page. Every word is `ui/mergeRequestThreadText.ts`;
 failure sentences go through `problemText` at the steps `thread`, `reply`, `draft`, `resolveThread`,
 `unresolveThread`, `submitReview`, `preview`. The state is §5.1's thread row.
 

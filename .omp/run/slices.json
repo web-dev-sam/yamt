@@ -1,13 +1,11 @@
 {
-  "MrThreadsBoxR3": {
+  "MrThreadsDocsR2": {
     "owned": [
-      "frontend/src/ui/MergeRequestThread.vue",
-      "frontend/src/ui/MergeRequestThreadPanel.test.ts",
-      "frontend/src/ui/MergeRequestDiscussions.vue",
-      "frontend/src/ui/MergeRequestDiscussionsBox.test.ts",
-      "frontend/src/ui/MergeRequestRow.vue",
-      "frontend/src/ui/MergeRequestsView.vue",
-      "frontend/src/ui/MergeRequestDescription.vue"
+      "frontend/src/ui/AGENTS.md",
+      "docs/architecture.md",
+      "docs/plan.md",
+      ".omp/skills/risk-register/SKILL.md",
+      ".omp/skills/project-map/**"
     ]
   }
 }
