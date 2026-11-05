@@ -1,11 +1,1 @@
-{
-  "MrReviewFixesDocsR1": {
-    "owned": [
-      "docs/architecture.md",
-      ".omp/skills/project-map/**",
-      ".omp/skills/ipc-contract/SKILL.md",
-      "docs/plan.md",
-      ".omp/skills/risk-register/**"
-    ]
-  }
-}
+{}
