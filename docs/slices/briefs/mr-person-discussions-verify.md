@@ -70,8 +70,8 @@ Dark and in yamt Light (set `<html data-theme="light">` live, #2495) unless note
 5. **D1–D4 an entry (p1, on !624).** Anna Berg's picture and name, "… ago" (hover: `DD.MM.YYYY, HH:MM`), "!624 <title>"
    muted, the place; the first comment formatted (bold, code, link, image) and cut at four lines (`read` its box height:
    80 px); the pictures Ben, Chiara, Dmitri left to right, each tooltip naming its writer; the turn word "Ben Okafor's turn".
-   A one-comment discussion: no pictures. p6: "+N" at the left, its tooltip naming the folded writers, the newest writers
-   visible; narrow the window to 900 px: N grows, the newest stay.
+   A one-comment discussion: no pictures. p6 (13 later writers): no fold at 1600 px; at 700 px "+N" at the left, its
+   tooltip naming the folded writers, the newest writers visible; narrow to 600 px: N grows, the newest stay (#2531).
 6. **B2 the person menu.** "Whose discussions" → Me first, then everyone by name with pictures (no narrowing field:
    it shows from 8 people, design §2.8 #6; the fixture has 5, #2522); pick Anna → the order equals Anna's pinned list,
    words "Your turn" become "Anna Berg's turn"-style and the header "… wait for Anna Berg". Escape in the menu closes the
