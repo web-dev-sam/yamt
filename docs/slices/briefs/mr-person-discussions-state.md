@@ -136,9 +136,10 @@ export async function askAgain(source: MergeRequestSource): Promise<void>; // to
 ### Rules (design §2.4–§2.6)
 
 - **State:** one `ShallowRef<{ person: Viewer; held: ReadonlySet<DiscussionId>; order: number } | null>`; `order` rises on
-  `openPersonView`, `pickPerson`, `refreshPersonView`, `rowsReplaced`, and an `Ordered` computed (as `shownOf`'s, over its
-  previous value) applies `keptInPlace(previous, next, held, entry ⇒ entry.discussion.id)` only while `order` is the one
-  the previous value was made under.
+  `openPersonView` and `pickPerson` only (a fresh sort); `refreshPersonView` and `rowsReplaced` keep `order` and set held
+  to the expanded entries (request C3 as amended, #2523). An `Ordered` computed (as `shownOf`'s, over its previous value)
+  applies `keptInPlace(previous, next, held, entry ⇒ entry.discussion.id)` only while `order` is the one the previous
+  value was made under.
 - **Entries:** `personEntries` over the shown rows (the list's order) whose entry is `read`, each row's `discussions`
   whole (resolved marks included, `resolved` from `entry.resolved`), `person = personView.person.username`.
 - **Demand (F1, RK61):** a `watch` on the view, `shownRows` and `discussions`: while the view is open, `wantRows` of every
