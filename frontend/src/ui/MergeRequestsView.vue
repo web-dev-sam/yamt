@@ -232,7 +232,7 @@ function listShownAgain(shown: boolean): void {
           type="button"
           :aria-pressed="viewShown"
           :disabled="shownRows.length === 0 && !viewShown"
-          class="flex items-center gap-1.5 rounded border border-control-border py-1 pr-2.5 pl-2 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted aria-pressed:bg-row-selected"
+          class="flex items-center gap-1.5 rounded border border-control-border py-1 pr-2.5 pl-2 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted aria-pressed:border-primary"
           @click="discussionsPressed"
         >
           <MessagesSquare class="size-4" aria-hidden="true" />
