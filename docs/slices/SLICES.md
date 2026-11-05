@@ -6,6 +6,18 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Release 0.7.0 (session 55, owner: "release 0.7.0")
+
+0.7.0 = 0.6.9 plus `@` completion, the fast comment preview, the review fixes, table alignment and one person's
+discussions (sections below; GitLab playground checks still open). The owner pushes `main`, waits for green ci, then
+tags.
+
+| row | slice                                                                                                        | owner        | status  | evidence |
+| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ------- | -------- |
+| 1   | release commit 0.7.0: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done    |          |
+| 2   | final run 0.7.0 before tagging (`briefs/release-0.7.0-verify.md`)                                            | verifier     | running |          |
+| 3   | push `main`, ci green on all four jobs, tag `v0.7.0`, publish                                                | human        | todo    |          |
+
 ## One person's discussions (session 55; owner: "Plan a view reachable from the MR list … all discussions where a selected person was participating")
 
 Request `docs/slices/request-mr-person-discussions.md` (parts A–F, acceptance, non-goals, reopens); base `197f8c6e`;
