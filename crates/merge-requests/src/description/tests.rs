@@ -507,6 +507,35 @@ fn table_cells_keep_gitlabs_alignment_and_header() {
 }
 
 #[test]
+fn table_cells_read_gitlabs_align_attribute() {
+    let html = "<table>\n<thead>\n<tr>\n<th align=\"left\">L</th>\n<th align=\"center\">C</th>\n\
+        <th align=\"right\">R</th>\n<th align=\"justify\">J</th>\n<th>N</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n\
+        <td align=\"left\">1</td>\n<td align=\"center\">2</td>\n<td align=\"right\">3</td>\n\
+        <td align=\"justify\">4</td>\n<td>5</td>\n<td align=\"left\" style=\"text-align: right\">6</td>\n\
+        </tr>\n</tbody>\n</table>";
+    let row = |cells| DescriptionRow { cells };
+
+    let expected = [DescriptionBlock::Table {
+        head: vec![row(vec![
+            cell(true, CellAlign::Start, "L"),
+            cell(true, CellAlign::Center, "C"),
+            cell(true, CellAlign::End, "R"),
+            cell(true, CellAlign::Start, "J"),
+            cell(true, CellAlign::Start, "N"),
+        ])],
+        body: vec![row(vec![
+            cell(false, CellAlign::Start, "1"),
+            cell(false, CellAlign::Center, "2"),
+            cell(false, CellAlign::End, "3"),
+            cell(false, CellAlign::Start, "4"),
+            cell(false, CellAlign::Start, "5"),
+            cell(false, CellAlign::End, "6"),
+        ])],
+    }];
+    assert_eq!(blocks(html), expected);
+}
+
+#[test]
 fn details_keep_their_summary_and_open_state() {
     let html = "<details open><summary>Logs <code>x</code></summary><pre>a</pre>text</details>\
         <details><p>no summary</p></details>";

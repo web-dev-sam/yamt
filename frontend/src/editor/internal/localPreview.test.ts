@@ -233,19 +233,24 @@ test("a_trigger_inside_code_stays_local", () => {
   });
 });
 
-function startRow(header: boolean, texts: readonly string[]): unknown {
+function alignedRow(header: boolean, texts: readonly string[]): unknown {
+  const aligns = ["start", "center", "end", "start"];
   return {
-    cells: texts.map((text) => ({ header, align: "start", inlines: [{ kind: "text", text }] })),
+    cells: texts.map((text, column) => ({
+      header,
+      align: aligns[column],
+      inlines: [{ kind: "text", text }],
+    })),
   };
 }
 
-test("a_table_reads_start_whatever_its_alignment", () => {
-  expect(localPreview("| l | c | r |\n| :- | :-: | -: |\n| 1 | 2 | 3 |")).toEqual({
+test("a_table_keeps_each_columns_alignment", () => {
+  expect(localPreview("| l | c | r | n |\n| :- | :-: | -: | - |\n| 1 | 2 | 3 | 4 |")).toEqual({
     blocks: [
       {
         kind: "table",
-        head: [startRow(true, ["l", "c", "r"])],
-        body: [startRow(false, ["1", "2", "3"])],
+        head: [alignedRow(true, ["l", "c", "r", "n"])],
+        body: [alignedRow(false, ["1", "2", "3", "4"])],
       },
     ],
   });

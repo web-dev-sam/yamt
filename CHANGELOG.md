@@ -25,6 +25,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   discussions the reviewer wrote in; a row keeps its place while its discussions box or thread is open and moves when
   they close.
 
+### Fixed
+
+- A table column aligned in Markdown (`:---:` centred, `---:` right) shows aligned in merge-request descriptions,
+  comments and a thread's Preview, as on GitLab's page; it showed left-aligned before.
+
 ## [0.6.9] - 2026-11-04
 
 ### Added

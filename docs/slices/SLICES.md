@@ -6,6 +6,22 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Table alignment (session 53; owner #2424: "Fix later, separately")
+
+Request `docs/slices/request-table-alignment.md` (rules 1–2, acceptance, non-goals); base `a0660296`. Measured by the
+orchestrator (`.omp/run/notes/PlanTableAlignMeasure.md`): gitlab.com writes `align="center|right"` on each cell in
+`descriptionHtml` too (issues; no aligned MR found), never `style`; the fake glab's `style` table was not measured.
+Decision (vision 5): the reducer reads `align=`, keeps the sanitizer's `text-align` style; the local preview maps
+`:-:`/`-:` to center/end; one slice since both paths share the corpus fixture (rule 2). No IPC type change
+(`just bindings` for a doc comment). Reopens plan #171 (alignment), #188 (local preview shows left). No question open.
+Order: slice, `just bindings`, smoke ∥ both reviews, docs keeper, final.
+
+| row | slice                                                                                                                 | owner                 | status | evidence                                                                                                                                                                                                                                                                                                                         |
+| --- | --------------------------------------------------------------------------------------------------------------------- | --------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | alignment (`briefs/table-alignment.md`): reducer, local preview, corpus, fake glab; wires it                          | rust-impl             | review | round 1 (+ `just bindings`, doc comment): `align=` first, else style; `CELL_ALIGN` in `localPreview`; table_align blocks start/center/end; 558 Rust + 4515 TS tests; 3 mutants 2 caught 1 unviable; failing paths fail. Deviations accepted (`DescriptionCell["align"]`, nested row fn for max-lines). Notes `TableAlignment.md` |
+| 2   | docs keeper (plan #171/#188 amended, architecture, guides); verify (`briefs/table-alignment-verify.md`): smoke, final | docs-keeper, verifier | todo   |                                                                                                                                                                                                                                                                                                                                  |
+| 3   | owner check on the GitLab playground                                                                                  | human                 | todo   |                                                                                                                                                                                                                                                                                                                                  |
+
 ## Release 0.6.9 (session 50, owner: "release 0.6.9")
 
 0.6.9 = 0.6.8 plus the merge-request threads (section below; GitLab playground check still open). The owner pushes

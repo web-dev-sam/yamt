@@ -19,7 +19,7 @@ import {
   type CodeBlock,
 } from "./markdownBlocks";
 import { parseInline } from "./markdownInline";
-import type { Table } from "./markdownTable";
+import type { Align, Table } from "./markdownTable";
 import { MAX_NESTING, type Inline } from "./markdownTree";
 
 /** Fenced-block languages GitLab draws instead of showing code (docs.gitlab.com: Diagrams and flowcharts, Math,
@@ -98,6 +98,12 @@ const DASH_ITEM = /^\s*-\s/;
 const STAR_ITEM = /^\s*\*\s/;
 const WHITE_SPACE = /\s/;
 const LANGUAGE_WORD = /^[a-z0-9_+-]+$/;
+const CELL_ALIGN: Readonly<Record<Align, DescriptionCell["align"]>> = {
+  none: "start",
+  left: "start",
+  center: "center",
+  right: "end",
+};
 
 function allOrNull<T, U>(items: readonly T[], convert: (item: T) => U | null): U[] | null {
   const converted: U[] = [];
@@ -216,17 +222,17 @@ function codeGoesToGitLab({ info, code }: CodeBlock): boolean {
   return blankEdge || (info !== "" && !shownAsWritten);
 }
 
-function describedRow(cells: readonly string[], header: boolean): DescriptionRow | null {
-  const described = allOrNull(cells, (cell): DescriptionCell | null => {
-    const inlines = describedSource(cell);
-    return inlines === null ? null : { header, align: "start", inlines };
-  });
-  return described === null ? null : { cells: described };
-}
-
-function describedTable(parsed: Table): DescriptionBlock | null {
-  const head = describedRow(parsed.header, true);
-  const body = allOrNull(parsed.rows, (row) => describedRow(row, false));
+function describedTable({ align, header, rows }: Table): DescriptionBlock | null {
+  function describedRow(cells: readonly string[], isHeader: boolean): DescriptionRow | null {
+    const described = allOrNull([...cells.entries()], ([column, cell]): DescriptionCell | null => {
+      const inlines = describedSource(cell);
+      const cellAlign = CELL_ALIGN[align[column] ?? "none"];
+      return inlines === null ? null : { header: isHeader, align: cellAlign, inlines };
+    });
+    return described === null ? null : { cells: described };
+  }
+  const head = describedRow(header, true);
+  const body = allOrNull(rows, (row) => describedRow(row, false));
   return head === null || body === null ? null : { kind: "table", head: [head], body };
 }
 

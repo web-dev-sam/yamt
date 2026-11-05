@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::super::html::described;
+use super::super::{CellAlign, DescriptionBlock, DescriptionRow};
 
 const FIXTURE: &str = include_str!("../../../../../frontend/fixtures/markdown/gitlab-preview.json");
 
@@ -144,6 +145,28 @@ fn every_recorded_answer_reduces_to_its_blocks() {
 
         assert_eq!(reduced, entry.blocks, "{}", entry.name);
     }
+}
+
+#[test]
+fn the_recorded_aligned_table_reads_start_center_end() {
+    let entry = corpus()
+        .entries
+        .into_iter()
+        .find(|entry| entry.name == "table_align")
+        .unwrap();
+    let aligns = |rows: &[DescriptionRow]| -> Vec<Vec<CellAlign>> {
+        let cells = |row: &DescriptionRow| row.cells.iter().map(|cell| cell.align).collect();
+        rows.iter().map(cells).collect()
+    };
+
+    let blocks = described(&entry.html, None).description.blocks;
+
+    let [DescriptionBlock::Table { head, body }] = blocks.as_slice() else {
+        panic!("not one table: {blocks:?}");
+    };
+    let start_center_end = vec![vec![CellAlign::Start, CellAlign::Center, CellAlign::End]];
+    assert_eq!(aligns(head), start_center_end);
+    assert_eq!(aligns(body), start_center_end);
 }
 
 #[test]

@@ -1201,7 +1201,7 @@
                 },
                 {
                   "header": true,
-                  "align": "start",
+                  "align": "center",
                   "inlines": [
                     {
                       "kind": "text",
@@ -1211,7 +1211,7 @@
                 },
                 {
                   "header": true,
-                  "align": "start",
+                  "align": "end",
                   "inlines": [
                     {
                       "kind": "text",
@@ -1237,7 +1237,7 @@
                 },
                 {
                   "header": false,
-                  "align": "start",
+                  "align": "center",
                   "inlines": [
                     {
                       "kind": "text",
@@ -1247,7 +1247,7 @@
                 },
                 {
                   "header": false,
-                  "align": "start",
+                  "align": "end",
                   "inlines": [
                     {
                       "kind": "text",

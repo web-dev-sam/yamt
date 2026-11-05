@@ -258,9 +258,11 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   !267727, !50000 on 2026-11-04): h1–h3 each with its empty anchor link; a paragraph with `em`, `strong`, `del`,
   `code`, a `br` and a `gl-emoji`; a ruby code block (`div`/`pre data-canonical-lang`/`span.line`), one without a
   language, a mermaid block; inline math; a list, an `ol start="3"`, a task list (done, open, inapplicable); a table
-  aligned left, centre and right; a quote, a rule, a `details` with its `summary`; links to `https://docs.example/x`,
-  `http://plain.example/`, the issue `#12`, `@anna`, a commit, the label `frontend`, `#section`, `mailto:`, `file:`
-  and `javascript:`; lazy images (placeholder `src`, real `data-src`, each in its `a.no-attachment-icon`): the uploads
+  aligned left, centre and right, its cells carrying `align=` as gitlab.com writes them (measured 2026-11-05,
+  `.omp/run/notes/PlanTableAlignMeasure.md`); a quote, a rule, a `details` with its `summary`; links to
+  `https://docs.example/x`, `http://plain.example/`, the issue `#12`, `@anna`, a commit, the label `frontend`,
+  `#section`, `mailto:`, `file:` and `javascript:`; lazy images (placeholder `src`, real `data-src`, each in its
+  `a.no-attachment-icon`): the uploads
   `/-/project/7/uploads/0a1b2c3d4e5f60718293a4b5c6d7e8f9/shot.png` (served by the uploads API,
   `uploads/7/uploads/…/shot.png`), `…/f9e8d7c6b5a4938271605f4e3d2c1b0a/old.png` (the API answers 404; served on its
   web path, `pictures/-/project/7/uploads/…/old.png`), `…/1111aaaa2222bbbb3333cccc4444dddd/gone.png` (on neither),

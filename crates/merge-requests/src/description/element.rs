@@ -69,8 +69,14 @@ fn first_content<'a>(parent: &NodeRef<'a>) -> Option<NodeRef<'a>> {
     parent.children().into_iter().find(is_content)
 }
 
-/// The only style GitLab keeps on a cell (`sanitization_filter.rb` `TABLE_ALIGNMENT_PATTERN`).
+/// A cell's alignment as GitLab writes it: `align="center"`/`"right"` (gitlab.com today), else the only style
+/// GitLab's sanitizer keeps on a cell (`sanitization_filter.rb` `TABLE_ALIGNMENT_PATTERN`), else Start.
 pub(super) fn align(cell: &NodeRef) -> CellAlign {
+    match cell.attr("align").as_deref() {
+        Some("center") => return CellAlign::Center,
+        Some("right") => return CellAlign::End,
+        _ => {}
+    }
     match cell.attr("style").as_deref() {
         Some("text-align: center") => CellAlign::Center,
         Some("text-align: right") => CellAlign::End,

@@ -169,8 +169,8 @@ pub struct DescriptionRow {
     pub cells: Vec<DescriptionCell>,
 }
 
-/// A cell of a table: `header` for a `th`; `align` from `style="text-align: left|center|right"` exactly as GitLab
-/// keeps it, else Start.
+/// A cell of a table: `header` for a `th`; `align` from `align="center"`/`"right"` as GitLab writes it, else from the
+/// only style GitLab's sanitizer keeps on a cell (`style="text-align: center|right"` exactly), else Start.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DescriptionCell {
