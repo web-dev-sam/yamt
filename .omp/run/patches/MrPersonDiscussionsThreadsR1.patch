@@ -1,0 +1,139 @@
+diff --git a/frontend/src/ui/mergeRequestThread.ts b/frontend/src/ui/mergeRequestThread.ts
+index c83928d..f5d62da 100644
+--- a/frontend/src/ui/mergeRequestThread.ts
++++ b/frontend/src/ui/mergeRequestThread.ts
+@@ -5,27 +5,25 @@ import {
+   type DiscussionId,
+   type DiscussionWriteReply,
+   type MergeRequestIid,
+-  type MergeRequestSource,
+   type ReplyKind,
+   type SourceResult,
+ } from "../ipc";
+-import type { DiscussionQueue } from "./mergeRequestDiscussions";
+ import { previewHere, readPreview, type Preview } from "./mergeRequestPreview";
+ import {
+-  backToWriting,
+   dropUnlessShown,
++  ensureRecord,
+   patch,
+   readAfresh,
+   recordOf,
+   replyKind,
+   reread,
+-  setText,
+-  shownRecord,
+   stateOf,
++  WRITING,
+   type Sending,
+   type ShownThread,
+   type State,
+   type Thread,
++  type ThreadDeps,
+   type WriteFailure,
+   type WriteKind,
+ } from "./mergeRequestThreadRecords";
+@@ -93,6 +91,20 @@ function failureOf(outcome: Outcome<DiscussionWriteReply>): WriteFailure | null
+   return reply.kind === "sent" ? null : reply;
+ }
+ 
++function backToWriting(state: State, discussion: DiscussionId): void {
++  const record = state.threads.value.get(discussion);
++  if (record !== undefined) {
++    patch(state, record.shown, { preview: WRITING });
++  }
++}
++
++function setText(state: State, discussion: DiscussionId, text: string): void {
++  const texts = new Map(state.replyTexts.value);
++  texts.delete(discussion);
++  state.replyTexts.value = text === "" ? texts : texts.set(discussion, text);
++  backToWriting(state, discussion);
++}
++
+ async function write(state: State, discussion: DiscussionId, how: Write): Promise<void> {
+   const record = state.threads.value.get(discussion);
+   if (record === undefined || !isWritable(record, state.writing.value)) {
+@@ -180,7 +192,7 @@ function panelOf(state: State): Pick<Threads, "thread" | "showThread" | "closeTh
+       if (previous !== null) {
+         dropUnlessShown(state, previous);
+       }
+-      shownRecord(state, { iid, discussion });
++      ensureRecord(state, { iid, discussion });
+     },
+     closeThread: () => {
+       const previous = panel.value;
+@@ -197,7 +209,7 @@ function entriesOf(state: State): Pick<Threads, "expandThread" | "collapseThread
+     expandThread: (iid, discussion) => {
+       if (!state.expanded.value.has(discussion)) {
+         state.expanded.value = new Set(state.expanded.value).add(discussion);
+-        shownRecord(state, { iid, discussion });
++        ensureRecord(state, { iid, discussion });
+       }
+     },
+     collapseThread: (discussion) => {
+@@ -210,10 +222,9 @@ function entriesOf(state: State): Pick<Threads, "expandThread" | "collapseThread
+   };
+ }
+ 
+-export function createThreads(deps: {
+-  readonly source: MergeRequestSource;
+-  readonly discussions: Pick<DiscussionQueue, "threadRead" | "reloadDiscussions">;
+-}): Threads & { readonly refreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void } {
++export function createThreads(
++  deps: ThreadDeps,
++): Threads & { readonly refreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void } {
+   const state = stateOf(deps);
+   return {
+     threads: state.threads,
+diff --git a/frontend/src/ui/mergeRequestThreadRecords.ts b/frontend/src/ui/mergeRequestThreadRecords.ts
+index 1ec5817..f949838 100644
+--- a/frontend/src/ui/mergeRequestThreadRecords.ts
++++ b/frontend/src/ui/mergeRequestThreadRecords.ts
+@@ -38,7 +38,7 @@ export type Thread = {
+   readonly sending: Sending;
+   readonly preview: Preview;
+ };
+-type ThreadDeps = {
++export type ThreadDeps = {
+   readonly source: MergeRequestSource;
+   readonly discussions: Pick<DiscussionQueue, "threadRead" | "reloadDiscussions">;
+ };
+@@ -56,7 +56,7 @@ export type State = ThreadDeps & {
+ };
+ 
+ const LOADING: ThreadLoad = { kind: "loading" };
+-const WRITING: Preview = { kind: "writing" };
++export const WRITING: Preview = { kind: "writing" };
+ 
+ export function stateOf(deps: ThreadDeps): State {
+   return {
+@@ -156,8 +156,8 @@ export async function reread(
+   await read(state, shown, token);
+ }
+ 
+-/** The record of `shown`, shared when one exists, else created loading and read afresh. */
+-export function shownRecord(state: State, shown: ShownThread): void {
++/** Shares the record of `shown` when one exists, else creates it loading and reads it afresh. */
++export function ensureRecord(state: State, shown: ShownThread): void {
+   if (recordOf(state, shown) === null) {
+     put(state, { shown, load: LOADING, sending: { kind: "idle" }, preview: WRITING });
+     void read(state, shown, tokenFor(state, shown.discussion));
+@@ -171,17 +171,3 @@ export function readAfresh(state: State, discussion: DiscussionId): void {
+     void read(state, record.shown, tokenFor(state, discussion));
+   }
+ }
+-
+-export function backToWriting(state: State, discussion: DiscussionId): void {
+-  const record = state.threads.value.get(discussion);
+-  if (record !== undefined) {
+-    put(state, { ...record, preview: WRITING });
+-  }
+-}
+-
+-export function setText(state: State, discussion: DiscussionId, text: string): void {
+-  const texts = new Map(state.replyTexts.value);
+-  texts.delete(discussion);
+-  state.replyTexts.value = text === "" ? texts : texts.set(discussion, text);
+-  backToWriting(state, discussion);
+-}

@@ -1,0 +1,5 @@
+just mutants HEAD — 264 killed, 0 timeout, 4 survived, 0 no-cov, 3 errors; score 98.51% (Thread.ts 98.30, Records.ts 98.91)
+mergeRequestThread.ts:192 `if (previous !== null)`→true — not a changed line; equivalent: dropUnlessShown(null) deletes nothing
+mergeRequestThread.ts:200 `if (previous !== null)`→true — not a changed line; equivalent: same reason (after closeThread panel is null, and expanded never holds null)
+mergeRequestThread.ts:187 `panel.value === null ?`→false — not a changed line; equivalent: threads.get(null) ?? null is null
+mergeRequestThreadRecords.ts:104 `lastToken += 1`→`-= 1` — not a changed line; equivalent: tokens are still unique and only compared for equality

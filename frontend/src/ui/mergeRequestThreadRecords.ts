@@ -38,7 +38,7 @@ export type Thread = {
   readonly sending: Sending;
   readonly preview: Preview;
 };
-type ThreadDeps = {
+export type ThreadDeps = {
   readonly source: MergeRequestSource;
   readonly discussions: Pick<DiscussionQueue, "threadRead" | "reloadDiscussions">;
 };
@@ -56,7 +56,7 @@ export type State = ThreadDeps & {
 };
 
 const LOADING: ThreadLoad = { kind: "loading" };
-const WRITING: Preview = { kind: "writing" };
+export const WRITING: Preview = { kind: "writing" };
 
 export function stateOf(deps: ThreadDeps): State {
   return {
@@ -156,8 +156,8 @@ export async function reread(
   await read(state, shown, token);
 }
 
-/** The record of `shown`, shared when one exists, else created loading and read afresh. */
-export function shownRecord(state: State, shown: ShownThread): void {
+/** Shares the record of `shown` when one exists, else creates it loading and reads it afresh. */
+export function ensureRecord(state: State, shown: ShownThread): void {
   if (recordOf(state, shown) === null) {
     put(state, { shown, load: LOADING, sending: { kind: "idle" }, preview: WRITING });
     void read(state, shown, tokenFor(state, shown.discussion));
@@ -170,18 +170,4 @@ export function readAfresh(state: State, discussion: DiscussionId): void {
     put(state, { ...record, load: LOADING });
     void read(state, record.shown, tokenFor(state, discussion));
   }
-}
-
-export function backToWriting(state: State, discussion: DiscussionId): void {
-  const record = state.threads.value.get(discussion);
-  if (record !== undefined) {
-    put(state, { ...record, preview: WRITING });
-  }
-}
-
-export function setText(state: State, discussion: DiscussionId, text: string): void {
-  const texts = new Map(state.replyTexts.value);
-  texts.delete(discussion);
-  state.replyTexts.value = text === "" ? texts : texts.set(discussion, text);
-  backToWriting(state, discussion);
 }

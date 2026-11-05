@@ -5,27 +5,25 @@ import {
   type DiscussionId,
   type DiscussionWriteReply,
   type MergeRequestIid,
-  type MergeRequestSource,
   type ReplyKind,
   type SourceResult,
 } from "../ipc";
-import type { DiscussionQueue } from "./mergeRequestDiscussions";
 import { previewHere, readPreview, type Preview } from "./mergeRequestPreview";
 import {
-  backToWriting,
   dropUnlessShown,
+  ensureRecord,
   patch,
   readAfresh,
   recordOf,
   replyKind,
   reread,
-  setText,
-  shownRecord,
   stateOf,
+  WRITING,
   type Sending,
   type ShownThread,
   type State,
   type Thread,
+  type ThreadDeps,
   type WriteFailure,
   type WriteKind,
 } from "./mergeRequestThreadRecords";
@@ -91,6 +89,20 @@ function failureOf(outcome: Outcome<DiscussionWriteReply>): WriteFailure | null 
   }
   const reply = outcome.value;
   return reply.kind === "sent" ? null : reply;
+}
+
+function backToWriting(state: State, discussion: DiscussionId): void {
+  const record = state.threads.value.get(discussion);
+  if (record !== undefined) {
+    patch(state, record.shown, { preview: WRITING });
+  }
+}
+
+function setText(state: State, discussion: DiscussionId, text: string): void {
+  const texts = new Map(state.replyTexts.value);
+  texts.delete(discussion);
+  state.replyTexts.value = text === "" ? texts : texts.set(discussion, text);
+  backToWriting(state, discussion);
 }
 
 async function write(state: State, discussion: DiscussionId, how: Write): Promise<void> {
@@ -180,7 +192,7 @@ function panelOf(state: State): Pick<Threads, "thread" | "showThread" | "closeTh
       if (previous !== null) {
         dropUnlessShown(state, previous);
       }
-      shownRecord(state, { iid, discussion });
+      ensureRecord(state, { iid, discussion });
     },
     closeThread: () => {
       const previous = panel.value;
@@ -197,7 +209,7 @@ function entriesOf(state: State): Pick<Threads, "expandThread" | "collapseThread
     expandThread: (iid, discussion) => {
       if (!state.expanded.value.has(discussion)) {
         state.expanded.value = new Set(state.expanded.value).add(discussion);
-        shownRecord(state, { iid, discussion });
+        ensureRecord(state, { iid, discussion });
       }
     },
     collapseThread: (discussion) => {
@@ -210,10 +222,9 @@ function entriesOf(state: State): Pick<Threads, "expandThread" | "collapseThread
   };
 }
 
-export function createThreads(deps: {
-  readonly source: MergeRequestSource;
-  readonly discussions: Pick<DiscussionQueue, "threadRead" | "reloadDiscussions">;
-}): Threads & { readonly refreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void } {
+export function createThreads(
+  deps: ThreadDeps,
+): Threads & { readonly refreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void } {
   const state = stateOf(deps);
   return {
     threads: state.threads,
