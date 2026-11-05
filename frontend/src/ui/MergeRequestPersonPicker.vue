@@ -4,7 +4,7 @@ import { computed, useTemplateRef } from "vue";
 import Check from "~icons/lucide/check";
 
 import type { Person } from "../ipc";
-import type { PersonLine, Viewer } from "../mergeRequests";
+import { viewerKey, type PersonLine, type Viewer } from "../mergeRequests";
 import MergeRequestMenu from "./MergeRequestMenu.vue";
 import MergeRequestPicture from "./MergeRequestPicture.vue";
 import { PEOPLE, PERSON_MENU } from "./mergeRequestsText";
@@ -24,10 +24,6 @@ const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey, dis
 useEventListener(window, "keydown", escapePressed);
 
 const chosen = computed(() => props.lines.find((line) => line.chosen) ?? null);
-
-function keyOf(value: Viewer): string {
-  return value.kind === "me" ? value.kind : `user:${value.username}`;
-}
 
 function escapePressed(event: KeyboardEvent): void {
   if (event.key !== "Escape" || event.defaultPrevented || props.asking || openFor.value === null) {
@@ -76,7 +72,7 @@ async function pick(line: PersonLine<Person>): Promise<void> {
     >
       <template #default="{ shown }">
         <ul role="menu" :aria-label="PERSON_MENU" class="min-h-0 overflow-y-auto">
-          <li v-for="line in shown" :key="keyOf(line.value)" role="none">
+          <li v-for="line in shown" :key="viewerKey(line.value)" role="none">
             <button
               type="button"
               role="menuitemradio"

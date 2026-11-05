@@ -11,10 +11,13 @@ import {
   type MergeRequestIid,
 } from "../ipc";
 import { dateTimeText } from "../mergeRequests";
+import { TURN_MARK } from "./mergeRequestPeopleLook";
 import MergeRequestPersonView from "./MergeRequestPersonView.vue";
 import { createMergeRequests, type MergeRequests } from "./mergeRequests";
 import { registerMergeRequests } from "./mergeRequestsStore";
 import type { Screen } from "./screen";
+
+const rowWidth = vi.hoisted(() => ({ px: Number.POSITIVE_INFINITY }));
 
 vi.mock("./tooltip", () => ({
   vTooltip: {
@@ -22,6 +25,14 @@ vi.mock("./tooltip", () => ({
   },
 }));
 vi.mock("./useMarkdown", () => ({ useMarkdownCode: () => undefined }));
+vi.mock("@vueuse/core", async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  useElementSize: () => ({
+    width: shallowRef(rowWidth.px),
+    height: shallowRef(0),
+    stop: () => undefined,
+  }),
+}));
 
 const NOW = Date.parse("2026-11-04T12:00:00Z");
 const PAUSE_MS = 400;
@@ -39,9 +50,10 @@ const P4 = 20;
 const P6 = 22;
 const P1_COMMENTS = 4;
 const P2_COMMENTS = 2;
-const TURN_MARK = "font-semibold text-primary";
 const CLAMP = "max-h-20 min-w-0 overflow-hidden leading-5";
-const WRITERS_ROW = "flex min-w-0 flex-1 items-center gap-1 overflow-hidden";
+const WRITERS_ROW = 'class="flex min-w-0 flex-1 items-center overflow-hidden" style="gap:4px;"';
+const NARROW_ROW_PX = 100;
+const PICTURE_SLOT = 'style="width:20px;height:20px;"';
 
 let slice: MergeRequests;
 
@@ -63,6 +75,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  rowWidth.px = Number.POSITIVE_INFINITY;
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -133,8 +146,7 @@ function writers(entry: string): string[] {
 /** The turn word and whether it carries the viewer's-turn look. */
 function turnOf(entry: string): string {
   const [, look = "", word = ""] =
-    [...entry.matchAll(/<span class="(?:([^"]*) )?ml-auto shrink-0">([^<]*)<\/span>/gu)].at(-1) ??
-    [];
+    [...entry.matchAll(/<span class="ml-auto shrink-0 ([^"]*)">([^<]*)<\/span>/gu)].at(-1) ?? [];
   return `${word.replaceAll("&#39;", "'")}${look === TURN_MARK ? " (marked)" : ""}`;
 }
 
@@ -182,6 +194,7 @@ test("the_writers_row_lists_the_later_writers_oldest_first_and_none_for_a_single
     (entry) => entry.discussion.earlier.length === 0,
   );
 
+  expect(entryOf(html, P1)).toContain(WRITERS_ROW);
   expect(writers(entryOf(html, P1))).toEqual(["Ben Okafor", "Chiara Rossi", "Dmitri Volkov"]);
   expect(writers(entryOf(html, P3))).toEqual(["Ben Okafor", "Anna Berg"]);
   expect(writers(entryOf(html, P6))).toEqual([
@@ -203,6 +216,21 @@ test("the_writers_row_lists_the_later_writers_oldest_first_and_none_for_a_single
   const lone = entryOf(html, Number(single?.discussion.id));
   expect(writers(lone)).toEqual([]);
   expect(lone).not.toContain(WRITERS_ROW);
+});
+
+test("a_narrow_writers_row_folds_the_oldest_into_a_chip_that_keeps_to_one_picture_slot", async () => {
+  await everyRowRead();
+  rowWidth.px = NARROW_ROW_PX;
+  const p6 = entryOf(await view(), P6);
+  const chip = /<span ([^>]*)>\+10<\/span>/u.exec(p6)?.[1] ?? "";
+
+  expect(writers(p6)).toEqual(["Dmitri Volkov", "Ben Okafor", "Chiara Rossi"]);
+  expect(chip).toContain(PICTURE_SLOT);
+  expect(chip).toContain("overflow-hidden");
+  expect(chip).toContain("whitespace-nowrap");
+  expect(chip).toContain('data-tooltip="10 more: Chiara Rossi, Dmitri Volkov, Anna Berg, Someone,');
+  const starterChipAndShown = 1 + 1 + writers(p6).length;
+  expect(p6.split(PICTURE_SLOT).length - 1).toBe(starterChipAndShown);
 });
 
 test("the_turn_word_reads_from_the_persons_side", async () => {
@@ -239,6 +267,9 @@ test("an_expanded_entry_shows_the_inline_thread_and_hides_the_clamp", async () =
   expect(p1).toContain('aria-label="Open on GitLab"');
   expect(p1).toContain("<textarea");
   expect(turnOf(p1)).toBe("Ben Okafor's turn");
+  const head = p1.slice(p1.indexOf("<header"), p1.indexOf("</header>"));
+  expect(turnOf(head)).toBe("Ben Okafor's turn");
+  expect(p1.split("Ben Okafor&#39;s turn")).toHaveLength(2);
   expect(p1).not.toContain(WRITERS_ROW);
   const p3 = entryOf(html, P3);
   expect(p3).toContain(CLAMP);

@@ -111,6 +111,7 @@ export {
   turnOf,
   turnSummaryText,
   turnText,
+  viewerKey,
   viewerOf,
   type DiscussionNote,
   type DiscussionPlace,

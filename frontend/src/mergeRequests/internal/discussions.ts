@@ -184,6 +184,10 @@ export function viewerAddressed(viewer: Viewer): string {
   return viewer.kind === "me" ? "you" : viewer.name;
 }
 
+export function viewerKey(value: ReviewFor | Viewer): string {
+  return value.kind === "me" ? value.kind : `user:${value.username}`;
+}
+
 /** A1/A2: `author` is the merge request's author; "author" reads "<displayName(author)>'s turn", "Author's turn"
  *  when null. Every other kind as today. */
 export function turnText(turn: Turn, viewer: Viewer, author: Person | null): string {

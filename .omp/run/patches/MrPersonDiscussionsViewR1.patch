@@ -1,0 +1,419 @@
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+index 848e57d..05281c9 100644
+--- a/frontend/src/mergeRequests/index.ts
++++ b/frontend/src/mergeRequests/index.ts
+@@ -111,6 +111,7 @@ export {
+   turnOf,
+   turnSummaryText,
+   turnText,
++  viewerKey,
+   viewerOf,
+   type DiscussionNote,
+   type DiscussionPlace,
+diff --git a/frontend/src/mergeRequests/internal/discussions.test.ts b/frontend/src/mergeRequests/internal/discussions.test.ts
+index 005e80c..e612e54 100644
+--- a/frontend/src/mergeRequests/internal/discussions.test.ts
++++ b/frontend/src/mergeRequests/internal/discussions.test.ts
+@@ -11,6 +11,7 @@ import {
+   turnOf,
+   turnSummaryText,
+   turnText,
++  viewerKey,
+   viewerOf,
+   type ListedRequest,
+   type Mention,
+@@ -344,6 +345,14 @@ test("viewer_name_is_the_display_name_else_the_username", () => {
+   });
+ });
+ 
++test("viewer_key_is_me_for_every_me_and_user_name_for_a_person", () => {
++  expect(viewerKey(ME_SAM)).toBe("me");
++  expect(viewerKey(NOBODY)).toBe("me");
++  expect(viewerKey({ kind: "me" })).toBe("me");
++  expect(viewerKey(AS_ANNA)).toBe("user:anna");
++  expect(viewerKey({ kind: "person", username: "anna" })).toBe("user:anna");
++});
++
+ test("a_file_place_reads_path_and_line_or_path_alone", () => {
+   expect(placeText({ kind: "overview" })).toBe("Overview");
+   expect(placeText({ kind: "file", path: "src/board/card.ts", line: 4 })).toBe(
+diff --git a/frontend/src/mergeRequests/internal/discussions.ts b/frontend/src/mergeRequests/internal/discussions.ts
+index 611fffa..d43647a 100644
+--- a/frontend/src/mergeRequests/internal/discussions.ts
++++ b/frontend/src/mergeRequests/internal/discussions.ts
+@@ -184,6 +184,10 @@ export function viewerAddressed(viewer: Viewer): string {
+   return viewer.kind === "me" ? "you" : viewer.name;
+ }
+ 
++export function viewerKey(value: ReviewFor | Viewer): string {
++  return value.kind === "me" ? value.kind : `user:${value.username}`;
++}
++
+ /** A1/A2: `author` is the merge request's author; "author" reads "<displayName(author)>'s turn", "Author's turn"
+  *  when null. Every other kind as today. */
+ export function turnText(turn: Turn, viewer: Viewer, author: Person | null): string {
+diff --git a/frontend/src/ui/MergeRequestDiscussions.vue b/frontend/src/ui/MergeRequestDiscussions.vue
+index 12c2ebe..247d00c 100644
+--- a/frontend/src/ui/MergeRequestDiscussions.vue
++++ b/frontend/src/ui/MergeRequestDiscussions.vue
+@@ -20,6 +20,7 @@ import {
+ } from "../mergeRequests";
+ import { unmarkedOf } from "./mergeRequestDiscussionRows";
+ import { useRowDiscussions, type DiscussionLoad } from "./mergeRequestDiscussions";
++import { TURN_MARK } from "./mergeRequestPeopleLook";
+ import MergeRequestPicture from "./MergeRequestPicture.vue";
+ import { isBeingRead } from "./mergeRequestsRefresh";
+ import { useMergeRequests } from "./mergeRequestsStore";
+@@ -42,8 +43,6 @@ type Words = { readonly place: string; readonly turn: string };
+ 
+ const props = defineProps<{ row: MergeRequestRow; now: number; asking: boolean }>();
+ 
+-const TURN_MARK = "font-semibold text-primary";
+-
+ const mergeRequests = useMergeRequests();
+ const { discussionDetails, viewer, openPage, reloads, thread } = mergeRequests;
+ const area = useTemplateRef<HTMLSpanElement>("area");
+diff --git a/frontend/src/ui/MergeRequestPersonEntry.vue b/frontend/src/ui/MergeRequestPersonEntry.vue
+index c2bb7f8..fde7701 100644
+--- a/frontend/src/ui/MergeRequestPersonEntry.vue
++++ b/frontend/src/ui/MergeRequestPersonEntry.vue
+@@ -1,4 +1,5 @@
+ <script setup lang="ts">
++import { createReusableTemplate } from "@vueuse/core";
+ import { computed, useTemplateRef } from "vue";
+ import Check from "~icons/lucide/check";
+ import ChevronDown from "~icons/lucide/chevron-down";
+@@ -14,6 +15,7 @@ import {
+   type Viewer,
+ } from "../mergeRequests";
+ import MergeRequestDescriptionBlocks from "./MergeRequestDescriptionBlocks.vue";
++import { TURN_MARK } from "./mergeRequestPeopleLook";
+ import type { PersonEntryShown } from "./mergeRequestPersonView";
+ import MergeRequestPicture from "./MergeRequestPicture.vue";
+ import { useMergeRequests } from "./mergeRequestsStore";
+@@ -38,8 +40,7 @@ const props = defineProps<{
+   thread: Thread | null;
+ }>();
+ 
+-const TURN_MARK = "font-semibold text-primary";
+-
++const [DefineStatus, ReuseStatus] = createReusableTemplate();
+ const { expandEntry, collapseEntry } = useMergeRequests();
+ const host = useTemplateRef<HTMLElement>("host");
+ const chevron = useTemplateRef<HTMLButtonElement>("chevron");
+@@ -78,6 +79,12 @@ function toggle(): void {
+ 
+ <template>
+   <article ref="host" tabindex="-1" class="flex gap-2 px-3 py-2 outline-none">
++    <DefineStatus>
++      <span v-if="entry.resolved" class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
++        ><Check class="size-4" aria-hidden="true" />{{ RESOLVED }}</span
++      >
++      <span v-else class="ml-auto shrink-0" :class="turn.look">{{ turn.text }}</span>
++    </DefineStatus>
+     <button
+       ref="chevron"
+       v-tooltip="chevronLabel"
+@@ -103,10 +110,7 @@ function toggle(): void {
+         >
+         <span class="shrink-0 text-fg-muted">{{ placeText(discussion.place) }}</span>
+         <template v-if="expanded">
+-          <span v-if="entry.resolved" class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
+-            ><Check class="size-4" aria-hidden="true" />{{ RESOLVED }}</span
+-          >
+-          <span v-else class="ml-auto shrink-0" :class="turn.look">{{ turn.text }}</span>
++          <ReuseStatus />
+           <span v-if="thread !== null" class="flex shrink-0 items-center gap-2">
+             <MergeRequestThreadButtons :thread="thread" @focus-host="focusHost" />
+           </span>
+@@ -129,10 +133,7 @@ function toggle(): void {
+         </div>
+         <div class="flex min-h-5 items-center gap-3">
+           <MergeRequestWriters :writers="writers" />
+-          <span v-if="entry.resolved" class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
+-            ><Check class="size-4" aria-hidden="true" />{{ RESOLVED }}</span
+-          >
+-          <span v-else class="ml-auto shrink-0" :class="turn.look">{{ turn.text }}</span>
++          <ReuseStatus />
+         </div>
+       </template>
+     </div>
+diff --git a/frontend/src/ui/MergeRequestPersonPicker.vue b/frontend/src/ui/MergeRequestPersonPicker.vue
+index 879da7c..be8638d 100644
+--- a/frontend/src/ui/MergeRequestPersonPicker.vue
++++ b/frontend/src/ui/MergeRequestPersonPicker.vue
+@@ -4,7 +4,7 @@ import { computed, useTemplateRef } from "vue";
+ import Check from "~icons/lucide/check";
+ 
+ import type { Person } from "../ipc";
+-import type { PersonLine, Viewer } from "../mergeRequests";
++import { viewerKey, type PersonLine, type Viewer } from "../mergeRequests";
+ import MergeRequestMenu from "./MergeRequestMenu.vue";
+ import MergeRequestPicture from "./MergeRequestPicture.vue";
+ import { PEOPLE, PERSON_MENU } from "./mergeRequestsText";
+@@ -25,10 +25,6 @@ useEventListener(window, "keydown", escapePressed);
+ 
+ const chosen = computed(() => props.lines.find((line) => line.chosen) ?? null);
+ 
+-function keyOf(value: Viewer): string {
+-  return value.kind === "me" ? value.kind : `user:${value.username}`;
+-}
+-
+ function escapePressed(event: KeyboardEvent): void {
+   if (event.key !== "Escape" || event.defaultPrevented || props.asking || openFor.value === null) {
+     return;
+@@ -76,7 +72,7 @@ async function pick(line: PersonLine<Person>): Promise<void> {
+     >
+       <template #default="{ shown }">
+         <ul role="menu" :aria-label="PERSON_MENU" class="min-h-0 overflow-y-auto">
+-          <li v-for="line in shown" :key="keyOf(line.value)" role="none">
++          <li v-for="line in shown" :key="viewerKey(line.value)" role="none">
+             <button
+               type="button"
+               role="menuitemradio"
+diff --git a/frontend/src/ui/MergeRequestPersonViewPage.test.ts b/frontend/src/ui/MergeRequestPersonViewPage.test.ts
+index 5e8ed83..c1eedcd 100644
+--- a/frontend/src/ui/MergeRequestPersonViewPage.test.ts
++++ b/frontend/src/ui/MergeRequestPersonViewPage.test.ts
+@@ -11,17 +11,28 @@ import {
+   type MergeRequestIid,
+ } from "../ipc";
+ import { dateTimeText } from "../mergeRequests";
++import { TURN_MARK } from "./mergeRequestPeopleLook";
+ import MergeRequestPersonView from "./MergeRequestPersonView.vue";
+ import { createMergeRequests, type MergeRequests } from "./mergeRequests";
+ import { registerMergeRequests } from "./mergeRequestsStore";
+ import type { Screen } from "./screen";
+ 
++const rowWidth = vi.hoisted(() => ({ px: Number.POSITIVE_INFINITY }));
++
+ vi.mock("./tooltip", () => ({
+   vTooltip: {
+     getSSRProps: ({ value }: { value: string | null }) => ({ "data-tooltip": value }),
+   },
+ }));
+ vi.mock("./useMarkdown", () => ({ useMarkdownCode: () => undefined }));
++vi.mock("@vueuse/core", async (original) => ({
++  ...(await original<Record<string, unknown>>()),
++  useElementSize: () => ({
++    width: shallowRef(rowWidth.px),
++    height: shallowRef(0),
++    stop: () => undefined,
++  }),
++}));
+ 
+ const NOW = Date.parse("2026-11-04T12:00:00Z");
+ const PAUSE_MS = 400;
+@@ -39,9 +50,10 @@ const P4 = 20;
+ const P6 = 22;
+ const P1_COMMENTS = 4;
+ const P2_COMMENTS = 2;
+-const TURN_MARK = "font-semibold text-primary";
+ const CLAMP = "max-h-20 min-w-0 overflow-hidden leading-5";
+-const WRITERS_ROW = "flex min-w-0 flex-1 items-center gap-1 overflow-hidden";
++const WRITERS_ROW = 'class="flex min-w-0 flex-1 items-center overflow-hidden" style="gap:4px;"';
++const NARROW_ROW_PX = 100;
++const PICTURE_SLOT = 'style="width:20px;height:20px;"';
+ 
+ let slice: MergeRequests;
+ 
+@@ -63,6 +75,7 @@ beforeEach(() => {
+ });
+ 
+ afterEach(() => {
++  rowWidth.px = Number.POSITIVE_INFINITY;
+   vi.useRealTimers();
+   vi.unstubAllGlobals();
+   vi.restoreAllMocks();
+@@ -133,8 +146,7 @@ function writers(entry: string): string[] {
+ /** The turn word and whether it carries the viewer's-turn look. */
+ function turnOf(entry: string): string {
+   const [, look = "", word = ""] =
+-    [...entry.matchAll(/<span class="(?:([^"]*) )?ml-auto shrink-0">([^<]*)<\/span>/gu)].at(-1) ??
+-    [];
++    [...entry.matchAll(/<span class="ml-auto shrink-0 ([^"]*)">([^<]*)<\/span>/gu)].at(-1) ?? [];
+   return `${word.replaceAll("&#39;", "'")}${look === TURN_MARK ? " (marked)" : ""}`;
+ }
+ 
+@@ -182,6 +194,7 @@ test("the_writers_row_lists_the_later_writers_oldest_first_and_none_for_a_single
+     (entry) => entry.discussion.earlier.length === 0,
+   );
+ 
++  expect(entryOf(html, P1)).toContain(WRITERS_ROW);
+   expect(writers(entryOf(html, P1))).toEqual(["Ben Okafor", "Chiara Rossi", "Dmitri Volkov"]);
+   expect(writers(entryOf(html, P3))).toEqual(["Ben Okafor", "Anna Berg"]);
+   expect(writers(entryOf(html, P6))).toEqual([
+@@ -205,6 +218,21 @@ test("the_writers_row_lists_the_later_writers_oldest_first_and_none_for_a_single
+   expect(lone).not.toContain(WRITERS_ROW);
+ });
+ 
++test("a_narrow_writers_row_folds_the_oldest_into_a_chip_that_keeps_to_one_picture_slot", async () => {
++  await everyRowRead();
++  rowWidth.px = NARROW_ROW_PX;
++  const p6 = entryOf(await view(), P6);
++  const chip = /<span ([^>]*)>\+10<\/span>/u.exec(p6)?.[1] ?? "";
++
++  expect(writers(p6)).toEqual(["Dmitri Volkov", "Ben Okafor", "Chiara Rossi"]);
++  expect(chip).toContain(PICTURE_SLOT);
++  expect(chip).toContain("overflow-hidden");
++  expect(chip).toContain("whitespace-nowrap");
++  expect(chip).toContain('data-tooltip="10 more: Chiara Rossi, Dmitri Volkov, Anna Berg, Someone,');
++  const starterChipAndShown = 1 + 1 + writers(p6).length;
++  expect(p6.split(PICTURE_SLOT).length - 1).toBe(starterChipAndShown);
++});
++
+ test("the_turn_word_reads_from_the_persons_side", async () => {
+   await everyRowRead();
+   const mine = await view();
+@@ -239,6 +267,9 @@ test("an_expanded_entry_shows_the_inline_thread_and_hides_the_clamp", async () =
+   expect(p1).toContain('aria-label="Open on GitLab"');
+   expect(p1).toContain("<textarea");
+   expect(turnOf(p1)).toBe("Ben Okafor's turn");
++  const head = p1.slice(p1.indexOf("<header"), p1.indexOf("</header>"));
++  expect(turnOf(head)).toBe("Ben Okafor's turn");
++  expect(p1.split("Ben Okafor&#39;s turn")).toHaveLength(2);
+   expect(p1).not.toContain(WRITERS_ROW);
+   const p3 = entryOf(html, P3);
+   expect(p3).toContain(CLAMP);
+diff --git a/frontend/src/ui/MergeRequestPicture.vue b/frontend/src/ui/MergeRequestPicture.vue
+index 553bb33..76a07c7 100644
+--- a/frontend/src/ui/MergeRequestPicture.vue
++++ b/frontend/src/ui/MergeRequestPicture.vue
+@@ -4,20 +4,21 @@ import UserRound from "~icons/lucide/user-round";
+ 
+ import type { Person } from "../ipc";
+ import { initials, pictureHue } from "../mergeRequests";
++import { pictureBox, type PictureSize } from "./mergeRequestPeopleLook";
+ 
+-type PictureSize = "row" | "stack" | "box";
+ type Shown = "loading" | "loaded" | "failed";
+ 
+ const props = defineProps<{ person: Person | null; size: PictureSize }>();
+ 
+-const SIZES: Readonly<Record<PictureSize, string>> = {
+-  row: "size-6 text-[0.625rem]",
+-  stack: "size-5 text-[0.5rem]",
+-  box: "size-5 text-[0.5rem]",
++const LETTERS: Readonly<Record<PictureSize, string>> = {
++  row: "text-[0.625rem]",
++  stack: "text-[0.5rem]",
++  box: "text-[0.5rem]",
+ };
+ 
+ const shown = shallowRef<Shown>("loading");
+ 
++const box = computed(() => pictureBox(props.size));
+ const picture = computed(() => props.person?.picture ?? null);
+ const letters = computed(() => (props.person === null ? "" : initials(props.person)));
+ const hue = computed(() => ({
+@@ -30,11 +31,12 @@ watch(picture, () => {
+ </script>
+ 
+ <template>
+-  <UserRound v-if="person === null" class="shrink-0 text-fg-muted" :class="SIZES[size]" />
++  <UserRound v-if="person === null" class="shrink-0 text-fg-muted" :style="box" />
+   <span
+     v-else
+     class="relative inline-flex shrink-0 overflow-hidden rounded-full font-semibold"
+-    :class="SIZES[size]"
++    :class="LETTERS[size]"
++    :style="box"
+   >
+     <span
+       class="absolute inset-0 flex items-center justify-center bg-primary text-on-primary"
+diff --git a/frontend/src/ui/MergeRequestReviewMode.vue b/frontend/src/ui/MergeRequestReviewMode.vue
+index 3a7e3c9..7772fe5 100644
+--- a/frontend/src/ui/MergeRequestReviewMode.vue
++++ b/frontend/src/ui/MergeRequestReviewMode.vue
+@@ -3,7 +3,7 @@ import { computed, useTemplateRef } from "vue";
+ import Check from "~icons/lucide/check";
+ import UserRoundSearch from "~icons/lucide/user-round-search";
+ 
+-import { filterName, type Choice, type ReviewFor } from "../mergeRequests";
++import { filterName, viewerKey, type Choice, type ReviewFor } from "../mergeRequests";
+ import MergeRequestMenu from "./MergeRequestMenu.vue";
+ import { REVIEW_MODE } from "./mergeRequestsText";
+ import { vTooltip } from "./tooltip";
+@@ -30,10 +30,6 @@ const box = useTemplateRef("box");
+ const menu = computed(() => box.value?.menu ?? null);
+ const narrowBox = computed(() => box.value?.narrowBox ?? null);
+ defineExpose({ opener, menu, narrowBox });
+-
+-function keyOf(value: ReviewFor): string {
+-  return value.kind === "me" ? value.kind : `user:${value.username}`;
+-}
+ </script>
+ 
+ <template>
+@@ -65,7 +61,7 @@ function keyOf(value: ReviewFor): string {
+     >
+       <template #default="{ shown }">
+         <ul role="menu" :aria-label="REVIEW_MODE" class="min-h-0 overflow-y-auto">
+-          <li v-for="choice in shown" :key="keyOf(choice.value)" role="none">
++          <li v-for="choice in shown" :key="viewerKey(choice.value)" role="none">
+             <button
+               type="button"
+               role="menuitemradio"
+diff --git a/frontend/src/ui/MergeRequestWriters.vue b/frontend/src/ui/MergeRequestWriters.vue
+index c75c5f1..0b663a3 100644
+--- a/frontend/src/ui/MergeRequestWriters.vue
++++ b/frontend/src/ui/MergeRequestWriters.vue
+@@ -4,20 +4,22 @@ import { computed, useTemplateRef } from "vue";
+ 
+ import type { Person } from "../ipc";
+ import { foldedWriters, moreText, noteAuthorName } from "../mergeRequests";
++import { PICTURE_PX, pictureBox } from "./mergeRequestPeopleLook";
+ import MergeRequestPicture from "./MergeRequestPicture.vue";
+ import { foldedWritersText } from "./mergeRequestsText";
+ import { vTooltip } from "./tooltip";
+ 
+ const props = defineProps<{ writers: readonly (Person | null)[] }>();
+ 
+-const PICTURE_PX = 20;
+ const GAP_PX = 4;
++const ROW = { gap: `${GAP_PX}px` };
++const SLOT = pictureBox("box");
+ 
+ const row = useTemplateRef<HTMLDivElement>("row");
+ const { width } = useElementSize(row, { width: Number.POSITIVE_INFINITY, height: 0 });
+ 
+ const fold = computed(() =>
+-  foldedWriters(props.writers, Math.floor((width.value + GAP_PX) / (PICTURE_PX + GAP_PX))),
++  foldedWriters(props.writers, Math.floor((width.value + GAP_PX) / (PICTURE_PX.box + GAP_PX))),
+ );
+ const more = computed(() => {
+   const { folded } = fold.value;
+@@ -31,12 +33,14 @@ const more = computed(() => {
+   <div
+     v-if="writers.length > 0"
+     ref="row"
+-    class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
++    class="flex min-w-0 flex-1 items-center overflow-hidden"
++    :style="ROW"
+   >
+     <span
+       v-if="more !== null"
+       v-tooltip="more.tip"
+-      class="flex h-5 min-w-5 shrink-0 items-center justify-center text-xs text-fg-muted"
++      class="flex shrink-0 items-center justify-center overflow-hidden text-[0.625rem] whitespace-nowrap text-fg-muted"
++      :style="SLOT"
+       >{{ more.text }}</span
+     >
+     <span
+diff --git a/frontend/src/ui/mergeRequestPeopleLook.ts b/frontend/src/ui/mergeRequestPeopleLook.ts
+new file mode 100644
+index 0000000..61d344c
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestPeopleLook.ts
+@@ -0,0 +1,11 @@
++export type PictureSize = "row" | "stack" | "box";
++type Box = { readonly width: string; readonly height: string };
++
++export const PICTURE_PX: Readonly<Record<PictureSize, number>> = { row: 24, stack: 20, box: 20 };
++
++export const TURN_MARK = "font-semibold text-primary";
++
++export function pictureBox(size: PictureSize): Box {
++  const side = `${PICTURE_PX[size]}px`;
++  return { width: side, height: side };
++}

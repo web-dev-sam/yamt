@@ -1,0 +1,2 @@
+just mutants HEAD → Stryker on discussions.ts + mergeRequestPeopleLook.ts: 224 killed, 12 survived, 4 no coverage; mergeRequestPeopleLook.ts 100% (3/3)
+

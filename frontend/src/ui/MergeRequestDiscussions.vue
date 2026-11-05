@@ -20,6 +20,7 @@ import {
 } from "../mergeRequests";
 import { unmarkedOf } from "./mergeRequestDiscussionRows";
 import { useRowDiscussions, type DiscussionLoad } from "./mergeRequestDiscussions";
+import { TURN_MARK } from "./mergeRequestPeopleLook";
 import MergeRequestPicture from "./MergeRequestPicture.vue";
 import { isBeingRead } from "./mergeRequestsRefresh";
 import { useMergeRequests } from "./mergeRequestsStore";
@@ -41,8 +42,6 @@ type Header = { readonly text: string; readonly failed: boolean };
 type Words = { readonly place: string; readonly turn: string };
 
 const props = defineProps<{ row: MergeRequestRow; now: number; asking: boolean }>();
-
-const TURN_MARK = "font-semibold text-primary";
 
 const mergeRequests = useMergeRequests();
 const { discussionDetails, viewer, openPage, reloads, thread } = mergeRequests;

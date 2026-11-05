@@ -11,6 +11,7 @@ import {
   turnOf,
   turnSummaryText,
   turnText,
+  viewerKey,
   viewerOf,
   type ListedRequest,
   type Mention,
@@ -342,6 +343,14 @@ test("viewer_name_is_the_display_name_else_the_username", () => {
     username: "zoe",
     name: "zoe",
   });
+});
+
+test("viewer_key_is_me_for_every_me_and_user_name_for_a_person", () => {
+  expect(viewerKey(ME_SAM)).toBe("me");
+  expect(viewerKey(NOBODY)).toBe("me");
+  expect(viewerKey({ kind: "me" })).toBe("me");
+  expect(viewerKey(AS_ANNA)).toBe("user:anna");
+  expect(viewerKey({ kind: "person", username: "anna" })).toBe("user:anna");
 });
 
 test("a_file_place_reads_path_and_line_or_path_alone", () => {

@@ -3,7 +3,7 @@ import { computed, useTemplateRef } from "vue";
 import Check from "~icons/lucide/check";
 import UserRoundSearch from "~icons/lucide/user-round-search";
 
-import { filterName, type Choice, type ReviewFor } from "../mergeRequests";
+import { filterName, viewerKey, type Choice, type ReviewFor } from "../mergeRequests";
 import MergeRequestMenu from "./MergeRequestMenu.vue";
 import { REVIEW_MODE } from "./mergeRequestsText";
 import { vTooltip } from "./tooltip";
@@ -30,10 +30,6 @@ const box = useTemplateRef("box");
 const menu = computed(() => box.value?.menu ?? null);
 const narrowBox = computed(() => box.value?.narrowBox ?? null);
 defineExpose({ opener, menu, narrowBox });
-
-function keyOf(value: ReviewFor): string {
-  return value.kind === "me" ? value.kind : `user:${value.username}`;
-}
 </script>
 
 <template>
@@ -65,7 +61,7 @@ function keyOf(value: ReviewFor): string {
     >
       <template #default="{ shown }">
         <ul role="menu" :aria-label="REVIEW_MODE" class="min-h-0 overflow-y-auto">
-          <li v-for="choice in shown" :key="keyOf(choice.value)" role="none">
+          <li v-for="choice in shown" :key="viewerKey(choice.value)" role="none">
             <button
               type="button"
               role="menuitemradio"

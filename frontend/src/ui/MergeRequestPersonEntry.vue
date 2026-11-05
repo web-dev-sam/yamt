@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { createReusableTemplate } from "@vueuse/core";
 import { computed, useTemplateRef } from "vue";
 import Check from "~icons/lucide/check";
 import ChevronDown from "~icons/lucide/chevron-down";
@@ -14,6 +15,7 @@ import {
   type Viewer,
 } from "../mergeRequests";
 import MergeRequestDescriptionBlocks from "./MergeRequestDescriptionBlocks.vue";
+import { TURN_MARK } from "./mergeRequestPeopleLook";
 import type { PersonEntryShown } from "./mergeRequestPersonView";
 import MergeRequestPicture from "./MergeRequestPicture.vue";
 import { useMergeRequests } from "./mergeRequestsStore";
@@ -38,8 +40,7 @@ const props = defineProps<{
   thread: Thread | null;
 }>();
 
-const TURN_MARK = "font-semibold text-primary";
-
+const [DefineStatus, ReuseStatus] = createReusableTemplate();
 const { expandEntry, collapseEntry } = useMergeRequests();
 const host = useTemplateRef<HTMLElement>("host");
 const chevron = useTemplateRef<HTMLButtonElement>("chevron");
@@ -78,6 +79,12 @@ function toggle(): void {
 
 <template>
   <article ref="host" tabindex="-1" class="flex gap-2 px-3 py-2 outline-none">
+    <DefineStatus>
+      <span v-if="entry.resolved" class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
+        ><Check class="size-4" aria-hidden="true" />{{ RESOLVED }}</span
+      >
+      <span v-else class="ml-auto shrink-0" :class="turn.look">{{ turn.text }}</span>
+    </DefineStatus>
     <button
       ref="chevron"
       v-tooltip="chevronLabel"
@@ -103,10 +110,7 @@ function toggle(): void {
         >
         <span class="shrink-0 text-fg-muted">{{ placeText(discussion.place) }}</span>
         <template v-if="expanded">
-          <span v-if="entry.resolved" class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
-            ><Check class="size-4" aria-hidden="true" />{{ RESOLVED }}</span
-          >
-          <span v-else class="ml-auto shrink-0" :class="turn.look">{{ turn.text }}</span>
+          <ReuseStatus />
           <span v-if="thread !== null" class="flex shrink-0 items-center gap-2">
             <MergeRequestThreadButtons :thread="thread" @focus-host="focusHost" />
           </span>
@@ -129,10 +133,7 @@ function toggle(): void {
         </div>
         <div class="flex min-h-5 items-center gap-3">
           <MergeRequestWriters :writers="writers" />
-          <span v-if="entry.resolved" class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
-            ><Check class="size-4" aria-hidden="true" />{{ RESOLVED }}</span
-          >
-          <span v-else class="ml-auto shrink-0" :class="turn.look">{{ turn.text }}</span>
+          <ReuseStatus />
         </div>
       </template>
     </div>

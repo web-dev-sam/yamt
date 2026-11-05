@@ -4,20 +4,21 @@ import UserRound from "~icons/lucide/user-round";
 
 import type { Person } from "../ipc";
 import { initials, pictureHue } from "../mergeRequests";
+import { pictureBox, type PictureSize } from "./mergeRequestPeopleLook";
 
-type PictureSize = "row" | "stack" | "box";
 type Shown = "loading" | "loaded" | "failed";
 
 const props = defineProps<{ person: Person | null; size: PictureSize }>();
 
-const SIZES: Readonly<Record<PictureSize, string>> = {
-  row: "size-6 text-[0.625rem]",
-  stack: "size-5 text-[0.5rem]",
-  box: "size-5 text-[0.5rem]",
+const LETTERS: Readonly<Record<PictureSize, string>> = {
+  row: "text-[0.625rem]",
+  stack: "text-[0.5rem]",
+  box: "text-[0.5rem]",
 };
 
 const shown = shallowRef<Shown>("loading");
 
+const box = computed(() => pictureBox(props.size));
 const picture = computed(() => props.person?.picture ?? null);
 const letters = computed(() => (props.person === null ? "" : initials(props.person)));
 const hue = computed(() => ({
@@ -30,11 +31,12 @@ watch(picture, () => {
 </script>
 
 <template>
-  <UserRound v-if="person === null" class="shrink-0 text-fg-muted" :class="SIZES[size]" />
+  <UserRound v-if="person === null" class="shrink-0 text-fg-muted" :style="box" />
   <span
     v-else
     class="relative inline-flex shrink-0 overflow-hidden rounded-full font-semibold"
-    :class="SIZES[size]"
+    :class="LETTERS[size]"
+    :style="box"
   >
     <span
       class="absolute inset-0 flex items-center justify-center bg-primary text-on-primary"
