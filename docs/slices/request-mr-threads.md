@@ -187,6 +187,9 @@ Starting a new discussion; editing or deleting comments; reactions (emoji); a Ma
 `@` completion); the diff lines a file discussion sits on; resolved discussions in the box beyond C10; approving or
 the review's state on submit; live updates without a reload; the description panel's other rules; sized videos.
 
+`@` completion was reopened by `request-mr-mentions.md` (plan #191): the reply field offers people; the rest of a
+Markdown editor stays a non-goal.
+
 ## Reopens (DR4: the owner's changed requirement)
 
 - Discussions request rule 2 (last comment only), rule 3 (turn words) and rule 5 (plain text) for the thread panel,

@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `a971493d` (table alignment: the reducer's `element.rs` `align` reads `align="center"|"right"` first, else the sanitizer's `text-align: center|right`, else `start`; `localPreview` gives each cell its column's Markdown alignment through `CELL_ALIGN`). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `e6eadfc0` (`@` completion: core `mentions.ts`, `useMentions` over the pure `mentionStep` in the reply field and the range Post box, `MergeRequestMentionList.vue` placed by `textareaCaret.ts`, the slice's second people search `mentionSearch`). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 
