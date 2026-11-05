@@ -195,8 +195,9 @@ export const MENTION_PEOPLE = "People to mention";
 ## Change
 
 1. **Measure first (design §2.7).** Before the rest, wire the smallest pick into the reply field. In the WebKit fixture, type `@an`, then Down and Enter, and confirm `@anna `. Press Ctrl+Z and `read` the field's value and `selectionStart`.
-   - `@an` and 3 → keep `execCommand("insertText")`.
-   - Anything else, or `execCommand` returning false → use `setRangeText(insert, from, to, "end")` plus a bubbling `input` event, and put the measurement in `open_risks`.
+   - `@an` restored in one undo step → keep `execCommand("insertText")`.
+   - Not restored, or `execCommand` returning false → use `setRangeText(insert, from, to, "end")` plus a bubbling `input` event, and put the measurement in `open_risks`.
+   - Measured 2026-11-05 (`MrMentionsList`, WebKit fixture, undo through `execCommand("undo")` since the driver's Ctrl+Z does not reach WebKit's undo): insertText's undo gives `@an` selected (0–3) in one step; setRangeText's undo corrupts the text (`hello @anna @an`). insertText ships; the orchestrator accepted the selection.
    - Ship exactly one path. Paste the measurement in `smoke_evidence`.
 2. `menuKeys.ts`: extract `wrappedIndex` from `stepMenuItem`, with no change in behaviour.
 3. `textareaCaret.ts`, per design §2.5. `mirrorStyle` is pure:

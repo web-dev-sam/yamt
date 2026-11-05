@@ -54,7 +54,7 @@ Start: `just app-session start-fixture --name mmv --diff --mr list --open-mr --s
    - the list's top is within 2 px of the bottom of the `@`'s line;
    - its left is within 4 px of the `@`'s x (the `hello ` width measured with a canvas `measureText` in the field's computed font).
 4. **Inside the panel.** With 12 lines typed and `@an` on the last: the list's rect is inside the panel's rect.
-5. **Pick and undo.** Down, then Enter → the field reads `@anna `, `selectionStart` 6, no list. Ctrl+Z → `@an` (one step) or, if the list slice measured otherwise, what its `open_risks` states. Click a line → that person written.
+5. **Pick and undo.** Down, then Enter → the field reads `@anna `, `selectionStart` 6, no list. Undo through `document.execCommand("undo")` (the driver's Ctrl+Z does not reach WebKit's undo, measured by the list slice) → `@an` selected (0–3), one step. Click a line → that person written.
 6. **Escape (RK73).** `@an`, Escape → the list closes, the panel stays open, focus is in the field. Escape again → the panel closes. The page stays (#189).
 7. **Send keys.**
    - Ctrl+Enter with the list open → one `fixture_write { kind: comment }`, and no list.
@@ -99,4 +99,5 @@ For each step: pass or fail, with the observed words, the `read` results, the lo
 
 1. Shift over the discussion's row. In the reply field type `@` → the merge request's people at once. Type two letters of a project member other than yourself → that member is listed.
 2. Pick them with Down/Enter or a click, and write a short reply. "Add comment" → on GitLab the comment shows `@username` as a link, and that person has a to-do ("mentioned you"). A self-mention makes no to-do on GitLab.
-3. Optional (range window): line a range up with the merge request, open the merge-request page once, then in "Text to post" type `@` → its people. Queue and Send → the draft carries the mention. It notifies the person when you publish the review on GitLab `[INFERENCE]`.
+3. In the reply field pick a person, then press Ctrl+Z once → the typed `@` word comes back (selected); the driver could not press a real Ctrl+Z.
+4. Optional (range window): line a range up with the merge request, open the merge-request page once, then in "Text to post" type `@` → its people. Queue and Send → the draft carries the mention. It notifies the person when you publish the review on GitLab `[INFERENCE]`.
