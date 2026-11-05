@@ -43,13 +43,19 @@ export type RowPeopleAsks = {
   readonly notDone: readonly NotDone[];
 };
 
-export type PeopleChanges = {
-  readonly peopleSearch: Readonly<ShallowRef<PeopleSearch>>;
-  readonly peopleAsks: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, RowPeopleAsks>>>;
-  /** core searchedText(typed) "" → empty at once; else searching, asked SEARCH_PAUSE_MS after the last call. */
-  searchPeople(typed: string): void;
+/** One search over GitLab's people (plan §2 rows 169, 191): SEARCH_PAUSE_MS after the last `search`, newest answer only. */
+export type PeopleSearcher = {
+  readonly state: Readonly<ShallowRef<PeopleSearch>>;
+  /** core searchedText(typed) "" → empty at once; the same text as a `searching`/`found` state → nothing; else
+   *  searching (the last people kept), asked SEARCH_PAUSE_MS after the last call. */
+  search(typed: string): void;
   /** empty; a pending or running search's answer is dropped. */
-  endPeopleSearch(): void;
+  end(): void;
+};
+
+export type PeopleChanges = {
+  readonly peopleSearch: PeopleSearcher;
+  readonly peopleAsks: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, RowPeopleAsks>>>;
   /** Queues `change` (an equal one already queued: nothing); settles when it is answered. */
   changePeople(iid: MergeRequestIid, change: PeopleChange): Promise<void>;
   /** Request rule 9 (the owner's answer, board item 2246): the rows whose people box is open. */
@@ -93,16 +99,14 @@ function searchAnswer(text: string, outcome: Outcome<PeopleSearchReply>): People
     : { kind: "refused", text, reply };
 }
 
-function searchOf(
-  source: MergeRequestSource,
-): Pick<PeopleChanges, "peopleSearch" | "searchPeople" | "endPeopleSearch"> {
-  const search = shallowRef<PeopleSearch>(EMPTY);
+export function createPeopleSearch(source: MergeRequestSource): PeopleSearcher {
+  const state = shallowRef<PeopleSearch>(EMPTY);
   let calls = 0;
   async function ask(text: string): Promise<void> {
     const sent = calls;
     const outcome = await attempt(() => source.searchPeople(text));
     if (sent === calls) {
-      search.value = searchAnswer(text, outcome);
+      state.value = searchAnswer(text, outcome);
     }
   }
   let pause: number | undefined;
@@ -111,20 +115,24 @@ function searchOf(
     calls += 1;
   }
   return {
-    peopleSearch: search,
-    searchPeople: (typed) => {
-      stop();
+    state,
+    search: (typed) => {
       const text = searchedText(typed);
-      if (text === "") {
-        search.value = EMPTY;
+      const shown = state.value;
+      if ((shown.kind === "searching" || shown.kind === "found") && shown.text === text) {
         return;
       }
-      search.value = { kind: "searching", text, people: shownPeople(search.value) };
+      stop();
+      if (text === "") {
+        state.value = EMPTY;
+        return;
+      }
+      state.value = { kind: "searching", text, people: shownPeople(shown) };
       pause = setTimeout(() => void ask(text), SEARCH_PAUSE_MS);
     },
-    endPeopleSearch: () => {
+    end: () => {
       stop();
-      search.value = EMPTY;
+      state.value = EMPTY;
     },
   };
 }
@@ -209,7 +217,7 @@ function boxesOf(
 export function createPeopleChanges(deps: Deps): PeopleChanges {
   const asks: Asks = shallowRef(new Map());
   return {
-    ...searchOf(deps.source),
+    peopleSearch: createPeopleSearch(deps.source),
     peopleAsks: asks,
     ...changesOf(deps, asks),
     ...boxesOf(asks),

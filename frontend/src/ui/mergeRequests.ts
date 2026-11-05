@@ -23,7 +23,12 @@ import {
 import { createDueDates, type DueDates } from "./mergeRequestDueDates";
 import { createJobLogs, type JobLogs } from "./mergeRequestJobLogs";
 import { createLinks, linksOf, type LinkQueue, type Links } from "./mergeRequestLinks";
-import { createPeopleChanges, type PeopleChanges } from "./mergeRequestPeople";
+import {
+  createPeopleChanges,
+  createPeopleSearch,
+  type PeopleChanges,
+  type PeopleSearcher,
+} from "./mergeRequestPeople";
 import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
 import { loadList, type ListLoad, type ListState } from "./mergeRequestsList";
 import { createRefreshes, type Refreshes } from "./mergeRequestsRefresh";
@@ -57,6 +62,8 @@ export type MergeRequests = RowActions &
   Shown &
   Refreshes &
   PeopleChanges & {
+    /** The mention list's own search (request rule 6): a second instance, never the people box's. */
+    readonly mentionSearch: PeopleSearcher;
     readonly project: Readonly<ShallowRef<GitLabProject>>;
     readonly me: Readonly<ShallowRef<string | null>>;
     readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
@@ -279,6 +286,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     openChanges: (iid) => openChanges(state, iid),
     ...state.rowActions,
     ...people,
+    mentionSearch: createPeopleSearch(deps.source),
     ...createJobLogs(deps),
     ...createDescriptions(deps),
     ...discussionsOf(state.discussionQueue),

@@ -1,0 +1,3 @@
+just mutants HEAD → 99.32% (293 killed, 2 survived, 0 no-cov) over mergeRequestPeople.ts and mergeRequests.ts
+src/ui/mergeRequestPeople.ts:115 `calls += 1` → `calls -= 1`: equivalent. `calls` is only compared for equality with a snapshot, so any step that changes it drops stale answers the same way.
+src/ui/mergeRequests.ts:146 `listing.kind === "done"` → true: not a changed line. It is existing code in show(), mutated only because the file was touched.

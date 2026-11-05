@@ -103,7 +103,7 @@ async function settled(): Promise<void> {
 }
 
 async function typed(live: Rig, text: string): Promise<void> {
-  live.slice.searchPeople(text);
+  live.slice.peopleSearch.search(text);
   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
 }
 
@@ -119,14 +119,18 @@ test("typing_waits_250_ms_then_asks_once_with_the_last_text", async () => {
   const live = rig();
   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
   expect(live.searches).toEqual([]);
-  live.slice.searchPeople("b");
+  live.slice.peopleSearch.search("b");
   await vi.advanceTimersByTimeAsync(100);
-  live.slice.searchPeople("be");
+  live.slice.peopleSearch.search("be");
   await vi.advanceTimersByTimeAsync(100);
-  live.slice.searchPeople(" @ben ");
+  live.slice.peopleSearch.search(" @ben ");
   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS - 1);
   expect(live.searches).toEqual([]);
-  expect(live.slice.peopleSearch.value).toEqual({ kind: "searching", text: "ben", people: [] });
+  expect(live.slice.peopleSearch.state.value).toEqual({
+    kind: "searching",
+    text: "ben",
+    people: [],
+  });
   await vi.advanceTimersByTimeAsync(1);
   expect(live.searches.map((call) => call.text)).toEqual(["ben"]);
   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
@@ -139,30 +143,42 @@ test("an_older_search_answer_is_dropped_once_a_newer_search_was_sent", async () 
   await typed(live, "an");
   at(live.searches, 0).answer(found([BEN]));
   await settled();
-  expect(live.slice.peopleSearch.value).toEqual({ kind: "searching", text: "an", people: [] });
+  expect(live.slice.peopleSearch.state.value).toEqual({
+    kind: "searching",
+    text: "an",
+    people: [],
+  });
   at(live.searches, 1).answer(found([ANNA]));
   await settled();
-  expect(live.slice.peopleSearch.value).toEqual({ kind: "found", text: "an", people: [ANNA] });
+  expect(live.slice.peopleSearch.state.value).toEqual({
+    kind: "found",
+    text: "an",
+    people: [ANNA],
+  });
 });
 
 test("an_answer_after_more_typing_is_dropped", async () => {
   const live = rig();
   await typed(live, "a");
-  live.slice.searchPeople("an");
+  live.slice.peopleSearch.search("an");
   at(live.searches, 0).answer(found([BEN]));
   await settled();
-  expect(live.slice.peopleSearch.value).toEqual({ kind: "searching", text: "an", people: [] });
+  expect(live.slice.peopleSearch.state.value).toEqual({
+    kind: "searching",
+    text: "an",
+    people: [],
+  });
   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
   expect(live.searches.map((call) => call.text)).toEqual(["a", "an"]);
 });
 
 test("an_empty_or_at_only_text_shows_the_suggestions_and_asks_nothing", async () => {
   const live = rig();
-  live.slice.searchPeople("a");
-  live.slice.searchPeople(" @ ");
-  expect(live.slice.peopleSearch.value).toEqual({ kind: "empty" });
-  live.slice.searchPeople("");
-  expect(live.slice.peopleSearch.value).toEqual({ kind: "empty" });
+  live.slice.peopleSearch.search("a");
+  live.slice.peopleSearch.search(" @ ");
+  expect(live.slice.peopleSearch.state.value).toEqual({ kind: "empty" });
+  live.slice.peopleSearch.search("");
+  expect(live.slice.peopleSearch.state.value).toEqual({ kind: "empty" });
   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
   expect(live.searches).toEqual([]);
 });
@@ -170,14 +186,14 @@ test("an_empty_or_at_only_text_shows_the_suggestions_and_asks_nothing", async ()
 test("ending_the_search_drops_the_answer_in_flight", async () => {
   const live = rig();
   await typed(live, "a");
-  live.slice.endPeopleSearch();
-  expect(live.slice.peopleSearch.value).toEqual({ kind: "empty" });
+  live.slice.peopleSearch.end();
+  expect(live.slice.peopleSearch.state.value).toEqual({ kind: "empty" });
   at(live.searches, 0).answer(found([ANNA]));
   await settled();
-  expect(live.slice.peopleSearch.value).toEqual({ kind: "empty" });
+  expect(live.slice.peopleSearch.state.value).toEqual({ kind: "empty" });
 
-  live.slice.searchPeople("b");
-  live.slice.endPeopleSearch();
+  live.slice.peopleSearch.search("b");
+  live.slice.peopleSearch.end();
   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
   expect(live.searches).toHaveLength(1);
 });
@@ -187,14 +203,14 @@ test("searching_keeps_the_last_answers_people", async () => {
   await typed(live, "a");
   at(live.searches, 0).answer(found([ANNA, BEN]));
   await settled();
-  live.slice.searchPeople("an");
-  expect(live.slice.peopleSearch.value).toEqual({
+  live.slice.peopleSearch.search("an");
+  expect(live.slice.peopleSearch.state.value).toEqual({
     kind: "searching",
     text: "an",
     people: [ANNA, BEN],
   });
-  live.slice.searchPeople("ann");
-  expect(live.slice.peopleSearch.value).toEqual({
+  live.slice.peopleSearch.search("ann");
+  expect(live.slice.peopleSearch.state.value).toEqual({
     kind: "searching",
     text: "ann",
     people: [ANNA, BEN],
@@ -202,8 +218,42 @@ test("searching_keeps_the_last_answers_people", async () => {
   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
   at(live.searches, 1).answer({ ok: true, value: { kind: "glabMissing" } });
   await settled();
-  live.slice.searchPeople("anna");
-  expect(live.slice.peopleSearch.value).toEqual({ kind: "searching", text: "anna", people: [] });
+  live.slice.peopleSearch.search("anna");
+  expect(live.slice.peopleSearch.state.value).toEqual({
+    kind: "searching",
+    text: "anna",
+    people: [],
+  });
+});
+
+test("the_same_text_again_asks_nothing", async () => {
+  const live = rig();
+  live.slice.peopleSearch.search("an");
+  await vi.advanceTimersByTimeAsync(100);
+  live.slice.peopleSearch.search("an");
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS - 100);
+  expect(live.searches.map((call) => call.text)).toEqual(["an"]);
+  at(live.searches, 0).answer(found([ANNA]));
+  await settled();
+  const answered = { kind: "found", text: "an", people: [ANNA] };
+  expect(live.slice.peopleSearch.state.value).toEqual(answered);
+
+  live.slice.peopleSearch.search(" an ");
+  live.slice.peopleSearch.search("@an");
+  expect(live.slice.peopleSearch.state.value).toEqual(answered);
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
+  expect(live.searches).toHaveLength(1);
+
+  await typed(live, "b");
+  await typed(live, "an");
+  at(live.searches, 2).answer({ ok: false, failure: STOPPED });
+  await settled();
+  await typed(live, "an");
+  expect(live.searches.map((call) => call.text)).toEqual(["an", "b", "an", "an"]);
+  at(live.searches, 3).answer({ ok: true, value: { kind: "glabMissing" } });
+  await settled();
+  await typed(live, "an");
+  expect(live.searches.map((call) => call.text)).toEqual(["an", "b", "an", "an", "an"]);
 });
 
 test("a_refused_search_keeps_the_reply_and_a_thrown_one_is_failed_without_a_report", async () => {
@@ -211,7 +261,7 @@ test("a_refused_search_keeps_the_reply_and_a_thrown_one_is_failed_without_a_repo
   await typed(live, "a");
   at(live.searches, 0).answer({ ok: true, value: { kind: "failed", message: "no field" } });
   await settled();
-  expect(live.slice.peopleSearch.value).toEqual({
+  expect(live.slice.peopleSearch.state.value).toEqual({
     kind: "refused",
     text: "a",
     reply: { kind: "failed", message: "no field" },
@@ -219,11 +269,15 @@ test("a_refused_search_keeps_the_reply_and_a_thrown_one_is_failed_without_a_repo
   await typed(live, "b");
   at(live.searches, 1).answer({ ok: false, failure: STOPPED });
   await settled();
-  expect(live.slice.peopleSearch.value).toEqual({ kind: "failed", text: "b", cause: STOPPED });
+  expect(live.slice.peopleSearch.state.value).toEqual({
+    kind: "failed",
+    text: "b",
+    cause: STOPPED,
+  });
   await typed(live, "c");
   at(live.searches, 2).fail(new Error("boom"));
   await settled();
-  expect(live.slice.peopleSearch.value).toEqual({
+  expect(live.slice.peopleSearch.state.value).toEqual({
     kind: "failed",
     text: "c",
     cause: { kind: "Unexpected", message: "boom" },

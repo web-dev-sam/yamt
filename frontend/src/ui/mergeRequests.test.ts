@@ -21,6 +21,7 @@ import {
   type OpenReply,
   type PageOpened,
   type PeopleChangeReply,
+  type PeopleSearchReply,
   type RerequestReply,
   type ResolveReply,
   type Person,
@@ -34,6 +35,7 @@ import {
 } from "../ipc";
 import { RECHECK_PAUSE_MS } from "./glab";
 import type { RowActing } from "./mergeRequestActions";
+import { SEARCH_PAUSE_MS } from "./mergeRequestPeople";
 import {
   createMergeRequests,
   type ListLoad,
@@ -1470,6 +1472,49 @@ test("an_open_box_does_not_bring_back_a_row_a_refresh_dropped", async () => {
   await reloading;
   expect(iids(live.slice.shownRows.value)).toEqual(iids(ROWS).filter((value) => value !== 640));
   expect(live.slice.openPeopleBoxes.value).toEqual(new Set([640]));
+});
+
+test("the_people_box_and_mention_searches_never_touch_each_other", async () => {
+  const searches: { text: string; answer: (result: SourceResult<PeopleSearchReply>) => void }[] =
+    [];
+  const live = rig({
+    searchPeople: (text) =>
+      new Promise((answer) => {
+        searches.push({ text, answer });
+      }),
+  });
+  vi.useFakeTimers();
+  const { peopleSearch, mentionSearch } = live.slice;
+  function answered(index: number, people: readonly Person[]): void {
+    const call = searches[index];
+    if (call === undefined) {
+      throw new Error(`no search ${index}; ${searches.length} made`);
+    }
+    call.answer({ ok: true, value: { kind: "found", people } });
+  }
+  const anna: Person = { username: "anna", name: "Anna Berg", picture: null };
+
+  peopleSearch.search("er");
+  mentionSearch.search("an");
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+  expect(searches.map((call) => call.text)).toEqual(["er", "an"]);
+  answered(0, [ERIK]);
+  answered(1, [anna]);
+  await settled();
+  expect(peopleSearch.state.value).toEqual({ kind: "found", text: "er", people: [ERIK] });
+  expect(mentionSearch.state.value).toEqual({ kind: "found", text: "an", people: [anna] });
+
+  peopleSearch.end();
+  expect(peopleSearch.state.value).toEqual({ kind: "empty" });
+  expect(mentionSearch.state.value).toEqual({ kind: "found", text: "an", people: [anna] });
+
+  mentionSearch.search("ann");
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+  peopleSearch.search("b");
+  answered(2, [anna]);
+  await settled();
+  expect(mentionSearch.state.value).toEqual({ kind: "found", text: "ann", people: [anna] });
+  expect(peopleSearch.state.value).toEqual({ kind: "searching", text: "b", people: [] });
 });
 
 test("a later refresh's rows replace a re-requested row's reviewers", async () => {

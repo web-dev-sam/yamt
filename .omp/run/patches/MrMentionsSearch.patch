@@ -1,0 +1,475 @@
+diff --git a/frontend/src/ui/MergeRequestPeople.vue b/frontend/src/ui/MergeRequestPeople.vue
+index d14f509..74c40ef 100644
+--- a/frontend/src/ui/MergeRequestPeople.vue
++++ b/frontend/src/ui/MergeRequestPeople.vue
+@@ -80,14 +80,8 @@ const GROUP_WORDS: Readonly<Record<PeopleGroup, GroupWords>> = {
+ };
+ const GROUPS: readonly PeopleGroup[] = ["assignees", "reviewers"];
+ 
+-const {
+-  peopleAsks,
+-  changePeople,
+-  searchPeople,
+-  endPeopleSearch,
+-  peopleBoxOpened,
+-  peopleBoxClosed,
+-} = useMergeRequests();
++const { peopleAsks, changePeople, peopleSearch, peopleBoxOpened, peopleBoxClosed } =
++  useMergeRequests();
+ const area = useTemplateRef<HTMLSpanElement>("area");
+ const opener = useTemplateRef<HTMLButtonElement>("opener");
+ const box = useTemplateRef<HTMLDivElement>("box");
+@@ -190,7 +184,7 @@ function keepFocusInBox(kept: ReadonlySet<string>): void {
+ 
+ function closeField(): void {
+   if (adding.value !== null) {
+-    endPeopleSearch();
++    peopleSearch.end();
+     adding.value = null;
+   }
+ }
+@@ -206,7 +200,7 @@ function toggleAdding(group: PeopleGroup): void {
+     return;
+   }
+   adding.value = group;
+-  searchPeople("");
++  peopleSearch.search("");
+ }
+ 
+ function fieldClosed(group: PeopleGroup): void {
+diff --git a/frontend/src/ui/MergeRequestPeopleSearch.vue b/frontend/src/ui/MergeRequestPeopleSearch.vue
+index 834cca2..67dcff6 100644
+--- a/frontend/src/ui/MergeRequestPeopleSearch.vue
++++ b/frontend/src/ui/MergeRequestPeopleSearch.vue
+@@ -18,7 +18,7 @@ import { alreadyText, SEARCH_PEOPLE, SEARCH_PEOPLE_PLACEHOLDER } from "./mergeRe
+ const props = defineProps<{ row: MergeRequestRow; group: PeopleGroup }>();
+ const emit = defineEmits<{ close: [] }>();
+ 
+-const { rows, me, peopleSearch, peopleAsks, searchPeople, changePeople } = useMergeRequests();
++const { rows, me, peopleSearch, peopleAsks, changePeople } = useMergeRequests();
+ const field = useTemplateRef<HTMLInputElement>("field");
+ const listId = useId();
+ const text = shallowRef("");
+@@ -30,7 +30,7 @@ const list = computed(() =>
+     row: props.row,
+     group: props.group,
+     me: me.value,
+-    search: peopleSearch.value,
++    search: peopleSearch.state.value,
+     asks: rowPeopleAsks(peopleAsks.value, props.row.iid),
+     platform: navigator.platform,
+   }),
+@@ -66,7 +66,7 @@ function optionId(index: number): string {
+ function typed(event: Event): void {
+   if (event.target instanceof HTMLInputElement) {
+     text.value = event.target.value;
+-    searchPeople(text.value);
++    peopleSearch.search(text.value);
+   }
+ }
+ 
+@@ -82,7 +82,7 @@ async function add(line: PickLine): Promise<void> {
+   });
+   if (field.value !== null && text.value === typedAtPick) {
+     text.value = "";
+-    searchPeople("");
++    peopleSearch.search("");
+     if (document.activeElement === document.body) {
+       field.value.focus();
+     }
+diff --git a/frontend/src/ui/mergeRequestPeople.test.ts b/frontend/src/ui/mergeRequestPeople.test.ts
+index 76449db..ca11859 100644
+--- a/frontend/src/ui/mergeRequestPeople.test.ts
++++ b/frontend/src/ui/mergeRequestPeople.test.ts
+@@ -103,7 +103,7 @@ async function settled(): Promise<void> {
+ }
+ 
+ async function typed(live: Rig, text: string): Promise<void> {
+-  live.slice.searchPeople(text);
++  live.slice.peopleSearch.search(text);
+   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+ }
+ 
+@@ -119,14 +119,18 @@ test("typing_waits_250_ms_then_asks_once_with_the_last_text", async () => {
+   const live = rig();
+   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
+   expect(live.searches).toEqual([]);
+-  live.slice.searchPeople("b");
++  live.slice.peopleSearch.search("b");
+   await vi.advanceTimersByTimeAsync(100);
+-  live.slice.searchPeople("be");
++  live.slice.peopleSearch.search("be");
+   await vi.advanceTimersByTimeAsync(100);
+-  live.slice.searchPeople(" @ben ");
++  live.slice.peopleSearch.search(" @ben ");
+   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS - 1);
+   expect(live.searches).toEqual([]);
+-  expect(live.slice.peopleSearch.value).toEqual({ kind: "searching", text: "ben", people: [] });
++  expect(live.slice.peopleSearch.state.value).toEqual({
++    kind: "searching",
++    text: "ben",
++    people: [],
++  });
+   await vi.advanceTimersByTimeAsync(1);
+   expect(live.searches.map((call) => call.text)).toEqual(["ben"]);
+   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
+@@ -139,30 +143,42 @@ test("an_older_search_answer_is_dropped_once_a_newer_search_was_sent", async ()
+   await typed(live, "an");
+   at(live.searches, 0).answer(found([BEN]));
+   await settled();
+-  expect(live.slice.peopleSearch.value).toEqual({ kind: "searching", text: "an", people: [] });
++  expect(live.slice.peopleSearch.state.value).toEqual({
++    kind: "searching",
++    text: "an",
++    people: [],
++  });
+   at(live.searches, 1).answer(found([ANNA]));
+   await settled();
+-  expect(live.slice.peopleSearch.value).toEqual({ kind: "found", text: "an", people: [ANNA] });
++  expect(live.slice.peopleSearch.state.value).toEqual({
++    kind: "found",
++    text: "an",
++    people: [ANNA],
++  });
+ });
+ 
+ test("an_answer_after_more_typing_is_dropped", async () => {
+   const live = rig();
+   await typed(live, "a");
+-  live.slice.searchPeople("an");
++  live.slice.peopleSearch.search("an");
+   at(live.searches, 0).answer(found([BEN]));
+   await settled();
+-  expect(live.slice.peopleSearch.value).toEqual({ kind: "searching", text: "an", people: [] });
++  expect(live.slice.peopleSearch.state.value).toEqual({
++    kind: "searching",
++    text: "an",
++    people: [],
++  });
+   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+   expect(live.searches.map((call) => call.text)).toEqual(["a", "an"]);
+ });
+ 
+ test("an_empty_or_at_only_text_shows_the_suggestions_and_asks_nothing", async () => {
+   const live = rig();
+-  live.slice.searchPeople("a");
+-  live.slice.searchPeople(" @ ");
+-  expect(live.slice.peopleSearch.value).toEqual({ kind: "empty" });
+-  live.slice.searchPeople("");
+-  expect(live.slice.peopleSearch.value).toEqual({ kind: "empty" });
++  live.slice.peopleSearch.search("a");
++  live.slice.peopleSearch.search(" @ ");
++  expect(live.slice.peopleSearch.state.value).toEqual({ kind: "empty" });
++  live.slice.peopleSearch.search("");
++  expect(live.slice.peopleSearch.state.value).toEqual({ kind: "empty" });
+   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
+   expect(live.searches).toEqual([]);
+ });
+@@ -170,14 +186,14 @@ test("an_empty_or_at_only_text_shows_the_suggestions_and_asks_nothing", async ()
+ test("ending_the_search_drops_the_answer_in_flight", async () => {
+   const live = rig();
+   await typed(live, "a");
+-  live.slice.endPeopleSearch();
+-  expect(live.slice.peopleSearch.value).toEqual({ kind: "empty" });
++  live.slice.peopleSearch.end();
++  expect(live.slice.peopleSearch.state.value).toEqual({ kind: "empty" });
+   at(live.searches, 0).answer(found([ANNA]));
+   await settled();
+-  expect(live.slice.peopleSearch.value).toEqual({ kind: "empty" });
++  expect(live.slice.peopleSearch.state.value).toEqual({ kind: "empty" });
+ 
+-  live.slice.searchPeople("b");
+-  live.slice.endPeopleSearch();
++  live.slice.peopleSearch.search("b");
++  live.slice.peopleSearch.end();
+   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
+   expect(live.searches).toHaveLength(1);
+ });
+@@ -187,14 +203,14 @@ test("searching_keeps_the_last_answers_people", async () => {
+   await typed(live, "a");
+   at(live.searches, 0).answer(found([ANNA, BEN]));
+   await settled();
+-  live.slice.searchPeople("an");
+-  expect(live.slice.peopleSearch.value).toEqual({
++  live.slice.peopleSearch.search("an");
++  expect(live.slice.peopleSearch.state.value).toEqual({
+     kind: "searching",
+     text: "an",
+     people: [ANNA, BEN],
+   });
+-  live.slice.searchPeople("ann");
+-  expect(live.slice.peopleSearch.value).toEqual({
++  live.slice.peopleSearch.search("ann");
++  expect(live.slice.peopleSearch.state.value).toEqual({
+     kind: "searching",
+     text: "ann",
+     people: [ANNA, BEN],
+@@ -202,8 +218,42 @@ test("searching_keeps_the_last_answers_people", async () => {
+   await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+   at(live.searches, 1).answer({ ok: true, value: { kind: "glabMissing" } });
+   await settled();
+-  live.slice.searchPeople("anna");
+-  expect(live.slice.peopleSearch.value).toEqual({ kind: "searching", text: "anna", people: [] });
++  live.slice.peopleSearch.search("anna");
++  expect(live.slice.peopleSearch.state.value).toEqual({
++    kind: "searching",
++    text: "anna",
++    people: [],
++  });
++});
++
++test("the_same_text_again_asks_nothing", async () => {
++  const live = rig();
++  live.slice.peopleSearch.search("an");
++  await vi.advanceTimersByTimeAsync(100);
++  live.slice.peopleSearch.search("an");
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS - 100);
++  expect(live.searches.map((call) => call.text)).toEqual(["an"]);
++  at(live.searches, 0).answer(found([ANNA]));
++  await settled();
++  const answered = { kind: "found", text: "an", people: [ANNA] };
++  expect(live.slice.peopleSearch.state.value).toEqual(answered);
++
++  live.slice.peopleSearch.search(" an ");
++  live.slice.peopleSearch.search("@an");
++  expect(live.slice.peopleSearch.state.value).toEqual(answered);
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS * 4);
++  expect(live.searches).toHaveLength(1);
++
++  await typed(live, "b");
++  await typed(live, "an");
++  at(live.searches, 2).answer({ ok: false, failure: STOPPED });
++  await settled();
++  await typed(live, "an");
++  expect(live.searches.map((call) => call.text)).toEqual(["an", "b", "an", "an"]);
++  at(live.searches, 3).answer({ ok: true, value: { kind: "glabMissing" } });
++  await settled();
++  await typed(live, "an");
++  expect(live.searches.map((call) => call.text)).toEqual(["an", "b", "an", "an", "an"]);
+ });
+ 
+ test("a_refused_search_keeps_the_reply_and_a_thrown_one_is_failed_without_a_report", async () => {
+@@ -211,7 +261,7 @@ test("a_refused_search_keeps_the_reply_and_a_thrown_one_is_failed_without_a_repo
+   await typed(live, "a");
+   at(live.searches, 0).answer({ ok: true, value: { kind: "failed", message: "no field" } });
+   await settled();
+-  expect(live.slice.peopleSearch.value).toEqual({
++  expect(live.slice.peopleSearch.state.value).toEqual({
+     kind: "refused",
+     text: "a",
+     reply: { kind: "failed", message: "no field" },
+@@ -219,11 +269,15 @@ test("a_refused_search_keeps_the_reply_and_a_thrown_one_is_failed_without_a_repo
+   await typed(live, "b");
+   at(live.searches, 1).answer({ ok: false, failure: STOPPED });
+   await settled();
+-  expect(live.slice.peopleSearch.value).toEqual({ kind: "failed", text: "b", cause: STOPPED });
++  expect(live.slice.peopleSearch.state.value).toEqual({
++    kind: "failed",
++    text: "b",
++    cause: STOPPED,
++  });
+   await typed(live, "c");
+   at(live.searches, 2).fail(new Error("boom"));
+   await settled();
+-  expect(live.slice.peopleSearch.value).toEqual({
++  expect(live.slice.peopleSearch.state.value).toEqual({
+     kind: "failed",
+     text: "c",
+     cause: { kind: "Unexpected", message: "boom" },
+diff --git a/frontend/src/ui/mergeRequestPeople.ts b/frontend/src/ui/mergeRequestPeople.ts
+index c910c64..4baa4ea 100644
+--- a/frontend/src/ui/mergeRequestPeople.ts
++++ b/frontend/src/ui/mergeRequestPeople.ts
+@@ -43,13 +43,19 @@ export type RowPeopleAsks = {
+   readonly notDone: readonly NotDone[];
+ };
+ 
+-export type PeopleChanges = {
+-  readonly peopleSearch: Readonly<ShallowRef<PeopleSearch>>;
+-  readonly peopleAsks: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, RowPeopleAsks>>>;
+-  /** core searchedText(typed) "" → empty at once; else searching, asked SEARCH_PAUSE_MS after the last call. */
+-  searchPeople(typed: string): void;
++/** One search over GitLab's people (plan §2 rows 169, 191): SEARCH_PAUSE_MS after the last `search`, newest answer only. */
++export type PeopleSearcher = {
++  readonly state: Readonly<ShallowRef<PeopleSearch>>;
++  /** core searchedText(typed) "" → empty at once; the same text as a `searching`/`found` state → nothing; else
++   *  searching (the last people kept), asked SEARCH_PAUSE_MS after the last call. */
++  search(typed: string): void;
+   /** empty; a pending or running search's answer is dropped. */
+-  endPeopleSearch(): void;
++  end(): void;
++};
++
++export type PeopleChanges = {
++  readonly peopleSearch: PeopleSearcher;
++  readonly peopleAsks: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, RowPeopleAsks>>>;
+   /** Queues `change` (an equal one already queued: nothing); settles when it is answered. */
+   changePeople(iid: MergeRequestIid, change: PeopleChange): Promise<void>;
+   /** Request rule 9 (the owner's answer, board item 2246): the rows whose people box is open. */
+@@ -93,16 +99,14 @@ function searchAnswer(text: string, outcome: Outcome<PeopleSearchReply>): People
+     : { kind: "refused", text, reply };
+ }
+ 
+-function searchOf(
+-  source: MergeRequestSource,
+-): Pick<PeopleChanges, "peopleSearch" | "searchPeople" | "endPeopleSearch"> {
+-  const search = shallowRef<PeopleSearch>(EMPTY);
++export function createPeopleSearch(source: MergeRequestSource): PeopleSearcher {
++  const state = shallowRef<PeopleSearch>(EMPTY);
+   let calls = 0;
+   async function ask(text: string): Promise<void> {
+     const sent = calls;
+     const outcome = await attempt(() => source.searchPeople(text));
+     if (sent === calls) {
+-      search.value = searchAnswer(text, outcome);
++      state.value = searchAnswer(text, outcome);
+     }
+   }
+   let pause: number | undefined;
+@@ -111,20 +115,24 @@ function searchOf(
+     calls += 1;
+   }
+   return {
+-    peopleSearch: search,
+-    searchPeople: (typed) => {
+-      stop();
++    state,
++    search: (typed) => {
+       const text = searchedText(typed);
+-      if (text === "") {
+-        search.value = EMPTY;
++      const shown = state.value;
++      if ((shown.kind === "searching" || shown.kind === "found") && shown.text === text) {
+         return;
+       }
+-      search.value = { kind: "searching", text, people: shownPeople(search.value) };
++      stop();
++      if (text === "") {
++        state.value = EMPTY;
++        return;
++      }
++      state.value = { kind: "searching", text, people: shownPeople(shown) };
+       pause = setTimeout(() => void ask(text), SEARCH_PAUSE_MS);
+     },
+-    endPeopleSearch: () => {
++    end: () => {
+       stop();
+-      search.value = EMPTY;
++      state.value = EMPTY;
+     },
+   };
+ }
+@@ -209,7 +217,7 @@ function boxesOf(
+ export function createPeopleChanges(deps: Deps): PeopleChanges {
+   const asks: Asks = shallowRef(new Map());
+   return {
+-    ...searchOf(deps.source),
++    peopleSearch: createPeopleSearch(deps.source),
+     peopleAsks: asks,
+     ...changesOf(deps, asks),
+     ...boxesOf(asks),
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index 2894185..f7003b9 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -21,6 +21,7 @@ import {
+   type OpenReply,
+   type PageOpened,
+   type PeopleChangeReply,
++  type PeopleSearchReply,
+   type RerequestReply,
+   type ResolveReply,
+   type Person,
+@@ -34,6 +35,7 @@ import {
+ } from "../ipc";
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import type { RowActing } from "./mergeRequestActions";
++import { SEARCH_PAUSE_MS } from "./mergeRequestPeople";
+ import {
+   createMergeRequests,
+   type ListLoad,
+@@ -1472,6 +1474,49 @@ test("an_open_box_does_not_bring_back_a_row_a_refresh_dropped", async () => {
+   expect(live.slice.openPeopleBoxes.value).toEqual(new Set([640]));
+ });
+ 
++test("the_people_box_and_mention_searches_never_touch_each_other", async () => {
++  const searches: { text: string; answer: (result: SourceResult<PeopleSearchReply>) => void }[] =
++    [];
++  const live = rig({
++    searchPeople: (text) =>
++      new Promise((answer) => {
++        searches.push({ text, answer });
++      }),
++  });
++  vi.useFakeTimers();
++  const { peopleSearch, mentionSearch } = live.slice;
++  function answered(index: number, people: readonly Person[]): void {
++    const call = searches[index];
++    if (call === undefined) {
++      throw new Error(`no search ${index}; ${searches.length} made`);
++    }
++    call.answer({ ok: true, value: { kind: "found", people } });
++  }
++  const anna: Person = { username: "anna", name: "Anna Berg", picture: null };
++
++  peopleSearch.search("er");
++  mentionSearch.search("an");
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
++  expect(searches.map((call) => call.text)).toEqual(["er", "an"]);
++  answered(0, [ERIK]);
++  answered(1, [anna]);
++  await settled();
++  expect(peopleSearch.state.value).toEqual({ kind: "found", text: "er", people: [ERIK] });
++  expect(mentionSearch.state.value).toEqual({ kind: "found", text: "an", people: [anna] });
++
++  peopleSearch.end();
++  expect(peopleSearch.state.value).toEqual({ kind: "empty" });
++  expect(mentionSearch.state.value).toEqual({ kind: "found", text: "an", people: [anna] });
++
++  mentionSearch.search("ann");
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
++  peopleSearch.search("b");
++  answered(2, [anna]);
++  await settled();
++  expect(mentionSearch.state.value).toEqual({ kind: "found", text: "ann", people: [anna] });
++  expect(peopleSearch.state.value).toEqual({ kind: "searching", text: "b", people: [] });
++});
++
+ test("a later refresh's rows replace a re-requested row's reviewers", async () => {
+   const live = rig();
+   await loaded(live);
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index ba11d1e..bf8ad8a 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -23,7 +23,12 @@ import {
+ import { createDueDates, type DueDates } from "./mergeRequestDueDates";
+ import { createJobLogs, type JobLogs } from "./mergeRequestJobLogs";
+ import { createLinks, linksOf, type LinkQueue, type Links } from "./mergeRequestLinks";
+-import { createPeopleChanges, type PeopleChanges } from "./mergeRequestPeople";
++import {
++  createPeopleChanges,
++  createPeopleSearch,
++  type PeopleChanges,
++  type PeopleSearcher,
++} from "./mergeRequestPeople";
+ import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
+ import { loadList, type ListLoad, type ListState } from "./mergeRequestsList";
+ import { createRefreshes, type Refreshes } from "./mergeRequestsRefresh";
+@@ -57,6 +62,8 @@ export type MergeRequests = RowActions &
+   Shown &
+   Refreshes &
+   PeopleChanges & {
++    /** The mention list's own search (request rule 6): a second instance, never the people box's. */
++    readonly mentionSearch: PeopleSearcher;
+     readonly project: Readonly<ShallowRef<GitLabProject>>;
+     readonly me: Readonly<ShallowRef<string | null>>;
+     readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
+@@ -279,6 +286,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     openChanges: (iid) => openChanges(state, iid),
+     ...state.rowActions,
+     ...people,
++    mentionSearch: createPeopleSearch(deps.source),
+     ...createJobLogs(deps),
+     ...createDescriptions(deps),
+     ...discussionsOf(state.discussionQueue),

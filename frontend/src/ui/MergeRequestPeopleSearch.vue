@@ -18,7 +18,7 @@ import { alreadyText, SEARCH_PEOPLE, SEARCH_PEOPLE_PLACEHOLDER } from "./mergeRe
 const props = defineProps<{ row: MergeRequestRow; group: PeopleGroup }>();
 const emit = defineEmits<{ close: [] }>();
 
-const { rows, me, peopleSearch, peopleAsks, searchPeople, changePeople } = useMergeRequests();
+const { rows, me, peopleSearch, peopleAsks, changePeople } = useMergeRequests();
 const field = useTemplateRef<HTMLInputElement>("field");
 const listId = useId();
 const text = shallowRef("");
@@ -30,7 +30,7 @@ const list = computed(() =>
     row: props.row,
     group: props.group,
     me: me.value,
-    search: peopleSearch.value,
+    search: peopleSearch.state.value,
     asks: rowPeopleAsks(peopleAsks.value, props.row.iid),
     platform: navigator.platform,
   }),
@@ -66,7 +66,7 @@ function optionId(index: number): string {
 function typed(event: Event): void {
   if (event.target instanceof HTMLInputElement) {
     text.value = event.target.value;
-    searchPeople(text.value);
+    peopleSearch.search(text.value);
   }
 }
 
@@ -82,7 +82,7 @@ async function add(line: PickLine): Promise<void> {
   });
   if (field.value !== null && text.value === typedAtPick) {
     text.value = "";
-    searchPeople("");
+    peopleSearch.search("");
     if (document.activeElement === document.body) {
       field.value.focus();
     }

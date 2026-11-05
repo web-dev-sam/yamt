@@ -80,14 +80,8 @@ const GROUP_WORDS: Readonly<Record<PeopleGroup, GroupWords>> = {
 };
 const GROUPS: readonly PeopleGroup[] = ["assignees", "reviewers"];
 
-const {
-  peopleAsks,
-  changePeople,
-  searchPeople,
-  endPeopleSearch,
-  peopleBoxOpened,
-  peopleBoxClosed,
-} = useMergeRequests();
+const { peopleAsks, changePeople, peopleSearch, peopleBoxOpened, peopleBoxClosed } =
+  useMergeRequests();
 const area = useTemplateRef<HTMLSpanElement>("area");
 const opener = useTemplateRef<HTMLButtonElement>("opener");
 const box = useTemplateRef<HTMLDivElement>("box");
@@ -190,7 +184,7 @@ function keepFocusInBox(kept: ReadonlySet<string>): void {
 
 function closeField(): void {
   if (adding.value !== null) {
-    endPeopleSearch();
+    peopleSearch.end();
     adding.value = null;
   }
 }
@@ -206,7 +200,7 @@ function toggleAdding(group: PeopleGroup): void {
     return;
   }
   adding.value = group;
-  searchPeople("");
+  peopleSearch.search("");
 }
 
 function fieldClosed(group: PeopleGroup): void {
