@@ -16,6 +16,7 @@ import { dateTimeText } from "../mergeRequests";
 import type { MergeRequests } from "./mergeRequests";
 import { windowMergeRequests } from "./mergeRequestsStore";
 import MergeRequestThread from "./MergeRequestThread.vue";
+import MergeRequestThreadBody from "./MergeRequestThreadBody.vue";
 import type { Problem } from "./problem";
 import type { Screen } from "./screen";
 
@@ -218,7 +219,7 @@ test("the_reply_field_offers_mentions", async () => {
 test("preview_shows_loading_then_blocks_and_nothing_for_empty", async () => {
   await shown(THREADS, 1);
   slice.setReplyText(d(1), "**Preview** of @anna");
-  slice.showPreview();
+  slice.showPreview(d(1));
   const loading = await panel();
   expect(loading).toContain('<p class="text-fg-muted">Loading…</p>');
   expect(loading).toContain('style="display:none;"');
@@ -228,18 +229,18 @@ test("preview_shows_loading_then_blocks_and_nothing_for_empty", async () => {
   expect(read).toContain("<strong>Preview</strong>");
   expect(read).toContain(">@anna</a>");
 
-  slice.showWrite();
+  slice.showWrite(d(1));
   const back = await panel();
   expect(back).toContain(">**Preview** of @anna</textarea>");
   expect(back).not.toContain("display:none");
   expect(back).not.toContain("<strong>Preview</strong>");
 
   slice.setReplyText(d(1), "   ");
-  slice.showPreview();
+  slice.showPreview(d(1));
   expect(await panel()).toContain('<p class="text-fg-muted">Nothing to preview.</p>');
 
   slice.setReplyText(d(1), "fail here #1");
-  slice.showPreview();
+  slice.showPreview(d(1));
   await vi.advanceTimersByTimeAsync(WRITE_MS);
   expect(await panel()).toContain(
     '<p role="alert" class="text-problem-error">Could not preview: glab timed out</p>',
@@ -253,16 +254,16 @@ test("a_plain_preview_shows_no_loading_and_asks_nothing", async () => {
   }
   await shown(THREADS, 1);
   slice.setReplyText(d(1), "Looks **good**, see `code`.\n\n- one\n- two");
-  slice.showPreview();
+  slice.showPreview(d(1));
   const read = await panel();
   expect(read).not.toContain("Loading…");
   expect(read).toContain("<strong>good</strong>");
   expect(read).toMatch(/<li[^>]*>.*one.*<\/li>/u);
   expect(previewsAsked()).toBe(0);
 
-  slice.showWrite();
+  slice.showWrite(d(1));
   slice.setReplyText(d(1), "**Preview** of @anna");
-  slice.showPreview();
+  slice.showPreview(d(1));
   expect(await panel()).toContain('<p class="text-fg-muted">Loading…</p>');
   await vi.advanceTimersByTimeAsync(WRITE_MS);
   expect(await panel()).toContain(">@anna</a>");
@@ -287,7 +288,7 @@ test("the_buttons_row_has_add_review_add_comment_and_resolve_at_the_right", asyn
   expect(buttons(typed).slice(-3)).toEqual(["Add review", "Add comment", "Resolve thread"]);
   expect(typed).toContain('<span class="ml-auto flex"><button');
 
-  void slice.sendReply("comment");
+  void slice.sendReply(d(1), "comment");
   expect(buttons(await panel()).slice(-3)).toEqual([
     "Add review (disabled)",
     "Add comment (disabled)",
@@ -320,7 +321,7 @@ test("while_the_thread_loads_every_write_button_is_disabled_and_a_resolve_sends_
     "Add comment (disabled)",
     "Resolve thread (disabled)",
   ]);
-  await slice.setResolved(true);
+  await slice.setResolved(d(1), true);
 
   await vi.advanceTimersByTimeAsync(WRITE_MS + THREAD_MS);
   const read = await panel();
@@ -331,7 +332,7 @@ test("while_the_thread_loads_every_write_button_is_disabled_and_a_resolve_sends_
 test("a_failed_send_says_why_under_the_row", async () => {
   await shown(THREADS, 2);
   slice.setReplyText(d(2), "refuse this");
-  const drafting = slice.sendReply("draft");
+  const drafting = slice.sendReply(d(2), "draft");
   await vi.advanceTimersByTimeAsync(WRITE_MS);
   await drafting;
   const refused = await panel();
@@ -341,14 +342,14 @@ test("a_failed_send_says_why_under_the_row", async () => {
   expect(refused).toContain(">refuse this</textarea>");
 
   slice.setReplyText(d(2), "fail now");
-  const failing = slice.sendReply("comment");
+  const failing = slice.sendReply(d(2), "comment");
   await vi.advanceTimersByTimeAsync(WRITE_MS);
   await failing;
   expect(await panel()).toContain("Could not add the comment: glab timed out</p>");
 
   await vi.advanceTimersByTimeAsync(THREAD_MS);
   await shown(LOCKED, 15);
-  const resolving = slice.setResolved(true);
+  const resolving = slice.setResolved(d(15), true);
   await vi.advanceTimersByTimeAsync(WRITE_MS);
   await resolving;
   expect(await panel(LOCKED)).toContain("Could not resolve the thread: 403 Forbidden</p>");
@@ -360,7 +361,7 @@ test("resolved_reads_resolved_and_unresolve", async () => {
   expect(open).toContain('<span class="shrink-0 text-fg-muted">Your turn</span>');
   expect(open).not.toContain(">Resolved");
 
-  const resolving = slice.setResolved(true);
+  const resolving = slice.setResolved(d(1), true);
   await vi.advanceTimersByTimeAsync(WRITE_MS + THREAD_MS);
   await resolving;
   const resolved = await panel();
@@ -409,7 +410,7 @@ test("loading_failure_and_not_found_read_one_sentence_with_retry", async () => {
 test("a_refreshing_thread_keeps_its_comments_and_another_requests_thread_renders_nothing", async () => {
   await shown(THREADS, 1);
   slice.setReplyText(d(1), "Agreed.");
-  const sending = slice.sendReply("comment");
+  const sending = slice.sendReply(d(1), "comment");
   await vi.advanceTimersByTimeAsync(WRITE_MS);
   await sending;
   const refreshing = await panel();
@@ -419,4 +420,36 @@ test("a_refreshing_thread_keeps_its_comments_and_another_requests_thread_renders
   expect(buttons(refreshing)).toContain("Submit review (disabled)");
 
   expect(await panel(LOCKED)).toBe("");
+});
+
+async function body(placement: "beside" | "inline"): Promise<string> {
+  const thread = slice.thread.value;
+  if (thread === null) {
+    throw new Error("no thread shown");
+  }
+  const props = { thread, author: "dmitri", now: NOW, placement };
+  const html = await renderToString(
+    createSSRApp({ render: () => h(MergeRequestThreadBody, props) }),
+  );
+  return html.replaceAll(/<!--[[\]]?-->/gu, "");
+}
+
+function scrollers(html: string): string[] {
+  return [...html.matchAll(/<([a-z]+) [^>]*overflow-y-auto/gu)].map(([, tag]) => tag ?? "");
+}
+
+test("the_inline_body_has_no_inner_scroller", async () => {
+  await shown(THREADS, 1);
+  const beside = await body("beside");
+  const inline = await body("inline");
+
+  expect(beside).toContain(
+    '<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-3 py-2"',
+  );
+  expect(scrollers(beside)).toEqual(["div", "textarea"]);
+  expect(inline).toContain('<div class="flex flex-col gap-4 px-3 py-2"');
+  expect(scrollers(inline)).toEqual(["textarea"]);
+  expect(articles(inline)).toHaveLength(5);
+  expect(inline).toContain('placeholder="Write a reply… (Markdown)"');
+  expect(inline).not.toContain("overscroll-contain");
 });

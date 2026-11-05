@@ -1,0 +1,5 @@
+just mutants HEAD — mergeRequestThread.ts 160 killed / 3 survived / 3 errors, mergeRequestThreadRecords.ts 104 killed / 1 survived; 98.51%
+src/ui/mergeRequestThread.ts:180 `if (previous !== null)`→`if (true)` — gate-covered: vue-tsc rejects passing `DiscussionId | null` to `dropUnlessShown`
+src/ui/mergeRequestThread.ts:188 `if (previous !== null)`→`if (true)` — gate-covered: same type error
+src/ui/mergeRequestThread.ts:175 `panel.value === null ? null :`→`false ? null :` — gate-covered: `Map<DiscussionId>.get(null)` is a type error; it returns undefined → null at runtime
+src/ui/mergeRequestThreadRecords.ts:104 `lastToken += 1`→`-= 1` — equivalent: tokens stay unique either way

@@ -170,7 +170,7 @@ async function resolve(serial: number): Promise<void> {
 async function resolveDiscussion(at: number, id: DiscussionId): Promise<void> {
   slice.showThread(iid(at), id);
   await vi.advanceTimersByTimeAsync(PAUSE_MS);
-  const resolving = slice.setResolved(true);
+  const resolving = slice.setResolved(id, true);
   await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
   await resolving;
 }
@@ -211,7 +211,7 @@ test("a_marked_row_reads_resolved_and_leaves_the_count", async () => {
   await discussionsRead();
   slice.showThread(iid(THREADS), d(2));
   await vi.advanceTimersByTimeAsync(PAUSE_MS);
-  const resolving = slice.setResolved(true);
+  const resolving = slice.setResolved(d(2), true);
   await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
   await resolving;
   const html = await box();

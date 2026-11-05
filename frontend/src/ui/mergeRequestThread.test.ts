@@ -21,6 +21,7 @@ import {
 import type { Preview } from "./mergeRequestPreview";
 import {
   createThreads,
+  isWritable,
   type Sending,
   type ShownThread,
   type Thread,
@@ -49,6 +50,7 @@ const MICROTASKS = 10;
 const STOPPED: SourceFailure = { kind: "WorkerStopped" };
 const LOADING: ThreadLoad = { kind: "loading" };
 const WRITING: Preview = { kind: "writing" };
+const IDLE: Sending = { kind: "idle" };
 const SECRET = "the secret words of the reply";
 const ASKED = `${SECRET} @anna`;
 const PLAIN = "Looks **good**, see `code`.\n\n- one\n- two";
@@ -162,6 +164,15 @@ function textOf(live: Rig, id: DiscussionId): string | undefined {
   return live.threads.replyTexts.value.get(id);
 }
 
+function recordAt(live: Rig, id: DiscussionId): Thread | undefined {
+  return live.threads.threads.value.get(id);
+}
+
+function writableAt(live: Rig, id: DiscussionId): boolean {
+  const record = recordAt(live, id);
+  return record !== undefined && isWritable(record, live.threads.writing.value);
+}
+
 async function readAt(live: Rig, index: number, thread: DiscussionThread): Promise<void> {
   at(live.reads, index).answer({ ok: true, value: { kind: "read", thread } });
   await settled();
@@ -213,7 +224,7 @@ test("each_open_reads_the_thread_afresh", async () => {
 
 test("a_failed_read_retries", async () => {
   const live = rig();
-  live.threads.retryThread();
+  live.threads.retryThread(D1);
   expect(live.reads).toEqual([]);
 
   live.threads.showThread(MR, D1);
@@ -221,21 +232,21 @@ test("a_failed_read_retries", async () => {
   await settled();
   expect(loadOf(live)).toEqual({ kind: "failed", cause: STOPPED });
 
-  live.threads.retryThread();
+  live.threads.retryThread(D1);
   expect(loadOf(live)).toEqual(LOADING);
   at(live.reads, 1).answer({ ok: true, value: { kind: "notFound" } });
   await settled();
   expect(loadOf(live)).toEqual({ kind: "refused", reply: { kind: "notFound" } });
   expect(live.boxReads).toEqual([]);
 
-  live.threads.retryThread();
+  live.threads.retryThread(D1);
   at(live.reads, 2).fail(new Error("unreadable answer"));
   await settled();
   expect(loadOf(live)).toEqual({
     kind: "failed",
     cause: { kind: "Unexpected", message: "unreadable answer" },
   });
-  live.threads.retryThread();
+  live.threads.retryThread(D1);
   await readAt(live, 3, threadOf(D1));
   expect(loadOf(live)).toEqual(read(threadOf(D1)));
 });
@@ -274,7 +285,7 @@ test("texts_are_kept_per_discussion_until_sent", async () => {
   expect(textOf(live, D1)).toBe("first");
   expect(textOf(live, D2)).toBe(SECRET);
 
-  void live.threads.sendReply("comment");
+  void live.threads.sendReply(D1, "comment");
   expect(at(live.writes, 0).args).toEqual(["reply", MR, D1, "comment", "first"]);
   await writeAt(live, 0, { kind: "sent" });
   expect(live.threads.replyTexts.value.has(D1)).toBe(false);
@@ -282,7 +293,7 @@ test("texts_are_kept_per_discussion_until_sent", async () => {
 
   await readAt(live, 2, threadOf(D1));
   live.threads.setReplyText(D1, "second");
-  void live.threads.sendReply("draft");
+  void live.threads.sendReply(D1, "draft");
   live.threads.setReplyText(D1, "second, longer");
   await writeAt(live, 1, { kind: "sent" });
   expect(at(live.writes, 1).args).toEqual(["reply", MR, D1, "draft", "second"]);
@@ -291,32 +302,179 @@ test("texts_are_kept_per_discussion_until_sent", async () => {
   expect([...live.threads.replyTexts.value.keys()]).toEqual([D1]);
 });
 
-test("a_thread_shown_during_another_threads_write_reports_it", async () => {
+test("two_expanded_threads_read_and_write_apart", async () => {
+  const live = rig();
+  live.threads.expandThread(MR, D1);
+  live.threads.expandThread(MR, D2);
+  expect(live.reads.map((ask) => ask.args)).toEqual([
+    [MR, D1],
+    [MR, D2],
+  ]);
+  expect([...live.threads.expanded.value]).toEqual([D1, D2]);
+  await readAt(live, 1, threadOf(D2, { pending: 2 }));
+  await readAt(live, 0, threadOf(D1));
+  expect(recordAt(live, D1)?.load).toEqual(read(threadOf(D1)));
+  expect(recordAt(live, D2)?.load).toEqual(read(threadOf(D2, { pending: 2 })));
+  expect(shownOf(live)).toBeNull();
+
+  live.threads.setReplyText(D1, "first");
+  live.threads.setReplyText(D2, "second");
+  void live.threads.sendReply(D2, "comment");
+  expect(at(live.writes, 0).args).toEqual(["reply", MR, D2, "comment", "second"]);
+  expect(recordAt(live, D2)?.sending).toEqual({ kind: "sending", what: "comment" });
+  expect(recordAt(live, D1)?.sending).toEqual(IDLE);
+  await writeAt(live, 0, { kind: "sent" });
+  expect(live.reads.map((ask) => ask.args)).toEqual([
+    [MR, D1],
+    [MR, D2],
+    [MR, D2],
+  ]);
+  expect(recordAt(live, D2)?.load).toEqual(read(threadOf(D2, { pending: 2 }), true));
+  expect(recordAt(live, D1)?.load).toEqual(read(threadOf(D1)));
+  expect(textOf(live, D1)).toBe("first");
+  expect(textOf(live, D2)).toBeUndefined();
+});
+
+test("one_write_at_a_time_across_threads", async () => {
+  const live = rig();
+  live.threads.expandThread(MR, D1);
+  live.threads.expandThread(MR, D2);
+  await readAt(live, 0, threadOf(D1));
+  await readAt(live, 1, threadOf(D2));
+  live.threads.setReplyText(D1, "first");
+  live.threads.setReplyText(D2, "second");
+  expect(live.threads.writing.value).toBeNull();
+
+  void live.threads.sendReply(D1, "comment");
+  expect(live.threads.writing.value).toBe("comment");
+  await live.threads.sendReply(D2, "comment");
+  await live.threads.setResolved(D2, true);
+  await live.threads.submitReview(D2);
+  expect(live.writes).toHaveLength(1);
+  expect(recordAt(live, D2)?.sending).toEqual(IDLE);
+  for (const id of [D1, D2]) {
+    expect(writableAt(live, id)).toBe(false);
+  }
+
+  await writeAt(live, 0, { kind: "sent" });
+  expect(live.threads.writing.value).toBeNull();
+  expect(writableAt(live, D1)).toBe(false);
+  expect(writableAt(live, D2)).toBe(true);
+  void live.threads.sendReply(D2, "draft");
+  expect(at(live.writes, 1).args).toEqual(["reply", MR, D2, "draft", "second"]);
+});
+
+test("a_collapsed_threads_late_answer_is_dropped", async () => {
+  const live = rig();
+  live.threads.collapseThread(D1);
+  live.threads.expandThread(MR, D1);
+  live.threads.collapseThread(D1);
+  expect(live.threads.threads.value.size).toBe(0);
+  expect(live.threads.expanded.value.size).toBe(0);
+
+  await readAt(live, 0, threadOf(D1, { resolved: true }));
+  expect(live.threads.threads.value.size).toBe(0);
+  expect(live.boxReads).toEqual([[MR, D1, true]]);
+});
+
+test("re_expanding_reads_afresh", async () => {
+  const live = rig();
+  live.threads.expandThread(MR, D1);
+  await readAt(live, 0, threadOf(D1));
+  live.threads.collapseThread(D1);
+  live.threads.expandThread(MR, D1);
+  const expanded = live.threads.expanded.value;
+  live.threads.expandThread(MR, D1);
+  expect(live.threads.expanded.value).toBe(expanded);
+
+  expect(recordAt(live, D1)?.load).toEqual(LOADING);
+  expect(live.reads).toHaveLength(2);
+  await readAt(live, 1, threadOf(D1, { pending: 1 }));
+  expect(recordAt(live, D1)?.load).toEqual(read(threadOf(D1, { pending: 1 })));
+});
+
+test("an_expansion_leaves_the_panel_alone", async () => {
   const live = rig();
   await shownAndRead(live, D1);
-  live.threads.setReplyText(D1, "first");
-  void live.threads.sendReply("comment");
-  live.threads.showThread(MR, D2);
-  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "comment" });
+  const panel = shownOf(live);
+  live.threads.expandThread(MR, D2);
+  expect(shownOf(live)).toBe(panel);
   await readAt(live, 1, threadOf(D2));
-  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "comment" });
+  live.threads.setReplyText(D2, "elsewhere");
+  live.threads.collapseThread(D2);
 
-  live.threads.retryThread();
-  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "comment" });
+  expect(shownOf(live)).toBe(panel);
+  expect([...live.threads.threads.value.keys()]).toEqual([D1]);
+});
+
+test("the_panel_and_an_entry_share_one_thread", async () => {
+  const live = rig();
+  await shownAndRead(live, D1);
+  const shared = shownOf(live);
+  live.threads.expandThread(MR, D1);
+  expect(live.reads).toHaveLength(1);
+  expect(recordAt(live, D1)).toBe(shared);
+
+  live.threads.closeThread();
+  expect(shownOf(live)).toBeNull();
+  expect(recordAt(live, D1)).toBe(shared);
   live.threads.showThread(MR, D1);
-  expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "comment" });
-  await writeAt(live, 0, { kind: "refused", reason: "403 Forbidden" });
-  expect(shownOf(live)?.sending).toEqual(
-    failed("comment", { kind: "refused", reason: "403 Forbidden" }),
-  );
+  expect(live.reads).toHaveLength(1);
+  expect(shownOf(live)).toBe(shared);
+  live.threads.collapseThread(D1);
+  expect(shownOf(live)).toBe(shared);
+  live.threads.expandThread(MR, D1);
   live.threads.showThread(MR, D2);
-  expect(shownOf(live)?.sending).toEqual({ kind: "idle" });
+  expect(recordAt(live, D1)).toBe(shared);
+
+  live.threads.collapseThread(D1);
+  expect(recordAt(live, D1)).toBeUndefined();
+  expect([...live.threads.threads.value.keys()]).toEqual([D2]);
+});
+
+test("the_text_outlives_a_collapse", async () => {
+  const live = rig();
+  live.threads.expandThread(MR, D1);
+  await readAt(live, 0, threadOf(D1));
+  live.threads.setReplyText(D1, "half a reply");
+  live.threads.collapseThread(D1);
+  expect(textOf(live, D1)).toBe("half a reply");
+
+  live.threads.expandThread(MR, D1);
+  await readAt(live, 1, threadOf(D1));
+  expect(textOf(live, D1)).toBe("half a reply");
+});
+
+test("refreshed_rereads_every_shown_thread_of_the_row", async () => {
+  const live = rig();
+  const other = iid(636);
+  const d3 = discussionId("3");
+  await shownAndRead(live, D1);
+  live.threads.expandThread(MR, D2);
+  live.threads.expandThread(other, d3);
+  await readAt(live, 1, threadOf(D2));
+  await readAt(live, 2, threadOf(d3));
+
+  live.threads.refreshed(MR);
+  expect(live.reads.slice(3).map((ask) => ask.args)).toEqual([
+    [MR, D1],
+    [MR, D2],
+  ]);
+  expect(recordAt(live, D2)?.load).toEqual(read(threadOf(D2), true));
+  expect(recordAt(live, d3)?.load).toEqual(read(threadOf(d3)));
+  await readAt(live, 4, threadOf(D2, { pending: 3 }));
+  expect(recordAt(live, D2)?.load).toEqual(read(threadOf(D2, { pending: 3 })));
+  expect(loadOf(live)).toEqual(read(threadOf(D1), true));
+
+  live.threads.refreshed(null);
+  expect(live.reads).toHaveLength(8);
+  expect(recordAt(live, d3)?.load).toEqual(read(threadOf(d3), true));
 });
 
 test("a_failed_write_answered_after_a_switch_leaves_the_shown_thread_idle", async () => {
   const live = rig();
   await shownAndRead(live, D1);
-  void live.threads.setResolved(true);
+  void live.threads.setResolved(D1, true);
   live.threads.showThread(MR, D2);
   await readAt(live, 1, threadOf(D2));
   await writeAt(live, 0, { kind: "failed", message: "glab timed out" });
@@ -328,7 +486,7 @@ test("a_failed_write_answered_after_a_switch_leaves_the_shown_thread_idle", asyn
   });
   expect(at(live.reads, 2).args).toEqual([MR, D1]);
   live.threads.setReplyText(D2, "other");
-  const drafting = live.threads.sendReply("draft");
+  const drafting = live.threads.sendReply(D2, "draft");
   expect(at(live.writes, 1).args).toEqual(["reply", MR, D2, "draft", "other"]);
 
   live.threads.closeThread();
@@ -339,39 +497,39 @@ test("a_failed_write_answered_after_a_switch_leaves_the_shown_thread_idle", asyn
 
 test("a_second_send_while_one_runs_sends_nothing", async () => {
   const live = rig();
-  await live.threads.sendReply("comment");
-  await live.threads.setResolved(true);
-  await live.threads.submitReview();
+  await live.threads.sendReply(D1, "comment");
+  await live.threads.setResolved(D1, true);
+  await live.threads.submitReview(D1);
   live.threads.showThread(MR, D1);
   live.threads.setReplyText(D1, "first");
-  await live.threads.sendReply("comment");
+  await live.threads.sendReply(D1, "comment");
   expect(live.writes).toEqual([]);
 
   await readAt(live, 0, threadOf(D1));
   live.threads.showThread(MR, D2);
   await readAt(live, 1, threadOf(D2));
-  await live.threads.sendReply("comment");
+  await live.threads.sendReply(D2, "comment");
   expect(live.writes).toEqual([]);
   live.threads.showThread(MR, D1);
   await readAt(live, 2, threadOf(D1));
   live.threads.setReplyText(D1, "  \n ");
-  await live.threads.sendReply("comment");
+  await live.threads.sendReply(D1, "comment");
   expect(live.writes).toEqual([]);
 
   live.threads.setReplyText(D1, "first");
-  void live.threads.sendReply("comment");
+  void live.threads.sendReply(D1, "comment");
   expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "comment" });
-  void live.threads.sendReply("comment");
-  void live.threads.setResolved(true);
-  void live.threads.submitReview();
+  void live.threads.sendReply(D1, "comment");
+  void live.threads.setResolved(D1, true);
+  void live.threads.submitReview(D1);
   live.threads.showThread(MR, D2);
   await readAt(live, 3, threadOf(D2));
   live.threads.setReplyText(D2, "other");
-  void live.threads.sendReply("draft");
+  void live.threads.sendReply(D2, "draft");
   expect(live.writes).toHaveLength(1);
 
   await writeAt(live, 0, { kind: "sent" });
-  void live.threads.sendReply("draft");
+  void live.threads.sendReply(D2, "draft");
   expect(live.writes).toHaveLength(2);
 });
 
@@ -379,7 +537,7 @@ test("a_refused_send_keeps_the_text_and_reads_nothing", async () => {
   const live = rig();
   await shownAndRead(live);
   live.threads.setReplyText(D1, "first");
-  void live.threads.sendReply("comment");
+  void live.threads.sendReply(D1, "comment");
   await writeAt(live, 0, { kind: "refused", reason: "403 Forbidden" });
 
   expect(shownOf(live)?.sending).toEqual(
@@ -389,7 +547,7 @@ test("a_refused_send_keeps_the_text_and_reads_nothing", async () => {
   expect(live.reads).toHaveLength(1);
   expect(loadOf(live)).toEqual(read(threadOf(D1)));
 
-  void live.threads.sendReply("comment");
+  void live.threads.sendReply(D1, "comment");
   expect(live.writes).toHaveLength(2);
   expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "comment" });
 });
@@ -398,7 +556,7 @@ test("a_failed_send_reads_the_thread_again_before_another_send", async () => {
   const live = rig();
   await shownAndRead(live);
   live.threads.setReplyText(D1, "first");
-  void live.threads.sendReply("comment");
+  void live.threads.sendReply(D1, "comment");
   await writeAt(live, 0, { kind: "failed", message: "glab timed out" });
 
   expect(shownOf(live)?.sending).toEqual(
@@ -407,18 +565,18 @@ test("a_failed_send_reads_the_thread_again_before_another_send", async () => {
   expect(textOf(live, D1)).toBe("first");
   expect(loadOf(live)).toEqual(read(threadOf(D1), true));
   expect(live.reads).toHaveLength(2);
-  await live.threads.sendReply("comment");
+  await live.threads.sendReply(D1, "comment");
   expect(live.writes).toHaveLength(1);
 
   await readAt(live, 1, threadOf(D1, { pending: 1 }));
   expect(loadOf(live)).toEqual(read(threadOf(D1, { pending: 1 })));
-  void live.threads.sendReply("comment");
+  void live.threads.sendReply(D1, "comment");
   at(live.writes, 1).answer({ ok: false, failure: STOPPED });
   await settled();
   expect(shownOf(live)?.sending).toEqual(failed("comment", { kind: "ipc", cause: STOPPED }));
   expect(live.reads).toHaveLength(3);
   await readAt(live, 2, threadOf(D1));
-  void live.threads.sendReply("comment");
+  void live.threads.sendReply(D1, "comment");
   await writeAt(live, 2, { kind: "notLoggedIn", detail: "gitlab.example: no token" });
   expect(live.reads).toHaveLength(4);
 });
@@ -427,7 +585,7 @@ test("submit_publishes_then_reloads_the_thread_and_the_row", async () => {
   const live = rig();
   await shownAndRead(live);
   live.threads.setReplyText(D1, "unsent");
-  void live.threads.submitReview();
+  void live.threads.submitReview(D1);
   expect(at(live.writes, 0).args).toEqual(["submit", MR]);
   expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "submit" });
   expect(live.reloads).toEqual([]);
@@ -446,7 +604,7 @@ test("a_failed_submit_keeps_the_drafts_pending", async () => {
   live.threads.showThread(MR, D1);
   const drafted = threadOf(D1, { drafts: [{ text: "a draft" }], pending: 3 });
   await readAt(live, 0, drafted);
-  void live.threads.submitReview();
+  void live.threads.submitReview(D1);
   await writeAt(live, 0, { kind: "glabMissing" });
 
   expect(shownOf(live)?.sending).toEqual(failed("submit", { kind: "glabMissing" }));
@@ -455,7 +613,7 @@ test("a_failed_submit_keeps_the_drafts_pending", async () => {
   await readAt(live, 1, drafted);
   expect(loadOf(live)).toEqual(read(drafted));
 
-  void live.threads.submitReview();
+  void live.threads.submitReview(D1);
   await writeAt(live, 1, { kind: "refused", reason: "404 Not Found" });
   expect(live.reloads).toEqual([]);
   expect(live.reads).toHaveLength(2);
@@ -465,7 +623,7 @@ test("resolve_sends_no_text_and_rereads", async () => {
   const live = rig();
   await shownAndRead(live);
   live.threads.setReplyText(D1, "kept");
-  void live.threads.setResolved(true);
+  void live.threads.setResolved(D1, true);
   expect(at(live.writes, 0).args).toEqual(["resolve", MR, D1, true]);
   expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "resolve" });
   await writeAt(live, 0, { kind: "sent" });
@@ -474,25 +632,25 @@ test("resolve_sends_no_text_and_rereads", async () => {
   await readAt(live, 1, threadOf(D1, { resolved: true }));
   expect(live.boxReads.at(-1)).toEqual([MR, D1, true]);
 
-  void live.threads.setResolved(false);
+  void live.threads.setResolved(D1, false);
   expect(at(live.writes, 1).args).toEqual(["resolve", MR, D1, false]);
   expect(shownOf(live)?.sending).toEqual({ kind: "sending", what: "unresolve" });
 });
 
 test("a_blank_preview_is_empty_without_a_call", async () => {
   const live = rig();
-  live.threads.showPreview();
-  live.threads.showWrite();
+  live.threads.showPreview(D1);
+  live.threads.showWrite(D1);
   expect(shownOf(live)).toBeNull();
 
   await shownAndRead(live);
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
   expect(shownOf(live)?.preview).toEqual({ kind: "empty" });
   live.threads.setReplyText(D1, " \n\t");
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
   expect(shownOf(live)?.preview).toEqual({ kind: "empty" });
   expect(live.previews).toEqual([]);
-  live.threads.showWrite();
+  live.threads.showWrite(D1);
   expect(shownOf(live)?.preview).toEqual(WRITING);
 });
 
@@ -500,14 +658,14 @@ test("a_preview_shows_gitlabs_rendering_of_the_text", async () => {
   const live = rig();
   await shownAndRead(live);
   live.threads.setReplyText(D1, ASKED);
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
   expect(shownOf(live)?.preview).toEqual({ kind: "loading" });
   expect(at(live.previews, 0).args).toEqual([MR, ASKED]);
   at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
   await settled();
   expect(shownOf(live)?.preview).toEqual({ kind: "read", preview: RENDERED });
 
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
   at(live.previews, 1).answer({ ok: true, value: { kind: "glabMissing" } });
   await settled();
   expect(shownOf(live)?.preview).toEqual({ kind: "refused", reply: { kind: "glabMissing" } });
@@ -517,7 +675,7 @@ test("a_preview_failure_keeps_the_text", async () => {
   const live = rig();
   await shownAndRead(live);
   live.threads.setReplyText(D1, ASKED);
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
   at(live.previews, 0).answer({ ok: false, failure: STOPPED });
   await settled();
   expect(shownOf(live)?.preview).toEqual({ kind: "failed", cause: STOPPED });
@@ -528,7 +686,7 @@ test("typing_while_a_preview_loads_drops_its_answer", async () => {
   const live = rig();
   await shownAndRead(live);
   live.threads.setReplyText(D1, "first @anna");
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
   live.threads.setReplyText(D1, "first @anna, longer");
   expect(shownOf(live)?.preview).toEqual(WRITING);
   at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
@@ -536,7 +694,7 @@ test("typing_while_a_preview_loads_drops_its_answer", async () => {
   expect(shownOf(live)?.preview).toEqual(WRITING);
 
   live.threads.setReplyText(D2, "elsewhere");
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
   live.threads.setReplyText(D2, "elsewhere, longer");
   expect(shownOf(live)?.preview).toEqual({ kind: "loading" });
 });
@@ -570,12 +728,12 @@ test("the_thread_logs_carry_no_text_names_or_ids", async () => {
   live.threads.showThread(MR, D1);
   await readAt(live, 0, threadOf(D1, { comments: [comment, comment] }));
   live.threads.setReplyText(D1, ASKED);
-  void live.threads.sendReply("comment");
+  void live.threads.sendReply(D1, "comment");
   await writeAt(live, 0, { kind: "refused", reason: "403 Forbidden" });
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
   at(live.previews, 0).answer({ ok: false, failure: STOPPED });
   await settled();
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
   at(live.previews, 1).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
   await settled();
 
@@ -608,7 +766,7 @@ test("a_preview_answered_after_the_panel_closed_changes_nothing", async () => {
   const live = rig();
   await shownAndRead(live);
   live.threads.setReplyText(D1, ASKED);
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
   live.threads.closeThread();
   at(live.previews, 0).answer({ ok: true, value: { kind: "read", preview: RENDERED } });
   await settled();
@@ -637,7 +795,7 @@ test("a_plain_preview_is_read_at_once_without_a_call", async () => {
   await shownAndRead(live);
   const seen = previewKinds(live);
   live.threads.setReplyText(D1, PLAIN);
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
 
   expect(shownOf(live)?.preview.kind).toBe("read");
   expect(blockKinds(shownOf(live)?.preview)).toEqual(["paragraph", "list"]);
@@ -652,7 +810,7 @@ test("a_preview_with_a_reference_goes_to_gitlab", async () => {
   await shownAndRead(live);
   for (const [index, text] of ["see #12", "thanks @anna"].entries()) {
     live.threads.setReplyText(D1, text);
-    live.threads.showPreview();
+    live.threads.showPreview(D1);
     expect(shownOf(live)?.preview).toEqual({ kind: "loading" });
     expect(live.previews).toHaveLength(index + 1);
     expect(at(live.previews, index).args).toEqual([MR, text]);
@@ -666,11 +824,11 @@ test("a_late_gitlab_answer_never_replaces_a_local_read", async () => {
   const live = rig();
   await shownAndRead(live);
   live.threads.setReplyText(D1, "thanks @anna");
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
   expect(shownOf(live)?.preview).toEqual({ kind: "loading" });
-  live.threads.showWrite();
+  live.threads.showWrite(D1);
   live.threads.setReplyText(D1, PLAIN);
-  live.threads.showPreview();
+  live.threads.showPreview(D1);
   const local = shownOf(live)?.preview;
   expect(blockKinds(local)).toEqual(["paragraph", "list"]);
 

@@ -34,7 +34,7 @@ type Shown =
 type Button = { readonly disabled: boolean; readonly reason: string | null };
 
 const props = defineProps<{ thread: Thread; writable: boolean }>();
-const emit = defineEmits<{ close: []; focusPanel: [] }>();
+const emit = defineEmits<{ cancel: []; focusHost: [] }>();
 
 const MIN_LINES = 3;
 const MAX_LINES = 12;
@@ -130,7 +130,7 @@ function fit(): void {
 }
 
 async function backToWrite(): Promise<void> {
-  showWrite();
+  showWrite(props.thread.shown.discussion);
   await nextTick();
   field.value?.focus();
 }
@@ -141,7 +141,7 @@ function keepFocus(): void {
   if (writing.value) {
     field.value?.focus();
   } else {
-    emit("focusPanel");
+    emit("focusHost");
   }
 }
 
@@ -149,13 +149,13 @@ function send(kind: "comment" | "draft"): void {
   mentions.close();
   if (!add.value.disabled) {
     keepFocus();
-    void sendReply(kind);
+    void sendReply(props.thread.shown.discussion, kind);
   }
 }
 
 function preview(): void {
   mentions.close();
-  showPreview();
+  showPreview(props.thread.shown.discussion);
 }
 
 function keyPressed(event: KeyboardEvent): void {
@@ -167,14 +167,14 @@ function keyPressed(event: KeyboardEvent): void {
       send("comment");
     },
     cancel: () => {
-      emit("close");
+      emit("cancel");
     },
   });
 }
 
 function toggleResolved(): void {
   keepFocus();
-  void setResolved(resolve.value.to);
+  void setResolved(props.thread.shown.discussion, resolve.value.to);
 }
 </script>
 

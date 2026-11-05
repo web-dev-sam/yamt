@@ -1,10 +1,8 @@
-import { shallowRef, type ShallowRef } from "vue";
+import { computed, type Ref, type ShallowRef } from "vue";
 
 import {
   log,
   type DiscussionId,
-  type DiscussionThread,
-  type DiscussionThreadReply,
   type DiscussionWriteReply,
   type MergeRequestIid,
   type MergeRequestSource,
@@ -13,143 +11,77 @@ import {
 } from "../ipc";
 import type { DiscussionQueue } from "./mergeRequestDiscussions";
 import { previewHere, readPreview, type Preview } from "./mergeRequestPreview";
-import { attempt, type Outcome, type ProblemCause } from "./problem";
+import {
+  backToWriting,
+  dropUnlessShown,
+  patch,
+  readAfresh,
+  recordOf,
+  replyKind,
+  reread,
+  setText,
+  shownRecord,
+  stateOf,
+  type Sending,
+  type ShownThread,
+  type State,
+  type Thread,
+  type WriteFailure,
+  type WriteKind,
+} from "./mergeRequestThreadRecords";
+import { attempt, type Outcome } from "./problem";
 
-export type ShownThread = { readonly iid: MergeRequestIid; readonly discussion: DiscussionId };
-export type ThreadLoad =
-  | { readonly kind: "loading" }
-  /** `refreshing`: read again (after a write, a reload, a refresh); the old thread stays shown meanwhile. */
-  | { readonly kind: "read"; readonly thread: DiscussionThread; readonly refreshing: boolean }
-  | {
-      readonly kind: "refused";
-      readonly reply: Exclude<DiscussionThreadReply, { readonly kind: "read" }>;
-    }
-  | { readonly kind: "failed"; readonly cause: ProblemCause };
-export type WriteKind = "comment" | "draft" | "resolve" | "unresolve" | "submit";
-export type WriteFailure =
-  | Exclude<DiscussionWriteReply, { readonly kind: "sent" }>
-  | { readonly kind: "ipc"; readonly cause: ProblemCause };
-export type Sending =
-  | { readonly kind: "idle" }
-  | { readonly kind: "sending"; readonly what: WriteKind }
-  | { readonly kind: "failed"; readonly what: WriteKind; readonly failure: WriteFailure };
-export type Thread = {
-  readonly shown: ShownThread;
-  readonly load: ThreadLoad;
-  readonly sending: Sending;
-  readonly preview: Preview;
-};
+export type {
+  Sending,
+  ShownThread,
+  Thread,
+  ThreadLoad,
+  WriteFailure,
+  WriteKind,
+} from "./mergeRequestThreadRecords";
+
 export type Threads = {
-  /** The window's one thread panel; null when none is shown. */
-  readonly thread: Readonly<ShallowRef<Thread | null>>;
+  /** Every thread shown, by discussion: the box's panel's and each expanded entry's (request E4). */
+  readonly threads: Readonly<ShallowRef<ReadonlyMap<DiscussionId, Thread>>>;
+  /** The box's panel's thread (`threads` at the panel's discussion); null when no panel shows. */
+  readonly thread: Readonly<Ref<Thread | null>>;
+  /** The person view's expanded entries, in expanding order. */
+  readonly expanded: Readonly<ShallowRef<ReadonlySet<DiscussionId>>>;
+  /** The write under way in the window, one at a time (C8, E4); null: none. */
+  readonly writing: Readonly<ShallowRef<WriteKind | null>>;
   /** C6: each discussion's unsent text for the window's life (absent: none); cleared only by a `sent` reply or draft. */
   readonly replyTexts: Readonly<ShallowRef<ReadonlyMap<DiscussionId, string>>>;
   setReplyText(discussion: DiscussionId, text: string): void;
-  /** C1, C5: shows `discussion` and reads it afresh (loading first); the one already shown: nothing. */
+  /** C1, C5: the panel shows `discussion`, read afresh (loading first); the one already in the panel: nothing; a thread
+   *  an entry shows is shared, not read again. The panel's previous thread is dropped unless an entry shows it. */
   showThread(iid: MergeRequestIid, discussion: DiscussionId): void;
+  /** The panel closes; its thread is dropped unless an entry shows it. */
   closeThread(): void;
-  retryThread(): void;
-  /** C8: one send at a time; a blank text or a send under way → nothing. */
-  sendReply(kind: ReplyKind): Promise<void>;
+  /** E3: the entry expands, its thread read afresh (loading first); already expanded: nothing; one the panel shows is
+   *  shared, not read again. */
+  expandThread(iid: MergeRequestIid, discussion: DiscussionId): void;
+  /** E2, E4: the entry collapses; its thread dropped unless the panel shows it; its text stays. Not expanded: nothing. */
+  collapseThread(discussion: DiscussionId): void;
+  retryThread(discussion: DiscussionId): void;
+  /** C8: one send at a time in the window; a blank text, a send under way, or a thread not read → nothing. */
+  sendReply(discussion: DiscussionId, kind: ReplyKind): Promise<void>;
   /** C10: resolve (true) or reopen (false); never sends the text. */
-  setResolved(resolve: boolean): Promise<void>;
-  /** C9: publishes every pending draft of the merge request. */
-  submitReview(): Promise<void>;
-  showPreview(): void;
-  showWrite(): void;
+  setResolved(discussion: DiscussionId, resolve: boolean): Promise<void>;
+  /** C9: publishes every pending draft of the discussion's merge request. */
+  submitReview(discussion: DiscussionId): Promise<void>;
+  showPreview(discussion: DiscussionId): void;
+  showWrite(discussion: DiscussionId): void;
 };
 
-type State = {
-  readonly source: MergeRequestSource;
-  readonly discussions: Pick<DiscussionQueue, "threadRead" | "reloadDiscussions">;
-  readonly thread: ShallowRef<Thread | null>;
-  readonly replyTexts: ShallowRef<ReadonlyMap<DiscussionId, string>>;
-  /** Bumped by every show, close and re-read: an older read's answer reaches only the box. */
-  generation: number;
-  /** The write under way, one at a time in the window: every thread shown meanwhile reports it as `sending`. */
-  writing: WriteKind | null;
+type Write = {
+  readonly what: WriteKind;
+  readonly call: (shown: ShownThread) => Promise<SourceResult<DiscussionWriteReply>>;
+  readonly text: string | null;
 };
 
-const LOADING: ThreadLoad = { kind: "loading" };
-const IDLE: Sending = { kind: "idle" };
-const WRITING: Preview = { kind: "writing" };
-
-function isShown(state: State, shown: ShownThread): boolean {
-  const current = state.thread.value?.shown;
-  return current?.iid === shown.iid && current.discussion === shown.discussion;
-}
-
-function patch(state: State, shown: ShownThread, change: Partial<Omit<Thread, "shown">>): void {
-  const current = state.thread.value;
-  if (current !== null && isShown(state, shown)) {
-    state.thread.value = { ...current, ...change };
-  }
-}
-
-function replyKind<T extends { readonly kind: string }>(outcome: Outcome<T>): string {
-  return outcome.ok ? outcome.value.kind : outcome.cause.kind;
-}
-
-function threadLoadOf(outcome: Outcome<DiscussionThreadReply>): ThreadLoad {
-  if (!outcome.ok) {
-    return { kind: "failed", cause: outcome.cause };
-  }
-  const reply = outcome.value;
-  return reply.kind === "read"
-    ? { kind: "read", thread: reply.thread, refreshing: false }
-    : { kind: "refused", reply };
-}
-
-/** Reads `shown`; the panel takes the answer only while `generation` is the latest (null: the box alone). */
-async function read(state: State, shown: ShownThread, generation: number | null): Promise<void> {
-  const started = performance.now();
-  const outcome = await attempt(() =>
-    state.source.readDiscussionThread(shown.iid, shown.discussion),
-  );
-  const load = threadLoadOf(outcome);
-  const comments = load.kind === "read" ? load.thread.comments.length : 0;
-  const ms = Math.round(performance.now() - started);
-  log.info("mergeRequests.thread_read", { iid: shown.iid, kind: replyKind(outcome), comments, ms });
-  if (load.kind === "read") {
-    state.discussions.threadRead(shown.iid, load.thread.discussion, load.thread.resolved);
-  }
-  if (generation === state.generation) {
-    patch(state, shown, { load });
-  }
-}
-
-async function reread(state: State, shown: ShownThread, asked?: Promise<void>): Promise<void> {
-  const current = state.thread.value;
-  const inPanel = current !== null && isShown(state, shown);
-  if (inPanel) {
-    state.generation += 1;
-    state.thread.value = {
-      ...current,
-      load: current.load.kind === "read" ? { ...current.load, refreshing: true } : LOADING,
-    };
-  }
-  const generation = inPanel ? state.generation : null;
-  if (asked !== undefined) {
-    await asked;
-  }
-  await read(state, shown, generation);
-}
-
-function show(state: State, shown: ShownThread): void {
-  state.generation += 1;
-  const sending: Sending = state.writing === null ? IDLE : { kind: "sending", what: state.writing };
-  state.thread.value = { shown, load: LOADING, sending, preview: WRITING };
-  void read(state, shown, state.generation);
-}
-
-function setText(state: State, discussion: DiscussionId, text: string): void {
-  const texts = new Map(state.replyTexts.value);
-  texts.delete(discussion);
-  state.replyTexts.value = text === "" ? texts : texts.set(discussion, text);
-  const current = state.thread.value;
-  if (current?.shown.discussion === discussion) {
-    state.thread.value = { ...current, preview: WRITING };
-  }
+/** The one rule both hosts use: read, not refreshing, and no write under way in the window. */
+export function isWritable(thread: Thread, writing: WriteKind | null): boolean {
+  return thread.load.kind === "read" && !thread.load.refreshing && writing === null;
 }
 
 /** Why a write did not land; null when GitLab took it. */
@@ -161,32 +93,25 @@ function failureOf(outcome: Outcome<DiscussionWriteReply>): WriteFailure | null 
   return reply.kind === "sent" ? null : reply;
 }
 
-async function write(
-  state: State,
-  what: WriteKind,
-  call: (shown: ShownThread) => Promise<SourceResult<DiscussionWriteReply>>,
-  text: string | null,
-): Promise<void> {
-  const current = state.thread.value;
-  if (current?.load.kind !== "read" || current.load.refreshing || state.writing !== null) {
+async function write(state: State, discussion: DiscussionId, how: Write): Promise<void> {
+  const record = state.threads.value.get(discussion);
+  if (record === undefined || !isWritable(record, state.writing.value)) {
     return;
   }
-  const { shown } = current;
-  state.writing = what;
+  const { shown } = record;
+  const { what } = how;
+  state.writing.value = what;
   patch(state, shown, { sending: { kind: "sending", what } });
   const started = performance.now();
-  const outcome = await attempt(() => call(shown));
+  const outcome = await attempt(() => how.call(shown));
   const ms = Math.round(performance.now() - started);
   log.info("mergeRequests.thread_write", { iid: shown.iid, what, kind: replyKind(outcome), ms });
   const failure = failureOf(outcome);
-  state.writing = null;
-  patch(state, shown, { sending: failure === null ? IDLE : { kind: "failed", what, failure } });
-  const after = state.thread.value;
-  if (after?.sending.kind === "sending") {
-    state.thread.value = { ...after, sending: IDLE };
-  }
-  if (failure === null && state.replyTexts.value.get(shown.discussion) === text) {
-    setText(state, shown.discussion, "");
+  state.writing.value = null;
+  const sending: Sending = failure === null ? { kind: "idle" } : { kind: "failed", what, failure };
+  patch(state, shown, { sending });
+  if (failure === null && state.replyTexts.value.get(discussion) === how.text) {
+    setText(state, discussion, "");
   }
   if (failure?.kind !== "refused") {
     void reread(state, shown);
@@ -196,13 +121,13 @@ async function write(
   }
 }
 
-async function preview(state: State): Promise<void> {
-  const current = state.thread.value;
-  if (current === null) {
+async function preview(state: State, discussion: DiscussionId): Promise<void> {
+  const record = state.threads.value.get(discussion);
+  if (record === undefined) {
     return;
   }
-  const { shown } = current;
-  const text = state.replyTexts.value.get(shown.discussion) ?? "";
+  const { shown } = record;
+  const text = state.replyTexts.value.get(discussion) ?? "";
   const atOnce = previewHere(shown.iid, text);
   if (atOnce !== null) {
     patch(state, shown, { preview: atOnce });
@@ -211,66 +136,75 @@ async function preview(state: State): Promise<void> {
   const loading: Preview = { kind: "loading" };
   patch(state, shown, { preview: loading });
   const answer = await readPreview(state.source, shown.iid, text);
-  if (state.thread.value?.preview === loading) {
+  if (recordOf(state, shown)?.preview === loading) {
     patch(state, shown, { preview: answer });
   }
 }
 
 function writesOf(state: State): Pick<Threads, "sendReply" | "setResolved" | "submitReview"> {
   return {
-    sendReply: async (kind) => {
-      const discussion = state.thread.value?.shown.discussion;
-      const text = discussion === undefined ? "" : (state.replyTexts.value.get(discussion) ?? "");
+    sendReply: async (discussion, kind) => {
+      const text = state.replyTexts.value.get(discussion) ?? "";
       if (text.trim() !== "") {
-        await write(
-          state,
-          kind,
-          (shown) => state.source.replyToDiscussion(shown.iid, shown.discussion, kind, text),
+        await write(state, discussion, {
+          what: kind,
+          call: (shown) => state.source.replyToDiscussion(shown.iid, shown.discussion, kind, text),
           text,
-        );
+        });
       }
     },
-    setResolved: (resolve) =>
-      write(
-        state,
-        resolve ? "resolve" : "unresolve",
-        (shown) => state.source.resolveDiscussion(shown.iid, shown.discussion, resolve),
-        null,
-      ),
-    submitReview: () =>
-      write(state, "submit", (shown) => state.source.submitReview(shown.iid), null),
+    setResolved: (discussion, resolve) =>
+      write(state, discussion, {
+        what: resolve ? "resolve" : "unresolve",
+        call: (shown) => state.source.resolveDiscussion(shown.iid, shown.discussion, resolve),
+        text: null,
+      }),
+    submitReview: (discussion) =>
+      write(state, discussion, {
+        what: "submit",
+        call: (shown) => state.source.submitReview(shown.iid),
+        text: null,
+      }),
   };
 }
 
-function panelOf(state: State): Omit<Threads, "sendReply" | "setResolved" | "submitReview"> {
+function panelOf(state: State): Pick<Threads, "thread" | "showThread" | "closeThread"> {
+  const { panel, threads } = state;
   return {
-    thread: state.thread,
-    replyTexts: state.replyTexts,
-    setReplyText: (discussion, text) => {
-      setText(state, discussion, text);
-    },
+    thread: computed(() =>
+      panel.value === null ? null : (threads.value.get(panel.value) ?? null),
+    ),
     showThread: (iid, discussion) => {
-      if (!isShown(state, { iid, discussion })) {
-        show(state, { iid, discussion });
+      const previous = panel.value;
+      panel.value = discussion;
+      if (previous !== null) {
+        dropUnlessShown(state, previous);
       }
+      shownRecord(state, { iid, discussion });
     },
     closeThread: () => {
-      state.generation += 1;
-      state.thread.value = null;
-    },
-    retryThread: () => {
-      const current = state.thread.value;
-      if (current !== null) {
-        show(state, current.shown);
+      const previous = panel.value;
+      panel.value = null;
+      if (previous !== null) {
+        dropUnlessShown(state, previous);
       }
     },
-    showPreview: () => {
-      void preview(state);
+  };
+}
+
+function entriesOf(state: State): Pick<Threads, "expandThread" | "collapseThread"> {
+  return {
+    expandThread: (iid, discussion) => {
+      if (!state.expanded.value.has(discussion)) {
+        state.expanded.value = new Set(state.expanded.value).add(discussion);
+        shownRecord(state, { iid, discussion });
+      }
     },
-    showWrite: () => {
-      const current = state.thread.value;
-      if (current !== null) {
-        state.thread.value = { ...current, preview: WRITING };
+    collapseThread: (discussion) => {
+      const expanded = new Set(state.expanded.value);
+      if (expanded.delete(discussion)) {
+        state.expanded.value = expanded;
+        dropUnlessShown(state, discussion);
       }
     },
   };
@@ -280,20 +214,32 @@ export function createThreads(deps: {
   readonly source: MergeRequestSource;
   readonly discussions: Pick<DiscussionQueue, "threadRead" | "reloadDiscussions">;
 }): Threads & { readonly refreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void } {
-  const state: State = {
-    ...deps,
-    thread: shallowRef<Thread | null>(null),
-    replyTexts: shallowRef<ReadonlyMap<DiscussionId, string>>(new Map()),
-    generation: 0,
-    writing: null,
-  };
+  const state = stateOf(deps);
   return {
+    threads: state.threads,
+    expanded: state.expanded,
+    writing: state.writing,
+    replyTexts: state.replyTexts,
+    setReplyText: (discussion, text) => {
+      setText(state, discussion, text);
+    },
     ...panelOf(state),
+    ...entriesOf(state),
     ...writesOf(state),
+    retryThread: (discussion) => {
+      readAfresh(state, discussion);
+    },
+    showPreview: (discussion) => {
+      void preview(state, discussion);
+    },
+    showWrite: (discussion) => {
+      backToWriting(state, discussion);
+    },
     refreshed: (iid, asked) => {
-      const shown = state.thread.value?.shown;
-      if (shown !== undefined && (iid === null || iid === shown.iid)) {
-        void reread(state, shown, asked);
+      for (const { shown } of state.threads.value.values()) {
+        if (iid === null || iid === shown.iid) {
+          void reread(state, shown, asked);
+        }
       }
     },
   };

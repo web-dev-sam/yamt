@@ -215,7 +215,7 @@ test("a_resolve_in_the_panel_marks_the_row_until_the_box_closes", async () => {
   const live = rig();
   const shown = await threadShown(live);
   const listed = rowOf(live, THREADS).openDiscussions;
-  const resolving = live.slice.setResolved(true);
+  const resolving = live.slice.setResolved(shown, true);
   await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
   await resolving;
 
@@ -244,10 +244,10 @@ test("a_box_thread_answer_through_the_slice_marks_its_row", async () => {
 
 test("the_discussions_reload_button_asks_gitlab_again", async () => {
   const live = rig();
-  await threadShown(live);
+  const shown = await threadShown(live);
   expect(live.calls).toEqual(["askGitLabAgain", "readDiscussions"]);
 
-  const submitting = live.slice.submitReview();
+  const submitting = live.slice.submitReview(shown);
   await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS * 2);
   await submitting;
   expect(live.calls).toEqual(["askGitLabAgain", "readDiscussions", "readDiscussions"]);
