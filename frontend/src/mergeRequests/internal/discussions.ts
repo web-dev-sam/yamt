@@ -55,7 +55,7 @@ const WAITING_TEXT = "Waiting for an answer";
 /** Who a discussion's turn is weighed for: usernames, null for nobody (no viewer) or unknown (no author). */
 type Sides = { readonly viewer: string | null; readonly author: string | null };
 
-function isUser(person: Person | null, username: string | null): boolean {
+export function isUser(person: Person | null, username: string | null): boolean {
   return username !== null && person !== null && person.username === username;
 }
 
@@ -63,7 +63,7 @@ function personsTurn(person: Person): Turn {
   return { kind: "person", username: person.username, name: displayName(person) };
 }
 
-function starterOf(discussion: OpenDiscussion): Person | null {
+export function starterOf(discussion: OpenDiscussion): Person | null {
   return (discussion.earlier[0] ?? discussion.last).author;
 }
 
@@ -77,7 +77,7 @@ function waitedOn(discussion: OpenDiscussion, { viewer, author }: Sides): Turn {
 }
 
 /** B2.4 and D3: the viewer wrote a comment in it. */
-function wroteIn(discussion: OpenDiscussion, viewer: string | null): boolean {
+export function wroteIn(discussion: OpenDiscussion, viewer: string | null): boolean {
   return [...discussion.earlier, discussion.last].some((comment) => isUser(comment.author, viewer));
 }
 

@@ -122,6 +122,19 @@ export {
   type TurnLine,
   type Viewer,
 } from "./internal/discussions";
+export {
+  PERSON_GROUPS,
+  foldedWriters,
+  laterWriters,
+  personEntries,
+  personGroupOf,
+  personLines,
+  type PersonEntry,
+  type PersonGroup,
+  type PersonLine,
+  type PersonRow,
+} from "./internal/personDiscussions";
+export { keptInPlace } from "./internal/keptInPlace";
 export { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "./internal/ciBox";
 export { filtersFrom, storedFilters, type StoredFilters } from "./internal/stored";
 export { sizeParts, sizeTitle } from "./internal/size";

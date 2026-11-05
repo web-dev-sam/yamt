@@ -1,0 +1,613 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index 55fa190..5cb29de 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -27,3 +27,5 @@ Job log (request `docs/slices/request-ci-job-log.md` rules 4–6, design `docs/s
+ People on a merge request (request `docs/slices/request-mr-people.md` rule 2, design `docs/slices/briefs/mr-people-design.md` option A §1.1, §1.6, §1.8, plan §2 #169): `peopleSuggestions(rows, row, group, me)` is the empty add field's list, each username once, at most `SUGGESTED_PEOPLE` (20, GitLab's autocomplete `LIMIT`): "Me" first when there is a viewer (their person from the row or any loaded row, else `null`: initials), then the row's own author, assignees, reviewers and approvers in that order, then everyone else on the loaded rows by how many rows hold them in `group`, then by `displayName` (`choices`'s `peopleOf` and `byCountThenLabel`, shared, never copied). People already in `group` stay listed; the page marks them. `KnownPeople` and `Suggestion` are generic in the person, so the window's rows and pictures pass through. `searchedText` is what GitLab is asked for: trimmed, one leading `@` dropped, trimmed again; `""` is the empty field, never sent. `ME_WORD` (`filters`) is the one spelling of "Me", read by the filters' words and the choices.
+ 
+ Mentions (request `docs/slices/request-mr-mentions.md` rules 1, 2, 4, design `docs/slices/briefs/mr-mentions-design.md` option A §2.1–2.2, plan §2 #191–#192): `mentionWordAt(text, caret)` is rule 1, the `MentionWord` being typed or null: scanning back from the caret over word characters (code points matching `[\p{L}\p{N}_.-]`) must reach an `@` that starts the text or follows whitespace, `(`, `[` or `{` (so `a@b.c` is no mention, RK76); `typed` is the text between the `@` and the caret, `end` the caret plus the word characters after it; a caret outside the text is null. `knownMentions(row, writers)` is the merge request's people for a field: the row's author, assignees, reviewers and approvers (reusing `suggestions`'s `peopleOnRow`), then the non-null writers, each username once, in that order; a null row gives the writers only. `mentionLines(known, found, typed)` is rule 2's list: the known people matching `typed`, then the found ones; a person's terms are the name without its spaces and the username, lower-cased; inside each group those with a term starting with the typed text come before those whose `"<name term> <username term>"` contains it (order kept); each username once, the first wins; at most `MENTION_LINES` (10, GitLab's `gfm_auto_complete.js` `limit`). A blank `typed` lists every known person and no found one. `mentionEdit(word, username)` is rule 4: it replaces the whole word, `start` to `end`, with `"@<username> "` (one space).
++
++One person's discussions (request `docs/slices/request-mr-person-discussions.md` B2, C2–C3, D3–D4, design `briefs/mr-person-discussions-design.md` option A §2.4, plan §2 #193): `personGroupOf(discussion, person, row)` is C2, the first `PersonGroup` that applies, in `PERSON_GROUPS` order: `turn` when `turnOf` with the person as the viewer and the row's author is `viewer`; `started` when `discussions`'s `starterOf` is the person; `wrote` when its `wroteIn`; `reviewer` when the row's reviewers name the person; else `other` (imported, never copied; a null person or a deleted writer is never the person, so a null person is always `other`). `personEntries(listed, person)` is every discussion of every listed row as a `PersonEntry` (row, discussion, group, turn), by group, then newest `last.createdAt` first; equal keys keep the input order (rows as listed, discussions as given). `keptInPlace(previous, next, held, keyOf)` (C3): a held item stays at its index in `previous`, taking its `next` version; the others fill the rest in `next`'s order; a held item missing from `next` is dropped; it is shared by the rows (by iid) and the entries (by discussion id). `laterWriters(discussion)` is D3, the writers after the first comment, oldest first: `[...earlier.slice(1), last]` when `earlier` is non-empty, else none; a person writing twice shows twice. `foldedWriters(writers, fits)` is D4: all when they fit; else the newest `max(fits − 1, 0)` shown and the rest `folded` (the "+N" takes the first slot); `fits` below 1 counts as 1. `personLines(rows, writers, me, chosen)` is B2's menu: "Me" (`ME_WORD`) first when there is a viewer, then every other username once from `peopleOnRow` of the rows and the non-null writers (`mentions`'s `knownMentions`), by `displayName` (`localeCompare` "en"), each a `PersonLine` with its value, label, person (null for a Me nobody listed has) and `chosen` (a person whose username is `me` is Me). `narrowed` reads only `label`, so it takes these lines as well as `Choice`s.
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+index d6fa204..848e57d 100644
+--- a/frontend/src/mergeRequests/index.ts
++++ b/frontend/src/mergeRequests/index.ts
+@@ -122,6 +122,19 @@ export {
+   type TurnLine,
+   type Viewer,
+ } from "./internal/discussions";
++export {
++  PERSON_GROUPS,
++  foldedWriters,
++  laterWriters,
++  personEntries,
++  personGroupOf,
++  personLines,
++  type PersonEntry,
++  type PersonGroup,
++  type PersonLine,
++  type PersonRow,
++} from "./internal/personDiscussions";
++export { keptInPlace } from "./internal/keptInPlace";
+ export { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "./internal/ciBox";
+ export { filtersFrom, storedFilters, type StoredFilters } from "./internal/stored";
+ export { sizeParts, sizeTitle } from "./internal/size";
+diff --git a/frontend/src/mergeRequests/internal/choices.ts b/frontend/src/mergeRequests/internal/choices.ts
+index 288bb21..56e30c3 100644
+--- a/frontend/src/mergeRequests/internal/choices.ts
++++ b/frontend/src/mergeRequests/internal/choices.ts
+@@ -143,7 +143,10 @@ export function reviewChoices(
+   });
+ }
+ 
+-export function narrowed<V>(choices: readonly Choice<V>[], typed: string): readonly Choice<V>[] {
++export function narrowed<C extends { readonly label: string }>(
++  choices: readonly C[],
++  typed: string,
++): readonly C[] {
+   const needle = typed.trim().toLowerCase();
+   return choices.filter((listed) => listed.label.toLowerCase().includes(needle));
+ }
+diff --git a/frontend/src/mergeRequests/internal/discussions.ts b/frontend/src/mergeRequests/internal/discussions.ts
+index af83cc0..611fffa 100644
+--- a/frontend/src/mergeRequests/internal/discussions.ts
++++ b/frontend/src/mergeRequests/internal/discussions.ts
+@@ -55,7 +55,7 @@ const WAITING_TEXT = "Waiting for an answer";
+ /** Who a discussion's turn is weighed for: usernames, null for nobody (no viewer) or unknown (no author). */
+ type Sides = { readonly viewer: string | null; readonly author: string | null };
+ 
+-function isUser(person: Person | null, username: string | null): boolean {
++export function isUser(person: Person | null, username: string | null): boolean {
+   return username !== null && person !== null && person.username === username;
+ }
+ 
+@@ -63,7 +63,7 @@ function personsTurn(person: Person): Turn {
+   return { kind: "person", username: person.username, name: displayName(person) };
+ }
+ 
+-function starterOf(discussion: OpenDiscussion): Person | null {
++export function starterOf(discussion: OpenDiscussion): Person | null {
+   return (discussion.earlier[0] ?? discussion.last).author;
+ }
+ 
+@@ -77,7 +77,7 @@ function waitedOn(discussion: OpenDiscussion, { viewer, author }: Sides): Turn {
+ }
+ 
+ /** B2.4 and D3: the viewer wrote a comment in it. */
+-function wroteIn(discussion: OpenDiscussion, viewer: string | null): boolean {
++export function wroteIn(discussion: OpenDiscussion, viewer: string | null): boolean {
+   return [...discussion.earlier, discussion.last].some((comment) => isUser(comment.author, viewer));
+ }
+ 
+diff --git a/frontend/src/mergeRequests/internal/keptInPlace.test.ts b/frontend/src/mergeRequests/internal/keptInPlace.test.ts
+new file mode 100644
+index 0000000..9c3cfd3
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/keptInPlace.test.ts
+@@ -0,0 +1,48 @@
++import { expect, test } from "vitest";
++
++import { keptInPlace } from "../index";
++
++type Item = { readonly id: number; readonly version: string };
++
++function items(version: string, ...ids: readonly number[]): readonly Item[] {
++  return ids.map((id) => ({ id, version }));
++}
++
++function keyOf(item: Item): number {
++  return item.id;
++}
++
++test("a_held_item_keeps_its_index_and_takes_its_new_version", () => {
++  const kept = keptInPlace(items("old", 1, 2, 3), items("new", 3, 2, 1), new Set([2, 3]), keyOf);
++  expect(kept).toEqual([
++    { id: 1, version: "new" },
++    { id: 2, version: "new" },
++    { id: 3, version: "new" },
++  ]);
++  expect(keptInPlace(items("old", 1, 2, 3), items("new", 3, 1, 2), new Set([2]), keyOf)).toEqual(
++    items("new", 3, 2, 1),
++  );
++});
++
++test("the_others_fill_in_next_order", () => {
++  expect(
++    keptInPlace(items("old", 1, 2, 3, 4), items("new", 4, 5, 3, 2, 1), new Set([1]), keyOf),
++  ).toEqual(items("new", 1, 4, 5, 3, 2));
++  expect(keptInPlace(items("old", 1, 2), items("new", 2, 1, 3), new Set([3]), keyOf)).toEqual(
++    items("new", 2, 1, 3),
++  );
++});
++
++test("a_held_item_gone_from_next_is_dropped", () => {
++  expect(keptInPlace(items("old", 1, 2, 3), items("new", 3, 1), new Set([2]), keyOf)).toEqual(
++    items("new", 3, 1),
++  );
++  expect(keptInPlace(items("old", 1, 2, 3), items("new", 3, 2), new Set([1, 3]), keyOf)).toEqual(
++    items("new", 2, 3),
++  );
++});
++
++test("nothing_held_is_next", () => {
++  const next = items("new", 3, 1, 2);
++  expect(keptInPlace(items("old", 1, 2, 3), next, new Set<number>(), keyOf)).toEqual(next);
++});
+diff --git a/frontend/src/mergeRequests/internal/keptInPlace.ts b/frontend/src/mergeRequests/internal/keptInPlace.ts
+new file mode 100644
+index 0000000..00a9b44
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/keptInPlace.ts
+@@ -0,0 +1,21 @@
++/** A held item stays at its index in `previous`, taking its `next` version; the others fill the rest in `next`'s
++ *  order; a held item missing from `next` is dropped. */
++export function keptInPlace<T, K>(
++  previous: readonly T[],
++  next: readonly T[],
++  held: ReadonlySet<K>,
++  keyOf: (item: T) => K,
++): readonly T[] {
++  const nextOf = new Map(next.map((item) => [keyOf(item), item]));
++  const kept = previous.flatMap((item, at) => {
++    const key = keyOf(item);
++    const now = held.has(key) ? nextOf.get(key) : undefined;
++    return now === undefined ? [] : [{ key, item: now, at }];
++  });
++  const keptKeys = new Set(kept.map(({ key }) => key));
++  const order = next.filter((item) => !keptKeys.has(keyOf(item)));
++  for (const { item, at } of kept) {
++    order.splice(at, 0, item);
++  }
++  return order;
++}
+diff --git a/frontend/src/mergeRequests/internal/personDiscussions.test.ts b/frontend/src/mergeRequests/internal/personDiscussions.test.ts
+new file mode 100644
+index 0000000..aefb2f9
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/personDiscussions.test.ts
+@@ -0,0 +1,286 @@
++import { expect, test } from "vitest";
++
++import {
++  PERSON_GROUPS,
++  foldedWriters,
++  laterWriters,
++  personEntries,
++  personGroupOf,
++  personLines,
++  type KnownPeople,
++  type OpenDiscussion,
++  type Person,
++  type PersonLine,
++  type TurnComment,
++  type Viewer,
++} from "../index";
++
++/** A comment as the cases write it: its writer (null: a deleted account), then the usernames it mentions. */
++type Said = readonly [writer: string | null, ...mentioned: string[]];
++type Row = KnownPeople<Person>;
++type Case = OpenDiscussion & { readonly id: string };
++
++const SAM: Person = { username: "sam", name: "Sam Weller" };
++const ANNA: Person = { username: "anna", name: "Anna Berg" };
++const BEN: Person = { username: "ben", name: "Ben Okafor" };
++const CHIARA: Person = { username: "chiara", name: "Chiara Rossi" };
++const DMITRI: Person = { username: "dmitri", name: "Dmitri Volkov" };
++const MARKUS: Person = { username: "markus", name: "Markus Lind" };
++const ERIN: Person = { username: "erin", name: "Erin Hale" };
++const KIM: Person = { username: "kim", name: " " };
++const PEOPLE: Readonly<Record<string, Person>> = {
++  sam: SAM,
++  anna: ANNA,
++  ben: BEN,
++  chiara: CHIARA,
++  dmitri: DMITRI,
++};
++
++function personOf(username: string): Person {
++  const person = PEOPLE[username];
++  if (person === undefined) {
++    throw new Error(`no person ${username}`);
++  }
++  return person;
++}
++
++function comment([writer, ...mentioned]: Said): TurnComment {
++  return {
++    author: writer === null ? null : personOf(writer),
++    mentions: mentioned.map(personOf),
++  };
++}
++
++/** A discussion of the comments, oldest first, its last written at `createdAt`; `id` names it in the tests. */
++function dated(id: string, createdAt: number, first: Said, ...rest: readonly Said[]): Case {
++  const comments = [first, ...rest].map(comment);
++  const last = comments.pop() ?? comment(first);
++  return {
++    id,
++    place: { kind: "overview" },
++    earlier: comments,
++    last: { ...last, createdAt, text: id },
++  };
++}
++
++function said(first: Said, ...rest: readonly Said[]): Case {
++  return dated("case", 0, first, ...rest);
++}
++
++function row(people: Partial<Row> = {}): Row {
++  return { author: DMITRI, assignees: [], reviewers: [], approvedBy: [], ...people };
++}
++
++function reviewedBy(...reviewers: readonly Person[]): Row {
++  return row({ reviewers: reviewers.map((person) => ({ person })) });
++}
++
++const BY_DMITRI = row();
++
++/** A discussion's writers as `laterWriters` reads them, the starter first. */
++function writing(...authors: readonly (Person | null)[]): {
++  readonly earlier: readonly { readonly author: Person | null }[];
++  readonly last: { readonly author: Person | null };
++} {
++  return {
++    earlier: authors.slice(0, -1).map((author) => ({ author })),
++    last: { author: authors.at(-1) ?? null },
++  };
++}
++
++test("the_persons_turn_is_group_one_for_the_viewer_and_for_another_person", () => {
++  for (const person of ["sam", "anna"]) {
++    const own = row({ author: personOf(person) });
++    expect(personGroupOf(said(["ben"], [person], ["chiara"]), person, BY_DMITRI)).toBe("turn");
++    expect(personGroupOf(said(["ben", person]), person, BY_DMITRI)).toBe("turn");
++    expect(personGroupOf(said(["ben"], ["chiara", person], ["ben"]), person, BY_DMITRI)).toBe(
++      "turn",
++    );
++    expect(personGroupOf(said(["ben"]), person, own)).toBe("turn");
++    expect(personGroupOf(said(["ben"], [person]), person, BY_DMITRI)).toBe("wrote");
++    expect(personGroupOf(said(["ben", person], [person]), person, BY_DMITRI)).toBe("wrote");
++    expect(personGroupOf(said(["ben"], [person]), person, own)).toBe("wrote");
++    expect(personGroupOf(said(["ben"]), person, BY_DMITRI)).toBe("other");
++  }
++});
++
++test("started_is_the_starter_whose_turn_it_is_not", () => {
++  expect(personGroupOf(said(["anna"], ["ben"], ["anna"]), "anna", BY_DMITRI)).toBe("started");
++  expect(personGroupOf(said(["anna"]), "anna", reviewedBy(ANNA))).toBe("started");
++  expect(personGroupOf(said(["anna"], ["ben"]), "anna", BY_DMITRI)).toBe("turn");
++  expect(personGroupOf(said(["sam"], ["sam"]), "sam", BY_DMITRI)).toBe("started");
++});
++
++test("wrote_is_a_later_comment_whose_turn_it_is_not", () => {
++  expect(personGroupOf(said(["ben"], ["anna"], ["chiara"], ["anna"]), "anna", BY_DMITRI)).toBe(
++    "wrote",
++  );
++  expect(personGroupOf(said(["ben"], ["anna"]), "anna", reviewedBy(ANNA))).toBe("wrote");
++  expect(personGroupOf(said(["ben"], ["anna"], ["chiara"]), "anna", BY_DMITRI)).toBe("turn");
++});
++
++test("reviewer_is_a_reviewer_who_never_wrote", () => {
++  expect(personGroupOf(said(["ben"], ["chiara"]), "anna", reviewedBy(BEN, ANNA))).toBe("reviewer");
++  expect(personGroupOf(said(["ben"]), "sam", reviewedBy(SAM))).toBe("reviewer");
++});
++
++test("a_non_reviewer_is_never_reviewer", () => {
++  const only = row({ assignees: [ANNA], approvedBy: [ANNA], reviewers: [{ person: BEN }] });
++  expect(personGroupOf(said(["ben"], ["chiara"]), "anna", only)).toBe("other");
++});
++
++test("every_other_discussion_is_other", () => {
++  const discussions = [said(["ben"]), said(["ben"], ["chiara", "ben"]), said(["chiara"], [null])];
++  for (const discussion of discussions) {
++    expect(personGroupOf(discussion, "anna", reviewedBy(CHIARA))).toBe("other");
++    expect(personGroupOf(discussion, "sam", BY_DMITRI)).toBe("other");
++  }
++});
++
++test("a_null_person_puts_everything_in_other", () => {
++  const discussions = [
++    said(["ben", "sam"]),
++    said(["sam"], ["anna"]),
++    said(["anna"], ["anna"]),
++    said([null], [null]),
++  ];
++  for (const discussion of discussions) {
++    expect(personGroupOf(discussion, null, reviewedBy(SAM, ANNA))).toBe("other");
++    expect(personGroupOf(discussion, null, row({ author: null }))).toBe("other");
++  }
++  expect(
++    personEntries([{ row: reviewedBy(ANNA), discussions }], null).map(({ group }) => group),
++  ).toEqual(["other", "other", "other", "other"]);
++});
++
++test("a_deleted_writer_is_never_the_person", () => {
++  const deleted = row({ author: null, reviewers: [{ person: CHIARA }] });
++  expect(personGroupOf(said([null], ["ben"], [null]), "anna", deleted)).toBe("other");
++  expect(personGroupOf(said([null]), "sam", deleted)).toBe("other");
++  expect(personGroupOf(said([null], ["anna"]), "anna", deleted)).toBe("wrote");
++});
++
++test("groups_come_in_c2_order_and_newest_last_comment_first_inside_each", () => {
++  const first = [
++    dated("reviewer", 9, ["chiara"]),
++    dated("wrote", 5, ["ben"], ["anna"]),
++    dated("turn-old", 2, ["ben", "anna"]),
++  ];
++  const second = [
++    dated("other-old", 1, ["ben"]),
++    dated("started", 3, ["anna"]),
++    dated("turn-new", 8, ["chiara"], ["anna"], ["ben"]),
++    dated("other-new", 7, ["ben"]),
++  ];
++  const entries = personEntries(
++    [
++      { row: reviewedBy(ANNA), discussions: first },
++      { row: BY_DMITRI, discussions: second },
++    ],
++    "anna",
++  );
++  expect(entries.map(({ discussion, group }) => [discussion.id, group])).toEqual([
++    ["turn-new", "turn"],
++    ["turn-old", "turn"],
++    ["started", "started"],
++    ["wrote", "wrote"],
++    ["reviewer", "reviewer"],
++    ["other-new", "other"],
++    ["other-old", "other"],
++  ]);
++  expect(entries.map(({ row: listed }) => listed.reviewers.length)).toEqual([0, 1, 0, 1, 1, 0, 0]);
++  expect(entries[0]?.turn).toEqual({ kind: "viewer" });
++  expect(entries[2]?.turn).toEqual({ kind: "author" });
++  expect(PERSON_GROUPS).toEqual(["turn", "started", "wrote", "reviewer", "other"]);
++});
++
++test("equal_times_keep_the_rows_order_then_gitlabs", () => {
++  const entries = personEntries(
++    [
++      { row: BY_DMITRI, discussions: [dated("a1", 4, ["ben"]), dated("a2", 4, ["chiara"])] },
++      { row: BY_DMITRI, discussions: [dated("b1", 4, ["ben"]), dated("b2", 4, ["ben"])] },
++    ],
++    "sam",
++  );
++  expect(entries.map(({ discussion }) => discussion.id)).toEqual(["a1", "a2", "b1", "b2"]);
++});
++
++test("the_writers_are_every_comment_after_the_first_oldest_first", () => {
++  expect(laterWriters(writing(ANNA))).toEqual([]);
++  expect(laterWriters(writing(ANNA, MARKUS, ERIN))).toEqual([MARKUS, ERIN]);
++  expect(laterWriters(writing(ANNA, MARKUS, ERIN, MARKUS))).toEqual([MARKUS, ERIN, MARKUS]);
++  expect(laterWriters(writing(ANNA, null))).toEqual([null]);
++});
++
++test("the_fold_keeps_the_newest_writers", () => {
++  const writers = [1, 2, 3, 4, 5, 6];
++  expect(foldedWriters(writers, 4)).toEqual({ folded: [1, 2, 3], shown: [4, 5, 6] });
++  expect(foldedWriters(writers, 5)).toEqual({ folded: [1, 2], shown: [3, 4, 5, 6] });
++  expect(foldedWriters(writers, 6)).toEqual({ folded: [], shown: writers });
++  expect(foldedWriters(writers, 7)).toEqual({ folded: [], shown: writers });
++  expect(foldedWriters(writers, 1)).toEqual({ folded: writers, shown: [] });
++  expect(foldedWriters(writers, 0)).toEqual({ folded: writers, shown: [] });
++  expect(foldedWriters([1], 0)).toEqual({ folded: [], shown: [1] });
++  expect(foldedWriters([1, 2], 1)).toEqual({ folded: [1, 2], shown: [] });
++});
++
++function marked(lines: readonly PersonLine<Person>[]): readonly [string, boolean][] {
++  return lines.map(({ label, chosen }) => [label, chosen]);
++}
++
++test("person_lines_list_me_first_then_everyone_once_by_name", () => {
++  const rows = [
++    row({ assignees: [ANNA, SAM], reviewers: [{ person: BEN }], approvedBy: [ANNA] }),
++    row({ author: null, reviewers: [{ person: CHIARA }], approvedBy: [BEN, KIM] }),
++  ];
++  const writers = [ERIN, null, ANNA, SAM, ERIN];
++  const ME: Viewer = { kind: "me", username: "sam" };
++  const lines = personLines(rows, writers, "sam", ME);
++  expect(marked(lines)).toEqual([
++    ["Me", true],
++    ["Anna Berg", false],
++    ["Ben Okafor", false],
++    ["Chiara Rossi", false],
++    ["Dmitri Volkov", false],
++    ["Erin Hale", false],
++    ["kim", false],
++  ]);
++  expect(lines[0]).toEqual({ value: ME, label: "Me", person: SAM, chosen: true });
++  expect(lines[1]?.value).toEqual({ kind: "person", username: "anna", name: "Anna Berg" });
++  expect(lines[1]?.person).toBe(ANNA);
++  expect(lines[6]?.value).toEqual({ kind: "person", username: "kim", name: "kim" });
++
++  const asAnna: Viewer = { kind: "person", username: "anna", name: "Anna Berg" };
++  expect(marked(personLines(rows, writers, "sam", asAnna)).filter(([, chosen]) => chosen)).toEqual([
++    ["Anna Berg", true],
++  ]);
++  const asSam: Viewer = { kind: "person", username: "sam", name: "Sam Weller" };
++  expect(marked(personLines(rows, writers, "sam", asSam)).filter(([, chosen]) => chosen)).toEqual([
++    ["Me", true],
++  ]);
++
++  const loggedOut = personLines(rows, writers, null, { kind: "me", username: null });
++  expect(marked(loggedOut).map(([label]) => label)).toEqual([
++    "Anna Berg",
++    "Ben Okafor",
++    "Chiara Rossi",
++    "Dmitri Volkov",
++    "Erin Hale",
++    "kim",
++    "Sam Weller",
++  ]);
++  expect(loggedOut.some(({ chosen }) => chosen)).toBe(false);
++
++  expect(personLines([row()], [], "zoe", { kind: "me", username: "zoe" })[0]).toEqual({
++    value: { kind: "me", username: "zoe" },
++    label: "Me",
++    person: null,
++    chosen: true,
++  });
++  const anyMe: Viewer = { kind: "me", username: null };
++  expect(marked(personLines(rows, writers, "sam", anyMe)).filter(([, chosen]) => chosen)).toEqual([
++    ["Me", true],
++  ]);
++  const meSam: Viewer = { kind: "me", username: "sam" };
++  expect(personLines(rows, writers, null, meSam).some(({ chosen }) => chosen)).toBe(false);
++});
+diff --git a/frontend/src/mergeRequests/internal/personDiscussions.ts b/frontend/src/mergeRequests/internal/personDiscussions.ts
+new file mode 100644
+index 0000000..fb0653a
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/personDiscussions.ts
+@@ -0,0 +1,153 @@
++import {
++  isUser,
++  starterOf,
++  turnOf,
++  wroteIn,
++  type OpenDiscussion,
++  type Turn,
++  type Viewer,
++} from "./discussions";
++import { ME_WORD, type Person } from "./filters";
++import { knownMentions } from "./mentions";
++import { displayName } from "./people";
++import { peopleOnRow, type KnownPeople } from "./suggestions";
++
++/** Request C2, in this order. */
++export type PersonGroup = "turn" | "started" | "wrote" | "reviewer" | "other";
++export const PERSON_GROUPS: readonly PersonGroup[] = [
++  "turn",
++  "started",
++  "wrote",
++  "reviewer",
++  "other",
++];
++
++/** What a group needs of a merge request. */
++export type PersonRow = {
++  readonly author: Person | null;
++  readonly reviewers: readonly { readonly person: Person }[];
++};
++export type PersonEntry<D extends OpenDiscussion, R extends PersonRow> = {
++  readonly row: R;
++  readonly discussion: D;
++  readonly group: PersonGroup;
++  /** turnOf with the person as the viewer. */
++  readonly turn: Turn;
++};
++
++/** B2: a line of the person menu. */
++export type PersonLine<P extends Person> = {
++  readonly value: Viewer;
++  readonly label: string;
++  /** The person's picture holder; null for "Me" when no listed row or writer has the viewer. */
++  readonly person: P | null;
++  readonly chosen: boolean;
++};
++
++function turnAsViewer(discussion: OpenDiscussion, person: string | null, row: PersonRow): Turn {
++  return turnOf(discussion, person, row.author?.username ?? null);
++}
++
++function groupAfter(
++  turn: Turn,
++  discussion: OpenDiscussion,
++  person: string | null,
++  row: PersonRow,
++): PersonGroup {
++  if (turn.kind === "viewer") {
++    return "turn";
++  }
++  if (isUser(starterOf(discussion), person)) {
++    return "started";
++  }
++  if (wroteIn(discussion, person)) {
++    return "wrote";
++  }
++  return row.reviewers.some((reviewer) => isUser(reviewer.person, person)) ? "reviewer" : "other";
++}
++
++/** C2: the first group that applies; `person` a username, null: "other" always. */
++export function personGroupOf(
++  discussion: OpenDiscussion,
++  person: string | null,
++  row: PersonRow,
++): PersonGroup {
++  return groupAfter(turnAsViewer(discussion, person, row), discussion, person, row);
++}
++
++/** C1–C2: every discussion of every listed row, by group, then newest `last.createdAt` first; equal keys keep the input
++ *  order (rows as listed, discussions as given). */
++export function personEntries<D extends OpenDiscussion, R extends PersonRow>(
++  listed: readonly { readonly row: R; readonly discussions: readonly D[] }[],
++  person: string | null,
++): readonly PersonEntry<D, R>[] {
++  return listed
++    .flatMap(({ row, discussions }) =>
++      discussions.map((discussion): PersonEntry<D, R> => {
++        const turn = turnAsViewer(discussion, person, row);
++        return { row, discussion, group: groupAfter(turn, discussion, person, row), turn };
++      }),
++    )
++    .toSorted((a, b) => {
++      const groups = PERSON_GROUPS.indexOf(a.group) - PERSON_GROUPS.indexOf(b.group);
++      return groups === 0 ? b.discussion.last.createdAt - a.discussion.last.createdAt : groups;
++    });
++}
++
++/** D3: the comments after the first, oldest first: `[...earlier.slice(1), last]` when `earlier` is non-empty, else []. */
++export function laterWriters<P extends Person>(discussion: {
++  readonly earlier: readonly { readonly author: P | null }[];
++  readonly last: { readonly author: P | null };
++}): readonly (P | null)[] {
++  if (discussion.earlier.length === 0) {
++    return [];
++  }
++  return [...discussion.earlier.slice(1), discussion.last].map((comment) => comment.author);
++}
++
++/** D4: all when `writers.length <= fits`; else the newest `max(fits − 1, 0)` shown and the rest `folded` (the "+N"
++ *  takes the first slot). `fits` < 1 counts as 1. */
++export function foldedWriters<P>(
++  writers: readonly P[],
++  fits: number,
++): { readonly folded: readonly P[]; readonly shown: readonly P[] } {
++  if (writers.length <= Math.max(fits, 1)) {
++    return { folded: [], shown: writers };
++  }
++  const cut = writers.length - Math.max(fits - 1, 0);
++  return { folded: writers.slice(0, cut), shown: writers.slice(cut) };
++}
++
++/** B2: "Me" first when `me` is not null (label ME_WORD), then every other username once from `peopleOnRow` of `rows`
++ *  and the non-null `writers`, by displayName (localeCompare "en"); value `person { username, name: displayName }`;
++ *  `chosen` the line equal to `chosen` (a person whose username is `me` is Me). */
++export function personLines<P extends Person>(
++  rows: readonly KnownPeople<P>[],
++  writers: readonly (P | null)[],
++  me: string | null,
++  chosen: Viewer,
++): readonly PersonLine<P>[] {
++  const known = knownMentions(null, [...rows.flatMap(peopleOnRow), ...writers]);
++  const mine: readonly PersonLine<P>[] =
++    me === null
++      ? []
++      : [
++          {
++            value: { kind: "me", username: me },
++            label: ME_WORD,
++            person: known.find((person) => person.username === me) ?? null,
++            chosen: chosen.kind === "me" || chosen.username === me,
++          },
++        ];
++  const others = known
++    .filter((person) => person.username !== me)
++    .map((person) => ({ person, label: displayName(person) }))
++    .toSorted((a, b) => a.label.localeCompare(b.label, "en"))
++    .map(({ person, label }): PersonLine<P> => ({
++      value: { kind: "person", username: person.username, name: label },
++      label,
++      person,
++      chosen: chosen.kind === "person" && chosen.username === person.username,
++    }));
++  return [...mine, ...others];
++}

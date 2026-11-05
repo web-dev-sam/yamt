@@ -143,7 +143,10 @@ export function reviewChoices(
   });
 }
 
-export function narrowed<V>(choices: readonly Choice<V>[], typed: string): readonly Choice<V>[] {
+export function narrowed<C extends { readonly label: string }>(
+  choices: readonly C[],
+  typed: string,
+): readonly C[] {
   const needle = typed.trim().toLowerCase();
   return choices.filter((listed) => listed.label.toLowerCase().includes(needle));
 }
