@@ -1,10 +1,11 @@
 use serde_json::{Value, json};
 
 use super::sample::{
-    ORIGIN, answer, comment, discussion, hex, iids, mentioning, merge_request, on_file, open,
-    project, system_note, with_id,
+    ORIGIN, answer, comment, discussion, hex, iids, mentioning, merge_request, on_file,
+    on_gitlab_com, open, project, system_note, with_id,
 };
 use super::*;
+use crate::description::described_on;
 use crate::page::NO_PROJECT;
 use crate::picture::{AvatarSource, avatar_source};
 
@@ -450,4 +451,96 @@ fn each_query_of_a_call_is_counted_and_the_batch_s_complexity_kept() {
         limit: 250,
     };
     assert_eq!(call.complexity, Some(measured));
+}
+
+/// The reduction of `html` on merge request 1's page.
+fn reduced(html: &str) -> Description {
+    described_on(&project(), MergeRequestIid(1), html).description
+}
+
+#[test]
+fn a_single_note_discussion_starts_with_its_last_note() {
+    let html = r#"<p>ben <a href="https://docs.example/a">2</a></p>"#;
+    let mut alone = comment("ben", 2);
+    alone["bodyHtml"] = json!(html);
+    let notes = [comment("anna", 1), system_note(2), comment("ben", 3)];
+    let batch = [merge_request(
+        1,
+        &[open(&notes), with_id(open(&[alone]), 2)],
+        None,
+    )];
+
+    let open = open_of(&batch);
+
+    assert_eq!(open[1].earlier, []);
+    assert_eq!(open[1].first.created_at, "2026-11-03T10:00:02Z");
+    assert_eq!(open[1].first.body, reduced(html));
+    assert_eq!(open[0].first.created_at, "2026-11-03T10:00:01Z");
+    assert_eq!(open[0].first.body, reduced("<p>anna 1</p>"));
+    assert_eq!(open[0].last.created_at, "2026-11-03T10:00:03Z");
+}
+
+#[test]
+fn the_first_comment_goes_through_the_description_reducer() {
+    let mut planted = comment("anna", 1);
+    planted["bodyHtml"] = json!(concat!(
+        r#"<p onclick="yamtPlanted()">x<img src="https://images.example/a.png" onerror="yamtPlanted()"></p>"#,
+        "<script>yamtPlanted()</script>",
+    ));
+
+    let open = open_of(&[merge_request(
+        1,
+        &[open(&[planted, comment("ben", 2)])],
+        None,
+    )]);
+
+    let body = serde_json::to_string(&open[0].first.body).unwrap();
+    for planted in ["yamtPlanted", "script", "onerror", "onclick"] {
+        assert!(!body.contains(planted), "{planted} in {body}");
+    }
+    assert!(body.contains("https://images.example/a.png"), "{body}");
+}
+
+#[test]
+fn the_read_offers_each_last_page_then_its_first_comments_pages_and_uploads_once() {
+    let note = |username: &str, n: u32, html: &str| {
+        let mut note = comment(username, n);
+        note["url"] = json!(format!(
+            "https://gitlab.com/taskboard/taskboard/-/merge_requests/1#note_{n}"
+        ));
+        note["bodyHtml"] = json!(html);
+        note
+    };
+    let secret = "8201a1b2c3d4e5f60718293a4b5c6d7e";
+    let upload = format!(r#"<img src="/-/project/7/uploads/{secret}/sort.png">"#);
+    let a = r#"<a href="https://docs.example/a">a</a>"#;
+    let b = r#"<a href="https://docs.example/b">b</a>"#;
+    let started = note("anna", 1, &format!("<p>{a}{upload}</p>"));
+    let answered_note = note("ben", 2, &format!("<p>{b}</p>"));
+    let again = note("chiara", 3, &format!("<p>{a}{b}{upload}</p>"));
+    let batch = [merge_request(
+        1,
+        &[open(&[started, answered_note]), with_id(open(&[again]), 2)],
+        None,
+    )];
+    let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(answer(&batch));
+
+    let read = answered(&iids(&[1]), &on_gitlab_com(), &mut fetch, &as_failed).read;
+
+    let pages: Vec<&str> = read.pages.iter().map(WebPage::as_str).collect();
+    let note_page =
+        |n: u32| format!("https://gitlab.com/taskboard/taskboard/-/merge_requests/1#note_{n}");
+    let expected = [
+        note_page(2),
+        "https://docs.example/a".to_owned(),
+        note_page(3),
+        "https://docs.example/b".to_owned(),
+    ];
+    assert_eq!(pages, expected);
+    let keys: Vec<&str> = read
+        .uploads
+        .iter()
+        .map(|upload| upload.key.as_str())
+        .collect();
+    assert_eq!(keys, [format!("upload~{secret}")]);
 }

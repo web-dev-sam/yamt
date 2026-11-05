@@ -1,11 +1,13 @@
+use crate::description::described_on;
 use crate::people::People;
 use crate::project::Project;
 use crate::{MergeRequestIid, WebPage};
 
-use super::answer::{DiscussionNode, NoteConnection, NoteNode};
+use super::answer::{DiscussionNode, NoteConnection, NoteNode, PositionNode};
 use super::mentions::{Mention, mentions_in};
 use super::{
-    DiscussionId, DiscussionNote, DiscussionPlace, NOTES_READ, OpenDiscussion, TurnComment,
+    DiscussionId, DiscussionNote, DiscussionPlace, FirstComment, NOTES_READ, Offers,
+    OpenDiscussion, TurnComment,
 };
 
 const ODD_ID: &str = "GitLab sent a discussion id yamt cannot read";
@@ -41,24 +43,25 @@ pub(crate) fn person_notes(notes: NoteConnection) -> Result<Vec<NoteNode>, Strin
 }
 
 /// The turn data of discussion `id` from its person notes, oldest first; `None` when it has none. The box and the
-/// thread both build it here.
+/// thread both build it here. `offers` gains the last note's page, then the first comment's pages and uploads.
 pub(crate) fn open_discussion(
     id: DiscussionId,
     notes: Vec<NoteNode>,
     iid: MergeRequestIid,
     project: &Project,
     people: &mut People,
+    offers: &mut Offers,
 ) -> Option<OpenDiscussion> {
     let mut earlier = notes;
     let mut last = earlier.pop()?;
     let starter = earlier.first_mut().unwrap_or(&mut last);
-    let place = match starter.position.take() {
-        None => DiscussionPlace::Overview,
-        Some(position) => DiscussionPlace::File {
-            path: position.file_path,
-            line: position.new_line.or(position.old_line),
-        },
-    };
+    let place = place_of(starter.position.take());
+    let first_at = starter.created_at.clone();
+    let first_described = described_on(
+        project,
+        iid,
+        starter.body_html.as_deref().unwrap_or_default(),
+    );
     let turn_comment = |note: NoteNode| TurnComment {
         mentions: mentions_of(&note),
         author: note.author.map(|author| people.person(author)),
@@ -71,12 +74,30 @@ pub(crate) fn open_discussion(
         created_at: last.created_at,
         text: last.body,
     };
+    if let Some(page) = &last.page {
+        offers.page(page.clone());
+    }
+    let first = FirstComment {
+        created_at: first_at,
+        body: offers.described(first_described),
+    };
     Some(OpenDiscussion {
         id,
         place,
+        first,
         earlier,
         last,
     })
+}
+
+fn place_of(position: Option<PositionNode>) -> DiscussionPlace {
+    match position {
+        None => DiscussionPlace::Overview,
+        Some(position) => DiscussionPlace::File {
+            path: position.file_path,
+            line: position.new_line.or(position.old_line),
+        },
+    }
 }
 
 fn mentions_of(note: &NoteNode) -> Vec<Mention> {

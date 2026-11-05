@@ -7,18 +7,22 @@ use crate::page::{Complexity, Connection, PageInfo};
 use crate::people::People;
 use crate::project::Project;
 use crate::query::discussions_args;
-use crate::{GitLabRepository, MergeRequestIid, OfferedPicture, Person, WebPage};
+use crate::{
+    Description, GitLabRepository, MergeRequestIid, OfferedPicture, OfferedUpload, Person, WebPage,
+};
 
 pub(crate) use answer::{DiscussionNode, NoteNode};
 use answer::{MergeRequestNode, parsed_batch};
 pub use id::DiscussionId;
 pub use mentions::Mention;
+pub(crate) use offers::Offers;
 use turn::open_notes;
 pub(crate) use turn::{note_page, open_discussion, person_notes};
 
 mod answer;
 mod id;
 mod mentions;
+mod offers;
 mod turn;
 
 #[cfg(test)]
@@ -78,10 +82,22 @@ pub struct OpenDiscussion {
     pub id: DiscussionId,
     /// Where it is: the first person note's `position` (GitLab's place of the discussion).
     pub place: DiscussionPlace,
+    /// The first person note (`earlier[0]`, else `last`): its time and its rendering.
+    pub first: FirstComment,
     /// Every person note before `last`, oldest first: `earlier[0]` (or `last` when empty) started the discussion.
     pub earlier: Vec<TurnComment>,
     /// Its last person note.
     pub last: DiscussionNote,
+}
+
+/// The note that started a discussion, as the person view shows it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FirstComment {
+    /// When it was written: GitLab's ISO 8601 time, as sent.
+    pub created_at: String,
+    /// Its `bodyHtml` reduced by `described_on` on the merge request's page (RK60, RK66: no other path).
+    pub body: Description,
 }
 
 /// A person note before the last, as the turn rule reads it.
@@ -125,13 +141,18 @@ pub struct DiscussionNote {
     pub mentions: Vec<Mention>,
 }
 
-/// What the shell gets: the rows answered, and the uploaded pictures of their authors (one per username).
+/// What the shell gets: the rows answered, the uploaded pictures of their authors (one per username), and the pages
+/// and uploads it offers beside them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReadDiscussions {
     /// One per merge request answered, in the asked order.
     pub rows: Vec<RowDiscussions>,
     /// The uploaded pictures of the notes' authors, one per username.
     pub pictures: Vec<OfferedPicture>,
+    /// Every answered last note's page, then every page its first comment links, once each, in order.
+    pub pages: Vec<WebPage>,
+    /// Every upload the first comments name, once each.
+    pub uploads: Vec<OfferedUpload>,
 }
 
 /// Asks GitLab for the discussions of `iids` (all of them, or one merge request's after a cursor).
@@ -163,6 +184,8 @@ pub fn read_discussions(
             read: ReadDiscussions {
                 rows: Vec::new(),
                 pictures: Vec::new(),
+                pages: Vec::new(),
+                uploads: Vec::new(),
             },
             queries: 0,
             complexity: None,
@@ -206,6 +229,8 @@ fn unanswered(asked: &[MergeRequestIid], answer: &DiscussionsAnswer) -> Answered
     let read = ReadDiscussions {
         rows: asked.iter().map(row).collect(),
         pictures: Vec::new(),
+        pages: Vec::new(),
+        uploads: Vec::new(),
     };
     Answered {
         read,
@@ -260,6 +285,7 @@ fn answered(
     };
     let mut found = first.merge_requests;
     let mut people = People::new(project.web_origin.as_deref());
+    let mut offers = Offers::new();
     let mut rows = Vec::new();
     for &iid in asked {
         let open = found
@@ -267,22 +293,38 @@ fn answered(
             .ok_or_else(|| not_sent(iid))
             .and_then(|node| every_discussion(iid, node.discussions, &mut counted))
             .and_then(open_notes);
-        let answer = match open {
-            Ok(open) => DiscussionsAnswer::Open {
-                discussions: open
-                    .into_iter()
-                    .filter_map(|(id, notes)| open_discussion(id, notes, iid, project, &mut people))
-                    .collect(),
-            },
-            Err(message) => DiscussionsAnswer::Failed { message },
-        };
+        let answer = open_answer(open, iid, project, &mut people, &mut offers);
         rows.push(RowDiscussions { iid, answer });
     }
-    let pictures = one_per_username(people.pictures);
+    let read = ReadDiscussions {
+        rows,
+        pictures: one_per_username(people.pictures),
+        pages: offers.pages,
+        uploads: offers.uploads,
+    };
     Answered {
-        read: ReadDiscussions { rows, pictures },
+        read,
         queries,
         complexity: first.complexity,
+    }
+}
+
+/// Row `iid`'s answer from its open discussions' notes, or why they were not read.
+fn open_answer(
+    open: Result<Vec<(DiscussionId, Vec<NoteNode>)>, String>,
+    iid: MergeRequestIid,
+    project: &Project,
+    people: &mut People,
+    offers: &mut Offers,
+) -> DiscussionsAnswer {
+    match open {
+        Ok(open) => DiscussionsAnswer::Open {
+            discussions: open
+                .into_iter()
+                .filter_map(|(id, notes)| open_discussion(id, notes, iid, project, people, offers))
+                .collect(),
+        },
+        Err(message) => DiscussionsAnswer::Failed { message },
     }
 }
 
@@ -341,15 +383,18 @@ pub(crate) fn later_page(
 
 /// Counts and GitLab's score only: never a name, a body or an address.
 fn log_read(call: &Answered) {
-    let rows = &call.read.rows;
-    let open = rows
+    let read = &call.read;
+    let open = read
+        .rows
         .iter()
         .filter(|row| matches!(row.answer, DiscussionsAnswer::Open { .. }))
         .count();
     tracing::info!(
-        asked = rows.len(),
+        asked = read.rows.len(),
         answered = open,
-        failed = rows.len() - open,
+        failed = read.rows.len() - open,
+        pages = read.pages.len(),
+        uploads = read.uploads.len(),
         queries = call.queries,
         score = call.complexity.map(|complexity| complexity.score),
         limit = call.complexity.map(|complexity| complexity.limit),

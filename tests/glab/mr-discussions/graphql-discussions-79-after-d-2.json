@@ -27,7 +27,7 @@
                         "createdAt": "2026-10-31T10:20:00Z",
                         "lastEditedAt": "2026-10-31T10:20:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_303",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/79#note_303",
                         "position": { "filePath": "src/board/search.ts", "newLine": 3, "oldLine": 3 }
                       }
                     ]

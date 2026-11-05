@@ -159,7 +159,7 @@ fn a_rows_open_discussions_arrive_with_their_last_persons_note_place_and_link() 
     assert_eq!(author(&a.last), Some("sam"));
     assert_eq!(a.last.text, "Yes, done in the second commit.");
     assert_eq!(a.last.created_at, "2026-11-03T11:05:00Z");
-    let note_103 = "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_103";
+    let note_103 = "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_103";
     assert_eq!(page(&a.last), Some(note_103));
     let due_dates = DiscussionPlace::File {
         path: "src/board/dueDates.ts".to_owned(),

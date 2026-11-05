@@ -1,0 +1,1104 @@
+diff --git a/crates/merge-requests/src/discussion_thread/read.rs b/crates/merge-requests/src/discussion_thread/read.rs
+index 2b90d79..c4d0482 100644
+--- a/crates/merge-requests/src/discussion_thread/read.rs
++++ b/crates/merge-requests/src/discussion_thread/read.rs
+@@ -2,8 +2,8 @@ use yamt_gitio::Glab;
+ 
+ use crate::description::described_on;
+ use crate::discussions::{
+-    DiscussionNode, Fetch, NoteNode, later_page, merge_request_page, note_page, open_discussion,
+-    person_notes,
++    DiscussionNode, Fetch, NoteNode, Offers, later_page, merge_request_page, note_page,
++    open_discussion, person_notes,
+ };
+ use crate::list::one_per_username;
+ use crate::people::People;
+@@ -29,13 +29,6 @@ pub(super) struct Read {
+     pictures: Vec<OfferedPicture>,
+ }
+ 
+-/// A thread's comments, and the pages and uploads they name, once each, in order.
+-struct Commented {
+-    comments: Vec<DiscussionComment>,
+-    pages: Vec<WebPage>,
+-    uploads: Vec<OfferedUpload>,
+-}
+-
+ /// glab missing → `GlabMissing`; the remembered project; the discussions query for `[iid]`, then its later pages
+ /// until one holds the discussion with `id` (the same pages as `read_discussions`, the `Fetch` seam); then one
+ /// `Glab::get` of `draft_notes_args` (`--paginate`: one JSON array or one per page). A draft counts for `drafts` when
+@@ -132,16 +125,24 @@ pub(super) fn thread_from(
+     let may_resolve = found.resolvable && found.user_permissions.resolve_note;
+     let notes = person_notes(found.notes).map_err(failed)?;
+     let mut people = People::new(project.web_origin.as_deref());
+-    let commented = comments_of(&notes, iid, project, &mut people);
+-    let opened = open_discussion(discussion.clone(), notes, iid, project, &mut people)
+-        .ok_or(DiscussionThreadReply::NotFound)?;
++    let mut offers = Offers::new();
++    let comments = comments_of(&notes, iid, project, &mut people, &mut offers);
++    let opened = open_discussion(
++        discussion.clone(),
++        notes,
++        iid,
++        project,
++        &mut people,
++        &mut offers,
++    )
++    .ok_or(DiscussionThreadReply::NotFound)?;
+     let listed = fetch_drafts()
+         .and_then(|json| drafts_in(&json, discussion))
+         .map_err(failed)?;
+     let thread = DiscussionThread {
+         discussion: opened,
+         resolved: found.resolved,
+-        comments: commented.comments,
++        comments,
+         drafts: listed.drafts,
+         pending: listed.pending,
+         commenting,
+@@ -149,8 +150,8 @@ pub(super) fn thread_from(
+     };
+     Ok(Read {
+         thread,
+-        pages: commented.pages,
+-        uploads: commented.uploads,
++        pages: offers.pages,
++        uploads: offers.uploads,
+         pictures: one_per_username(people.pictures),
+     })
+ }
+@@ -193,45 +194,31 @@ fn commenting(create_note: bool, discussion_locked: bool) -> Commenting {
+     }
+ }
+ 
+-/// Each note as a comment, its body through `described_on` (RK60); every page (the note's own, then its links') and
+-/// every upload once.
++/// Each note as a comment, its body through `described_on` (RK60); `offers` gains every page (the note's own, then its
++/// links') and every upload.
+ fn comments_of(
+     notes: &[NoteNode],
+     iid: MergeRequestIid,
+     project: &Project,
+     people: &mut People,
+-) -> Commented {
+-    let mut commented = Commented {
+-        comments: Vec::new(),
+-        pages: Vec::new(),
+-        uploads: Vec::new(),
+-    };
++    offers: &mut Offers,
++) -> Vec<DiscussionComment> {
++    let mut comments = Vec::new();
+     for note in notes {
+         let page = note_page(note, iid, project);
++        if let Some(page) = &page {
++            offers.page(page.clone());
++        }
+         let described = described_on(project, iid, note.body_html.as_deref().unwrap_or_default());
+-        for offered in page.iter().cloned().chain(described.pages) {
+-            if !commented.pages.contains(&offered) {
+-                commented.pages.push(offered);
+-            }
+-        }
+-        for upload in described.uploads {
+-            if !commented
+-                .uploads
+-                .iter()
+-                .any(|offered| offered.key == upload.key)
+-            {
+-                commented.uploads.push(upload);
+-            }
+-        }
+-        commented.comments.push(DiscussionComment {
++        comments.push(DiscussionComment {
+             author: note.author.clone().map(|author| people.person(author)),
+             created_at: note.created_at.clone(),
+             edited: edit_of(note, people),
+-            body: described.description,
++            body: offers.described(described),
+             page,
+         });
+     }
+-    commented
++    comments
+ }
+ 
+ /// GitLab's `Note#edited?`: an editor named and `lastEditedAt` after `createdAt` (design §1.3).
+diff --git a/crates/merge-requests/src/discussion_thread/tests.rs b/crates/merge-requests/src/discussion_thread/tests.rs
+index 11ea3f7..9257f75 100644
+--- a/crates/merge-requests/src/discussion_thread/tests.rs
++++ b/crates/merge-requests/src/discussion_thread/tests.rs
+@@ -6,7 +6,8 @@ use super::read::{self, offered, thread_from};
+ use super::write::{self, Write, failure_words, replied, request};
+ use super::*;
+ use crate::discussions::sample::{
+-    answer, comment, discussion, hex, merge_request, open, project, system_note, with_id,
++    answer, comment, discussion, hex, merge_request, on_gitlab_com, open, project, system_note,
++    with_id,
+ };
+ use crate::project::Project;
+ use crate::query::{draft_notes_args, markdown_args, markdown_body};
+@@ -401,14 +402,6 @@ fn a_notes_image_keeps_its_size() {
+     assert_eq!(sizes, [Some(height)]);
+ }
+ 
+-fn on_gitlab_com() -> Project {
+-    Project {
+-        full_path: "taskboard/taskboard".to_owned(),
+-        web_path: "/taskboard/taskboard".to_owned(),
+-        web_origin: Some("https://gitlab.com".to_owned()),
+-    }
+-}
+-
+ fn note_page(n: u32) -> String {
+     format!("https://gitlab.com/taskboard/taskboard/-/merge_requests/1#note_{n}")
+ }
+@@ -423,7 +416,7 @@ fn annas_note(n: u32, html: &str) -> Value {
+ }
+ 
+ #[test]
+-fn a_threads_pages_and_uploads_are_named_once_each_in_order() {
++fn the_thread_read_carries_first_and_offers_each_page_once() {
+     let secret = "903a1b2c3d4e5f60718293a4b5c6d7e8";
+     let upload = format!(r#"<img src="/-/project/7/uploads/{secret}/shot.png">"#);
+     let a = r#"<a href="https://docs.example/a">a</a>"#;
+@@ -456,6 +449,11 @@ fn a_threads_pages_and_uploads_are_named_once_each_in_order() {
+         .map(|picture| picture.username.as_str())
+         .collect();
+     assert_eq!(pictures, ["anna"]);
++    let thread = thread_of(&read);
++    let first = &thread.discussion.first;
++    assert_eq!(first.body, thread.comments[0].body);
++    assert_eq!(first.created_at, thread.comments[0].created_at);
++    assert_ne!(first.body, thread.comments[1].body);
+ }
+ 
+ const ROUTE: &str = "projects/group%2Fsub%2Fproject/merge_requests/1";
+diff --git a/crates/merge-requests/src/discussions.rs b/crates/merge-requests/src/discussions.rs
+index 77c486a..92010a2 100644
+--- a/crates/merge-requests/src/discussions.rs
++++ b/crates/merge-requests/src/discussions.rs
+@@ -7,18 +7,22 @@ use crate::page::{Complexity, Connection, PageInfo};
+ use crate::people::People;
+ use crate::project::Project;
+ use crate::query::discussions_args;
+-use crate::{GitLabRepository, MergeRequestIid, OfferedPicture, Person, WebPage};
++use crate::{
++    Description, GitLabRepository, MergeRequestIid, OfferedPicture, OfferedUpload, Person, WebPage,
++};
+ 
+ pub(crate) use answer::{DiscussionNode, NoteNode};
+ use answer::{MergeRequestNode, parsed_batch};
+ pub use id::DiscussionId;
+ pub use mentions::Mention;
++pub(crate) use offers::Offers;
+ use turn::open_notes;
+ pub(crate) use turn::{note_page, open_discussion, person_notes};
+ 
+ mod answer;
+ mod id;
+ mod mentions;
++mod offers;
+ mod turn;
+ 
+ #[cfg(test)]
+@@ -78,12 +82,24 @@ pub struct OpenDiscussion {
+     pub id: DiscussionId,
+     /// Where it is: the first person note's `position` (GitLab's place of the discussion).
+     pub place: DiscussionPlace,
++    /// The first person note (`earlier[0]`, else `last`): its time and its rendering.
++    pub first: FirstComment,
+     /// Every person note before `last`, oldest first: `earlier[0]` (or `last` when empty) started the discussion.
+     pub earlier: Vec<TurnComment>,
+     /// Its last person note.
+     pub last: DiscussionNote,
+ }
+ 
++/// The note that started a discussion, as the person view shows it.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct FirstComment {
++    /// When it was written: GitLab's ISO 8601 time, as sent.
++    pub created_at: String,
++    /// Its `bodyHtml` reduced by `described_on` on the merge request's page (RK60, RK66: no other path).
++    pub body: Description,
++}
++
+ /// A person note before the last, as the turn rule reads it.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ #[serde(rename_all = "camelCase")]
+@@ -125,13 +141,18 @@ pub struct DiscussionNote {
+     pub mentions: Vec<Mention>,
+ }
+ 
+-/// What the shell gets: the rows answered, and the uploaded pictures of their authors (one per username).
++/// What the shell gets: the rows answered, the uploaded pictures of their authors (one per username), and the pages
++/// and uploads it offers beside them.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct ReadDiscussions {
+     /// One per merge request answered, in the asked order.
+     pub rows: Vec<RowDiscussions>,
+     /// The uploaded pictures of the notes' authors, one per username.
+     pub pictures: Vec<OfferedPicture>,
++    /// Every answered last note's page, then every page its first comment links, once each, in order.
++    pub pages: Vec<WebPage>,
++    /// Every upload the first comments name, once each.
++    pub uploads: Vec<OfferedUpload>,
+ }
+ 
+ /// Asks GitLab for the discussions of `iids` (all of them, or one merge request's after a cursor).
+@@ -163,6 +184,8 @@ pub fn read_discussions(
+             read: ReadDiscussions {
+                 rows: Vec::new(),
+                 pictures: Vec::new(),
++                pages: Vec::new(),
++                uploads: Vec::new(),
+             },
+             queries: 0,
+             complexity: None,
+@@ -206,6 +229,8 @@ fn unanswered(asked: &[MergeRequestIid], answer: &DiscussionsAnswer) -> Answered
+     let read = ReadDiscussions {
+         rows: asked.iter().map(row).collect(),
+         pictures: Vec::new(),
++        pages: Vec::new(),
++        uploads: Vec::new(),
+     };
+     Answered {
+         read,
+@@ -260,6 +285,7 @@ fn answered(
+     };
+     let mut found = first.merge_requests;
+     let mut people = People::new(project.web_origin.as_deref());
++    let mut offers = Offers::new();
+     let mut rows = Vec::new();
+     for &iid in asked {
+         let open = found
+@@ -267,25 +293,41 @@ fn answered(
+             .ok_or_else(|| not_sent(iid))
+             .and_then(|node| every_discussion(iid, node.discussions, &mut counted))
+             .and_then(open_notes);
+-        let answer = match open {
+-            Ok(open) => DiscussionsAnswer::Open {
+-                discussions: open
+-                    .into_iter()
+-                    .filter_map(|(id, notes)| open_discussion(id, notes, iid, project, &mut people))
+-                    .collect(),
+-            },
+-            Err(message) => DiscussionsAnswer::Failed { message },
+-        };
++        let answer = open_answer(open, iid, project, &mut people, &mut offers);
+         rows.push(RowDiscussions { iid, answer });
+     }
+-    let pictures = one_per_username(people.pictures);
++    let read = ReadDiscussions {
++        rows,
++        pictures: one_per_username(people.pictures),
++        pages: offers.pages,
++        uploads: offers.uploads,
++    };
+     Answered {
+-        read: ReadDiscussions { rows, pictures },
++        read,
+         queries,
+         complexity: first.complexity,
+     }
+ }
+ 
++/// Row `iid`'s answer from its open discussions' notes, or why they were not read.
++fn open_answer(
++    open: Result<Vec<(DiscussionId, Vec<NoteNode>)>, String>,
++    iid: MergeRequestIid,
++    project: &Project,
++    people: &mut People,
++    offers: &mut Offers,
++) -> DiscussionsAnswer {
++    match open {
++        Ok(open) => DiscussionsAnswer::Open {
++            discussions: open
++                .into_iter()
++                .filter_map(|(id, notes)| open_discussion(id, notes, iid, project, people, offers))
++                .collect(),
++        },
++        Err(message) => DiscussionsAnswer::Failed { message },
++    }
++}
++
+ fn not_sent(iid: MergeRequestIid) -> String {
+     format!("GitLab sent no merge request !{}", iid.0)
+ }
+@@ -341,15 +383,18 @@ pub(crate) fn later_page(
+ 
+ /// Counts and GitLab's score only: never a name, a body or an address.
+ fn log_read(call: &Answered) {
+-    let rows = &call.read.rows;
+-    let open = rows
++    let read = &call.read;
++    let open = read
++        .rows
+         .iter()
+         .filter(|row| matches!(row.answer, DiscussionsAnswer::Open { .. }))
+         .count();
+     tracing::info!(
+-        asked = rows.len(),
++        asked = read.rows.len(),
+         answered = open,
+-        failed = rows.len() - open,
++        failed = read.rows.len() - open,
++        pages = read.pages.len(),
++        uploads = read.uploads.len(),
+         queries = call.queries,
+         score = call.complexity.map(|complexity| complexity.score),
+         limit = call.complexity.map(|complexity| complexity.limit),
+diff --git a/crates/merge-requests/src/discussions/offers.rs b/crates/merge-requests/src/discussions/offers.rs
+new file mode 100644
+index 0000000..a8dcef5
+--- /dev/null
++++ b/crates/merge-requests/src/discussions/offers.rs
+@@ -0,0 +1,94 @@
++use crate::description::Described;
++use crate::{Description, OfferedUpload, WebPage};
++
++/// The pages and uploads a read names for the shell to offer, each once, in the order first named.
++pub(crate) struct Offers {
++    pub(crate) pages: Vec<WebPage>,
++    pub(crate) uploads: Vec<OfferedUpload>,
++}
++
++impl Offers {
++    pub(crate) fn new() -> Self {
++        Offers {
++            pages: Vec::new(),
++            uploads: Vec::new(),
++        }
++    }
++
++    /// Adds `page` unless it is already there.
++    pub(crate) fn page(&mut self, page: WebPage) {
++        if !self.pages.contains(&page) {
++            self.pages.push(page);
++        }
++    }
++
++    /// Adds `described`'s pages and uploads (an upload once per key) and gives back its description.
++    pub(crate) fn described(&mut self, described: Described) -> Description {
++        for page in described.pages {
++            self.page(page);
++        }
++        for upload in described.uploads {
++            if !self.uploads.iter().any(|offered| offered.key == upload.key) {
++                self.uploads.push(upload);
++            }
++        }
++        described.description
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::MergeRequestIid;
++    use crate::description::described_on;
++    use crate::discussions::sample::on_gitlab_com;
++
++    const SECRET_A: &str = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
++    const SECRET_B: &str = "f9e8d7c6b5a4938271605f4e3d2c1b0a";
++
++    fn described(html: &str) -> Described {
++        described_on(&on_gitlab_com(), MergeRequestIid(1), html)
++    }
++
++    fn link(page: &str) -> String {
++        format!(r#"<a href="{page}">{page}</a>"#)
++    }
++
++    fn upload(secret: &str) -> String {
++        format!(r#"<img src="/-/project/7/uploads/{secret}/shot.png">"#)
++    }
++
++    #[test]
++    fn offers_keep_each_page_and_upload_once_in_order() {
++        let a = "https://docs.example/a";
++        let b = "https://docs.example/b";
++        let c = "https://docs.example/c";
++        let first = format!("<p>{}{}{}</p>", link(b), link(a), upload(SECRET_A));
++        let second = format!(
++            "<p>{}{}{}{}</p>",
++            link(a),
++            link(c),
++            upload(SECRET_B),
++            upload(SECRET_A)
++        );
++        let mut offers = Offers::new();
++
++        offers.page(WebPage(a.to_owned()));
++        let description = offers.described(described(&first));
++        offers.described(described(&second));
++        offers.page(WebPage(c.to_owned()));
++
++        let pages: Vec<&str> = offers.pages.iter().map(WebPage::as_str).collect();
++        assert_eq!(pages, [a, b, c]);
++        let keys: Vec<&str> = offers
++            .uploads
++            .iter()
++            .map(|upload| upload.key.as_str())
++            .collect();
++        assert_eq!(
++            keys,
++            [format!("upload~{SECRET_A}"), format!("upload~{SECRET_B}")]
++        );
++        assert_eq!(description, described(&first).description);
++    }
++}
+diff --git a/crates/merge-requests/src/discussions/sample.rs b/crates/merge-requests/src/discussions/sample.rs
+index 53a937e..4efdbfd 100644
+--- a/crates/merge-requests/src/discussions/sample.rs
++++ b/crates/merge-requests/src/discussions/sample.rs
+@@ -13,6 +13,14 @@ pub(crate) fn project() -> Project {
+     }
+ }
+ 
++/// `project()` on gitlab.com, the one GitLab whose uploads are offered.
++pub(crate) fn on_gitlab_com() -> Project {
++    Project {
++        web_origin: Some("https://gitlab.com".to_owned()),
++        ..project()
++    }
++}
++
+ pub(crate) fn iids(numbers: &[u32]) -> Vec<MergeRequestIid> {
+     numbers
+         .iter()
+diff --git a/crates/merge-requests/src/discussions/tests.rs b/crates/merge-requests/src/discussions/tests.rs
+index 6d8be95..7cd9273 100644
+--- a/crates/merge-requests/src/discussions/tests.rs
++++ b/crates/merge-requests/src/discussions/tests.rs
+@@ -1,10 +1,11 @@
+ use serde_json::{Value, json};
+ 
+ use super::sample::{
+-    ORIGIN, answer, comment, discussion, hex, iids, mentioning, merge_request, on_file, open,
+-    project, system_note, with_id,
++    ORIGIN, answer, comment, discussion, hex, iids, mentioning, merge_request, on_file,
++    on_gitlab_com, open, project, system_note, with_id,
+ };
+ use super::*;
++use crate::description::described_on;
+ use crate::page::NO_PROJECT;
+ use crate::picture::{AvatarSource, avatar_source};
+ 
+@@ -451,3 +452,95 @@ fn each_query_of_a_call_is_counted_and_the_batch_s_complexity_kept() {
+     };
+     assert_eq!(call.complexity, Some(measured));
+ }
++
++/// The reduction of `html` on merge request 1's page.
++fn reduced(html: &str) -> Description {
++    described_on(&project(), MergeRequestIid(1), html).description
++}
++
++#[test]
++fn a_single_note_discussion_starts_with_its_last_note() {
++    let html = r#"<p>ben <a href="https://docs.example/a">2</a></p>"#;
++    let mut alone = comment("ben", 2);
++    alone["bodyHtml"] = json!(html);
++    let notes = [comment("anna", 1), system_note(2), comment("ben", 3)];
++    let batch = [merge_request(
++        1,
++        &[open(&notes), with_id(open(&[alone]), 2)],
++        None,
++    )];
++
++    let open = open_of(&batch);
++
++    assert_eq!(open[1].earlier, []);
++    assert_eq!(open[1].first.created_at, "2026-11-03T10:00:02Z");
++    assert_eq!(open[1].first.body, reduced(html));
++    assert_eq!(open[0].first.created_at, "2026-11-03T10:00:01Z");
++    assert_eq!(open[0].first.body, reduced("<p>anna 1</p>"));
++    assert_eq!(open[0].last.created_at, "2026-11-03T10:00:03Z");
++}
++
++#[test]
++fn the_first_comment_goes_through_the_description_reducer() {
++    let mut planted = comment("anna", 1);
++    planted["bodyHtml"] = json!(concat!(
++        r#"<p onclick="yamtPlanted()">x<img src="https://images.example/a.png" onerror="yamtPlanted()"></p>"#,
++        "<script>yamtPlanted()</script>",
++    ));
++
++    let open = open_of(&[merge_request(
++        1,
++        &[open(&[planted, comment("ben", 2)])],
++        None,
++    )]);
++
++    let body = serde_json::to_string(&open[0].first.body).unwrap();
++    for planted in ["yamtPlanted", "script", "onerror", "onclick"] {
++        assert!(!body.contains(planted), "{planted} in {body}");
++    }
++    assert!(body.contains("https://images.example/a.png"), "{body}");
++}
++
++#[test]
++fn the_read_offers_each_last_page_then_its_first_comments_pages_and_uploads_once() {
++    let note = |username: &str, n: u32, html: &str| {
++        let mut note = comment(username, n);
++        note["url"] = json!(format!(
++            "https://gitlab.com/taskboard/taskboard/-/merge_requests/1#note_{n}"
++        ));
++        note["bodyHtml"] = json!(html);
++        note
++    };
++    let secret = "8201a1b2c3d4e5f60718293a4b5c6d7e";
++    let upload = format!(r#"<img src="/-/project/7/uploads/{secret}/sort.png">"#);
++    let a = r#"<a href="https://docs.example/a">a</a>"#;
++    let b = r#"<a href="https://docs.example/b">b</a>"#;
++    let started = note("anna", 1, &format!("<p>{a}{upload}</p>"));
++    let answered_note = note("ben", 2, &format!("<p>{b}</p>"));
++    let again = note("chiara", 3, &format!("<p>{a}{b}{upload}</p>"));
++    let batch = [merge_request(
++        1,
++        &[open(&[started, answered_note]), with_id(open(&[again]), 2)],
++        None,
++    )];
++    let mut fetch = |_: &[MergeRequestIid], _: Option<&str>| Ok(answer(&batch));
++
++    let read = answered(&iids(&[1]), &on_gitlab_com(), &mut fetch, &as_failed).read;
++
++    let pages: Vec<&str> = read.pages.iter().map(WebPage::as_str).collect();
++    let note_page =
++        |n: u32| format!("https://gitlab.com/taskboard/taskboard/-/merge_requests/1#note_{n}");
++    let expected = [
++        note_page(2),
++        "https://docs.example/a".to_owned(),
++        note_page(3),
++        "https://docs.example/b".to_owned(),
++    ];
++    assert_eq!(pages, expected);
++    let keys: Vec<&str> = read
++        .uploads
++        .iter()
++        .map(|upload| upload.key.as_str())
++        .collect();
++    assert_eq!(keys, [format!("upload~{secret}")]);
++}
+diff --git a/crates/merge-requests/src/discussions/turn.rs b/crates/merge-requests/src/discussions/turn.rs
+index 79dd0f0..86d097a 100644
+--- a/crates/merge-requests/src/discussions/turn.rs
++++ b/crates/merge-requests/src/discussions/turn.rs
+@@ -1,11 +1,13 @@
++use crate::description::described_on;
+ use crate::people::People;
+ use crate::project::Project;
+ use crate::{MergeRequestIid, WebPage};
+ 
+-use super::answer::{DiscussionNode, NoteConnection, NoteNode};
++use super::answer::{DiscussionNode, NoteConnection, NoteNode, PositionNode};
+ use super::mentions::{Mention, mentions_in};
+ use super::{
+-    DiscussionId, DiscussionNote, DiscussionPlace, NOTES_READ, OpenDiscussion, TurnComment,
++    DiscussionId, DiscussionNote, DiscussionPlace, FirstComment, NOTES_READ, Offers,
++    OpenDiscussion, TurnComment,
+ };
+ 
+ const ODD_ID: &str = "GitLab sent a discussion id yamt cannot read";
+@@ -41,24 +43,25 @@ pub(crate) fn person_notes(notes: NoteConnection) -> Result<Vec<NoteNode>, Strin
+ }
+ 
+ /// The turn data of discussion `id` from its person notes, oldest first; `None` when it has none. The box and the
+-/// thread both build it here.
++/// thread both build it here. `offers` gains the last note's page, then the first comment's pages and uploads.
+ pub(crate) fn open_discussion(
+     id: DiscussionId,
+     notes: Vec<NoteNode>,
+     iid: MergeRequestIid,
+     project: &Project,
+     people: &mut People,
++    offers: &mut Offers,
+ ) -> Option<OpenDiscussion> {
+     let mut earlier = notes;
+     let mut last = earlier.pop()?;
+     let starter = earlier.first_mut().unwrap_or(&mut last);
+-    let place = match starter.position.take() {
+-        None => DiscussionPlace::Overview,
+-        Some(position) => DiscussionPlace::File {
+-            path: position.file_path,
+-            line: position.new_line.or(position.old_line),
+-        },
+-    };
++    let place = place_of(starter.position.take());
++    let first_at = starter.created_at.clone();
++    let first_described = described_on(
++        project,
++        iid,
++        starter.body_html.as_deref().unwrap_or_default(),
++    );
+     let turn_comment = |note: NoteNode| TurnComment {
+         mentions: mentions_of(&note),
+         author: note.author.map(|author| people.person(author)),
+@@ -71,14 +74,32 @@ pub(crate) fn open_discussion(
+         created_at: last.created_at,
+         text: last.body,
+     };
++    if let Some(page) = &last.page {
++        offers.page(page.clone());
++    }
++    let first = FirstComment {
++        created_at: first_at,
++        body: offers.described(first_described),
++    };
+     Some(OpenDiscussion {
+         id,
+         place,
++        first,
+         earlier,
+         last,
+     })
+ }
+ 
++fn place_of(position: Option<PositionNode>) -> DiscussionPlace {
++    match position {
++        None => DiscussionPlace::Overview,
++        Some(position) => DiscussionPlace::File {
++            path: position.file_path,
++            line: position.new_line.or(position.old_line),
++        },
++    }
++}
++
+ fn mentions_of(note: &NoteNode) -> Vec<Mention> {
+     mentions_in(note.body_html.as_deref().unwrap_or_default())
+ }
+diff --git a/crates/merge-requests/src/lib.rs b/crates/merge-requests/src/lib.rs
+index 0dc3331..da4c787 100644
+--- a/crates/merge-requests/src/lib.rs
++++ b/crates/merge-requests/src/lib.rs
+@@ -50,9 +50,9 @@ pub use discussion_thread::{
+     resolve_discussion, submit_review,
+ };
+ pub use discussions::{
+-    DISCUSSION_BATCH, DiscussionId, DiscussionNote, DiscussionPlace, DiscussionsAnswer, Mention,
+-    OpenDiscussion, ReadDiscussions, RowDiscussions, TurnComment, read_discussions,
+-    unread_discussions,
++    DISCUSSION_BATCH, DiscussionId, DiscussionNote, DiscussionPlace, DiscussionsAnswer,
++    FirstComment, Mention, OpenDiscussion, ReadDiscussions, RowDiscussions, TurnComment,
++    read_discussions, unread_discussions,
+ };
+ pub use job_log::{JobLog, JobLogReply, MAX_LOG_BYTES, read_job_log};
+ pub use labels::{Label, LabelColors};
+diff --git a/crates/merge-requests/tests/discussions.rs b/crates/merge-requests/tests/discussions.rs
+index 3fa6bc1..2122ed7 100644
+--- a/crates/merge-requests/tests/discussions.rs
++++ b/crates/merge-requests/tests/discussions.rs
+@@ -159,7 +159,7 @@ fn a_rows_open_discussions_arrive_with_their_last_persons_note_place_and_link()
+     assert_eq!(author(&a.last), Some("sam"));
+     assert_eq!(a.last.text, "Yes, done in the second commit.");
+     assert_eq!(a.last.created_at, "2026-11-03T11:05:00Z");
+-    let note_103 = "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_103";
++    let note_103 = "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_103";
+     assert_eq!(page(&a.last), Some(note_103));
+     let due_dates = DiscussionPlace::File {
+         path: "src/board/dueDates.ts".to_owned(),
+diff --git a/src-tauri/src/merge_requests/discussions.rs b/src-tauri/src/merge_requests/discussions.rs
+index 0f22672..902fc72 100644
+--- a/src-tauri/src/merge_requests/discussions.rs
++++ b/src-tauri/src/merge_requests/discussions.rs
+@@ -1,12 +1,12 @@
+ use yamt_merge_requests::{
+-    DiscussionsAnswer, Glab, MergeRequestIid, OpenDiscussion, RowDiscussions, read_discussions,
+-    unread_discussions,
++    Glab, MergeRequestIid, RowDiscussions, read_discussions, unread_discussions,
+ };
+ 
+ use super::{MergeRequestState, NO_PROJECT, offer};
+ 
+-/// No GitLab project → each asked row fails; else glab reads them, and every answered note's page and the authors'
+-/// uploaded pictures are offered before the rows are returned. Never holds `pages` while glab runs.
++/// No GitLab project → each asked row fails; else glab reads them, and every answered note's page, the first
++/// comments' pages and uploads and the authors' uploaded pictures are offered before the rows are returned. Never
++/// holds `pages` while glab runs.
+ pub(super) fn discussions_reply(
+     state: &MergeRequestState,
+     glab: Option<&Glab>,
+@@ -16,18 +16,7 @@ pub(super) fn discussions_reply(
+         return unread_discussions(iids, NO_PROJECT);
+     };
+     let read = read_discussions(repository, glab, iids);
+-    let notes = read.rows.iter().flat_map(open_discussions);
+-    offer(
+-        state,
+-        notes.filter_map(|open| open.last.page.clone()),
+-        read.pictures,
+-    );
++    offer(state, read.pages, read.pictures);
++    state.pictures.offer_uploads(read.uploads);
+     read.rows
+ }
+-
+-fn open_discussions(row: &RowDiscussions) -> &[OpenDiscussion] {
+-    let DiscussionsAnswer::Open { discussions } = &row.answer else {
+-        return &[];
+-    };
+-    discussions
+-}
+diff --git a/src-tauri/src/merge_requests/tests/discussions.rs b/src-tauri/src/merge_requests/tests/discussions.rs
+index 571a330..a6d4c2b 100644
+--- a/src-tauri/src/merge_requests/tests/discussions.rs
++++ b/src-tauri/src/merge_requests/tests/discussions.rs
+@@ -1,6 +1,8 @@
+ use tauri::http::StatusCode;
+ 
+-use super::through_glab::{glab_log, in_this_repository, open, opens_each, run_with_fakes};
++use super::through_glab::{
++    asked, glab_log, in_this_repository, is_not_found, open, opens_each, run_with_fakes,
++};
+ use super::*;
+ use crate::frontend_log::tests::logged;
+ use crate::merge_requests::discussions::discussions_reply;
+@@ -11,14 +13,20 @@ const OFFERED_TEST: &str = "merge_requests::tests::discussions::note_pages_on_pa
+ const PICTURE_TEST: &str = "merge_requests::tests::discussions::an_authors_picture_on_paths_glab";
+ const READ_TEST: &str =
+     "merge_requests::tests::discussions::read_discussions_replies_on_paths_glab";
++const FIRST_TEST: &str = "merge_requests::tests::discussions::first_comments_on_paths_glab";
++const FIRST_OFFERS_TEST: &str =
++    "merge_requests::tests::discussions::first_comment_offers_on_paths_opener";
+ const LOG_TEST: &str = "merge_requests::tests::discussions::the_log_line_on_paths_glab";
+ const BATCH: [u32; 4] = [82, 81, 79, 78];
+-const NOTE_103: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_103";
+-const UNLISTED_NOTE: &str =
+-    "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_999";
++const NOTE_103: &str = "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_103";
++const UNLISTED_NOTE: &str = "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_999";
+ const EVIL_NOTE: &str = "https://evil.example/x#note_1";
+ const ANNA_S_PICTURE: &str =
+     "tests/glab/mr-discussions/pictures/uploads/-/system/user/avatar/2/avatar.png";
++const ISSUE_12: &str = "https://gitlab.com/taskboard/taskboard/-/issues/12";
++const UPLOAD: &str = "/upload~8201a1b2c3d4e5f60718293a4b5c6d7e";
++const SORT: &str =
++    "tests/glab/mr-discussions/uploads/7/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png";
+ 
+ /// The rows the window gets for `iids` through the command.
+ fn read(window: &MergeRequestWindow, iids: &[u32]) -> Value {
+@@ -102,6 +110,20 @@ fn read_discussions_answers_through_the_command() {
+     run_with_fakes(READ_TEST, SCENARIO);
+ }
+ 
++/// The first comment of !81's one discussion, ben's note 201: GitLab's escaped markup stays text.
++fn bens_first() -> Value {
++    json!({
++        "createdAt": "2026-11-02T10:00:00Z",
++        "body": { "blocks": [{ "kind": "paragraph", "inlines": [
++            { "kind": "text", "text": "Please " },
++            { "kind": "strong", "inlines": [{ "kind": "text", "text": "check" }] },
++            { "kind": "text", "text": " " },
++            { "kind": "strong", "inlines": [{ "kind": "text", "text": "THIS" }] },
++            { "kind": "text", "text": " & that\non a dark theme\n<script>alert(1)</script>" },
++        ] }] },
++    })
++}
++
+ #[test]
+ #[ignore = "run by read_discussions_answers_through_the_command"]
+ fn read_discussions_replies_on_paths_glab() {
+@@ -121,12 +143,13 @@ fn read_discussions_replies_on_paths_glab() {
+         "author": ben,
+         "createdAt": "2026-11-02T10:00:00Z",
+         "text": "Please **check** <b>THIS</b> & that\non a dark theme\n<script>alert(1)</script>",
+-        "page": "https://gitlab.example/taskboard/taskboard/-/merge_requests/81#note_201",
++        "page": "https://gitlab.com/taskboard/taskboard/-/merge_requests/81#note_201",
+         "mentions": [],
+     });
+     let discussion = json!({
+         "id": "0000000000000000000000000000000000008101",
+         "place": { "kind": "overview" },
++        "first": bens_first(),
+         "earlier": [],
+         "last": last,
+     });
+@@ -154,6 +177,93 @@ fn the_log_line_on_paths_glab() {
+     let lines: Vec<&str> = log.lines().filter(|line| line.contains(" INFO ")).collect();
+     let asked = " INFO yamt_merge_requests::project: asked glab for the login and the project outcome=\"found\"";
+     let line = " INFO yamt_merge_requests::discussions: read merge requests' open discussions asked=4 \
+-                answered=3 failed=1 queries=2 score=58 limit=250";
++                answered=3 failed=1 pages=5 uploads=1 queries=2 score=58 limit=250";
+     assert_eq!(lines, [asked, line], "{log}");
+ }
++
++/// A first comment's body that is one paragraph of `text`.
++fn paragraph(text: &str) -> Value {
++    json!({ "blocks": [{ "kind": "paragraph", "inlines": [{ "kind": "text", "text": text }] }] })
++}
++
++/// The first comment of !82's first discussion, anna's note 101: a link to issue #12 and an uploaded image.
++fn annas_first() -> Value {
++    let body = json!({ "blocks": [
++        { "kind": "paragraph", "inlines": [
++            { "kind": "text", "text": "Should a card without a due date sort last? As in " },
++            { "kind": "link", "link": { "kind": "page", "page": ISSUE_12 },
++              "inlines": [{ "kind": "text", "text": "#12" }] },
++            { "kind": "text", "text": ":" },
++        ] },
++        { "kind": "paragraph", "inlines": [
++            { "kind": "image", "image": { "kind": "uploaded", "key": &UPLOAD[1..] },
++              "caption": "sort", "size": null },
++        ] },
++    ] });
++    json!({ "createdAt": "2026-11-03T10:00:00Z", "body": body })
++}
++
++#[test]
++fn each_discussion_carries_its_first_comment_in_one_read() {
++    run_with_fakes(FIRST_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by each_discussion_carries_its_first_comment_in_one_read"]
++fn first_comments_on_paths_glab() {
++    let window = open_window_in(gitlab_repo());
++
++    let rows = read(&window, &BATCH);
++
++    let firsts: Vec<Value> = rows
++        .as_array()
++        .unwrap()
++        .iter()
++        .filter_map(|row| row["answer"]["discussions"].as_array())
++        .flatten()
++        .map(|discussion| discussion["first"].clone())
++        .collect();
++    let first = |at: &str, body: Value| json!({ "createdAt": at, "body": body });
++    let expected = [
++        annas_first(),
++        first(
++            "2026-11-03T10:10:00Z",
++            paragraph("This removed line still has a caller."),
++        ),
++        first(
++            "2026-11-03T10:20:00Z",
++            paragraph("Please add a screenshot to the description."),
++        ),
++        bens_first(),
++        first(
++            "2026-10-31T10:20:00Z",
++            paragraph("Search titles only, for now?"),
++        ),
++    ];
++    assert_eq!(firsts, expected);
++    let queries = glab_log("argv: api graphql");
++    assert_eq!(queries.len(), 2, "{queries:?}");
++    assert!(queries[0].ends_with(r#" -F iids=["82","81","79","78"] -F first=4"#));
++    assert!(queries[1].ends_with(r#" -F iids=["79"] -F first=1 -f discussionsAfter=d-2"#));
++}
++
++#[test]
++fn a_first_comments_link_and_upload_are_offered_before_the_reply() {
++    run_with_fakes(FIRST_OFFERS_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by a_first_comments_link_and_upload_are_offered_before_the_reply"]
++fn first_comment_offers_on_paths_opener() {
++    let window = open_window_in(gitlab_repo());
++    assert_eq!(open(&window, ISSUE_12), json!({ "kind": "notOffered" }));
++    assert!(is_not_found(&asked(&window, UPLOAD)));
++
++    read(&window, &BATCH);
++
++    let answer = asked(&window, UPLOAD);
++    assert_eq!(answer.status(), StatusCode::OK);
++    let file = std::fs::read(in_this_repository(SORT)).unwrap();
++    assert_eq!(answer.body(), &file);
++    opens_each(&window, &[ISSUE_12]);
++}
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index 4208e6a..54bf24d 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -204,12 +204,16 @@ answered: <address or endpoint>            (a picture or a job's log, after its
+   is no `304.log` (404); `310.log` is a short fork log (`FORK LOG: …`), `312.log` a short coloured log with `fail`.
+   `.gitattributes` keeps every byte (`* -text`).
+ - `mr-discussions/` — each row's open discussions (`crates/merge-requests/tests/discussions.rs`, the discussions app
+-  tests in `src-tauri/src/merge_requests/tests/discussions.rs`): logged in; `merge-requests/`'s project; user `sam`;
+-  one page, the last, with the list query's fields (`queryComplexity` 170 of 250); no `diffHeadSha`. !82 (3 open: 4
+-  resolvable, 1 resolved), !81 (1), !80 (0), !79 (1), !78 (1). The batch `graphql-discussions-82-81-79-78.json`
++  tests in `src-tauri/src/merge_requests/tests/discussions.rs`): logged in; `merge-requests/`'s project on gitlab.com
++  (id 7, `https://gitlab.com/taskboard/taskboard`: a first comment's upload is fetched with the login only there); user
++  `sam`; one page, the last, with the list query's fields (`queryComplexity` 170 of 250); no `diffHeadSha`. !82 (3
++  open: 4 resolvable, 1 resolved), !81 (1), !80 (0), !79 (1), !78 (1). The batch `graphql-discussions-82-81-79-78.json`
+   (`queryComplexity` 58 of 250, as gitlab.com scored 20 merge requests on 2026-11-03): !82 holds, in order, (a) a diff
+-  discussion on `src/board/card.ts` line 12: anna's comment, a system note "changed this line in version 2 of the
+-  diff", then sam's reply (note 103); (b) a diff discussion on `src/board/dueDates.ts`, old line 6 only: ben's
++  discussion on `src/board/card.ts` line 12: anna's comment (note 101, linking issue #12,
++  `/taskboard/taskboard/-/issues/12`, and the lazy upload
++  `/-/project/7/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png`, served by the uploads API,
++  `uploads/7/uploads/…/sort.png`, a small PNG), a system note "changed this line in version 2
++  of the diff", then sam's reply (note 103); (b) a diff discussion on `src/board/dueDates.ts`, old line 6 only: ben's
+   comment, then a system note last; (c) an Overview discussion by anna whose `url` is `https://evil.example/x#note_1`
+   (no page); (d) a resolved discussion; (e) a system-only "added 2 commits" (`resolvable: false`); (f) chiara's
+   non-resolvable comment. !81: one Overview discussion, ben's note 201, its body `Please **check** <b>THIS</b> & that`
+@@ -218,7 +222,7 @@ answered: <address or endpoint>            (a picture or a job's log, after its
+   !78 is absent from the batch's answer. `graphql-discussions-81.json` answers !81 alone (a lazy ask, score 32);
+   `graphql-discussions-77.err` and `.exit` (1) fail before any answer with a deadline line. Avatars: anna's uploaded
+   `/uploads/-/system/user/avatar/2/avatar.png` (`pictures/`, `mr-row-details/`'s PNG), ben's Gravatar as in
+-  `mr-row-details/`; every other `url` is `https://gitlab.example/taskboard/taskboard/-/merge_requests/<iid>#note_<n>`.
++  `mr-row-details/`; every other `url` is `https://gitlab.com/taskboard/taskboard/-/merge_requests/<iid>#note_<n>`.
+   Each merge request answers `discussionLocked: false` and `createNote: true`; each discussion an `id` whose hex ends
+   in the iid and its place (`…008201` for !82's first) and `resolveNote: true`; each note its `bodyHtml`, `lastEditedAt`
+   equal to `createdAt` and `lastEditedBy: null`; `notes.pageInfo` both `hasNextPage: false` and `hasPreviousPage`.
+diff --git a/tests/glab/mr-discussions/graphql-discussions-79-after-d-2.json b/tests/glab/mr-discussions/graphql-discussions-79-after-d-2.json
+index 0699c03..217bdef 100644
+--- a/tests/glab/mr-discussions/graphql-discussions-79-after-d-2.json
++++ b/tests/glab/mr-discussions/graphql-discussions-79-after-d-2.json
+@@ -27,7 +27,7 @@
+                         "createdAt": "2026-10-31T10:20:00Z",
+                         "lastEditedAt": "2026-10-31T10:20:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_303",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/79#note_303",
+                         "position": { "filePath": "src/board/search.ts", "newLine": 3, "oldLine": 3 }
+                       }
+                     ]
+diff --git a/tests/glab/mr-discussions/graphql-discussions-81.json b/tests/glab/mr-discussions/graphql-discussions-81.json
+index 3f6eb91..d9b864c 100644
+--- a/tests/glab/mr-discussions/graphql-discussions-81.json
++++ b/tests/glab/mr-discussions/graphql-discussions-81.json
+@@ -31,7 +31,7 @@
+                         "createdAt": "2026-11-02T10:00:00Z",
+                         "lastEditedAt": "2026-11-02T10:00:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/81#note_201",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/81#note_201",
+                         "position": null
+                       }
+                     ]
+diff --git a/tests/glab/mr-discussions/graphql-discussions-82-81-79-78.json b/tests/glab/mr-discussions/graphql-discussions-82-81-79-78.json
+index 02fc7ce..e365f4a 100644
+--- a/tests/glab/mr-discussions/graphql-discussions-82-81-79-78.json
++++ b/tests/glab/mr-discussions/graphql-discussions-82-81-79-78.json
+@@ -26,12 +26,12 @@
+                           "name": "Anna Berg",
+                           "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+                         },
+-                        "body": "Should a card without a due date sort last?",
+-                        "bodyHtml": "<p data-sourcepos=\"1:1-1:43\" dir=\"auto\">Should a card without a due date sort last?</p>",
++                        "body": "Should a card without a due date sort last? As in #12:\n\n![sort](/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png)",
++                        "bodyHtml": "<p data-sourcepos=\"1:1-1:54\" dir=\"auto\">Should a card without a due date sort last? As in <a href=\"/taskboard/taskboard/-/issues/12\" data-reference-type=\"issue\" data-original=\"#12\" data-link=\"false\" data-link-reference=\"false\" data-issue=\"512\" data-project=\"7\" data-iid=\"12\" data-namespace-path=\"taskboard\" data-project-path=\"taskboard/taskboard\" data-issue-type=\"issue\" data-container=\"body\" data-placement=\"top\" title=\"Fix the card\" class=\"gfm gfm-issue\">#12</a>:</p>\n<p data-sourcepos=\"3:1-3:63\" dir=\"auto\"><a class=\"no-attachment-icon gfm\" href=\"/-/project/7/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png\" target=\"_blank\" rel=\"noopener noreferrer\" data-canonical-src=\"/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png\" data-link=\"true\"><img data-sourcepos=\"3:1-3:63\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" alt=\"sort\" decoding=\"async\" class=\"lazy gfm\" data-src=\"/-/project/7/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png\" data-canonical-src=\"/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png\"></a></p>",
+                         "createdAt": "2026-11-03T10:00:00Z",
+                         "lastEditedAt": "2026-11-03T10:00:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_101",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_101",
+                         "position": { "filePath": "src/board/card.ts", "newLine": 12, "oldLine": null }
+                       },
+                       {
+@@ -42,7 +42,7 @@
+                         "createdAt": "2026-11-03T11:00:00Z",
+                         "lastEditedAt": "2026-11-03T11:00:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_102",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_102",
+                         "position": { "filePath": "src/board/card.ts", "newLine": 12, "oldLine": null }
+                       },
+                       {
+@@ -53,7 +53,7 @@
+                         "createdAt": "2026-11-03T11:05:00Z",
+                         "lastEditedAt": "2026-11-03T11:05:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_103",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_103",
+                         "position": { "filePath": "src/board/card.ts", "newLine": 12, "oldLine": null }
+                       }
+                     ]
+@@ -79,7 +79,7 @@
+                         "createdAt": "2026-11-03T10:10:00Z",
+                         "lastEditedAt": "2026-11-03T10:10:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_104",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_104",
+                         "position": { "filePath": "src/board/dueDates.ts", "newLine": null, "oldLine": 6 }
+                       },
+                       {
+@@ -90,7 +90,7 @@
+                         "createdAt": "2026-11-03T11:00:00Z",
+                         "lastEditedAt": "2026-11-03T11:00:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_105",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_105",
+                         "position": { "filePath": "src/board/dueDates.ts", "newLine": null, "oldLine": 6 }
+                       }
+                     ]
+@@ -138,7 +138,7 @@
+                         "createdAt": "2026-11-03T10:30:00Z",
+                         "lastEditedAt": "2026-11-03T10:30:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_106",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_106",
+                         "position": null
+                       }
+                     ]
+@@ -160,7 +160,7 @@
+                         "createdAt": "2026-11-03T11:00:00Z",
+                         "lastEditedAt": "2026-11-03T11:00:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_107",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_107",
+                         "position": null
+                       }
+                     ]
+@@ -182,7 +182,7 @@
+                         "createdAt": "2026-11-03T11:30:00Z",
+                         "lastEditedAt": "2026-11-03T11:30:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_108",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_108",
+                         "position": null
+                       }
+                     ]
+@@ -218,7 +218,7 @@
+                         "createdAt": "2026-11-02T10:00:00Z",
+                         "lastEditedAt": "2026-11-02T10:00:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/81#note_201",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/81#note_201",
+                         "position": null
+                       }
+                     ]
+@@ -250,7 +250,7 @@
+                         "createdAt": "2026-10-31T10:00:00Z",
+                         "lastEditedAt": "2026-10-31T10:00:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_301",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/79#note_301",
+                         "position": null
+                       }
+                     ]
+@@ -272,7 +272,7 @@
+                         "createdAt": "2026-10-31T10:10:00Z",
+                         "lastEditedAt": "2026-10-31T10:10:00Z",
+                         "lastEditedBy": null,
+-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_302",
++                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/79#note_302",
+                         "position": null
+                       }
+                     ]
+diff --git a/tests/glab/mr-discussions/project.json b/tests/glab/mr-discussions/project.json
+index d591a82..de14b15 100644
+--- a/tests/glab/mr-discussions/project.json
++++ b/tests/glab/mr-discussions/project.json
+@@ -1 +1 @@
+-{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example/taskboard/taskboard"}
++{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.com/taskboard/taskboard"}
+diff --git a/tests/glab/mr-discussions/uploads/7/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png b/tests/glab/mr-discussions/uploads/7/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..159c465cf94c3a42d0205214e3c8ef01716fe5e6
+GIT binary patch
+literal 201
+zcmeAS@N?(olHy`uVBq!ia0y~yU{C;I0VW0phBY0A4;UC2CV09yhD02GJL5L*0R;}%
+z+e;=}x>$#p8z0mx;9|9Ek$*P9icx(h{|B9?wb`~C-g6nw{r=8SjA74AJ|l;Ymlb9G
+z8`&;g6yjRwy~5Y5;c~D>bLUN=u4#@=DGcJTGa3XgcbXa2i#Lf&*3VtGJb;P+La>H2
+z{{qH8_gl9y`~0&#Fil`D`w!nakK#FUlXkJc(EP%9*KA%B$AQ_C85kHCJYD@<);T3K
+F0RT$1N#6hf
+
+literal 0
+HcmV?d00001
+

@@ -2,8 +2,8 @@ use yamt_gitio::Glab;
 
 use crate::description::described_on;
 use crate::discussions::{
-    DiscussionNode, Fetch, NoteNode, later_page, merge_request_page, note_page, open_discussion,
-    person_notes,
+    DiscussionNode, Fetch, NoteNode, Offers, later_page, merge_request_page, note_page,
+    open_discussion, person_notes,
 };
 use crate::list::one_per_username;
 use crate::people::People;
@@ -27,13 +27,6 @@ pub(super) struct Read {
     pages: Vec<WebPage>,
     uploads: Vec<OfferedUpload>,
     pictures: Vec<OfferedPicture>,
-}
-
-/// A thread's comments, and the pages and uploads they name, once each, in order.
-struct Commented {
-    comments: Vec<DiscussionComment>,
-    pages: Vec<WebPage>,
-    uploads: Vec<OfferedUpload>,
 }
 
 /// glab missing → `GlabMissing`; the remembered project; the discussions query for `[iid]`, then its later pages
@@ -132,16 +125,24 @@ pub(super) fn thread_from(
     let may_resolve = found.resolvable && found.user_permissions.resolve_note;
     let notes = person_notes(found.notes).map_err(failed)?;
     let mut people = People::new(project.web_origin.as_deref());
-    let commented = comments_of(&notes, iid, project, &mut people);
-    let opened = open_discussion(discussion.clone(), notes, iid, project, &mut people)
-        .ok_or(DiscussionThreadReply::NotFound)?;
+    let mut offers = Offers::new();
+    let comments = comments_of(&notes, iid, project, &mut people, &mut offers);
+    let opened = open_discussion(
+        discussion.clone(),
+        notes,
+        iid,
+        project,
+        &mut people,
+        &mut offers,
+    )
+    .ok_or(DiscussionThreadReply::NotFound)?;
     let listed = fetch_drafts()
         .and_then(|json| drafts_in(&json, discussion))
         .map_err(failed)?;
     let thread = DiscussionThread {
         discussion: opened,
         resolved: found.resolved,
-        comments: commented.comments,
+        comments,
         drafts: listed.drafts,
         pending: listed.pending,
         commenting,
@@ -149,8 +150,8 @@ pub(super) fn thread_from(
     };
     Ok(Read {
         thread,
-        pages: commented.pages,
-        uploads: commented.uploads,
+        pages: offers.pages,
+        uploads: offers.uploads,
         pictures: one_per_username(people.pictures),
     })
 }
@@ -193,45 +194,31 @@ fn commenting(create_note: bool, discussion_locked: bool) -> Commenting {
     }
 }
 
-/// Each note as a comment, its body through `described_on` (RK60); every page (the note's own, then its links') and
-/// every upload once.
+/// Each note as a comment, its body through `described_on` (RK60); `offers` gains every page (the note's own, then its
+/// links') and every upload.
 fn comments_of(
     notes: &[NoteNode],
     iid: MergeRequestIid,
     project: &Project,
     people: &mut People,
-) -> Commented {
-    let mut commented = Commented {
-        comments: Vec::new(),
-        pages: Vec::new(),
-        uploads: Vec::new(),
-    };
+    offers: &mut Offers,
+) -> Vec<DiscussionComment> {
+    let mut comments = Vec::new();
     for note in notes {
         let page = note_page(note, iid, project);
+        if let Some(page) = &page {
+            offers.page(page.clone());
+        }
         let described = described_on(project, iid, note.body_html.as_deref().unwrap_or_default());
-        for offered in page.iter().cloned().chain(described.pages) {
-            if !commented.pages.contains(&offered) {
-                commented.pages.push(offered);
-            }
-        }
-        for upload in described.uploads {
-            if !commented
-                .uploads
-                .iter()
-                .any(|offered| offered.key == upload.key)
-            {
-                commented.uploads.push(upload);
-            }
-        }
-        commented.comments.push(DiscussionComment {
+        comments.push(DiscussionComment {
             author: note.author.clone().map(|author| people.person(author)),
             created_at: note.created_at.clone(),
             edited: edit_of(note, people),
-            body: described.description,
+            body: offers.described(described),
             page,
         });
     }
-    commented
+    comments
 }
 
 /// GitLab's `Note#edited?`: an editor named and `lastEditedAt` after `createdAt` (design §1.3).

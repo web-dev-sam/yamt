@@ -6,7 +6,8 @@ use super::read::{self, offered, thread_from};
 use super::write::{self, Write, failure_words, replied, request};
 use super::*;
 use crate::discussions::sample::{
-    answer, comment, discussion, hex, merge_request, open, project, system_note, with_id,
+    answer, comment, discussion, hex, merge_request, on_gitlab_com, open, project, system_note,
+    with_id,
 };
 use crate::project::Project;
 use crate::query::{draft_notes_args, markdown_args, markdown_body};
@@ -401,14 +402,6 @@ fn a_notes_image_keeps_its_size() {
     assert_eq!(sizes, [Some(height)]);
 }
 
-fn on_gitlab_com() -> Project {
-    Project {
-        full_path: "taskboard/taskboard".to_owned(),
-        web_path: "/taskboard/taskboard".to_owned(),
-        web_origin: Some("https://gitlab.com".to_owned()),
-    }
-}
-
 fn note_page(n: u32) -> String {
     format!("https://gitlab.com/taskboard/taskboard/-/merge_requests/1#note_{n}")
 }
@@ -423,7 +416,7 @@ fn annas_note(n: u32, html: &str) -> Value {
 }
 
 #[test]
-fn a_threads_pages_and_uploads_are_named_once_each_in_order() {
+fn the_thread_read_carries_first_and_offers_each_page_once() {
     let secret = "903a1b2c3d4e5f60718293a4b5c6d7e8";
     let upload = format!(r#"<img src="/-/project/7/uploads/{secret}/shot.png">"#);
     let a = r#"<a href="https://docs.example/a">a</a>"#;
@@ -456,6 +449,11 @@ fn a_threads_pages_and_uploads_are_named_once_each_in_order() {
         .map(|picture| picture.username.as_str())
         .collect();
     assert_eq!(pictures, ["anna"]);
+    let thread = thread_of(&read);
+    let first = &thread.discussion.first;
+    assert_eq!(first.body, thread.comments[0].body);
+    assert_eq!(first.created_at, thread.comments[0].created_at);
+    assert_ne!(first.body, thread.comments[1].body);
 }
 
 const ROUTE: &str = "projects/group%2Fsub%2Fproject/merge_requests/1";

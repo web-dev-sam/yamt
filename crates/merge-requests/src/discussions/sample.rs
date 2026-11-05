@@ -13,6 +13,14 @@ pub(crate) fn project() -> Project {
     }
 }
 
+/// `project()` on gitlab.com, the one GitLab whose uploads are offered.
+pub(crate) fn on_gitlab_com() -> Project {
+    Project {
+        web_origin: Some("https://gitlab.com".to_owned()),
+        ..project()
+    }
+}
+
 pub(crate) fn iids(numbers: &[u32]) -> Vec<MergeRequestIid> {
     numbers
         .iter()

@@ -204,12 +204,16 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   is no `304.log` (404); `310.log` is a short fork log (`FORK LOG: …`), `312.log` a short coloured log with `fail`.
   `.gitattributes` keeps every byte (`* -text`).
 - `mr-discussions/` — each row's open discussions (`crates/merge-requests/tests/discussions.rs`, the discussions app
-  tests in `src-tauri/src/merge_requests/tests/discussions.rs`): logged in; `merge-requests/`'s project; user `sam`;
-  one page, the last, with the list query's fields (`queryComplexity` 170 of 250); no `diffHeadSha`. !82 (3 open: 4
-  resolvable, 1 resolved), !81 (1), !80 (0), !79 (1), !78 (1). The batch `graphql-discussions-82-81-79-78.json`
+  tests in `src-tauri/src/merge_requests/tests/discussions.rs`): logged in; `merge-requests/`'s project on gitlab.com
+  (id 7, `https://gitlab.com/taskboard/taskboard`: a first comment's upload is fetched with the login only there); user
+  `sam`; one page, the last, with the list query's fields (`queryComplexity` 170 of 250); no `diffHeadSha`. !82 (3
+  open: 4 resolvable, 1 resolved), !81 (1), !80 (0), !79 (1), !78 (1). The batch `graphql-discussions-82-81-79-78.json`
   (`queryComplexity` 58 of 250, as gitlab.com scored 20 merge requests on 2026-11-03): !82 holds, in order, (a) a diff
-  discussion on `src/board/card.ts` line 12: anna's comment, a system note "changed this line in version 2 of the
-  diff", then sam's reply (note 103); (b) a diff discussion on `src/board/dueDates.ts`, old line 6 only: ben's
+  discussion on `src/board/card.ts` line 12: anna's comment (note 101, linking issue #12,
+  `/taskboard/taskboard/-/issues/12`, and the lazy upload
+  `/-/project/7/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png`, served by the uploads API,
+  `uploads/7/uploads/…/sort.png`, a small PNG), a system note "changed this line in version 2
+  of the diff", then sam's reply (note 103); (b) a diff discussion on `src/board/dueDates.ts`, old line 6 only: ben's
   comment, then a system note last; (c) an Overview discussion by anna whose `url` is `https://evil.example/x#note_1`
   (no page); (d) a resolved discussion; (e) a system-only "added 2 commits" (`resolvable: false`); (f) chiara's
   non-resolvable comment. !81: one Overview discussion, ben's note 201, its body `Please **check** <b>THIS</b> & that`
@@ -218,7 +222,7 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   !78 is absent from the batch's answer. `graphql-discussions-81.json` answers !81 alone (a lazy ask, score 32);
   `graphql-discussions-77.err` and `.exit` (1) fail before any answer with a deadline line. Avatars: anna's uploaded
   `/uploads/-/system/user/avatar/2/avatar.png` (`pictures/`, `mr-row-details/`'s PNG), ben's Gravatar as in
-  `mr-row-details/`; every other `url` is `https://gitlab.example/taskboard/taskboard/-/merge_requests/<iid>#note_<n>`.
+  `mr-row-details/`; every other `url` is `https://gitlab.com/taskboard/taskboard/-/merge_requests/<iid>#note_<n>`.
   Each merge request answers `discussionLocked: false` and `createNote: true`; each discussion an `id` whose hex ends
   in the iid and its place (`…008201` for !82's first) and `resolveNote: true`; each note its `bodyHtml`, `lastEditedAt`
   equal to `createdAt` and `lastEditedBy: null`; `notes.pageInfo` both `hasNextPage: false` and `hasPreviousPage`.

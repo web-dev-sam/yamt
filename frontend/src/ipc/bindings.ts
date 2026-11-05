@@ -719,6 +719,14 @@ export type FileStatus = "Unresolved" |
 /**  Unmerged for git, with the resolution git rerere replayed on disk, not yet reviewed (plan §2 #90). */
 "Remembered" | "Resolved";
 
+/**  The note that started a discussion, as the person view shows it. */
+export type FirstComment = {
+	/**  When it was written: GitLab's ISO 8601 time, as sent. */
+	createdAt: string,
+	/**  Its `bodyHtml` reduced by `described_on` on the merge request's page (RK60, RK66: no other path). */
+	body: Description,
+};
+
 /**  Whether GitLab's diff is exactly the window's. */
 export type GitLabCheck = 
 /**  It is: posting goes to this merge request. */
@@ -1246,6 +1254,8 @@ export type OpenDiscussion = {
 	id: DiscussionId,
 	/**  Where it is: the first person note's `position` (GitLab's place of the discussion). */
 	place: DiscussionPlace,
+	/**  The first person note (`earlier[0]`, else `last`): its time and its rendering. */
+	first: FirstComment,
 	/**  Every person note before `last`, oldest first: `earlier[0]` (or `last` when empty) started the discussion. */
 	earlier: TurnComment[],
 	/**  Its last person note. */

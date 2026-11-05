@@ -1,0 +1,2 @@
+just mutants HEAD → 18 mutants in 3m: 7 caught, 10 unviable, 1 missed
+crates/merge-requests/src/discussions.rs:386 log_read → () — gate-covered: mutants runs crate tests only. Applied by hand, yamt-app a_read_logs_its_counts_and_score_but_no_name_or_body FAILED; reverted.

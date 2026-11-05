@@ -26,12 +26,12 @@
                           "name": "Anna Berg",
                           "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
                         },
-                        "body": "Should a card without a due date sort last?",
-                        "bodyHtml": "<p data-sourcepos=\"1:1-1:43\" dir=\"auto\">Should a card without a due date sort last?</p>",
+                        "body": "Should a card without a due date sort last? As in #12:\n\n![sort](/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png)",
+                        "bodyHtml": "<p data-sourcepos=\"1:1-1:54\" dir=\"auto\">Should a card without a due date sort last? As in <a href=\"/taskboard/taskboard/-/issues/12\" data-reference-type=\"issue\" data-original=\"#12\" data-link=\"false\" data-link-reference=\"false\" data-issue=\"512\" data-project=\"7\" data-iid=\"12\" data-namespace-path=\"taskboard\" data-project-path=\"taskboard/taskboard\" data-issue-type=\"issue\" data-container=\"body\" data-placement=\"top\" title=\"Fix the card\" class=\"gfm gfm-issue\">#12</a>:</p>\n<p data-sourcepos=\"3:1-3:63\" dir=\"auto\"><a class=\"no-attachment-icon gfm\" href=\"/-/project/7/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png\" target=\"_blank\" rel=\"noopener noreferrer\" data-canonical-src=\"/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png\" data-link=\"true\"><img data-sourcepos=\"3:1-3:63\" src=\"data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==\" alt=\"sort\" decoding=\"async\" class=\"lazy gfm\" data-src=\"/-/project/7/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png\" data-canonical-src=\"/uploads/8201a1b2c3d4e5f60718293a4b5c6d7e/sort.png\"></a></p>",
                         "createdAt": "2026-11-03T10:00:00Z",
                         "lastEditedAt": "2026-11-03T10:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_101",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_101",
                         "position": { "filePath": "src/board/card.ts", "newLine": 12, "oldLine": null }
                       },
                       {
@@ -42,7 +42,7 @@
                         "createdAt": "2026-11-03T11:00:00Z",
                         "lastEditedAt": "2026-11-03T11:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_102",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_102",
                         "position": { "filePath": "src/board/card.ts", "newLine": 12, "oldLine": null }
                       },
                       {
@@ -53,7 +53,7 @@
                         "createdAt": "2026-11-03T11:05:00Z",
                         "lastEditedAt": "2026-11-03T11:05:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_103",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_103",
                         "position": { "filePath": "src/board/card.ts", "newLine": 12, "oldLine": null }
                       }
                     ]
@@ -79,7 +79,7 @@
                         "createdAt": "2026-11-03T10:10:00Z",
                         "lastEditedAt": "2026-11-03T10:10:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_104",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_104",
                         "position": { "filePath": "src/board/dueDates.ts", "newLine": null, "oldLine": 6 }
                       },
                       {
@@ -90,7 +90,7 @@
                         "createdAt": "2026-11-03T11:00:00Z",
                         "lastEditedAt": "2026-11-03T11:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_105",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_105",
                         "position": { "filePath": "src/board/dueDates.ts", "newLine": null, "oldLine": 6 }
                       }
                     ]
@@ -138,7 +138,7 @@
                         "createdAt": "2026-11-03T10:30:00Z",
                         "lastEditedAt": "2026-11-03T10:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_106",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_106",
                         "position": null
                       }
                     ]
@@ -160,7 +160,7 @@
                         "createdAt": "2026-11-03T11:00:00Z",
                         "lastEditedAt": "2026-11-03T11:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_107",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_107",
                         "position": null
                       }
                     ]
@@ -182,7 +182,7 @@
                         "createdAt": "2026-11-03T11:30:00Z",
                         "lastEditedAt": "2026-11-03T11:30:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/82#note_108",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/82#note_108",
                         "position": null
                       }
                     ]
@@ -218,7 +218,7 @@
                         "createdAt": "2026-11-02T10:00:00Z",
                         "lastEditedAt": "2026-11-02T10:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/81#note_201",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/81#note_201",
                         "position": null
                       }
                     ]
@@ -250,7 +250,7 @@
                         "createdAt": "2026-10-31T10:00:00Z",
                         "lastEditedAt": "2026-10-31T10:00:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_301",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/79#note_301",
                         "position": null
                       }
                     ]
@@ -272,7 +272,7 @@
                         "createdAt": "2026-10-31T10:10:00Z",
                         "lastEditedAt": "2026-10-31T10:10:00Z",
                         "lastEditedBy": null,
-                        "url": "https://gitlab.example/taskboard/taskboard/-/merge_requests/79#note_302",
+                        "url": "https://gitlab.com/taskboard/taskboard/-/merge_requests/79#note_302",
                         "position": null
                       }
                     ]

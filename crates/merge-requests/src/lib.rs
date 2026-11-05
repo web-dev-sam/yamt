@@ -50,9 +50,9 @@ pub use discussion_thread::{
     resolve_discussion, submit_review,
 };
 pub use discussions::{
-    DISCUSSION_BATCH, DiscussionId, DiscussionNote, DiscussionPlace, DiscussionsAnswer, Mention,
-    OpenDiscussion, ReadDiscussions, RowDiscussions, TurnComment, read_discussions,
-    unread_discussions,
+    DISCUSSION_BATCH, DiscussionId, DiscussionNote, DiscussionPlace, DiscussionsAnswer,
+    FirstComment, Mention, OpenDiscussion, ReadDiscussions, RowDiscussions, TurnComment,
+    read_discussions, unread_discussions,
 };
 pub use job_log::{JobLog, JobLogReply, MAX_LOG_BYTES, read_job_log};
 pub use labels::{Label, LabelColors};
