@@ -1,5 +1,5 @@
 {
-  "MrReviewFixesR1": {
+  "MrReviewFixesR2": {
     "owned": [
       "frontend/src/mergeRequests/internal/discussions.ts",
       "frontend/src/mergeRequests/internal/discussions.test.ts",
@@ -21,7 +21,8 @@
       "frontend/src/ui/MergeRequestThread.vue",
       "frontend/src/ui/MergeRequestThreadPanel.test.ts",
       "frontend/src/ui/mergeRequestThread.ts",
-      "frontend/src/ui/mergeRequestThread.test.ts"
+      "frontend/src/ui/mergeRequestThread.test.ts",
+      "frontend/src/ui/mergeRequestDiscussionRows.ts"
     ]
   }
 }
