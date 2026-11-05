@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `4fabdabc` (merge-request review fixes, plan §2 #189: `turnText(turn, viewer, author)` names the author; one count `ui/mergeRequestDiscussionRows.ts` `unmarkedOf` for the box's header, the opener's `TURN_MARK` and review mode's order; Escape never leaves the page (`MergeRequestsView.vue` `escapePressed` only closes a filter menu); review order `reviewFirst` — `order.ts` `dueFirst`, most `viewersTurn`, fewest `viewerWrote` (core `wroteIn`) —, tooltip through `viewerAddressed`; held rows `ui/mergeRequestsShown.ts` `heldOf`/`keptInPlace`, new state `discussionBoxes` written by `discussionsBoxOpened`/`discussionsBoxClosed`). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `1049e90b` (merge-request review fixes, plan §2 #189: `turnText(turn, viewer, author)` names the author; one count `ui/mergeRequestDiscussionRows.ts` `unmarkedOf` for the box's header, the opener's `TURN_MARK` and review mode's order; Escape never leaves the page (`MergeRequestsView.vue` `escapePressed` only closes a filter menu); review order `reviewFirst` — `order.ts` `dueFirst`, most `viewersTurn`, fewest `viewerWrote` (core `wroteIn`) —, tooltip through `viewerAddressed`; held rows `ui/mergeRequestsShown.ts` `heldOf`/`keptInPlace` over `panelRow`, new state `discussionBoxes` written by `discussionsBoxOpened`/`discussionsBoxClosed`, a box that can no longer render closes). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 
