@@ -7,7 +7,7 @@ import {
   SAM_CASES_IID,
 } from "./fixtureMergeRequestData";
 import { fixtureWebImage, pixels } from "./fixtureMergeRequestDescriptions";
-import { inlines, type Said } from "./fixtureMergeRequestRendering";
+import { inlines } from "./fixtureMergeRequestRendering";
 import {
   PERSON_FIRST_SERIAL,
   scripted,
@@ -17,7 +17,7 @@ import {
 } from "./fixtureMergeRequestTurnCases";
 
 type Inline = Generated.DescriptionInline;
-type PersonCase = { readonly iid: number; readonly said: readonly Said[] };
+type PersonCase = { readonly iid: number } & Pick<Script, "said" | "changes">;
 
 const FORMATTED_WIDTH_PX = 160;
 const IMPORT_NOTES = `${ORIGIN}/-/wikis/import`;
@@ -30,6 +30,8 @@ const FORMATTED_TEXT = [
   "And this sixth line is hidden too.",
 ].join("\n");
 
+const FORMATTED_FIRST: Script["changes"] = [(comment) => ({ ...comment, body: formattedBody() })];
+
 /** The person view's cases (`docs/slices/briefs/mr-person-discussions-design.md` §2.7), p1 first; none mentions
  *  anyone, so each falls in the group the design names for sam and anna. */
 const PERSON_CASES: readonly PersonCase[] = [
@@ -41,6 +43,7 @@ const PERSON_CASES: readonly PersonCase[] = [
       ["chiara", "Not when it is archived, though."],
       ["dmitri", "I'll add a test for archiving."],
     ],
+    changes: FORMATTED_FIRST,
   },
   {
     iid: ANNA_CASES_IID,
@@ -48,6 +51,7 @@ const PERSON_CASES: readonly PersonCase[] = [
       ["sam", "Should the snooze menu remember the last choice?"],
       ["anna", "Yes, per board."],
     ],
+    changes: [],
   },
   {
     iid: ANNA_CASES_IID,
@@ -56,6 +60,7 @@ const PERSON_CASES: readonly PersonCase[] = [
       ["ben", "Only on narrow cards."],
       ["anna", "Narrow cards are the default on phones."],
     ],
+    changes: [],
   },
   {
     iid: SAM_CASES_IID,
@@ -64,6 +69,7 @@ const PERSON_CASES: readonly PersonCase[] = [
       ["chiara", "Added one."],
       ["sam", "It drops the wrong column."],
     ],
+    changes: [],
   },
   {
     iid: SAM_CASES_IID,
@@ -72,6 +78,7 @@ const PERSON_CASES: readonly PersonCase[] = [
       ["chiara", "Once for the count."],
       ["sam", "The count could come from the first one."],
     ],
+    changes: [],
   },
   {
     iid: FOLD_CASE_IID,
@@ -91,6 +98,7 @@ const PERSON_CASES: readonly PersonCase[] = [
       ["ben", "Then local time is right for them."],
       ["chiara", "Agreed, only new files are UTC."],
     ],
+    changes: [],
   },
   {
     iid: OTHERS_CASE_IID,
@@ -98,9 +106,9 @@ const PERSON_CASES: readonly PersonCase[] = [
       ["dmitri", "The export button has no tooltip."],
       ["chiara", "Added one in the next commit."],
     ],
+    changes: [],
   },
 ];
-const FORMATTED_FIRST: Script["changes"] = [(comment) => ({ ...comment, body: formattedBody() })];
 
 /** p1's first comment as GitLab renders it: bold, inline code, a link, a sized web image, six lines in all. */
 function formattedBody(): Generated.Description {
@@ -131,9 +139,8 @@ function formattedBody(): Generated.Description {
 /** The person cases on `seed`'s merge request, or null when it has none. Each last comment is `serial` hours before
  *  `now`, so no two cases' last comments share an hour, on one row or across rows. */
 export function personCases(seed: Seed): FixtureDiscussion[] | null {
-  const scripts = PERSON_CASES.flatMap(({ iid, said }, at): Script[] => {
+  const scripts = PERSON_CASES.flatMap(({ iid, said, changes }, at): Script[] => {
     const serial = PERSON_FIRST_SERIAL + at;
-    const changes = at === 0 ? FORMATTED_FIRST : [];
     return iid === seed.iid ? [{ serial, said, hoursAgo: serial, changes }] : [];
   });
   return scripts.length === 0 ? null : scripted(seed, scripts);

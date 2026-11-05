@@ -1,0 +1,3 @@
+just mutants HEAD → Stryker on fixtureMergeRequestData.ts and fixtureMergeRequestPersonCases.ts: 203 killed, 263 survived, 2 no coverage (whole files)
+PersonCases.ts:33 FORMATTED_FIRST → []/[() => undefined] — gate-covered: set once at import, mutant never runs (#732); the p1 formatted-comment test asserts the body; asserted line 44 survives the same way
+PersonCases.ts:54,63,72,81,101,109 changes: [] → ["Stryker was here"] — gate-covered: same import-time PERSON_CASES array (#732); the plain-p2-body and group tests check these cases

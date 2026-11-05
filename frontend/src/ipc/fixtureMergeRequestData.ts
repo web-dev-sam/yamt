@@ -19,7 +19,7 @@ export const THREADS_IID = 637;
 export const LOCKED_THREADS_IID = 636;
 const THREADS_DISCUSSIONS = 13;
 const LOCKED_DISCUSSIONS = 3;
-/** The rows whose discussions are the person view's cases (`fixtureMergeRequestTurnCases.ts` `PERSON_CASES`). */
+/** The rows whose discussions are the person view's cases (`fixtureMergeRequestPersonCases.ts` `PERSON_CASES`). */
 export const ANNA_CASES_IID = 624;
 export const SAM_CASES_IID = 628;
 export const FOLD_CASE_IID = 609;

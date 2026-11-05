@@ -1,0 +1,195 @@
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.ts b/frontend/src/ipc/fixtureMergeRequestData.ts
+index 87217fa..da63fb7 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.ts
+@@ -19,7 +19,7 @@ export const THREADS_IID = 637;
+ export const LOCKED_THREADS_IID = 636;
+ const THREADS_DISCUSSIONS = 13;
+ const LOCKED_DISCUSSIONS = 3;
+-/** The rows whose discussions are the person view's cases (`fixtureMergeRequestTurnCases.ts` `PERSON_CASES`). */
++/** The rows whose discussions are the person view's cases (`fixtureMergeRequestPersonCases.ts` `PERSON_CASES`). */
+ export const ANNA_CASES_IID = 624;
+ export const SAM_CASES_IID = 628;
+ export const FOLD_CASE_IID = 609;
+diff --git a/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts b/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
+index 93c2068..7db95ba 100644
+--- a/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
+@@ -5,8 +5,8 @@ import {
+   calendarDayFrom,
+   filtered,
+   reviewing,
++  personGroupOf,
+   reviewOrdered,
+-  turnOf,
+   withDraft,
+   type CalendarDay,
+   type Filters,
+@@ -427,39 +427,27 @@ function converted(iid: number, store: DiscussionStore): readonly OpenDiscussion
+   return answer.kind === "open" ? answer.discussions : [];
+ }
+ 
+-type Group = "turn" | "started" | "wrote" | "reviewer or other";
+-
+-function groupOf(discussion: OpenDiscussion, viewer: string, author: string | null): Group {
+-  if (turnOf(discussion, viewer, author).kind === "viewer") {
+-    return "turn";
+-  }
+-  const writers = [...discussion.earlier, discussion.last].map(
+-    (comment) => comment.author?.username,
+-  );
+-  if (writers[0] === viewer) {
+-    return "started";
+-  }
+-  return writers.includes(viewer) ? "wrote" : "reviewer or other";
+-}
+-
+ test("the_person_cases_fall_in_the_groups_the_design_names_for_sam_and_anna", () => {
+   const store = createDiscussionStore(500);
+   const groups = PERSON_CASE_ROWS.flatMap((iid) => {
+-    const author = LISTED.find((row) => row.iid === iid)?.author?.username ?? null;
++    const row = LISTED.find((listed) => listed.iid === iid);
++    if (row === undefined) {
++      throw new Error(`!${iid} is not listed`);
++    }
+     return converted(iid, store).map((discussion) => [
+-      groupOf(discussion, FIXTURE_ME, author),
+-      groupOf(discussion, "anna", author),
++      personGroupOf(discussion, FIXTURE_ME, row),
++      personGroupOf(discussion, "anna", row),
+     ]);
+   });
+ 
+   expect(groups).toEqual([
+-    ["reviewer or other", "turn"],
++    ["other", "turn"],
+     ["turn", "wrote"],
+-    ["reviewer or other", "started"],
+-    ["started", "reviewer or other"],
+-    ["wrote", "reviewer or other"],
+-    ["reviewer or other", "turn"],
+-    ["reviewer or other", "reviewer or other"],
++    ["other", "started"],
++    ["started", "other"],
++    ["wrote", "other"],
++    ["other", "turn"],
++    ["other", "other"],
+   ]);
+ });
+ 
+@@ -467,11 +455,9 @@ test("the_listed_rows_give_sam_and_anna_each_a_reviewer_group_discussion", () =>
+   const store = createDiscussionStore(SMOKE_ROWS);
+   function reviewerGroup(viewer: string): string[] {
+     return fixtureRows(0, SMOKE_ROWS)
+-      .filter(({ reviewers }) => reviewers.some(({ person }) => person.username === viewer))
+-      .filter(({ author }) => author?.username !== viewer)
+-      .filter(({ iid }) =>
+-        converted(iid, store).some(
+-          (discussion) => groupOf(discussion, viewer, null) === "reviewer or other",
++      .filter((row) =>
++        converted(row.iid, store).some(
++          (discussion) => personGroupOf(discussion, viewer, row) === "reviewer",
+         ),
+       )
+       .map(({ iid }) => `!${iid}`);
+diff --git a/frontend/src/ipc/fixtureMergeRequestPersonCases.ts b/frontend/src/ipc/fixtureMergeRequestPersonCases.ts
+index 5e28ea3..e92f2e3 100644
+--- a/frontend/src/ipc/fixtureMergeRequestPersonCases.ts
++++ b/frontend/src/ipc/fixtureMergeRequestPersonCases.ts
+@@ -7,7 +7,7 @@ import {
+   SAM_CASES_IID,
+ } from "./fixtureMergeRequestData";
+ import { fixtureWebImage, pixels } from "./fixtureMergeRequestDescriptions";
+-import { inlines, type Said } from "./fixtureMergeRequestRendering";
++import { inlines } from "./fixtureMergeRequestRendering";
+ import {
+   PERSON_FIRST_SERIAL,
+   scripted,
+@@ -17,7 +17,7 @@ import {
+ } from "./fixtureMergeRequestTurnCases";
+ 
+ type Inline = Generated.DescriptionInline;
+-type PersonCase = { readonly iid: number; readonly said: readonly Said[] };
++type PersonCase = { readonly iid: number } & Pick<Script, "said" | "changes">;
+ 
+ const FORMATTED_WIDTH_PX = 160;
+ const IMPORT_NOTES = `${ORIGIN}/-/wikis/import`;
+@@ -30,6 +30,8 @@ const FORMATTED_TEXT = [
+   "And this sixth line is hidden too.",
+ ].join("\n");
+ 
++const FORMATTED_FIRST: Script["changes"] = [(comment) => ({ ...comment, body: formattedBody() })];
++
+ /** The person view's cases (`docs/slices/briefs/mr-person-discussions-design.md` §2.7), p1 first; none mentions
+  *  anyone, so each falls in the group the design names for sam and anna. */
+ const PERSON_CASES: readonly PersonCase[] = [
+@@ -41,6 +43,7 @@ const PERSON_CASES: readonly PersonCase[] = [
+       ["chiara", "Not when it is archived, though."],
+       ["dmitri", "I'll add a test for archiving."],
+     ],
++    changes: FORMATTED_FIRST,
+   },
+   {
+     iid: ANNA_CASES_IID,
+@@ -48,6 +51,7 @@ const PERSON_CASES: readonly PersonCase[] = [
+       ["sam", "Should the snooze menu remember the last choice?"],
+       ["anna", "Yes, per board."],
+     ],
++    changes: [],
+   },
+   {
+     iid: ANNA_CASES_IID,
+@@ -56,6 +60,7 @@ const PERSON_CASES: readonly PersonCase[] = [
+       ["ben", "Only on narrow cards."],
+       ["anna", "Narrow cards are the default on phones."],
+     ],
++    changes: [],
+   },
+   {
+     iid: SAM_CASES_IID,
+@@ -64,6 +69,7 @@ const PERSON_CASES: readonly PersonCase[] = [
+       ["chiara", "Added one."],
+       ["sam", "It drops the wrong column."],
+     ],
++    changes: [],
+   },
+   {
+     iid: SAM_CASES_IID,
+@@ -72,6 +78,7 @@ const PERSON_CASES: readonly PersonCase[] = [
+       ["chiara", "Once for the count."],
+       ["sam", "The count could come from the first one."],
+     ],
++    changes: [],
+   },
+   {
+     iid: FOLD_CASE_IID,
+@@ -91,6 +98,7 @@ const PERSON_CASES: readonly PersonCase[] = [
+       ["ben", "Then local time is right for them."],
+       ["chiara", "Agreed, only new files are UTC."],
+     ],
++    changes: [],
+   },
+   {
+     iid: OTHERS_CASE_IID,
+@@ -98,9 +106,9 @@ const PERSON_CASES: readonly PersonCase[] = [
+       ["dmitri", "The export button has no tooltip."],
+       ["chiara", "Added one in the next commit."],
+     ],
++    changes: [],
+   },
+ ];
+-const FORMATTED_FIRST: Script["changes"] = [(comment) => ({ ...comment, body: formattedBody() })];
+ 
+ /** p1's first comment as GitLab renders it: bold, inline code, a link, a sized web image, six lines in all. */
+ function formattedBody(): Generated.Description {
+@@ -131,9 +139,8 @@ function formattedBody(): Generated.Description {
+ /** The person cases on `seed`'s merge request, or null when it has none. Each last comment is `serial` hours before
+  *  `now`, so no two cases' last comments share an hour, on one row or across rows. */
+ export function personCases(seed: Seed): FixtureDiscussion[] | null {
+-  const scripts = PERSON_CASES.flatMap(({ iid, said }, at): Script[] => {
++  const scripts = PERSON_CASES.flatMap(({ iid, said, changes }, at): Script[] => {
+     const serial = PERSON_FIRST_SERIAL + at;
+-    const changes = at === 0 ? FORMATTED_FIRST : [];
+     return iid === seed.iid ? [{ serial, said, hoursAgo: serial, changes }] : [];
+   });
+   return scripts.length === 0 ? null : scripted(seed, scripts);

@@ -5,8 +5,8 @@ import {
   calendarDayFrom,
   filtered,
   reviewing,
+  personGroupOf,
   reviewOrdered,
-  turnOf,
   withDraft,
   type CalendarDay,
   type Filters,
@@ -427,39 +427,27 @@ function converted(iid: number, store: DiscussionStore): readonly OpenDiscussion
   return answer.kind === "open" ? answer.discussions : [];
 }
 
-type Group = "turn" | "started" | "wrote" | "reviewer or other";
-
-function groupOf(discussion: OpenDiscussion, viewer: string, author: string | null): Group {
-  if (turnOf(discussion, viewer, author).kind === "viewer") {
-    return "turn";
-  }
-  const writers = [...discussion.earlier, discussion.last].map(
-    (comment) => comment.author?.username,
-  );
-  if (writers[0] === viewer) {
-    return "started";
-  }
-  return writers.includes(viewer) ? "wrote" : "reviewer or other";
-}
-
 test("the_person_cases_fall_in_the_groups_the_design_names_for_sam_and_anna", () => {
   const store = createDiscussionStore(500);
   const groups = PERSON_CASE_ROWS.flatMap((iid) => {
-    const author = LISTED.find((row) => row.iid === iid)?.author?.username ?? null;
+    const row = LISTED.find((listed) => listed.iid === iid);
+    if (row === undefined) {
+      throw new Error(`!${iid} is not listed`);
+    }
     return converted(iid, store).map((discussion) => [
-      groupOf(discussion, FIXTURE_ME, author),
-      groupOf(discussion, "anna", author),
+      personGroupOf(discussion, FIXTURE_ME, row),
+      personGroupOf(discussion, "anna", row),
     ]);
   });
 
   expect(groups).toEqual([
-    ["reviewer or other", "turn"],
+    ["other", "turn"],
     ["turn", "wrote"],
-    ["reviewer or other", "started"],
-    ["started", "reviewer or other"],
-    ["wrote", "reviewer or other"],
-    ["reviewer or other", "turn"],
-    ["reviewer or other", "reviewer or other"],
+    ["other", "started"],
+    ["started", "other"],
+    ["wrote", "other"],
+    ["other", "turn"],
+    ["other", "other"],
   ]);
 });
 
@@ -467,11 +455,9 @@ test("the_listed_rows_give_sam_and_anna_each_a_reviewer_group_discussion", () =>
   const store = createDiscussionStore(SMOKE_ROWS);
   function reviewerGroup(viewer: string): string[] {
     return fixtureRows(0, SMOKE_ROWS)
-      .filter(({ reviewers }) => reviewers.some(({ person }) => person.username === viewer))
-      .filter(({ author }) => author?.username !== viewer)
-      .filter(({ iid }) =>
-        converted(iid, store).some(
-          (discussion) => groupOf(discussion, viewer, null) === "reviewer or other",
+      .filter((row) =>
+        converted(row.iid, store).some(
+          (discussion) => personGroupOf(discussion, viewer, row) === "reviewer",
         ),
       )
       .map(({ iid }) => `!${iid}`);
