@@ -1,0 +1,987 @@
+diff --git a/frontend/src/ui/MergeRequestMenu.vue b/frontend/src/ui/MergeRequestMenu.vue
+index 8e2270e..3007fe0 100644
+--- a/frontend/src/ui/MergeRequestMenu.vue
++++ b/frontend/src/ui/MergeRequestMenu.vue
+@@ -1,17 +1,17 @@
+-<script setup lang="ts" generic="V">
++<script setup lang="ts" generic="C extends { readonly label: string }">
+ import { computed, shallowRef, useTemplateRef, watch } from "vue";
+ 
+-import { NARROW_FROM, narrowed, type Choice } from "../mergeRequests";
++import { NARROW_FROM, narrowed } from "../mergeRequests";
+ import { narrowLabel, narrowPlaceholder } from "./mergeRequestsText";
+ 
+ const props = defineProps<{
+-  choices: readonly Choice<V>[];
++  choices: readonly C[];
+   name: string;
+   open: boolean;
+   above: boolean;
+ }>();
+ const emit = defineEmits<{ menuKey: [event: KeyboardEvent] }>();
+-defineSlots<{ default(props: { shown: readonly Choice<V>[] }): unknown }>();
++defineSlots<{ default(props: { shown: readonly C[] }): unknown }>();
+ 
+ const menu = useTemplateRef<HTMLDivElement>("menu");
+ const narrowBox = useTemplateRef<HTMLInputElement>("narrowBox");
+diff --git a/frontend/src/ui/MergeRequestPersonEntry.vue b/frontend/src/ui/MergeRequestPersonEntry.vue
+new file mode 100644
+index 0000000..c2bb7f8
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestPersonEntry.vue
+@@ -0,0 +1,140 @@
++<script setup lang="ts">
++import { computed, useTemplateRef } from "vue";
++import Check from "~icons/lucide/check";
++import ChevronDown from "~icons/lucide/chevron-down";
++import ChevronRight from "~icons/lucide/chevron-right";
++
++import {
++  agoText,
++  dateTimeText,
++  laterWriters,
++  noteAuthorName,
++  placeText,
++  turnText,
++  type Viewer,
++} from "../mergeRequests";
++import MergeRequestDescriptionBlocks from "./MergeRequestDescriptionBlocks.vue";
++import type { PersonEntryShown } from "./mergeRequestPersonView";
++import MergeRequestPicture from "./MergeRequestPicture.vue";
++import { useMergeRequests } from "./mergeRequestsStore";
++import {
++  COLLAPSE_THREAD,
++  EXPAND_THREAD,
++  mergeRequestReference,
++  SHOW_THREAD_KEY,
++} from "./mergeRequestsText";
++import type { Thread } from "./mergeRequestThread";
++import MergeRequestThreadBody from "./MergeRequestThreadBody.vue";
++import MergeRequestThreadButtons from "./MergeRequestThreadButtons.vue";
++import { RESOLVED } from "./mergeRequestThreadText";
++import MergeRequestWriters from "./MergeRequestWriters.vue";
++import { vTooltip } from "./tooltip";
++
++const props = defineProps<{
++  entry: PersonEntryShown;
++  person: Viewer;
++  now: number;
++  expanded: boolean;
++  thread: Thread | null;
++}>();
++
++const TURN_MARK = "font-semibold text-primary";
++
++const { expandEntry, collapseEntry } = useMergeRequests();
++const host = useTemplateRef<HTMLElement>("host");
++const chevron = useTemplateRef<HTMLButtonElement>("chevron");
++defineExpose({ focusChevron });
++
++const discussion = computed(() => props.entry.discussion);
++const starter = computed(() => (discussion.value.earlier[0] ?? discussion.value.last).author);
++const written = computed(() => ({
++  ago: agoText(discussion.value.first.createdAt, props.now),
++  at: dateTimeText(discussion.value.first.createdAt),
++}));
++const turn = computed(() => ({
++  text: turnText(props.entry.turn, props.person, props.entry.row.author),
++  look: props.entry.group === "turn" ? TURN_MARK : "text-fg-muted",
++}));
++const writers = computed(() => laterWriters(discussion.value));
++const chevronLabel = computed(() => (props.expanded ? COLLAPSE_THREAD : EXPAND_THREAD));
++const author = computed(() => props.entry.row.author?.username ?? null);
++
++function focusChevron(): void {
++  chevron.value?.focus();
++}
++
++function focusHost(): void {
++  host.value?.focus();
++}
++
++function toggle(): void {
++  if (props.expanded) {
++    collapseEntry(discussion.value.id);
++    return;
++  }
++  expandEntry(props.entry.row.iid, discussion.value.id);
++}
++</script>
++
++<template>
++  <article ref="host" tabindex="-1" class="flex gap-2 px-3 py-2 outline-none">
++    <button
++      ref="chevron"
++      v-tooltip="chevronLabel"
++      type="button"
++      :aria-expanded="expanded"
++      :aria-label="chevronLabel"
++      class="h-max shrink-0 rounded p-0.5 hover:bg-hover"
++      @click="toggle"
++    >
++      <ChevronDown v-if="expanded" class="size-4" aria-hidden="true" />
++      <ChevronRight v-else class="size-4" aria-hidden="true" />
++    </button>
++    <div class="flex min-w-0 flex-1 flex-col gap-1">
++      <header
++        v-tooltip="expanded ? null : SHOW_THREAD_KEY"
++        class="flex min-w-0 items-center gap-x-2"
++      >
++        <MergeRequestPicture :person="starter" size="box" aria-hidden="true" />
++        <span class="shrink-0 font-semibold">{{ noteAuthorName(starter) }}</span>
++        <span v-tooltip="written.at" class="shrink-0 text-fg-muted">{{ written.ago }}</span>
++        <span class="min-w-0 truncate text-fg-muted"
++          >{{ mergeRequestReference(entry.row.iid) }} {{ entry.row.title }}</span
++        >
++        <span class="shrink-0 text-fg-muted">{{ placeText(discussion.place) }}</span>
++        <template v-if="expanded">
++          <span v-if="entry.resolved" class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
++            ><Check class="size-4" aria-hidden="true" />{{ RESOLVED }}</span
++          >
++          <span v-else class="ml-auto shrink-0" :class="turn.look">{{ turn.text }}</span>
++          <span v-if="thread !== null" class="flex shrink-0 items-center gap-2">
++            <MergeRequestThreadButtons :thread="thread" @focus-host="focusHost" />
++          </span>
++        </template>
++      </header>
++      <div v-if="expanded" class="flex flex-col">
++        <MergeRequestThreadBody
++          v-if="thread !== null"
++          :thread="thread"
++          :author="author"
++          :now="now"
++          placement="inline"
++          @cancel="focusChevron"
++          @focus-host="focusHost"
++        />
++      </div>
++      <template v-else>
++        <div class="max-h-20 min-w-0 overflow-hidden leading-5 [overflow-wrap:anywhere]">
++          <MergeRequestDescriptionBlocks :blocks="discussion.first.body.blocks" />
++        </div>
++        <div class="flex min-h-5 items-center gap-3">
++          <MergeRequestWriters :writers="writers" />
++          <span v-if="entry.resolved" class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
++            ><Check class="size-4" aria-hidden="true" />{{ RESOLVED }}</span
++          >
++          <span v-else class="ml-auto shrink-0" :class="turn.look">{{ turn.text }}</span>
++        </div>
++      </template>
++    </div>
++  </article>
++</template>
+diff --git a/frontend/src/ui/MergeRequestPersonPicker.vue b/frontend/src/ui/MergeRequestPersonPicker.vue
+new file mode 100644
+index 0000000..879da7c
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestPersonPicker.vue
+@@ -0,0 +1,97 @@
++<script setup lang="ts">
++import { useEventListener } from "@vueuse/core";
++import { computed, useTemplateRef } from "vue";
++import Check from "~icons/lucide/check";
++
++import type { Person } from "../ipc";
++import type { PersonLine, Viewer } from "../mergeRequests";
++import MergeRequestMenu from "./MergeRequestMenu.vue";
++import MergeRequestPicture from "./MergeRequestPicture.vue";
++import { PEOPLE, PERSON_MENU } from "./mergeRequestsText";
++import { vTooltip } from "./tooltip";
++import { useHoverMenu } from "./useHoverMenu";
++
++const props = defineProps<{ lines: readonly PersonLine<Person>[]; asking: boolean }>();
++const emit = defineEmits<{ pick: [person: Viewer] }>();
++
++const opener = useTemplateRef<HTMLButtonElement>("opener");
++const box = useTemplateRef("box");
++const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey, dismiss, close } =
++  useHoverMenu<"person">({
++    menu: (): HTMLElement | null => box.value?.menu ?? null,
++    opener: () => opener.value,
++  });
++useEventListener(window, "keydown", escapePressed);
++
++const chosen = computed(() => props.lines.find((line) => line.chosen) ?? null);
++
++function keyOf(value: Viewer): string {
++  return value.kind === "me" ? value.kind : `user:${value.username}`;
++}
++
++function escapePressed(event: KeyboardEvent): void {
++  if (event.key !== "Escape" || event.defaultPrevented || props.asking || openFor.value === null) {
++    return;
++  }
++  event.preventDefault();
++  void dismiss();
++}
++
++async function openerClick(): Promise<void> {
++  await openerClicked("person");
++  box.value?.narrowBox?.focus();
++}
++
++async function pick(line: PersonLine<Person>): Promise<void> {
++  emit("pick", line.value);
++  await close();
++}
++</script>
++
++<template>
++  <div
++    class="relative flex min-w-0 items-center"
++    @pointerenter="pointerEntered('person')"
++    @pointerleave="pointerLeft"
++  >
++    <button
++      ref="opener"
++      v-tooltip="PERSON_MENU"
++      type="button"
++      aria-haspopup="menu"
++      :aria-expanded="openFor === 'person'"
++      class="flex min-w-0 items-center gap-1.5 rounded border border-control-border py-1 pr-2.5 pl-1.5 hover:bg-hover aria-expanded:bg-row-selected"
++      @click="openerClick"
++    >
++      <MergeRequestPicture :person="chosen?.person ?? null" size="box" aria-hidden="true" />
++      <span class="truncate">{{ chosen?.label ?? PERSON_MENU }}</span>
++    </button>
++    <MergeRequestMenu
++      ref="box"
++      :choices="lines"
++      :name="PEOPLE"
++      :open="openFor === 'person'"
++      :above="above"
++      @menu-key="menuKey"
++    >
++      <template #default="{ shown }">
++        <ul role="menu" :aria-label="PERSON_MENU" class="min-h-0 overflow-y-auto">
++          <li v-for="line in shown" :key="keyOf(line.value)" role="none">
++            <button
++              type="button"
++              role="menuitemradio"
++              :aria-checked="line.chosen"
++              class="flex w-full items-center gap-2 rounded py-1 pr-2 pl-1.5 text-left whitespace-nowrap outline-none hover:bg-hover focus:bg-row-selected"
++              @click="pick(line)"
++            >
++              <Check v-if="line.chosen" class="size-4 shrink-0" aria-hidden="true" />
++              <span v-else class="size-4 shrink-0" aria-hidden="true" />
++              <MergeRequestPicture :person="line.person" size="box" aria-hidden="true" />
++              <span class="truncate">{{ line.label }}</span>
++            </button>
++          </li>
++        </ul>
++      </template>
++    </MergeRequestMenu>
++  </div>
++</template>
+diff --git a/frontend/src/ui/MergeRequestPersonView.vue b/frontend/src/ui/MergeRequestPersonView.vue
+new file mode 100644
+index 0000000..81e2997
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestPersonView.vue
+@@ -0,0 +1,153 @@
++<script setup lang="ts">
++import { computed, onMounted, shallowRef, useTemplateRef, watch } from "vue";
++import ArrowLeft from "~icons/lucide/arrow-left";
++import RefreshCw from "~icons/lucide/refresh-cw";
++
++import { turnSummaryText } from "../mergeRequests";
++import { RETRY } from "./aiText";
++import MergeRequestPersonEntry from "./MergeRequestPersonEntry.vue";
++import MergeRequestPersonPicker from "./MergeRequestPersonPicker.vue";
++import type { PersonEntryShown } from "./mergeRequestPersonView";
++import { useMergeRequests } from "./mergeRequestsStore";
++import {
++  BACK_TO_LIST,
++  discussionsFailedText,
++  PERSON_VIEW,
++  personFailureText,
++  personLoadingText,
++  RELOAD_DISCUSSIONS,
++} from "./mergeRequestsText";
++import { vTooltip } from "./tooltip";
++import { isTypingTarget } from "./typingTarget";
++import { useShiftTaps } from "./useShiftHeld";
++
++defineProps<{ now: number; asking: boolean }>();
++
++const requests = useMergeRequests();
++const { personView, threads, expanded } = requests;
++const back = useTemplateRef<HTMLButtonElement>("back");
++const pointed = shallowRef<PersonEntryShown | null>(null);
++const focused = shallowRef<PersonEntryShown | null>(null);
++
++const status = computed(() => {
++  const shown = personView.value;
++  if (shown === null) {
++    return "";
++  }
++  return shown.loading === null
++    ? turnSummaryText(shown.counts, shown.person)
++    : personLoadingText(shown.loading.answered, shown.loading.asked);
++});
++const failures = computed(() =>
++  (personView.value?.failures ?? []).map(({ row, failure }) => ({
++    iid: row.iid,
++    text: personFailureText(row, discussionsFailedText(failure, navigator.platform)),
++  })),
++);
++
++watch(useShiftTaps(), () => {
++  const entry = pointed.value ?? focused.value;
++  if (entry === null || isTypingTarget(document.activeElement)) {
++    return;
++  }
++  requests.expandEntry(entry.row.iid, entry.discussion.id);
++});
++
++onMounted(() => {
++  back.value?.focus();
++});
++
++function point(entry: PersonEntryShown): void {
++  pointed.value = entry;
++}
++
++function unpoint(): void {
++  pointed.value = null;
++}
++
++function focus(entry: PersonEntryShown): void {
++  focused.value = entry;
++}
++
++function unfocus(): void {
++  focused.value = null;
++}
++</script>
++
++<template>
++  <section
++    v-if="personView !== null"
++    :aria-label="PERSON_VIEW"
++    class="flex min-h-0 flex-1 flex-col"
++  >
++    <header class="flex shrink-0 items-center gap-3 border-b border-separator px-3 py-2">
++      <button
++        ref="back"
++        type="button"
++        class="flex shrink-0 items-center gap-1.5 rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++        @click="requests.leavePersonView"
++      >
++        <ArrowLeft class="size-4" aria-hidden="true" />
++        {{ BACK_TO_LIST }}
++      </button>
++      <MergeRequestPersonPicker
++        :lines="personView.people"
++        :asking="asking"
++        @pick="requests.pickPerson"
++      />
++      <p role="status" class="min-w-0 flex-1 truncate text-fg-muted">{{ status }}</p>
++      <button
++        v-tooltip="RELOAD_DISCUSSIONS"
++        type="button"
++        :aria-label="RELOAD_DISCUSSIONS"
++        class="shrink-0 rounded p-1 hover:bg-hover"
++        @click="requests.refreshPersonView"
++      >
++        <RefreshCw
++          class="size-4"
++          :class="{ 'animate-spin': personView.reloading }"
++          aria-hidden="true"
++        />
++      </button>
++    </header>
++    <p
++      v-for="failure in failures"
++      :key="failure.iid"
++      role="alert"
++      class="flex shrink-0 items-center gap-3 border-b border-separator px-3 py-2"
++    >
++      <span class="min-w-0 text-problem-error">{{ failure.text }}</span>
++      <button
++        type="button"
++        class="shrink-0 rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++        @click="requests.retryRow(failure.iid)"
++      >
++        {{ RETRY }}
++      </button>
++    </p>
++    <ul
++      v-if="personView.entries.length > 0"
++      class="min-h-0 flex-1 overflow-y-auto rounded-b-island opaque-scroller"
++    >
++      <li
++        v-for="entry in personView.entries"
++        :key="entry.discussion.id"
++        aria-keyshortcuts="Shift"
++        :data-discussion-id="entry.discussion.id"
++        class="border-b border-separator"
++        @pointerenter="point(entry)"
++        @pointerleave="unpoint"
++        @focusin="focus(entry)"
++        @focusout="unfocus"
++      >
++        <MergeRequestPersonEntry
++          :entry="entry"
++          :person="personView.person"
++          :now="now"
++          :expanded="expanded.has(entry.discussion.id)"
++          :thread="threads.get(entry.discussion.id) ?? null"
++        />
++      </li>
++    </ul>
++  </section>
++</template>
+diff --git a/frontend/src/ui/MergeRequestPersonViewPage.test.ts b/frontend/src/ui/MergeRequestPersonViewPage.test.ts
+new file mode 100644
+index 0000000..5e8ed83
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestPersonViewPage.test.ts
+@@ -0,0 +1,298 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { createSSRApp, h, shallowRef } from "vue";
++import { renderToString } from "vue/server-renderer";
++
++import {
++  createFixtureCompareSource,
++  isDiscussionId,
++  isMergeRequestIid,
++  log,
++  type DiscussionId,
++  type MergeRequestIid,
++} from "../ipc";
++import { dateTimeText } from "../mergeRequests";
++import MergeRequestPersonView from "./MergeRequestPersonView.vue";
++import { createMergeRequests, type MergeRequests } from "./mergeRequests";
++import { registerMergeRequests } from "./mergeRequestsStore";
++import type { Screen } from "./screen";
++
++vi.mock("./tooltip", () => ({
++  vTooltip: {
++    getSSRProps: ({ value }: { value: string | null }) => ({ "data-tooltip": value }),
++  },
++}));
++vi.mock("./useMarkdown", () => ({ useMarkdownCode: () => undefined }));
++
++const NOW = Date.parse("2026-11-04T12:00:00Z");
++const PAUSE_MS = 400;
++const CALLS = 3;
++const ANSWERED_PER_CALL = 10;
++const ANNA_CASES = 624;
++const SAM_CASES = 628;
++const FOLD_CASE = 609;
++const FAILING = 615;
++const LOGGED_OUT = 629;
++const P1 = 17;
++const P2 = 18;
++const P3 = 19;
++const P4 = 20;
++const P6 = 22;
++const P1_COMMENTS = 4;
++const P2_COMMENTS = 2;
++const TURN_MARK = "font-semibold text-primary";
++const CLAMP = "max-h-20 min-w-0 overflow-hidden leading-5";
++const WRITERS_ROW = "flex min-w-0 flex-1 items-center gap-1 overflow-hidden";
++
++let slice: MergeRequests;
++
++beforeEach(() => {
++  const document = new EventTarget();
++  vi.stubGlobal("document", document);
++  vi.stubGlobal("window", Object.assign(new EventTarget(), { document }));
++  vi.stubGlobal("navigator", { platform: "Linux x86_64" });
++  vi.useFakeTimers();
++  vi.setSystemTime(NOW);
++  vi.spyOn(log, "info").mockImplementation(() => undefined);
++  slice = createMergeRequests({
++    source: createFixtureCompareSource(log, "?mr=list", {}),
++    screen: shallowRef<Screen>({ kind: "mergeRequests" }),
++    report: () => undefined,
++    discussionDetails: () => "lazy",
++  });
++  registerMergeRequests(slice);
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++  vi.unstubAllGlobals();
++  vi.restoreAllMocks();
++});
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is not an iid`);
++  }
++  return value;
++}
++
++function d(serial: number): DiscussionId {
++  const id = String(serial).padStart(40, "0");
++  if (!isDiscussionId(id)) {
++    throw new Error(`${id} is not a discussion id`);
++  }
++  return id;
++}
++
++async function everyRowRead(): Promise<void> {
++  await slice.refresh();
++  slice.openPersonView();
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
++}
++
++async function expanded(row: number, serial: number): Promise<void> {
++  slice.expandEntry(iid(row), d(serial));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++}
++
++async function view(): Promise<string> {
++  const props = { now: NOW, asking: false };
++  const html = await renderToString(
++    createSSRApp({ render: () => h(MergeRequestPersonView, props) }),
++  );
++  return html.replaceAll(/<!--[[\]]?-->/gu, "");
++}
++
++/** Each entry's `<li>` by its discussion's serial. */
++function entries(html: string): ReadonlyMap<number, string> {
++  return new Map(
++    html
++      .split('<li aria-keyshortcuts="Shift"')
++      .slice(1)
++      .flatMap((entry): [number, string][] => {
++        const serial = /^[^>]*data-discussion-id="0*(\d+)"/u.exec(entry)?.[1];
++        return serial === undefined ? [] : [[Number(serial), entry]];
++      }),
++  );
++}
++
++function entryOf(html: string, serial: number): string {
++  const found = entries(html).get(serial);
++  if (found === undefined) {
++    throw new Error(`no entry d${serial}`);
++  }
++  return found;
++}
++
++/** The writers row's names, oldest first (each picture is an `img` named by its writer). */
++function writers(entry: string): string[] {
++  return [...entry.matchAll(/role="img" aria-label="([^"]*)"/gu)].map(
++    ([, name]) => name?.replaceAll("&#39;", "'") ?? "",
++  );
++}
++
++/** The turn word and whether it carries the viewer's-turn look. */
++function turnOf(entry: string): string {
++  const [, look = "", word = ""] =
++    [...entry.matchAll(/<span class="(?:([^"]*) )?ml-auto shrink-0">([^<]*)<\/span>/gu)].at(-1) ??
++    [];
++  return `${word.replaceAll("&#39;", "'")}${look === TURN_MARK ? " (marked)" : ""}`;
++}
++
++function statusOf(html: string): string {
++  return /<p role="status"[^>]*>([^<]*)<\/p>/u.exec(html)?.[1] ?? "";
++}
++
++function rowTitle(at: number): string {
++  const found = slice.rows.value.find((row) => row.iid === at);
++  if (found === undefined) {
++    throw new Error(`no row !${at}`);
++  }
++  return found.title;
++}
++
++test("an_entry_shows_its_starter_time_merge_request_place_and_first_comment", async () => {
++  await everyRowRead();
++  const html = await view();
++  const p1 = entryOf(html, P1);
++  const first = slice.personView.value?.entries.find((entry) => entry.discussion.id === d(P1));
++
++  expect(p1).toContain('<span class="shrink-0 font-semibold">Anna Berg</span>');
++  expect(first).toBeDefined();
++  const at = first?.discussion.first.createdAt ?? 0;
++  expect(p1).toMatch(
++    new RegExp(`data-tooltip="${dateTimeText(at)}">\\d+ (hours|days) ago</span>`, "u"),
++  );
++  expect(p1).toContain(`>!${ANNA_CASES} ${rowTitle(ANNA_CASES)}</span>`);
++  expect(p1).toContain('<span class="shrink-0 text-fg-muted">Overview</span>');
++  expect(p1).toContain('aria-expanded="false" aria-label="Show the whole thread"');
++  expect(p1).toContain('data-tooltip="Shift: show the thread"');
++  expect(html).toContain(`<li aria-keyshortcuts="Shift" data-discussion-id="${d(P1)}"`);
++  const clamp = p1.slice(p1.indexOf(CLAMP));
++  expect(clamp).toMatch(/<strong>\s*reminder\s*<\/strong>/u);
++  expect(clamp).toContain('<code class="markdown-inline-code">snoozeUntil</code>');
++  expect(clamp).toMatch(/<a [^>]*role="link"[^>]*>\s*the import notes\s*<\/a>/u);
++  expect(clamp).toContain("<img");
++  expect(clamp).toContain("And this sixth line is hidden too.");
++});
++
++test("the_writers_row_lists_the_later_writers_oldest_first_and_none_for_a_single_comment", async () => {
++  await everyRowRead();
++  const html = await view();
++  const single = slice.personView.value?.entries.find(
++    (entry) => entry.discussion.earlier.length === 0,
++  );
++
++  expect(writers(entryOf(html, P1))).toEqual(["Ben Okafor", "Chiara Rossi", "Dmitri Volkov"]);
++  expect(writers(entryOf(html, P3))).toEqual(["Ben Okafor", "Anna Berg"]);
++  expect(writers(entryOf(html, P6))).toEqual([
++    "Chiara Rossi",
++    "Dmitri Volkov",
++    "Anna Berg",
++    "Someone",
++    "Ben Okafor",
++    "Dmitri Volkov",
++    "Chiara Rossi",
++    "Anna Berg",
++    "Ben Okafor",
++    "Someone",
++    "Dmitri Volkov",
++    "Ben Okafor",
++    "Chiara Rossi",
++  ]);
++  expect(single).toBeDefined();
++  const lone = entryOf(html, Number(single?.discussion.id));
++  expect(writers(lone)).toEqual([]);
++  expect(lone).not.toContain(WRITERS_ROW);
++});
++
++test("the_turn_word_reads_from_the_persons_side", async () => {
++  await everyRowRead();
++  const mine = await view();
++
++  expect(statusOf(mine)).toMatch(/^\d+ of \d+ wait for you$/u);
++  expect(turnOf(entryOf(mine, P2))).toBe("Your turn (marked)");
++  expect(turnOf(entryOf(mine, P4))).toBe("Chiara Rossi's turn");
++  expect(turnOf(entryOf(mine, P1))).toBe("Ben Okafor's turn");
++
++  slice.pickPerson({ kind: "person", username: "anna", name: "Anna Berg" });
++  const annas = await view();
++  expect(statusOf(annas)).toMatch(/^\d+ of \d+ wait for Anna Berg$/u);
++  expect(turnOf(entryOf(annas, P1))).toBe("Anna Berg's turn (marked)");
++  expect(turnOf(entryOf(annas, P6))).toBe("Anna Berg's turn (marked)");
++  expect(turnOf(entryOf(annas, P2))).toBe("Ben Okafor's turn");
++  expect([...entries(annas).keys()].indexOf(P1)).toBeLessThan(
++    [...entries(annas).keys()].indexOf(P2),
++  );
++});
++
++test("an_expanded_entry_shows_the_inline_thread_and_hides_the_clamp", async () => {
++  await everyRowRead();
++  await expanded(ANNA_CASES, P1);
++  const html = await view();
++  const p1 = entryOf(html, P1);
++
++  expect(p1).toContain('aria-expanded="true" aria-label="Hide the thread"');
++  expect(p1).not.toContain(CLAMP);
++  expect(p1).not.toContain('data-tooltip="Shift: show the thread"');
++  expect(p1.split("<article").length - 1).toBe(1 + P1_COMMENTS);
++  expect(p1).toContain("I&#39;ll add a test for archiving.");
++  expect(p1).toContain('aria-label="Open on GitLab"');
++  expect(p1).toContain("<textarea");
++  expect(turnOf(p1)).toBe("Ben Okafor's turn");
++  expect(p1).not.toContain(WRITERS_ROW);
++  const p3 = entryOf(html, P3);
++  expect(p3).toContain(CLAMP);
++  expect(p3).not.toContain("<textarea");
++});
++
++test("two_expanded_entries_each_show_their_thread", async () => {
++  await everyRowRead();
++  await expanded(ANNA_CASES, P1);
++  await expanded(ANNA_CASES, P2);
++  const html = await view();
++  const [p1, p2] = [entryOf(html, P1), entryOf(html, P2)];
++
++  expect(p1.split("<article").length - 1).toBe(1 + P1_COMMENTS);
++  expect(p2.split("<article").length - 1).toBe(1 + P2_COMMENTS);
++  expect(p2).toContain("Yes, per board.");
++  expect(p2).not.toContain("archiving");
++  expect([p1, p2].map((entry) => entry.includes("<textarea"))).toEqual([true, true]);
++  expect([...entries(html).values()].filter((entry) => entry.includes("<textarea"))).toHaveLength(
++    2,
++  );
++});
++
++test("failed_rows_show_one_line_each_with_retry", async () => {
++  await everyRowRead();
++  const html = await view();
++  const alerts = [...html.matchAll(/<p role="alert"[^>]*>([^]*?)<\/p>/gu)].map(([, inner]) =>
++    (inner ?? "").replaceAll(/<[^>]*>/gu, "|").replaceAll(/\|+/gu, "|"),
++  );
++
++  expect(alerts).toHaveLength(2);
++  expect(alerts[0]).toMatch(
++    new RegExp(`^\\|!${LOGGED_OUT} [^|]+ — glab is not logged in: .+\\|\\s*Retry\\s*\\|$`, "u"),
++  );
++  expect(alerts[1]).toMatch(new RegExp(`^\\|!${FAILING} [^|]+ — .+\\|\\s*Retry\\s*\\|$`, "u"));
++  expect(alerts[1]).toContain(`!${FAILING} ${rowTitle(FAILING)} — `);
++  expect(entries(html).size).toBeGreaterThan(0);
++});
++
++test("the_loading_line_counts_the_merge_requests", async () => {
++  await slice.refresh();
++  const asked = slice.shownRows.value.filter((row) => row.openDiscussions > 0).length;
++  slice.openPersonView();
++
++  expect(statusOf(await view())).toBe(`Loading discussions — 0 of ${asked} merge requests`);
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  const partly = await view();
++  expect(statusOf(partly)).toBe(
++    `Loading discussions — ${ANSWERED_PER_CALL} of ${asked} merge requests`,
++  );
++  expect(entries(partly).size).toBeGreaterThan(0);
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * (CALLS - 1));
++  expect(statusOf(await view())).toMatch(/wait for you$/u);
++  expect(entries(await view()).has(P4)).toBe(true);
++  expect(entries(await view()).has(SAM_CASES)).toBe(false);
++  expect(entries(await view()).has(FOLD_CASE)).toBe(false);
++});
+diff --git a/frontend/src/ui/MergeRequestWriters.vue b/frontend/src/ui/MergeRequestWriters.vue
+new file mode 100644
+index 0000000..c75c5f1
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestWriters.vue
+@@ -0,0 +1,53 @@
++<script setup lang="ts">
++import { useElementSize } from "@vueuse/core";
++import { computed, useTemplateRef } from "vue";
++
++import type { Person } from "../ipc";
++import { foldedWriters, moreText, noteAuthorName } from "../mergeRequests";
++import MergeRequestPicture from "./MergeRequestPicture.vue";
++import { foldedWritersText } from "./mergeRequestsText";
++import { vTooltip } from "./tooltip";
++
++const props = defineProps<{ writers: readonly (Person | null)[] }>();
++
++const PICTURE_PX = 20;
++const GAP_PX = 4;
++
++const row = useTemplateRef<HTMLDivElement>("row");
++const { width } = useElementSize(row, { width: Number.POSITIVE_INFINITY, height: 0 });
++
++const fold = computed(() =>
++  foldedWriters(props.writers, Math.floor((width.value + GAP_PX) / (PICTURE_PX + GAP_PX))),
++);
++const more = computed(() => {
++  const { folded } = fold.value;
++  return folded.length === 0
++    ? null
++    : { text: moreText(folded.length), tip: foldedWritersText(folded.map(noteAuthorName)) };
++});
++</script>
++
++<template>
++  <div
++    v-if="writers.length > 0"
++    ref="row"
++    class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
++  >
++    <span
++      v-if="more !== null"
++      v-tooltip="more.tip"
++      class="flex h-5 min-w-5 shrink-0 items-center justify-center text-xs text-fg-muted"
++      >{{ more.text }}</span
++    >
++    <span
++      v-for="(writer, index) in fold.shown"
++      :key="index"
++      v-tooltip="noteAuthorName(writer)"
++      role="img"
++      :aria-label="noteAuthorName(writer)"
++      class="flex shrink-0"
++    >
++      <MergeRequestPicture :person="writer" size="box" aria-hidden="true" />
++    </span>
++  </div>
++</template>
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index 8e765de..3814226 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -1,7 +1,8 @@
+ <script setup lang="ts">
+ import { useEventListener, useIntervalFn, useNow } from "@vueuse/core";
+-import { computed, onMounted, onUnmounted, useTemplateRef } from "vue";
++import { computed, onMounted, onUnmounted, useTemplateRef, watch } from "vue";
+ import ArrowLeft from "~icons/lucide/arrow-left";
++import MessagesSquare from "~icons/lucide/messages-square";
+ import RefreshCw from "~icons/lucide/refresh-cw";
+ import X from "~icons/lucide/x";
+ 
+@@ -11,6 +12,7 @@ import ChoiceButtons from "./ChoiceButtons.vue";
+ import { returnFocus } from "./focusReturn";
+ import MergeRequestDescription from "./MergeRequestDescription.vue";
+ import MergeRequestFilter from "./MergeRequestFilter.vue";
++import MergeRequestPersonView from "./MergeRequestPersonView.vue";
+ import MergeRequestReviewMode from "./MergeRequestReviewMode.vue";
+ import MergeRequestReviewSort from "./MergeRequestReviewSort.vue";
+ import MergeRequestRow from "./MergeRequestRow.vue";
+@@ -26,6 +28,8 @@ import {
+   LOADING_TEXT,
+   NONE_TEXT,
+   PAGE_TITLE,
++  PERSON_VIEW,
++  PERSON_VIEW_TIP,
+   REFRESH,
+ } from "./mergeRequestsText";
+ import { DISMISS_LABEL } from "./searchText";
+@@ -65,10 +69,14 @@ const {
+   viewer,
+   reviewSort,
+   description,
++  personView,
+ } = requests;
+ const back = useTemplateRef<HTMLButtonElement>("back");
++const list = useTemplateRef<HTMLUListElement>("list");
++const discussionsButton = useTemplateRef<HTMLButtonElement>("discussionsButton");
+ const bars = useTemplateRef<FilterBar[]>("bars");
+ const picker = useTemplateRef<Picker>("picker");
++let listScrollTop = 0;
+ const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey, dismiss, close } =
+   useHoverMenu<MenuFor>({
+     menu: () => bars.value?.find((bar) => bar.menu !== null)?.menu ?? picker.value?.menu ?? null,
+@@ -87,6 +95,9 @@ const empty = computed(
+ );
+ const filtered = computed(() => isFiltered(filters.value));
+ const nowMs = computed(() => now.value.getTime());
++const viewShown = computed(() => personView.value !== null);
++
++watch(viewShown, listShownAgain, { flush: "post" });
+ 
+ onMounted(() => {
+   back.value?.focus();
+@@ -127,6 +138,25 @@ async function pick(value: ReviewFor): Promise<void> {
+   requests.review(value);
+   await close();
+ }
++
++function discussionsPressed(): void {
++  if (viewShown.value) {
++    requests.leavePersonView();
++    return;
++  }
++  listScrollTop = list.value?.scrollTop ?? 0;
++  requests.openPersonView();
++}
++
++function listShownAgain(shown: boolean): void {
++  if (shown) {
++    return;
++  }
++  if (list.value !== null) {
++    list.value.scrollTop = listScrollTop;
++  }
++  discussionsButton.value?.focus();
++}
+ </script>
+ 
+ <template>
+@@ -196,6 +226,19 @@ async function pick(value: ReviewFor): Promise<void> {
+         @menu-key="menuKey"
+       />
+       <MergeRequestReviewSort v-if="reviewSort !== null" :sort="reviewSort" :viewer="viewer" />
++      <span v-tooltip="PERSON_VIEW_TIP" class="flex">
++        <button
++          ref="discussionsButton"
++          type="button"
++          :aria-pressed="viewShown"
++          :disabled="shownRows.length === 0 && !viewShown"
++          class="flex items-center gap-1.5 rounded border border-control-border py-1 pr-2.5 pl-2 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted aria-pressed:bg-row-selected"
++          @click="discussionsPressed"
++        >
++          <MessagesSquare class="size-4" aria-hidden="true" />
++          {{ PERSON_VIEW }}
++        </button>
++      </span>
+       <button
+         v-if="filtered"
+         type="button"
+@@ -246,9 +289,11 @@ async function pick(value: ReviewFor): Promise<void> {
+     </p>
+     <p v-if="waiting" class="px-3 py-2 text-fg-muted">{{ LOADING_TEXT }}</p>
+     <p v-else-if="empty" class="px-3 py-2 text-fg-muted">{{ NONE_TEXT }}</p>
++    <MergeRequestPersonView v-else-if="viewShown" :now="nowMs" :asking="asking" />
+     <template v-else-if="rows.length > 0">
+       <p class="shrink-0 px-3 pt-2 pb-1 text-fg-muted" aria-live="polite">{{ summary }}</p>
+       <ul
++        ref="list"
+         :aria-label="LIST_LABEL"
+         :aria-busy="loading"
+         class="min-h-0 flex-1 overflow-y-auto rounded-b-island opaque-scroller"
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index b0edc34..543480c 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -31,6 +31,9 @@ import {
+   DISCUSSIONS_LOADING,
+   glabRefusalText,
+   discussionsFailedText,
++  foldedWritersText,
++  personFailureText,
++  personLoadingText,
+   discussionsText,
+   dueDateLabel,
+   jobTitle,
+@@ -142,6 +145,24 @@ test("a row's discussions lost to an IPC failure read the problem bar's discussi
+   ).toBe("Could not read the discussions: yamt's worker stopped; try again.");
+ });
+ 
++test("the person view's loading line counts the merge requests (F1), one in the singular", () => {
++  expect(personLoadingText(12, 27)).toBe("Loading discussions — 12 of 27 merge requests");
++  expect(personLoadingText(0, 1)).toBe("Loading discussions — 0 of 1 merge request");
++});
++
++test("the +N tip counts and names the folded writers in the given order (D4)", () => {
++  expect(foldedWritersText(["Anna Berg", "Ben Okafor", "Someone"])).toBe(
++    "3 more: Anna Berg, Ben Okafor, Someone",
++  );
++  expect(foldedWritersText(["Ben Okafor"])).toBe("1 more: Ben Okafor");
++});
++
++test("a failed row's line names the merge request, then GitLab's reason (F2)", () => {
++  expect(
++    personFailureText({ iid: 615, title: "Snooze a reminder" }, "glab failed: glab timed out"),
++  ).toBe("!615 Snooze a reminder — glab failed: glab timed out");
++});
++
+ test("review mode's button is named as the request names it", () => {
+   expect(REVIEW_MODE).toBe("Review mode");
+ });
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index a40863e..c29837f 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -72,6 +72,13 @@ export const DISCUSSION_DETAILS_HINT =
+   "On the merge-request page: every listed merge request's open discussions, right after the list; one merge " +
+   "request's, when you first hover its count; or none.";
+ export const REVIEW_MODE = "Review mode";
++export const PERSON_VIEW = "Discussions";
++export const PERSON_VIEW_TIP = "Every open discussion, for one person";
++export const BACK_TO_LIST = "Back to list";
++export const PERSON_MENU = "Whose discussions";
++export const EXPAND_THREAD = "Show the whole thread";
++export const COLLAPSE_THREAD = "Hide the thread";
++export const PEOPLE = "People";
+ 
+ type GlabRefusal =
+   | { readonly kind: "glabMissing" }
+@@ -101,6 +108,18 @@ export function discussionsFailedText(failure: DiscussionFailure, platform: stri
+     : problemText({ action: "mergeRequests", step: "discussions", cause: failure.cause }, platform);
+ }
+ 
++export function personLoadingText(answered: number, asked: number): string {
++  return `Loading discussions — ${answered} of ${counted(asked, "merge request", "merge requests")}`;
++}
++
++export function foldedWritersText(names: readonly string[]): string {
++  return `${names.length} more: ${names.join(", ")}`;
++}
++
++export function personFailureText(row: { iid: number; title: string }, text: string): string {
++  return `!${row.iid} ${row.title} — ${text}`;
++}
++
+ export function mergeRequestReference(iid: MergeRequestIid): string {
+   return `!${iid}`;
+ }

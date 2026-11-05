@@ -1,17 +1,17 @@
-<script setup lang="ts" generic="V">
+<script setup lang="ts" generic="C extends { readonly label: string }">
 import { computed, shallowRef, useTemplateRef, watch } from "vue";
 
-import { NARROW_FROM, narrowed, type Choice } from "../mergeRequests";
+import { NARROW_FROM, narrowed } from "../mergeRequests";
 import { narrowLabel, narrowPlaceholder } from "./mergeRequestsText";
 
 const props = defineProps<{
-  choices: readonly Choice<V>[];
+  choices: readonly C[];
   name: string;
   open: boolean;
   above: boolean;
 }>();
 const emit = defineEmits<{ menuKey: [event: KeyboardEvent] }>();
-defineSlots<{ default(props: { shown: readonly Choice<V>[] }): unknown }>();
+defineSlots<{ default(props: { shown: readonly C[] }): unknown }>();
 
 const menu = useTemplateRef<HTMLDivElement>("menu");
 const narrowBox = useTemplateRef<HTMLInputElement>("narrowBox");

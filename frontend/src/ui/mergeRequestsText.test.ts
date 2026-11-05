@@ -31,6 +31,9 @@ import {
   DISCUSSIONS_LOADING,
   glabRefusalText,
   discussionsFailedText,
+  foldedWritersText,
+  personFailureText,
+  personLoadingText,
   discussionsText,
   dueDateLabel,
   jobTitle,
@@ -140,6 +143,24 @@ test("a row's discussions lost to an IPC failure read the problem bar's discussi
   expect(
     discussionsFailedText({ kind: "failed", cause: { kind: "WorkerStopped" } }, "Linux x86_64"),
   ).toBe("Could not read the discussions: yamt's worker stopped; try again.");
+});
+
+test("the person view's loading line counts the merge requests (F1), one in the singular", () => {
+  expect(personLoadingText(12, 27)).toBe("Loading discussions — 12 of 27 merge requests");
+  expect(personLoadingText(0, 1)).toBe("Loading discussions — 0 of 1 merge request");
+});
+
+test("the +N tip counts and names the folded writers in the given order (D4)", () => {
+  expect(foldedWritersText(["Anna Berg", "Ben Okafor", "Someone"])).toBe(
+    "3 more: Anna Berg, Ben Okafor, Someone",
+  );
+  expect(foldedWritersText(["Ben Okafor"])).toBe("1 more: Ben Okafor");
+});
+
+test("a failed row's line names the merge request, then GitLab's reason (F2)", () => {
+  expect(
+    personFailureText({ iid: 615, title: "Snooze a reminder" }, "glab failed: glab timed out"),
+  ).toBe("!615 Snooze a reminder — glab failed: glab timed out");
 });
 
 test("review mode's button is named as the request names it", () => {

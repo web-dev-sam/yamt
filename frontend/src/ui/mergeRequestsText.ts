@@ -72,6 +72,13 @@ export const DISCUSSION_DETAILS_HINT =
   "On the merge-request page: every listed merge request's open discussions, right after the list; one merge " +
   "request's, when you first hover its count; or none.";
 export const REVIEW_MODE = "Review mode";
+export const PERSON_VIEW = "Discussions";
+export const PERSON_VIEW_TIP = "Every open discussion, for one person";
+export const BACK_TO_LIST = "Back to list";
+export const PERSON_MENU = "Whose discussions";
+export const EXPAND_THREAD = "Show the whole thread";
+export const COLLAPSE_THREAD = "Hide the thread";
+export const PEOPLE = "People";
 
 type GlabRefusal =
   | { readonly kind: "glabMissing" }
@@ -99,6 +106,18 @@ export function discussionsFailedText(failure: DiscussionFailure, platform: stri
   return failure.kind === "refused"
     ? glabRefusalText(failure.answer)
     : problemText({ action: "mergeRequests", step: "discussions", cause: failure.cause }, platform);
+}
+
+export function personLoadingText(answered: number, asked: number): string {
+  return `Loading discussions — ${answered} of ${counted(asked, "merge request", "merge requests")}`;
+}
+
+export function foldedWritersText(names: readonly string[]): string {
+  return `${names.length} more: ${names.join(", ")}`;
+}
+
+export function personFailureText(row: { iid: number; title: string }, text: string): string {
+  return `!${row.iid} ${row.title} — ${text}`;
 }
 
 export function mergeRequestReference(iid: MergeRequestIid): string {

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { useEventListener, useIntervalFn, useNow } from "@vueuse/core";
-import { computed, onMounted, onUnmounted, useTemplateRef } from "vue";
+import { computed, onMounted, onUnmounted, useTemplateRef, watch } from "vue";
 import ArrowLeft from "~icons/lucide/arrow-left";
+import MessagesSquare from "~icons/lucide/messages-square";
 import RefreshCw from "~icons/lucide/refresh-cw";
 import X from "~icons/lucide/x";
 
@@ -11,6 +12,7 @@ import ChoiceButtons from "./ChoiceButtons.vue";
 import { returnFocus } from "./focusReturn";
 import MergeRequestDescription from "./MergeRequestDescription.vue";
 import MergeRequestFilter from "./MergeRequestFilter.vue";
+import MergeRequestPersonView from "./MergeRequestPersonView.vue";
 import MergeRequestReviewMode from "./MergeRequestReviewMode.vue";
 import MergeRequestReviewSort from "./MergeRequestReviewSort.vue";
 import MergeRequestRow from "./MergeRequestRow.vue";
@@ -26,6 +28,8 @@ import {
   LOADING_TEXT,
   NONE_TEXT,
   PAGE_TITLE,
+  PERSON_VIEW,
+  PERSON_VIEW_TIP,
   REFRESH,
 } from "./mergeRequestsText";
 import { DISMISS_LABEL } from "./searchText";
@@ -65,10 +69,14 @@ const {
   viewer,
   reviewSort,
   description,
+  personView,
 } = requests;
 const back = useTemplateRef<HTMLButtonElement>("back");
+const list = useTemplateRef<HTMLUListElement>("list");
+const discussionsButton = useTemplateRef<HTMLButtonElement>("discussionsButton");
 const bars = useTemplateRef<FilterBar[]>("bars");
 const picker = useTemplateRef<Picker>("picker");
+let listScrollTop = 0;
 const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey, dismiss, close } =
   useHoverMenu<MenuFor>({
     menu: () => bars.value?.find((bar) => bar.menu !== null)?.menu ?? picker.value?.menu ?? null,
@@ -87,6 +95,9 @@ const empty = computed(
 );
 const filtered = computed(() => isFiltered(filters.value));
 const nowMs = computed(() => now.value.getTime());
+const viewShown = computed(() => personView.value !== null);
+
+watch(viewShown, listShownAgain, { flush: "post" });
 
 onMounted(() => {
   back.value?.focus();
@@ -126,6 +137,25 @@ async function openerClick(which: MenuFor): Promise<void> {
 async function pick(value: ReviewFor): Promise<void> {
   requests.review(value);
   await close();
+}
+
+function discussionsPressed(): void {
+  if (viewShown.value) {
+    requests.leavePersonView();
+    return;
+  }
+  listScrollTop = list.value?.scrollTop ?? 0;
+  requests.openPersonView();
+}
+
+function listShownAgain(shown: boolean): void {
+  if (shown) {
+    return;
+  }
+  if (list.value !== null) {
+    list.value.scrollTop = listScrollTop;
+  }
+  discussionsButton.value?.focus();
 }
 </script>
 
@@ -196,6 +226,19 @@ async function pick(value: ReviewFor): Promise<void> {
         @menu-key="menuKey"
       />
       <MergeRequestReviewSort v-if="reviewSort !== null" :sort="reviewSort" :viewer="viewer" />
+      <span v-tooltip="PERSON_VIEW_TIP" class="flex">
+        <button
+          ref="discussionsButton"
+          type="button"
+          :aria-pressed="viewShown"
+          :disabled="shownRows.length === 0 && !viewShown"
+          class="flex items-center gap-1.5 rounded border border-control-border py-1 pr-2.5 pl-2 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted aria-pressed:bg-row-selected"
+          @click="discussionsPressed"
+        >
+          <MessagesSquare class="size-4" aria-hidden="true" />
+          {{ PERSON_VIEW }}
+        </button>
+      </span>
       <button
         v-if="filtered"
         type="button"
@@ -246,9 +289,11 @@ async function pick(value: ReviewFor): Promise<void> {
     </p>
     <p v-if="waiting" class="px-3 py-2 text-fg-muted">{{ LOADING_TEXT }}</p>
     <p v-else-if="empty" class="px-3 py-2 text-fg-muted">{{ NONE_TEXT }}</p>
+    <MergeRequestPersonView v-else-if="viewShown" :now="nowMs" :asking="asking" />
     <template v-else-if="rows.length > 0">
       <p class="shrink-0 px-3 pt-2 pb-1 text-fg-muted" aria-live="polite">{{ summary }}</p>
       <ul
+        ref="list"
         :aria-label="LIST_LABEL"
         :aria-busy="loading"
         class="min-h-0 flex-1 overflow-y-auto rounded-b-island opaque-scroller"
