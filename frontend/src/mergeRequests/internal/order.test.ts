@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import { byDueDate, calendarDayFrom, merged, type CalendarDay, type ListedRequest } from "../index";
+import { dueFirst } from "./order";
 
 type Row = ListedRequest & { readonly title: string };
 
@@ -48,4 +49,15 @@ test("undated_rows_keep_their_order", () => {
   const due = dueDays({ 3: "2027-01-01" });
   expect(byDueDate(rows, due).map((listed) => listed.iid)).toEqual([3, 1, 2, 4]);
   expect(byDueDate(rows, dueDays({}))).toEqual(rows);
+});
+
+test("due_first_puts_dated_before_undated_and_the_sooner_day_first", () => {
+  const soon = calendarDayFrom("2026-11-04");
+  const later = calendarDayFrom("2026-11-09");
+  expect(dueFirst(soon, null)).toBeLessThan(0);
+  expect(dueFirst(null, soon)).toBeGreaterThan(0);
+  expect(dueFirst(null, null)).toBe(0);
+  expect(dueFirst(soon, later)).toBeLessThan(0);
+  expect(dueFirst(later, soon)).toBeGreaterThan(0);
+  expect(dueFirst(later, calendarDayFrom("2026-11-09"))).toBe(0);
 });

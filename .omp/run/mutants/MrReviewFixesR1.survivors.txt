@@ -1,0 +1,3 @@
+just mutants HEAD → 441 killed, 0 timeout, 17 survived, 6 no-cov; order.ts 100%, mergeRequestsShown.ts 96.15%, discussions.ts 93.07%, reviewOrder.ts 95%
+mergeRequestsShown.ts:57 {kind:"none"} to {} or {kind:""} — equivalent: reviewOrdered reads any kind other than read, loading or failed as NO_TURNS. The line is unchanged, only moved.
+discussions.ts:42-53, :59, :201, :221; reviewOrder.ts:24, :93, :97; mergeRequestDiscussionRows.ts:60 — unchanged lines (the round-1 survivors, moved).

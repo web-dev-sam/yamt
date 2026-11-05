@@ -6,8 +6,8 @@ import {
   type TurnCounts,
   type Viewer,
 } from "./discussions";
-import { compareDays, type CalendarDay } from "./dueDate";
-import { byDueDate } from "./order";
+import type { CalendarDay } from "./dueDate";
+import { byDueDate, dueFirst } from "./order";
 
 /** A row's discussion details as the review order reads them (rule 6). */
 export type ReviewDetails<F> =
@@ -36,19 +36,12 @@ function firstFailed<R extends { readonly iid: number }, F>(
   return null;
 }
 
-/** D1 the due day, dated before undated, the soonest first; D2 most waiting for the reviewer; D3 fewest written in;
- *  0 for a tie (D4: the stable sort keeps the normal order). */
+/** D1 the due day as the normal order (plan §2 row 156); D2 most waiting for the reviewer; D3 fewest written in; 0 for
+ *  a tie (D4: the stable sort keeps the normal order). */
 function reviewFirst<R>(a: Ranked<R>, b: Ranked<R>): number {
-  if (a.due === null || b.due === null) {
-    const undated = Number(a.due === null) - Number(b.due === null);
-    if (undated !== 0) {
-      return undated;
-    }
-  } else {
-    const days = compareDays(a.due, b.due);
-    if (days !== 0) {
-      return days;
-    }
+  const days = dueFirst(a.due, b.due);
+  if (days !== 0) {
+    return days;
   }
   const waiting = b.counts.viewersTurn - a.counts.viewersTurn;
   return waiting === 0 ? a.counts.viewerWrote - b.counts.viewerWrote : waiting;

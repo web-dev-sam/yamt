@@ -297,6 +297,24 @@ test("the_buttons_row_has_add_review_add_comment_and_resolve_at_the_right", asyn
   );
 });
 
+test("while_the_thread_loads_every_write_button_is_disabled_and_a_resolve_sends_nothing", async () => {
+  slice.setReplyText(d(1), "Agreed.");
+  slice.showThread(iid(THREADS), d(1));
+  const loading = await panel();
+  expect(tagOf(loading, "Loading…")).toBe('<p class="text-fg-muted">');
+  expect(buttons(loading).slice(-3)).toEqual([
+    "Add review (disabled)",
+    "Add comment (disabled)",
+    "Resolve thread (disabled)",
+  ]);
+  await slice.setResolved(true);
+
+  await vi.advanceTimersByTimeAsync(WRITE_MS + THREAD_MS);
+  const read = await panel();
+  expect(buttons(read).slice(-3)).toEqual(["Add review", "Add comment", "Resolve thread"]);
+  expect(read).toContain('<span class="shrink-0 text-fg-muted">Your turn</span>');
+});
+
 test("a_failed_send_says_why_under_the_row", async () => {
   await shown(THREADS, 2);
   slice.setReplyText(d(2), "refuse this");

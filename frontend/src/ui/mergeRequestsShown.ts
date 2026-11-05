@@ -12,6 +12,7 @@ import {
   type ReviewDetails,
   type Viewer,
 } from "../mergeRequests";
+import { unmarkedOf } from "./mergeRequestDiscussionRows";
 import type { DiscussionFailure, DiscussionLoad, Discussions } from "./mergeRequestDiscussions";
 import type { DueDates } from "./mergeRequestDueDates";
 import {
@@ -55,9 +56,15 @@ function reviewDetails(load: DiscussionLoad | undefined): ReviewDetails<Discussi
   if (load === undefined) {
     return { kind: "none" };
   }
-  return load.kind === "refused" || load.kind === "failed"
-    ? { kind: "failed", failure: load }
-    : load;
+  switch (load.kind) {
+    case "loading":
+      return load;
+    case "read":
+      return { kind: "read", discussions: unmarkedOf(load) };
+    case "refused":
+    case "failed":
+      return { kind: "failed", failure: load };
+  }
 }
 
 function ordered(listed: Listed, passing: readonly MergeRequestRow[], viewer: Viewer): Ordered {

@@ -76,16 +76,20 @@ function waitedOn(discussion: OpenDiscussion, { viewer, author }: Sides): Turn {
   return starter === null || isUser(starter, author) ? WAITING : personsTurn(starter);
 }
 
+/** B2.4 and D3: the viewer wrote a comment in it. */
+function wroteIn(discussion: OpenDiscussion, viewer: string | null): boolean {
+  return [...discussion.earlier, discussion.last].some((comment) => isUser(comment.author, viewer));
+}
+
 /** B2, with B1 false. B2.1 (the viewer started it) is B2.4 (the viewer wrote a comment); a mention of the viewer in
  *  any comment is B2.2, or B2.4 when the viewer wrote it; B2.3 the viewer is the author. */
 function isViewersTurn(discussion: OpenDiscussion, { viewer, author }: Sides): boolean {
   return (
     viewer !== null &&
     (viewer === author ||
-      [...discussion.earlier, discussion.last].some(
-        (comment) =>
-          isUser(comment.author, viewer) ||
-          comment.mentions.some((mention) => mention.username === viewer),
+      wroteIn(discussion, viewer) ||
+      [...discussion.earlier, discussion.last].some((comment) =>
+        comment.mentions.some((mention) => mention.username === viewer),
       ))
   );
 }
@@ -143,9 +147,7 @@ export function turnCounts(
   return {
     viewersTurn: open.filter((discussion) => turnOf(discussion, viewer, author).kind === "viewer")
       .length,
-    viewerWrote: open.filter((discussion) =>
-      [...discussion.earlier, discussion.last].some((comment) => isUser(comment.author, viewer)),
-    ).length,
+    viewerWrote: open.filter((discussion) => wroteIn(discussion, viewer)).length,
     total: open.length,
   };
 }

@@ -49,6 +49,7 @@ const PAUSE_MS = 400;
 const WRITE_MS = 300;
 const THREADS = 637;
 const SPINS = /aria-label="Reload discussions"[^>]*><svg [^>]*animate-spin/u;
+const TURN_LOOK = "font-semibold text-primary";
 
 let slice: MergeRequests;
 /** When set, every discussions read after it fails with this message. */
@@ -126,8 +127,8 @@ async function discussionsRead(): Promise<void> {
   await vi.advanceTimersByTimeAsync(PAUSE_MS);
 }
 
-async function box(): Promise<string> {
-  const props = { row: rowOf(THREADS), now: NOW, asking: false };
+async function box(at = THREADS): Promise<string> {
+  const props = { row: rowOf(at), now: NOW, asking: false };
   const html = await renderToString(
     createSSRApp({ render: () => h(MergeRequestDiscussions, props) }),
   );
@@ -156,14 +157,18 @@ function headerOf(html: string): string {
   return `${text} | ${tone.includes("text-problem-error") ? "error" : "muted"}`;
 }
 
-/** Whether the discussions opener button carries the turn words' mark. */
-function isMarked(html: string): boolean {
+/** Whether the discussions opener button carries the look of a "Your turn" line's words. */
+function waitsForViewer(html: string): boolean {
   const opener = /<button [^>]*aria-expanded[^>]*>/u.exec(html)?.[0] ?? "";
-  return opener.includes("font-semibold text-primary");
+  return opener.includes(TURN_LOOK);
 }
 
 async function resolve(serial: number): Promise<void> {
-  slice.showThread(iid(THREADS), d(serial));
+  await resolveDiscussion(THREADS, d(serial));
+}
+
+async function resolveDiscussion(at: number, id: DiscussionId): Promise<void> {
+  slice.showThread(iid(at), id);
   await vi.advanceTimersByTimeAsync(PAUSE_MS);
   const resolving = slice.setResolved(true);
   await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
@@ -271,28 +276,57 @@ test("a_failed_reload_keeps_the_rows", async () => {
 
 test("a_row_with_the_viewers_turn_has_a_marked_button", async () => {
   await slice.refresh();
-  expect(isMarked(await box())).toBe(false);
+  expect(waitsForViewer(await box())).toBe(false);
   slice.askDiscussions(iid(THREADS));
   await vi.advanceTimersByTimeAsync(PAUSE_MS);
   const read = await box();
-  expect([headerOf(read), isMarked(read)]).toEqual(["4 of 13 wait for you | muted", true]);
+  expect(read).toContain(`class="${TURN_LOOK} ml-auto pl-4">Your turn<`);
+  expect([headerOf(read), waitsForViewer(read)]).toEqual(["4 of 13 wait for you | muted", true]);
 
   mode.value = "full";
   await slice.findProject();
   slice.review({ kind: "person", username: "anna" });
   const anna = await box();
-  expect([headerOf(anna), isMarked(anna)]).toEqual(["2 of 13 wait for Anna Berg | muted", true]);
+  expect([headerOf(anna), waitsForViewer(anna)]).toEqual([
+    "2 of 13 wait for Anna Berg | muted",
+    true,
+  ]);
   slice.review({ kind: "person", username: "zoe" });
   const zoe = await box();
-  expect([headerOf(zoe), isMarked(zoe)]).toEqual(["0 of 13 wait for zoe | muted", false]);
+  expect([headerOf(zoe), waitsForViewer(zoe)]).toEqual(["0 of 13 wait for zoe | muted", false]);
   slice.review({ kind: "me" });
 
   for (const serial of [1, 3, 4]) {
     await resolve(serial);
   }
   const last = await box();
-  expect([headerOf(last), isMarked(last)]).toEqual(["1 of 10 waits for you | muted", true]);
+  expect([headerOf(last), waitsForViewer(last)]).toEqual(["1 of 10 waits for you | muted", true]);
   await resolve(5);
   const none = await box();
-  expect([headerOf(none), isMarked(none)]).toEqual(["0 of 9 wait for you | muted", false]);
+  expect([headerOf(none), waitsForViewer(none)]).toEqual(["0 of 9 wait for you | muted", false]);
+});
+
+test("a_discussion_resolved_in_the_box_moves_its_row_in_review_order_as_it_unmarks_the_button", async () => {
+  const ASKS_SAM = 633;
+  mode.value = "full";
+  await slice.findProject();
+  await slice.refresh();
+  slice.review({ kind: "me" });
+  await vi.advanceTimersByTimeAsync(PAUSE_MS);
+  const entry = slice.discussions.value.get(iid(ASKS_SAM));
+  const [only] = entry?.kind === "read" ? entry.discussions : [];
+  if (only === undefined || entry?.kind !== "read" || entry.discussions.length !== 1) {
+    throw new Error(`!${ASKS_SAM} should have read one open discussion`);
+  }
+  expect(slice.shownRows.value[0]?.iid).toBe(ASKS_SAM);
+  expect(waitsForViewer(await box(ASKS_SAM))).toBe(true);
+
+  await resolveDiscussion(ASKS_SAM, only.id);
+
+  const after = await box(ASKS_SAM);
+  expect(after).toContain(`data-discussion-id="${only.id}"`);
+  expect(headerOf(after)).toBe("No open discussions | muted");
+  expect(waitsForViewer(after)).toBe(false);
+  expect(slice.shownRows.value[0]?.iid).not.toBe(ASKS_SAM);
+  expect(slice.shownRows.value.map((row) => row.iid)).toContain(ASKS_SAM);
 });

@@ -77,6 +77,7 @@ export function loggedFields(
 }
 
 type Entries = ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>;
+type Read = Extract<DiscussionLoad, { readonly kind: "read" }>;
 
 export function threadRead(
   entries: Entries,
@@ -100,6 +101,12 @@ export function threadRead(
   setRow(entries, iid, { kind: "read", discussions, resolved: marks });
 }
 
+/** The entry's open discussions not resolved here (C10): what the box's header, its opener's mark and review mode
+ *  count. */
+export function unmarkedOf(entry: Read): readonly OpenDiscussion[] {
+  return entry.discussions.filter((each) => !entry.resolved.has(each.id));
+}
+
 export function boxClosed(
   entries: Entries,
   iid: MergeRequestIid,
@@ -109,7 +116,7 @@ export function boxClosed(
   if (entry?.kind !== "read" || entry.resolved.size === 0) {
     return;
   }
-  const discussions = entry.discussions.filter((each) => !entry.resolved.has(each.id));
+  const discussions = unmarkedOf(entry);
   setRow(entries, iid, { kind: "read", discussions, resolved: new Set<DiscussionId>() });
   counted(iid, discussions.length);
 }

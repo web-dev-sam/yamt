@@ -18,6 +18,7 @@ import {
   turnSummaryText,
   turnText,
 } from "../mergeRequests";
+import { unmarkedOf } from "./mergeRequestDiscussionRows";
 import { useRowDiscussions, type DiscussionLoad } from "./mergeRequestDiscussions";
 import MergeRequestPicture from "./MergeRequestPicture.vue";
 import { isBeingRead } from "./mergeRequestsRefresh";
@@ -40,6 +41,8 @@ type Header = { readonly text: string; readonly failed: boolean };
 type Words = { readonly place: string; readonly turn: string };
 
 const props = defineProps<{ row: MergeRequestRow; now: number; asking: boolean }>();
+
+const TURN_MARK = "font-semibold text-primary";
 
 const mergeRequests = useMergeRequests();
 const { discussionDetails, viewer, openPage, reloads, thread } = mergeRequests;
@@ -76,10 +79,12 @@ const spinning = computed(() => {
   const shown = thread.value;
   return shownId.value !== null && shown !== null && isBeingRead(shown.load);
 });
-const counts = computed(() =>
-  turnCounts(unmarkedOf(load.value), viewer.value.username, author.value),
-);
-const marked = computed(() => counts.value.viewersTurn > 0);
+const counts = computed(() => {
+  const shown = load.value;
+  const unmarked = shown?.kind === "read" ? unmarkedOf(shown) : [];
+  return turnCounts(unmarked, viewer.value.username, author.value);
+});
+const waitsForViewer = computed(() => counts.value.viewersTurn > 0);
 const header = computed(() => headerOf(load.value));
 const lines = computed(() => {
   const shown = load.value;
@@ -162,13 +167,6 @@ function headerOf(shown: DiscussionLoad | undefined): Header {
       return _exhaustive;
     }
   }
-}
-
-function unmarkedOf(shown: DiscussionLoad | undefined): readonly OpenDiscussion[] {
-  if (shown?.kind !== "read") {
-    return [];
-  }
-  return shown.discussions.filter((discussion) => !shown.resolved.has(discussion.id));
 }
 
 function readHeader(): Header {
@@ -261,7 +259,7 @@ function threadClosed(): void {
       :aria-expanded="open"
       :aria-label="label"
       class="flex items-center gap-1 rounded p-0.5 hover:bg-hover"
-      :class="{ 'font-semibold text-primary': marked }"
+      :class="{ [TURN_MARK]: waitsForViewer }"
     >
       <MessageSquare class="size-4" aria-hidden="true" />
       <span aria-hidden="true">{{ count }}</span>
@@ -320,7 +318,7 @@ function threadClosed(): void {
               ><span
                 v-else
                 class="ml-auto pl-4"
-                :class="line.viewersTurn ? 'font-semibold text-primary' : 'text-fg-muted'"
+                :class="line.viewersTurn ? TURN_MARK : 'text-fg-muted'"
                 >{{ line.turn }}</span
               >
             </span>
