@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `e6eadfc0` (`@` completion: core `mentions.ts`, `useMentions` over the pure `mentionStep` in the reply field and the range Post box, `MergeRequestMentionList.vue` placed by `textareaCaret.ts`, the slice's second people search `mentionSearch`). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `f887786b` (one person's discussions: core `personDiscussions.ts` and `keptInPlace.ts`, `ui/mergeRequestPersonView.ts` over the one queue's `wantRows`/`retryRows`/`reloadRows`/`viewLeft`, several threads keyed by discussion in `mergeRequestThread.ts`, the panel's body shared with the view's entries, the first comment and its offers in the discussions read). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 

@@ -227,7 +227,7 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   in the iid and its place (`…008201` for !82's first) and `resolveNote: true`; each note its `bodyHtml`, `lastEditedAt`
   equal to `createdAt` and `lastEditedBy: null`; `notes.pageInfo` both `hasNextPage: false` and `hasPreviousPage`.
 - `mr-review-mode/` — review mode's order on the merge-request page (the real-app acceptance of
-  `docs/slices/briefs/mr-review-mode-page.md`): logged in; `mr-discussions/`'s project; user `sam` ("Sam Doe"); one
+  `docs/slices/briefs/mr-review-mode-page.md`): logged in; `merge-requests/`'s project; user `sam` ("Sam Doe"); one
   page, the last, with the list query's fields (`queryComplexity` 170 of 250); no `diffHeadSha`, no pipeline, no
   label, assignee or avatar; every reviewer `UNREVIEWED`, not approved. !97 (by ben; reviewer anna; 1 open), !96 (ben;
   sam and anna; 2), !95 (a draft, "Draft: …"; anna; sam; 1), !94 (anna; sam; 1), !93 (ben; sam; 2), !92 (sam; anna;

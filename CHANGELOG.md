@@ -12,6 +12,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `@` completion while writing a reply in a merge request's thread and in the range window's "Text to post" box: the
   merge request's people show at once (author, assignees, reviewers, approvers, the thread's writers), GitLab's
   project search follows as you type; Up/Down, Enter/Tab or a click writes `@username `, Escape closes only the list.
+- A "Discussions" button on the merge-request page shows every open discussion of one person across the listed merge
+  requests — whose turn first, then the ones they started, wrote in or review, newest first — with the first comment,
+  who wrote since, and the whole thread inline to answer or resolve. Pick another person from its menu; filters and
+  search still apply; the discussions load while the view is open whatever "Discussion details" says.
 
 ### Changed
 
