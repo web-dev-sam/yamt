@@ -7,12 +7,10 @@ import type {
   MergeRequestIid,
   MergeRequestRow,
   MergeRequestSource,
-  OpenReply,
-  WebPage,
 } from "../ipc";
 import type { CalendarDay } from "../mergeRequests";
 import { RECHECK_PAUSE_MS } from "./glab";
-import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
+import { createRowActions, type RowActions } from "./mergeRequestActions";
 import { createDescriptions, type Descriptions } from "./mergeRequestDescriptions";
 import {
   createDiscussions,
@@ -29,13 +27,15 @@ import {
   type PeopleChanges,
   type PeopleSearcher,
 } from "./mergeRequestPeople";
+import { createPersonView, type PersonView } from "./mergeRequestPersonView";
 import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
 import { loadList, type ListLoad, type ListState } from "./mergeRequestsList";
+import { pagesOf, type Opening, type Pages } from "./mergeRequestsPages";
 import { createRefreshes, type Refreshes } from "./mergeRequestsRefresh";
 import { shownOf, type Shown } from "./mergeRequestsShown";
-import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
+import { listFailureText } from "./mergeRequestsText";
 import { createThreads, type Threads } from "./mergeRequestThread";
-import { attempt, type Problem } from "./problem";
+import type { Problem } from "./problem";
 import type { Screen } from "./screen";
 
 export type {
@@ -48,9 +48,7 @@ export { rowPeopleAsks } from "./mergeRequestPeople";
 export type { RerequestAsk } from "./mergeRequestRerequests";
 export type { ListLoad } from "./mergeRequestsList";
 
-export type Opening =
-  | { readonly kind: "fetching" }
-  | { readonly kind: "refused"; readonly reply: Exclude<OpenReply, { readonly kind: "opened" }> };
+export type { Opening } from "./mergeRequestsPages";
 
 export type MergeRequests = RowActions &
   Rerequests &
@@ -61,6 +59,8 @@ export type MergeRequests = RowActions &
   Links &
   Shown &
   Refreshes &
+  PersonView &
+  Pages &
   PeopleChanges & {
     /** The mention list's own search (request rule 6): a second instance, never the people box's. */
     readonly mentionSearch: PeopleSearcher;
@@ -73,15 +73,10 @@ export type MergeRequests = RowActions &
     readonly search: Readonly<ShallowRef<string>>;
     readonly dueDates: ComputedRef<ReadonlyMap<MergeRequestIid, CalendarDay>>;
     readonly openings: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>>;
-    readonly pageProblem: Readonly<ShallowRef<string | null>>;
-    findProject(): Promise<void>;
     show(): void;
     close(): void;
     setSearch(text: string): void;
     setDueDate(iid: MergeRequestIid, day: CalendarDay | null): void;
-    openChanges(iid: MergeRequestIid): Promise<void>;
-    openPage(clicked: PageKind, page: WebPage): Promise<void>;
-    dismissPageProblem(): void;
   };
 
 type Deps = {
@@ -149,38 +144,6 @@ function show(state: State): void {
   }
 }
 
-async function findProject(state: State): Promise<void> {
-  const outcome = await attempt(() => state.source.findGitLabProject());
-  if (outcome.ok) {
-    state.project.value = outcome.value;
-  } else {
-    state.report({ action: "mergeRequests", step: "find", cause: outcome.cause });
-  }
-}
-
-async function openChanges(state: State, iid: MergeRequestIid): Promise<void> {
-  if (!claimRow(state.openings, iid, { kind: "fetching" })) {
-    return;
-  }
-  const outcome = await attempt(() => state.source.openMergeRequest(iid));
-  if (!outcome.ok) {
-    setRow(state.openings, iid, null);
-    state.report({ action: "mergeRequests", step: "open", cause: outcome.cause });
-    return;
-  }
-  const reply = outcome.value;
-  setRow(state.openings, iid, reply.kind === "opened" ? null : { kind: "refused", reply });
-}
-
-async function openPage(state: State, clicked: PageKind, page: WebPage): Promise<void> {
-  const outcome = await attempt(() => state.source.openPage(page));
-  if (!outcome.ok) {
-    state.report({ action: "mergeRequests", step: clicked, cause: outcome.cause });
-    return;
-  }
-  state.pageProblem.value = pageProblemText(outcome.value, clicked);
-}
-
 function discussingOf(
   deps: Deps,
   rows: () => readonly MergeRequestRow[],
@@ -192,20 +155,12 @@ function discussingOf(
   return { discussionQueue, threads, threadsRefreshed: refreshed };
 }
 
-function createState(deps: Deps): State {
+function createState(deps: Deps, viewReplaced: () => void): State {
   const project = shallowRef<GitLabProject>({ kind: "none" });
   const repository = computed(() =>
     project.value.kind === "found" ? project.value.repository : null,
   );
   const rows = shallowRef<readonly MergeRequestRow[]>([]);
-  const discussing = discussingOf(
-    deps,
-    () => rows.value,
-    (iid, openDiscussions) => {
-      withRow(state, iid, { openDiscussions });
-    },
-  );
-  const linkQueue = createLinks(deps);
   const state: State = {
     ...deps,
     project,
@@ -220,12 +175,19 @@ function createState(deps: Deps): State {
     pageProblem: shallowRef<string | null>(null),
     dueDates: createDueDates(repository, deps.storage),
     rowActions: createRowActions(deps),
-    ...discussing,
-    linkQueue,
+    ...discussingOf(
+      deps,
+      () => rows.value,
+      (iid, openDiscussions) => {
+        withRow(state, iid, { openDiscussions });
+      },
+    ),
+    linkQueue: createLinks(deps),
     rowsReplaced: (replaced) => {
-      discussing.discussionQueue.replaced(replaced);
-      linkQueue.dropped();
-      discussing.threadsRefreshed(null);
+      state.discussionQueue.replaced(replaced);
+      state.linkQueue.dropped();
+      state.threadsRefreshed(null);
+      viewReplaced();
     },
     shown: null,
     running: null,
@@ -242,22 +204,34 @@ function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setD
   };
 }
 
-function pageOpenerOf(
+/** The list's shown rows and the person view over them; `rowsReplaced` is the view's. */
+function shownAndViewOf(
   state: State,
-): Pick<MergeRequests, "pageProblem" | "openPage" | "dismissPageProblem"> {
+  people: PeopleChanges,
+): Shown & PersonView & { readonly rowsReplaced: () => void } {
+  const shown = shownOf({ ...state, openPeopleBoxes: people.openPeopleBoxes }, state.storage);
+  return { ...shown, ...createPersonView({ ...state, ...shown, queue: state.discussionQueue }) };
+}
+
+function screensOf(state: State, view: PersonView): Pick<MergeRequests, "show" | "close"> {
   return {
-    pageProblem: state.pageProblem,
-    openPage: (clicked, page) => openPage(state, clicked, page),
-    dismissPageProblem: () => {
-      state.pageProblem.value = null;
+    show: () => {
+      show(state);
+    },
+    close: () => {
+      view.leavePersonView();
+      state.screen.value = { kind: "files" };
     },
   };
 }
 
 export function createMergeRequests(deps: Deps): MergeRequests {
-  const state = createState(deps);
+  const state = createState(deps, () => {
+    replaced();
+  });
   const { me, rows, search } = state;
   const people = peopleOf(state);
+  const { rowsReplaced: replaced, ...shown } = shownAndViewOf(state, people);
   return {
     project: state.project,
     me,
@@ -267,23 +241,16 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     failure: computed(() =>
       state.listing.value.kind === "done" ? listFailureText(state.listing.value.end) : null,
     ),
-    ...shownOf({ ...state, openPeopleBoxes: people.openPeopleBoxes }, deps.storage),
+    ...shown,
     search,
     setSearch: (text) => {
       search.value = text;
     },
     ...dueDatesOf(state),
     openings: state.openings,
-    ...pageOpenerOf(state),
-    findProject: () => findProject(state),
-    show: () => {
-      show(state);
-    },
-    close: () => {
-      state.screen.value = { kind: "files" };
-    },
+    ...pagesOf(state),
+    ...screensOf(state, shown),
     ...createRefreshes(state),
-    openChanges: (iid) => openChanges(state, iid),
     ...state.rowActions,
     ...people,
     mentionSearch: createPeopleSearch(deps.source),

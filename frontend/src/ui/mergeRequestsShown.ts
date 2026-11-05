@@ -4,6 +4,7 @@ import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } fro
 import type { DiscussionDetails, MergeRequestIid, MergeRequestRow } from "../ipc";
 import {
   filtered,
+  keptInPlace,
   reviewOrdered,
   searched,
   summaryText,
@@ -95,25 +96,6 @@ function heldOf(
   return held;
 }
 
-/** A held row stays at its index in the order shown before; the other rows fill the rest in `next`'s order. */
-function keptInPlace(
-  previous: readonly MergeRequestRow[],
-  next: readonly MergeRequestRow[],
-  held: ReadonlySet<MergeRequestIid>,
-): readonly MergeRequestRow[] {
-  const nextOf = new Map(next.map((row) => [row.iid, row]));
-  const kept = previous.flatMap((row, at) => {
-    const now = held.has(row.iid) ? nextOf.get(row.iid) : undefined;
-    return now === undefined ? [] : [{ row: now, at }];
-  });
-  const keptRows = new Set(kept.map(({ row }) => row));
-  const order = next.filter((row) => !keptRows.has(row));
-  for (const { row, at } of kept) {
-    order.splice(at, 0, row);
-  }
-  return order;
-}
-
 function boxesOf(
   boxes: ShallowRef<ReadonlySet<MergeRequestIid>>,
 ): Pick<Shown, "discussionsBoxOpened" | "discussionsBoxClosed"> {
@@ -150,7 +132,7 @@ export function shownOf(listed: Listed, storage?: StorageLike): Shown {
         : ordered(listed, passing, viewer.value);
     return previous === undefined
       ? next
-      : { ...next, rows: keptInPlace(previous.rows, next.rows, held) };
+      : { ...next, rows: keptInPlace(previous.rows, next.rows, held, (row) => row.iid) };
   });
   const shownRows = computed(() => shown.value.rows);
   return {

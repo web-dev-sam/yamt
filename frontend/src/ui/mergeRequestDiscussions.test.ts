@@ -870,3 +870,213 @@ test("closing_a_box_without_marks_changes_nothing", async () => {
   expect(live.queue.discussions.value).toBe(before);
   expect(live.counts).toEqual([]);
 });
+
+const BATCH = 10;
+
+async function askedInBatches(live: Rig, all: readonly MergeRequestIid[]): Promise<void> {
+  for (let at = 0; at * BATCH < all.length; at += 1) {
+    expect(callAt(live, at).iids).toEqual(all.slice(at * BATCH));
+    await answered(live, at, all.slice(at * BATCH, (at + 1) * BATCH));
+  }
+}
+
+test("the_view_asks_every_missing_row_under_each_setting", async () => {
+  const all = openIids(ROWS);
+  const full = rig("full");
+  full.queue.listed(ROWS);
+  const listedLoads = full.queue.discussions.value;
+  full.queue.wantRows(all);
+  expect(full.queue.discussions.value).toBe(listedLoads);
+  await askedInBatches(full, all);
+  expect(full.calls).toHaveLength(Math.ceil(all.length / BATCH));
+
+  for (const mode of ["lazy", "off"] as const) {
+    const live = rig(mode);
+    live.queue.listed(ROWS);
+    expect(live.calls).toEqual([]);
+    live.queue.wantRows(all);
+    live.queue.wantRows(all);
+    expect([...live.queue.discussions.value.values()]).toEqual(all.map(() => LOADING));
+    expect(live.calls).toHaveLength(1);
+    await askedInBatches(live, all);
+    expect(live.calls).toHaveLength(Math.ceil(all.length / BATCH));
+    expect([...live.queue.discussions.value.values()].every((load) => load.kind === "read")).toBe(
+      true,
+    );
+  }
+});
+
+test("a_wanted_row_in_flight_after_a_switch_to_lazy_is_kept_not_asked_again", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 20));
+  const sent = openIids(ROWS.slice(0, 20));
+  const [first, second] = sent;
+  live.mode.value = "lazy";
+  await nextTick();
+
+  live.queue.wantRows(sent);
+  expect(live.calls).toHaveLength(1);
+  await answered(live, 0, [first ?? iid(0)]);
+  expect(entry(live, first ?? 0)).toEqual(read());
+  expect(entry(live, second ?? 0)).toEqual(LOADING);
+  expect(callAt(live, 1).iids).toEqual(sent.slice(1));
+});
+
+test("leaving_under_lazy_or_off_sends_nothing_more", async () => {
+  const [earlier, sent, unsent] = [[iid(639)], [iid(638), iid(637)], [iid(636), iid(635)]];
+  for (const mode of ["lazy", "off", "full"] as const) {
+    const live = rig(mode);
+    live.queue.wantRows(earlier);
+    await answered(live, 0);
+    live.queue.wantRows(sent);
+    live.queue.wantRows(unsent);
+    expect(callAt(live, 1).iids).toEqual(sent);
+
+    live.queue.viewLeft();
+    await answered(live, 1);
+    expect(entry(live, 639)).toEqual(read());
+    expect(entry(live, 638)).toEqual(read());
+    if (mode === "full") {
+      expect(entry(live, 636)).toEqual(LOADING);
+      expect(callAt(live, 2).iids).toEqual(unsent);
+    } else {
+      expect(entry(live, 636)).toBeUndefined();
+      expect(live.calls).toHaveLength(2);
+    }
+  }
+});
+
+test("retry_asks_a_failed_row_again_and_reloads_a_failed_reload", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 6));
+  callAt(live, 0).answer({
+    ok: true,
+    value: [
+      { iid: iid(639), answer: { kind: "failed", message: "glab timed out" } },
+      { iid: iid(638), answer: { kind: "open", discussions: [DISCUSSION] } },
+      { iid: iid(637), answer: { kind: "open", discussions: [DISCUSSION] } },
+      { iid: iid(636), answer: { kind: "glabMissing" } },
+      { iid: iid(635), answer: { kind: "open", discussions: [DISCUSSION] } },
+    ],
+  });
+  await settled();
+  live.queue.reloadDiscussions(iid(638));
+  callAt(live, 1).answer({ ok: false, failure: STOPPED });
+  await settled();
+  live.queue.reloadDiscussions(iid(636));
+  callAt(live, 2).answer({ ok: false, failure: STOPPED });
+  await settled();
+  expect(live.queue.reloads.value.get(iid(636))).toEqual({ kind: "failed", cause: STOPPED });
+  live.queue.wantRows([iid(634)]);
+  callAt(live, 3).answer({ ok: false, failure: STOPPED });
+  await settled();
+  expect(entry(live, 634)?.kind).toBe("failed");
+  live.queue.reloadDiscussions(iid(637), heldAsks().askFirst);
+
+  const before = live.queue.discussions.value;
+  live.queue.retryRows([iid(637), iid(640)]);
+  expect(live.queue.discussions.value).toBe(before);
+  expect(live.calls).toHaveLength(4);
+  live.queue.retryRows([iid(639), iid(638), iid(636), iid(634), iid(637)]);
+  expect(entry(live, 639)).toEqual(LOADING);
+  expect(entry(live, 638)).toEqual(read());
+  expect(live.queue.reloads.value.get(iid(638))).toEqual(RUNNING);
+  expect(entry(live, 636)).toEqual(LOADING);
+  expect(live.queue.reloads.value.has(iid(636))).toBe(false);
+  expect(entry(live, 634)).toEqual(LOADING);
+  expect(entry(live, 637)).toEqual(read());
+  expect(callAt(live, 4).iids).toEqual([639, 638, 636, 634]);
+
+  await answered(live, 4);
+  expect([...live.queue.reloads.value.keys()]).toEqual([637]);
+  expect([639, 638, 636, 634].map((value) => entry(live, value))).toEqual(
+    [639, 638, 636, 634].map(() => read()),
+  );
+  expect(live.counts).toEqual([[638, 1]]);
+});
+
+test("reload_rows_keeps_entries_until_answered_and_asks_once_first", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 6));
+  callAt(live, 0).answer({
+    ok: true,
+    value: [
+      { iid: iid(639), answer: { kind: "failed", message: "glab timed out" } },
+      ...[638, 637, 636, 635].map((value) => ({
+        iid: iid(value),
+        answer: { kind: "open", discussions: [DISCUSSION] } as const,
+      })),
+    ],
+  });
+  await settled();
+  live.queue.reloadDiscussions(iid(637));
+  expect(callAt(live, 1).iids).toEqual([637]);
+  const { asks, askFirst } = heldAsks();
+
+  live.queue.reloadRows([iid(637), iid(640), iid(639), iid(638)], askFirst);
+  expect(asks).toHaveLength(1);
+  expect(entry(live, 640)).toEqual(LOADING);
+  expect(entry(live, 639)).toEqual(LOADING);
+  expect(entry(live, 638)).toEqual(read());
+  expect(live.queue.reloads.value.get(iid(638))).toEqual(RUNNING);
+  expect(live.queue.reloads.value.has(iid(636))).toBe(false);
+  asks[0]?.();
+  await settled();
+  expect(live.calls).toHaveLength(2);
+
+  await answered(live, 1, []);
+  expect(callAt(live, 2).iids).toEqual([640, 639, 638, 637]);
+  await answered(live, 2);
+  expect(live.queue.reloads.value.size).toBe(0);
+  expect(entry(live, 638)).toEqual(read());
+  expect(live.calls).toHaveLength(3);
+});
+
+test("reload_rows_skips_a_row_answered_during_its_ask_and_a_dropped_generation", async () => {
+  const lazy = rig("lazy");
+  lazy.queue.askDiscussions(iid(639));
+  const answeredFirst = heldAsks();
+  lazy.queue.reloadRows([iid(639)], answeredFirst.askFirst);
+  await answered(lazy, 0);
+  answeredFirst.asks[0]?.();
+  await settled();
+  expect(lazy.calls).toHaveLength(1);
+
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 3));
+  const dropped = heldAsks();
+  live.queue.reloadRows([iid(638)], dropped.askFirst);
+  live.queue.replaced(ROWS.slice(0, 3));
+  dropped.asks[0]?.();
+  await settled();
+  await answered(live, 0);
+  expect(callAt(live, 1).iids).toEqual([639, 638]);
+});
+
+test("reload_rows_keeps_a_row_sent_before_a_switch_to_lazy", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 20));
+  const [first, second] = openIids(ROWS.slice(0, 20));
+  live.mode.value = "lazy";
+  await nextTick();
+
+  live.queue.reloadRows([second ?? iid(0)], heldAsks().askFirst);
+  await answered(live, 0, [first ?? iid(0)]);
+  expect(entry(live, second ?? 0)).toEqual(LOADING);
+});
+
+test("a_submit_under_off_reloads_a_row_the_view_read", async () => {
+  const live = rig("off");
+  live.queue.wantRows([iid(639)]);
+  await answered(live, 0);
+
+  live.queue.reloadDiscussions(iid(639));
+  expect(live.queue.reloads.value.get(iid(639))).toEqual(RUNNING);
+  expect(callAt(live, 1).iids).toEqual([639]);
+  live.queue.reloadDiscussions(iid(638));
+  expect(entry(live, 638)).toBeUndefined();
+  callAt(live, 1).answer(both());
+  await settled();
+  expect(live.counts).toEqual([[639, 2]]);
+  expect(live.calls).toHaveLength(2);
+});

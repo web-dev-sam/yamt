@@ -1,26 +1,31 @@
-import { computed, shallowRef, watch, type ShallowRef } from "vue";
+import { computed, shallowRef, watch } from "vue";
 
-import {
-  log,
-  type DiscussionDetails,
-  type MergeRequestIid,
-  type MergeRequestRow,
-  type MergeRequestSource,
-  type RowDiscussions,
+import type {
+  DiscussionDetails,
+  MergeRequestIid,
+  MergeRequestRow,
+  MergeRequestSource,
 } from "../ipc";
 import { setRow } from "./mergeRequestActions";
 import {
-  answerKind,
+  afterAsk,
+  dropped,
+  isReloading,
+  LOADING,
+  marked,
+  queuedLast,
+  RUNNING,
+  sentFirst,
+  unsentDropped,
+  type Queue,
+} from "./mergeRequestDiscussionQueue";
+import {
   boxClosed,
-  loadOf,
-  loggedFields,
   threadRead,
-  type Answered,
   type DiscussionLoad,
   type Discussions,
   type Reload,
 } from "./mergeRequestDiscussionRows";
-import { attempt, type Outcome } from "./problem";
 
 export type {
   DiscussionFailure,
@@ -35,128 +40,34 @@ export type DiscussionQueue = Discussions & {
   /** A refresh replaced the rows: every entry, the queue and any answer in flight dropped; then `listed(rows)`. */
   replaced(rows: readonly MergeRequestRow[]): void;
   /** D1: reads `iid` again alone, first in the queue; the entry stays as it is until the answer. The row is marked
-   *  at once; `askFirst` (a button press) runs before the read, and a row already marked asks nothing. */
+   *  at once; `askFirst` (a button press) runs before the read, and a row already marked asks nothing. Under "off"
+   *  only a row with an entry (the person view's) is read again. */
   reloadDiscussions(iid: MergeRequestIid, askFirst?: () => Promise<void>): void;
+  /** F1 (owner 2026-11-05): each iid without an entry gets `loading` and is queued last, whatever the setting; an iid in
+   *  `unhovered` (a running call's, after a switch to "lazy") leaves `unhovered` instead of being asked again. */
+  wantRows(iids: readonly MergeRequestIid[]): void;
+  /** F2's Retry, first in the queue: a `refused`/`failed` entry becomes `loading`; a read entry whose reload failed is
+   *  reloaded (entry kept). Any other iid: nothing. */
+  retryRows(iids: readonly MergeRequestIid[]): void;
+  /** C4: every iid marked at once (a read entry `reloads` running, no entry or a failed one `loading`), then `askFirst`,
+   *  then all queued first in the given order; only in the generation it started in; an iid already reloading: nothing. */
+  reloadRows(iids: readonly MergeRequestIid[], askFirst: () => Promise<void>): void;
+  /** The person view left: unless the setting is "full", every queued iid not in the running call and not reloading loses
+   *  its `loading` entry and leaves the queue (no call after Back); read entries stay. */
+  viewLeft(): void;
 };
-
-type Call = { readonly generation: number; readonly iids: readonly MergeRequestIid[] };
-type Queue = {
-  readonly source: MergeRequestSource;
-  readonly mode: () => DiscussionDetails;
-  readonly counted: (iid: MergeRequestIid, count: number) => void;
-  readonly entries: ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>;
-  readonly reloads: ShallowRef<ReadonlyMap<MergeRequestIid, Reload>>;
-  /** Each `loading` entry's and `running` reload's iid in send order, a pressed reload's once its ask is answered;
-   *  the running call's stay until answered. */
-  queued: readonly MergeRequestIid[];
-  /** The running call's iids at a switch to "lazy" not hovered since: dropped unless its answer has them. */
-  unhovered: Set<MergeRequestIid>;
-  running: Call | null;
-  generation: number;
-};
-
-const LOADING: DiscussionLoad = { kind: "loading" };
-
-function isReloading(queue: Queue, iid: MergeRequestIid): boolean {
-  return queue.reloads.value.get(iid)?.kind === "running";
-}
-
-function settle(
-  queue: Queue,
-  asked: readonly MergeRequestIid[],
-  outcome: Outcome<readonly RowDiscussions[]>,
-  ms: number,
-): void {
-  const next = new Map(queue.entries.value);
-  const reloads = new Map(queue.reloads.value);
-  const answers: readonly (readonly [MergeRequestIid, Answered])[] = outcome.ok
-    ? outcome.value.map(({ iid, answer }) => [iid, loadOf(answer)])
-    : asked.map((iid) => [iid, { kind: "failed", cause: outcome.cause }]);
-  for (const [iid, load] of answers) {
-    if (reloads.get(iid)?.kind !== "running") {
-      next.set(iid, load);
-      continue;
-    }
-    log.info("mergeRequests.discussions_reloaded", { iid, kind: answerKind(load), ms });
-    if (load.kind === "read") {
-      next.set(iid, load);
-      reloads.delete(iid);
-      queue.counted(iid, load.discussions.length);
-    } else {
-      reloads.set(iid, load);
-    }
-  }
-  const answered = new Set(outcome.ok ? outcome.value.map((row) => row.iid) : []);
-  for (const iid of queue.unhovered) {
-    if (!answered.has(iid)) {
-      next.delete(iid);
-    }
-  }
-  queue.unhovered = new Set();
-  queue.entries.value = next;
-  queue.reloads.value = reloads;
-  queue.queued = queue.queued.filter(
-    (iid) => next.get(iid)?.kind === "loading" || isReloading(queue, iid),
-  );
-}
-
-async function send(queue: Queue): Promise<void> {
-  if (queue.running !== null || queue.queued.length === 0) {
-    return;
-  }
-  const call: Call = { generation: queue.generation, iids: queue.queued };
-  queue.running = call;
-  const started = performance.now();
-  const outcome = await attempt(() => queue.source.readDiscussions(call.iids));
-  queue.running = null;
-  const ms = Math.round(performance.now() - started);
-  log.info("mergeRequests.discussions_read", loggedFields(call.iids.length, outcome, ms));
-  if (call.generation === queue.generation) {
-    settle(queue, call.iids, outcome, ms);
-  }
-  await send(queue);
-}
 
 function listed(queue: Queue, rows: readonly MergeRequestRow[]): void {
-  if (queue.mode() !== "full") {
-    return;
+  if (queue.mode() === "full") {
+    queuedLast(
+      queue,
+      rows.filter((row) => row.openDiscussions > 0).map((row) => row.iid),
+    );
   }
-  const next = new Map(queue.entries.value);
-  const missing: MergeRequestIid[] = [];
-  for (const { iid, openDiscussions } of rows) {
-    if (openDiscussions > 0 && !next.has(iid)) {
-      next.set(iid, LOADING);
-      missing.push(iid);
-    }
-  }
-  if (missing.length === 0) {
-    return;
-  }
-  queue.entries.value = next;
-  queue.queued = [...queue.queued, ...missing];
-  void send(queue);
-}
-
-function dropped(queue: Queue): void {
-  queue.generation += 1;
-  queue.entries.value = new Map();
-  queue.reloads.value = new Map();
-  queue.queued = [];
-  queue.unhovered = new Set();
 }
 
 function becameLazy(queue: Queue): void {
-  const { running, generation } = queue;
-  const sent = new Set(running?.generation === generation ? running.iids : []);
-  function kept(iid: MergeRequestIid): boolean {
-    return sent.has(iid) || isReloading(queue, iid);
-  }
-  const next = new Map(queue.entries.value);
-  for (const iid of queue.queued.filter((each) => !kept(each))) {
-    next.delete(iid);
-  }
-  queue.entries.value = next;
-  queue.queued = queue.queued.filter(kept);
+  const sent = unsentDropped(queue);
   queue.unhovered = new Set([...sent].filter((iid) => !isReloading(queue, iid)));
 }
 
@@ -179,11 +90,6 @@ function switched(queue: Queue, mode: DiscussionDetails, rows: readonly MergeReq
   }
 }
 
-function sentFirst(queue: Queue, iid: MergeRequestIid): void {
-  queue.queued = [iid, ...queue.queued.filter((each) => each !== iid)];
-  void send(queue);
-}
-
 function asked(queue: Queue, iid: MergeRequestIid): void {
   if (queue.mode() !== "lazy") {
     return;
@@ -196,13 +102,14 @@ function asked(queue: Queue, iid: MergeRequestIid): void {
     return;
   }
   setRow(queue.entries, iid, LOADING);
-  sentFirst(queue, iid);
+  sentFirst(queue, [iid]);
 }
 
 function reload(queue: Queue, iid: MergeRequestIid, askFirst?: () => Promise<void>): void {
   const entry = queue.entries.value.get(iid);
   const pressedAgain = askFirst !== undefined && entry?.kind === "loading";
-  if (queue.mode() === "off" || isReloading(queue, iid) || pressedAgain) {
+  const offWithout = queue.mode() === "off" && entry === undefined;
+  if (offWithout || isReloading(queue, iid) || pressedAgain) {
     return;
   }
   if (entry === undefined) {
@@ -210,18 +117,25 @@ function reload(queue: Queue, iid: MergeRequestIid, askFirst?: () => Promise<voi
   } else if (entry.kind === "loading") {
     queue.unhovered.delete(iid);
   } else {
-    setRow(queue.reloads, iid, { kind: "running" });
+    setRow(queue.reloads, iid, RUNNING);
   }
   if (askFirst === undefined) {
-    sentFirst(queue, iid);
-    return;
+    sentFirst(queue, [iid]);
+  } else {
+    afterAsk(queue, [iid], askFirst);
   }
-  const { generation } = queue;
-  void askFirst().then(() => {
-    if (queue.generation === generation) {
-      sentFirst(queue, iid);
-    }
-  });
+}
+
+function retried(queue: Queue, iids: readonly MergeRequestIid[]): void {
+  const failed = iids.filter((iid) =>
+    [queue.entries.value.get(iid)?.kind, queue.reloads.value.get(iid)?.kind].some(
+      (kind) => kind === "refused" || kind === "failed",
+    ),
+  );
+  if (failed.length > 0) {
+    marked(queue, failed);
+    sentFirst(queue, failed);
+  }
 }
 
 export function discussionsOf(queue: DiscussionQueue): Discussions {
@@ -262,6 +176,29 @@ function membersOf(queue: Queue): Discussions & Pick<DiscussionQueue, "reloadDis
   };
 }
 
+function personViewsOf(
+  queue: Queue,
+): Pick<DiscussionQueue, "wantRows" | "retryRows" | "reloadRows" | "viewLeft"> {
+  return {
+    wantRows: (iids) => {
+      queuedLast(queue, iids);
+    },
+    retryRows: (iids) => {
+      retried(queue, iids);
+    },
+    reloadRows: (iids, askFirst) => {
+      const marking = iids.filter((iid) => !isReloading(queue, iid));
+      marked(queue, marking);
+      afterAsk(queue, marking, askFirst);
+    },
+    viewLeft: () => {
+      if (queue.mode() !== "full") {
+        unsentDropped(queue);
+      }
+    },
+  };
+}
+
 export function createDiscussions(deps: {
   readonly source: MergeRequestSource;
   readonly mode: () => DiscussionDetails;
@@ -292,5 +229,6 @@ export function createDiscussions(deps: {
       dropped(queue);
       listed(queue, rows);
     },
+    ...personViewsOf(queue),
   };
 }

@@ -1,0 +1,2096 @@
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 92c57b9..369738d 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -96,6 +96,7 @@ export type {
+   DiscussionThread,
+   DiscussionThreadReply,
+   DiscussionWriteReply,
++  FirstComment,
+   MarkdownPreviewReply,
+   OpenDiscussion,
+   ReplyKind,
+diff --git a/frontend/src/ui/mergeRequestDiscussionQueue.ts b/frontend/src/ui/mergeRequestDiscussionQueue.ts
+new file mode 100644
+index 0000000..9accabd
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestDiscussionQueue.ts
+@@ -0,0 +1,185 @@
++import type { ShallowRef } from "vue";
++
++import {
++  log,
++  type DiscussionDetails,
++  type MergeRequestIid,
++  type MergeRequestSource,
++  type RowDiscussions,
++} from "../ipc";
++import {
++  answerKind,
++  loadOf,
++  loggedFields,
++  type Answered,
++  type DiscussionLoad,
++  type Reload,
++} from "./mergeRequestDiscussionRows";
++import { attempt, type Outcome } from "./problem";
++
++type Call = { readonly generation: number; readonly iids: readonly MergeRequestIid[] };
++export type Queue = {
++  readonly source: MergeRequestSource;
++  readonly mode: () => DiscussionDetails;
++  readonly counted: (iid: MergeRequestIid, count: number) => void;
++  readonly entries: ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>;
++  readonly reloads: ShallowRef<ReadonlyMap<MergeRequestIid, Reload>>;
++  /** Each `loading` entry's and `running` reload's iid in send order, a pressed reload's once its ask is answered;
++   *  the running call's stay until answered. */
++  queued: readonly MergeRequestIid[];
++  /** The running call's iids at a switch to "lazy" not hovered since: dropped unless its answer has them. */
++  unhovered: Set<MergeRequestIid>;
++  running: Call | null;
++  generation: number;
++};
++
++export const LOADING: DiscussionLoad = { kind: "loading" };
++export const RUNNING: Reload = { kind: "running" };
++
++export function isReloading(queue: Queue, iid: MergeRequestIid): boolean {
++  return queue.reloads.value.get(iid)?.kind === "running";
++}
++
++/** The iid still needs an answer: its entry is `loading` or its reload runs (what `queued` may hold). */
++function isWaiting(queue: Queue, iid: MergeRequestIid): boolean {
++  return queue.entries.value.get(iid)?.kind === "loading" || isReloading(queue, iid);
++}
++
++function settle(
++  queue: Queue,
++  asked: readonly MergeRequestIid[],
++  outcome: Outcome<readonly RowDiscussions[]>,
++  ms: number,
++): void {
++  const next = new Map(queue.entries.value);
++  const reloads = new Map(queue.reloads.value);
++  const answers: readonly (readonly [MergeRequestIid, Answered])[] = outcome.ok
++    ? outcome.value.map(({ iid, answer }) => [iid, loadOf(answer)])
++    : asked.map((iid) => [iid, { kind: "failed", cause: outcome.cause }]);
++  for (const [iid, load] of answers) {
++    if (reloads.get(iid)?.kind !== "running") {
++      next.set(iid, load);
++      continue;
++    }
++    log.info("mergeRequests.discussions_reloaded", { iid, kind: answerKind(load), ms });
++    if (load.kind === "read") {
++      next.set(iid, load);
++      reloads.delete(iid);
++      queue.counted(iid, load.discussions.length);
++    } else {
++      reloads.set(iid, load);
++    }
++  }
++  const answered = new Set(outcome.ok ? outcome.value.map((row) => row.iid) : []);
++  for (const iid of queue.unhovered) {
++    if (!answered.has(iid)) {
++      next.delete(iid);
++    }
++  }
++  queue.unhovered = new Set();
++  queue.entries.value = next;
++  queue.reloads.value = reloads;
++  queue.queued = queue.queued.filter((iid) => isWaiting(queue, iid));
++}
++
++async function send(queue: Queue): Promise<void> {
++  if (queue.running !== null || queue.queued.length === 0) {
++    return;
++  }
++  const call: Call = { generation: queue.generation, iids: queue.queued };
++  queue.running = call;
++  const started = performance.now();
++  const outcome = await attempt(() => queue.source.readDiscussions(call.iids));
++  queue.running = null;
++  const ms = Math.round(performance.now() - started);
++  log.info("mergeRequests.discussions_read", loggedFields(call.iids.length, outcome, ms));
++  if (call.generation === queue.generation) {
++    settle(queue, call.iids, outcome, ms);
++  }
++  await send(queue);
++}
++
++/** Each iid without an entry gets `loading` and is queued last; one in `unhovered` leaves it instead. */
++export function queuedLast(queue: Queue, iids: readonly MergeRequestIid[]): void {
++  const next = new Map(queue.entries.value);
++  const missing: MergeRequestIid[] = [];
++  for (const iid of iids) {
++    if (!queue.unhovered.delete(iid) && !next.has(iid)) {
++      next.set(iid, LOADING);
++      missing.push(iid);
++    }
++  }
++  if (missing.length === 0) {
++    return;
++  }
++  queue.entries.value = next;
++  queue.queued = [...queue.queued, ...missing];
++  void send(queue);
++}
++
++export function sentFirst(queue: Queue, iids: readonly MergeRequestIid[]): void {
++  const first = new Set(iids);
++  queue.queued = [...first, ...queue.queued.filter((each) => !first.has(each))];
++  void send(queue);
++}
++
++export function dropped(queue: Queue): void {
++  queue.generation += 1;
++  queue.entries.value = new Map();
++  queue.reloads.value = new Map();
++  queue.queued = [];
++  queue.unhovered = new Set();
++}
++
++/** Every queued iid not in the running call and not reloading loses its entry and leaves the queue; returns the
++ *  running call's iids. */
++export function unsentDropped(queue: Queue): ReadonlySet<MergeRequestIid> {
++  const { running, generation } = queue;
++  const sent = new Set(running?.generation === generation ? running.iids : []);
++  function kept(iid: MergeRequestIid): boolean {
++    return sent.has(iid) || isReloading(queue, iid);
++  }
++  const next = new Map(queue.entries.value);
++  for (const iid of queue.queued.filter((each) => !kept(each))) {
++    next.delete(iid);
++  }
++  queue.entries.value = next;
++  queue.queued = queue.queued.filter(kept);
++  return sent;
++}
++
++/** Retry's and `reloadRows`' marks: a read entry reloading, a loading one kept asked, none or a failed one `loading`. */
++export function marked(queue: Queue, iids: readonly MergeRequestIid[]): void {
++  const entries = new Map(queue.entries.value);
++  const reloads = new Map(queue.reloads.value);
++  for (const iid of iids) {
++    const entry = entries.get(iid);
++    if (entry?.kind === "read") {
++      reloads.set(iid, RUNNING);
++    } else if (entry?.kind === "loading") {
++      queue.unhovered.delete(iid);
++    } else {
++      entries.set(iid, LOADING);
++      reloads.delete(iid);
++    }
++  }
++  queue.entries.value = entries;
++  queue.reloads.value = reloads;
++}
++
++/** Once `askFirst` is answered, and only in the generation it started in, the iids still waiting go first. */
++export function afterAsk(
++  queue: Queue,
++  iids: readonly MergeRequestIid[],
++  askFirst: () => Promise<void>,
++): void {
++  const { generation } = queue;
++  void askFirst().then(() => {
++    if (queue.generation === generation) {
++      sentFirst(
++        queue,
++        iids.filter((iid) => isWaiting(queue, iid)),
++      );
++    }
++  });
++}
+diff --git a/frontend/src/ui/mergeRequestDiscussions.test.ts b/frontend/src/ui/mergeRequestDiscussions.test.ts
+index 02f3f74..2fdea55 100644
+--- a/frontend/src/ui/mergeRequestDiscussions.test.ts
++++ b/frontend/src/ui/mergeRequestDiscussions.test.ts
+@@ -870,3 +870,213 @@ test("closing_a_box_without_marks_changes_nothing", async () => {
+   expect(live.queue.discussions.value).toBe(before);
+   expect(live.counts).toEqual([]);
+ });
++
++const BATCH = 10;
++
++async function askedInBatches(live: Rig, all: readonly MergeRequestIid[]): Promise<void> {
++  for (let at = 0; at * BATCH < all.length; at += 1) {
++    expect(callAt(live, at).iids).toEqual(all.slice(at * BATCH));
++    await answered(live, at, all.slice(at * BATCH, (at + 1) * BATCH));
++  }
++}
++
++test("the_view_asks_every_missing_row_under_each_setting", async () => {
++  const all = openIids(ROWS);
++  const full = rig("full");
++  full.queue.listed(ROWS);
++  const listedLoads = full.queue.discussions.value;
++  full.queue.wantRows(all);
++  expect(full.queue.discussions.value).toBe(listedLoads);
++  await askedInBatches(full, all);
++  expect(full.calls).toHaveLength(Math.ceil(all.length / BATCH));
++
++  for (const mode of ["lazy", "off"] as const) {
++    const live = rig(mode);
++    live.queue.listed(ROWS);
++    expect(live.calls).toEqual([]);
++    live.queue.wantRows(all);
++    live.queue.wantRows(all);
++    expect([...live.queue.discussions.value.values()]).toEqual(all.map(() => LOADING));
++    expect(live.calls).toHaveLength(1);
++    await askedInBatches(live, all);
++    expect(live.calls).toHaveLength(Math.ceil(all.length / BATCH));
++    expect([...live.queue.discussions.value.values()].every((load) => load.kind === "read")).toBe(
++      true,
++    );
++  }
++});
++
++test("a_wanted_row_in_flight_after_a_switch_to_lazy_is_kept_not_asked_again", async () => {
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 20));
++  const sent = openIids(ROWS.slice(0, 20));
++  const [first, second] = sent;
++  live.mode.value = "lazy";
++  await nextTick();
++
++  live.queue.wantRows(sent);
++  expect(live.calls).toHaveLength(1);
++  await answered(live, 0, [first ?? iid(0)]);
++  expect(entry(live, first ?? 0)).toEqual(read());
++  expect(entry(live, second ?? 0)).toEqual(LOADING);
++  expect(callAt(live, 1).iids).toEqual(sent.slice(1));
++});
++
++test("leaving_under_lazy_or_off_sends_nothing_more", async () => {
++  const [earlier, sent, unsent] = [[iid(639)], [iid(638), iid(637)], [iid(636), iid(635)]];
++  for (const mode of ["lazy", "off", "full"] as const) {
++    const live = rig(mode);
++    live.queue.wantRows(earlier);
++    await answered(live, 0);
++    live.queue.wantRows(sent);
++    live.queue.wantRows(unsent);
++    expect(callAt(live, 1).iids).toEqual(sent);
++
++    live.queue.viewLeft();
++    await answered(live, 1);
++    expect(entry(live, 639)).toEqual(read());
++    expect(entry(live, 638)).toEqual(read());
++    if (mode === "full") {
++      expect(entry(live, 636)).toEqual(LOADING);
++      expect(callAt(live, 2).iids).toEqual(unsent);
++    } else {
++      expect(entry(live, 636)).toBeUndefined();
++      expect(live.calls).toHaveLength(2);
++    }
++  }
++});
++
++test("retry_asks_a_failed_row_again_and_reloads_a_failed_reload", async () => {
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 6));
++  callAt(live, 0).answer({
++    ok: true,
++    value: [
++      { iid: iid(639), answer: { kind: "failed", message: "glab timed out" } },
++      { iid: iid(638), answer: { kind: "open", discussions: [DISCUSSION] } },
++      { iid: iid(637), answer: { kind: "open", discussions: [DISCUSSION] } },
++      { iid: iid(636), answer: { kind: "glabMissing" } },
++      { iid: iid(635), answer: { kind: "open", discussions: [DISCUSSION] } },
++    ],
++  });
++  await settled();
++  live.queue.reloadDiscussions(iid(638));
++  callAt(live, 1).answer({ ok: false, failure: STOPPED });
++  await settled();
++  live.queue.reloadDiscussions(iid(636));
++  callAt(live, 2).answer({ ok: false, failure: STOPPED });
++  await settled();
++  expect(live.queue.reloads.value.get(iid(636))).toEqual({ kind: "failed", cause: STOPPED });
++  live.queue.wantRows([iid(634)]);
++  callAt(live, 3).answer({ ok: false, failure: STOPPED });
++  await settled();
++  expect(entry(live, 634)?.kind).toBe("failed");
++  live.queue.reloadDiscussions(iid(637), heldAsks().askFirst);
++
++  const before = live.queue.discussions.value;
++  live.queue.retryRows([iid(637), iid(640)]);
++  expect(live.queue.discussions.value).toBe(before);
++  expect(live.calls).toHaveLength(4);
++  live.queue.retryRows([iid(639), iid(638), iid(636), iid(634), iid(637)]);
++  expect(entry(live, 639)).toEqual(LOADING);
++  expect(entry(live, 638)).toEqual(read());
++  expect(live.queue.reloads.value.get(iid(638))).toEqual(RUNNING);
++  expect(entry(live, 636)).toEqual(LOADING);
++  expect(live.queue.reloads.value.has(iid(636))).toBe(false);
++  expect(entry(live, 634)).toEqual(LOADING);
++  expect(entry(live, 637)).toEqual(read());
++  expect(callAt(live, 4).iids).toEqual([639, 638, 636, 634]);
++
++  await answered(live, 4);
++  expect([...live.queue.reloads.value.keys()]).toEqual([637]);
++  expect([639, 638, 636, 634].map((value) => entry(live, value))).toEqual(
++    [639, 638, 636, 634].map(() => read()),
++  );
++  expect(live.counts).toEqual([[638, 1]]);
++});
++
++test("reload_rows_keeps_entries_until_answered_and_asks_once_first", async () => {
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 6));
++  callAt(live, 0).answer({
++    ok: true,
++    value: [
++      { iid: iid(639), answer: { kind: "failed", message: "glab timed out" } },
++      ...[638, 637, 636, 635].map((value) => ({
++        iid: iid(value),
++        answer: { kind: "open", discussions: [DISCUSSION] } as const,
++      })),
++    ],
++  });
++  await settled();
++  live.queue.reloadDiscussions(iid(637));
++  expect(callAt(live, 1).iids).toEqual([637]);
++  const { asks, askFirst } = heldAsks();
++
++  live.queue.reloadRows([iid(637), iid(640), iid(639), iid(638)], askFirst);
++  expect(asks).toHaveLength(1);
++  expect(entry(live, 640)).toEqual(LOADING);
++  expect(entry(live, 639)).toEqual(LOADING);
++  expect(entry(live, 638)).toEqual(read());
++  expect(live.queue.reloads.value.get(iid(638))).toEqual(RUNNING);
++  expect(live.queue.reloads.value.has(iid(636))).toBe(false);
++  asks[0]?.();
++  await settled();
++  expect(live.calls).toHaveLength(2);
++
++  await answered(live, 1, []);
++  expect(callAt(live, 2).iids).toEqual([640, 639, 638, 637]);
++  await answered(live, 2);
++  expect(live.queue.reloads.value.size).toBe(0);
++  expect(entry(live, 638)).toEqual(read());
++  expect(live.calls).toHaveLength(3);
++});
++
++test("reload_rows_skips_a_row_answered_during_its_ask_and_a_dropped_generation", async () => {
++  const lazy = rig("lazy");
++  lazy.queue.askDiscussions(iid(639));
++  const answeredFirst = heldAsks();
++  lazy.queue.reloadRows([iid(639)], answeredFirst.askFirst);
++  await answered(lazy, 0);
++  answeredFirst.asks[0]?.();
++  await settled();
++  expect(lazy.calls).toHaveLength(1);
++
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 3));
++  const dropped = heldAsks();
++  live.queue.reloadRows([iid(638)], dropped.askFirst);
++  live.queue.replaced(ROWS.slice(0, 3));
++  dropped.asks[0]?.();
++  await settled();
++  await answered(live, 0);
++  expect(callAt(live, 1).iids).toEqual([639, 638]);
++});
++
++test("reload_rows_keeps_a_row_sent_before_a_switch_to_lazy", async () => {
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 20));
++  const [first, second] = openIids(ROWS.slice(0, 20));
++  live.mode.value = "lazy";
++  await nextTick();
++
++  live.queue.reloadRows([second ?? iid(0)], heldAsks().askFirst);
++  await answered(live, 0, [first ?? iid(0)]);
++  expect(entry(live, second ?? 0)).toEqual(LOADING);
++});
++
++test("a_submit_under_off_reloads_a_row_the_view_read", async () => {
++  const live = rig("off");
++  live.queue.wantRows([iid(639)]);
++  await answered(live, 0);
++
++  live.queue.reloadDiscussions(iid(639));
++  expect(live.queue.reloads.value.get(iid(639))).toEqual(RUNNING);
++  expect(callAt(live, 1).iids).toEqual([639]);
++  live.queue.reloadDiscussions(iid(638));
++  expect(entry(live, 638)).toBeUndefined();
++  callAt(live, 1).answer(both());
++  await settled();
++  expect(live.counts).toEqual([[639, 2]]);
++  expect(live.calls).toHaveLength(2);
++});
+diff --git a/frontend/src/ui/mergeRequestDiscussions.ts b/frontend/src/ui/mergeRequestDiscussions.ts
+index 511451f..535ef05 100644
+--- a/frontend/src/ui/mergeRequestDiscussions.ts
++++ b/frontend/src/ui/mergeRequestDiscussions.ts
+@@ -1,26 +1,31 @@
+-import { computed, shallowRef, watch, type ShallowRef } from "vue";
++import { computed, shallowRef, watch } from "vue";
+ 
+-import {
+-  log,
+-  type DiscussionDetails,
+-  type MergeRequestIid,
+-  type MergeRequestRow,
+-  type MergeRequestSource,
+-  type RowDiscussions,
++import type {
++  DiscussionDetails,
++  MergeRequestIid,
++  MergeRequestRow,
++  MergeRequestSource,
+ } from "../ipc";
+ import { setRow } from "./mergeRequestActions";
+ import {
+-  answerKind,
++  afterAsk,
++  dropped,
++  isReloading,
++  LOADING,
++  marked,
++  queuedLast,
++  RUNNING,
++  sentFirst,
++  unsentDropped,
++  type Queue,
++} from "./mergeRequestDiscussionQueue";
++import {
+   boxClosed,
+-  loadOf,
+-  loggedFields,
+   threadRead,
+-  type Answered,
+   type DiscussionLoad,
+   type Discussions,
+   type Reload,
+ } from "./mergeRequestDiscussionRows";
+-import { attempt, type Outcome } from "./problem";
+ 
+ export type {
+   DiscussionFailure,
+@@ -35,128 +40,34 @@ export type DiscussionQueue = Discussions & {
+   /** A refresh replaced the rows: every entry, the queue and any answer in flight dropped; then `listed(rows)`. */
+   replaced(rows: readonly MergeRequestRow[]): void;
+   /** D1: reads `iid` again alone, first in the queue; the entry stays as it is until the answer. The row is marked
+-   *  at once; `askFirst` (a button press) runs before the read, and a row already marked asks nothing. */
++   *  at once; `askFirst` (a button press) runs before the read, and a row already marked asks nothing. Under "off"
++   *  only a row with an entry (the person view's) is read again. */
+   reloadDiscussions(iid: MergeRequestIid, askFirst?: () => Promise<void>): void;
++  /** F1 (owner 2026-11-05): each iid without an entry gets `loading` and is queued last, whatever the setting; an iid in
++   *  `unhovered` (a running call's, after a switch to "lazy") leaves `unhovered` instead of being asked again. */
++  wantRows(iids: readonly MergeRequestIid[]): void;
++  /** F2's Retry, first in the queue: a `refused`/`failed` entry becomes `loading`; a read entry whose reload failed is
++   *  reloaded (entry kept). Any other iid: nothing. */
++  retryRows(iids: readonly MergeRequestIid[]): void;
++  /** C4: every iid marked at once (a read entry `reloads` running, no entry or a failed one `loading`), then `askFirst`,
++   *  then all queued first in the given order; only in the generation it started in; an iid already reloading: nothing. */
++  reloadRows(iids: readonly MergeRequestIid[], askFirst: () => Promise<void>): void;
++  /** The person view left: unless the setting is "full", every queued iid not in the running call and not reloading loses
++   *  its `loading` entry and leaves the queue (no call after Back); read entries stay. */
++  viewLeft(): void;
+ };
+ 
+-type Call = { readonly generation: number; readonly iids: readonly MergeRequestIid[] };
+-type Queue = {
+-  readonly source: MergeRequestSource;
+-  readonly mode: () => DiscussionDetails;
+-  readonly counted: (iid: MergeRequestIid, count: number) => void;
+-  readonly entries: ShallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>;
+-  readonly reloads: ShallowRef<ReadonlyMap<MergeRequestIid, Reload>>;
+-  /** Each `loading` entry's and `running` reload's iid in send order, a pressed reload's once its ask is answered;
+-   *  the running call's stay until answered. */
+-  queued: readonly MergeRequestIid[];
+-  /** The running call's iids at a switch to "lazy" not hovered since: dropped unless its answer has them. */
+-  unhovered: Set<MergeRequestIid>;
+-  running: Call | null;
+-  generation: number;
+-};
+-
+-const LOADING: DiscussionLoad = { kind: "loading" };
+-
+-function isReloading(queue: Queue, iid: MergeRequestIid): boolean {
+-  return queue.reloads.value.get(iid)?.kind === "running";
+-}
+-
+-function settle(
+-  queue: Queue,
+-  asked: readonly MergeRequestIid[],
+-  outcome: Outcome<readonly RowDiscussions[]>,
+-  ms: number,
+-): void {
+-  const next = new Map(queue.entries.value);
+-  const reloads = new Map(queue.reloads.value);
+-  const answers: readonly (readonly [MergeRequestIid, Answered])[] = outcome.ok
+-    ? outcome.value.map(({ iid, answer }) => [iid, loadOf(answer)])
+-    : asked.map((iid) => [iid, { kind: "failed", cause: outcome.cause }]);
+-  for (const [iid, load] of answers) {
+-    if (reloads.get(iid)?.kind !== "running") {
+-      next.set(iid, load);
+-      continue;
+-    }
+-    log.info("mergeRequests.discussions_reloaded", { iid, kind: answerKind(load), ms });
+-    if (load.kind === "read") {
+-      next.set(iid, load);
+-      reloads.delete(iid);
+-      queue.counted(iid, load.discussions.length);
+-    } else {
+-      reloads.set(iid, load);
+-    }
+-  }
+-  const answered = new Set(outcome.ok ? outcome.value.map((row) => row.iid) : []);
+-  for (const iid of queue.unhovered) {
+-    if (!answered.has(iid)) {
+-      next.delete(iid);
+-    }
+-  }
+-  queue.unhovered = new Set();
+-  queue.entries.value = next;
+-  queue.reloads.value = reloads;
+-  queue.queued = queue.queued.filter(
+-    (iid) => next.get(iid)?.kind === "loading" || isReloading(queue, iid),
+-  );
+-}
+-
+-async function send(queue: Queue): Promise<void> {
+-  if (queue.running !== null || queue.queued.length === 0) {
+-    return;
+-  }
+-  const call: Call = { generation: queue.generation, iids: queue.queued };
+-  queue.running = call;
+-  const started = performance.now();
+-  const outcome = await attempt(() => queue.source.readDiscussions(call.iids));
+-  queue.running = null;
+-  const ms = Math.round(performance.now() - started);
+-  log.info("mergeRequests.discussions_read", loggedFields(call.iids.length, outcome, ms));
+-  if (call.generation === queue.generation) {
+-    settle(queue, call.iids, outcome, ms);
+-  }
+-  await send(queue);
+-}
+-
+ function listed(queue: Queue, rows: readonly MergeRequestRow[]): void {
+-  if (queue.mode() !== "full") {
+-    return;
++  if (queue.mode() === "full") {
++    queuedLast(
++      queue,
++      rows.filter((row) => row.openDiscussions > 0).map((row) => row.iid),
++    );
+   }
+-  const next = new Map(queue.entries.value);
+-  const missing: MergeRequestIid[] = [];
+-  for (const { iid, openDiscussions } of rows) {
+-    if (openDiscussions > 0 && !next.has(iid)) {
+-      next.set(iid, LOADING);
+-      missing.push(iid);
+-    }
+-  }
+-  if (missing.length === 0) {
+-    return;
+-  }
+-  queue.entries.value = next;
+-  queue.queued = [...queue.queued, ...missing];
+-  void send(queue);
+-}
+-
+-function dropped(queue: Queue): void {
+-  queue.generation += 1;
+-  queue.entries.value = new Map();
+-  queue.reloads.value = new Map();
+-  queue.queued = [];
+-  queue.unhovered = new Set();
+ }
+ 
+ function becameLazy(queue: Queue): void {
+-  const { running, generation } = queue;
+-  const sent = new Set(running?.generation === generation ? running.iids : []);
+-  function kept(iid: MergeRequestIid): boolean {
+-    return sent.has(iid) || isReloading(queue, iid);
+-  }
+-  const next = new Map(queue.entries.value);
+-  for (const iid of queue.queued.filter((each) => !kept(each))) {
+-    next.delete(iid);
+-  }
+-  queue.entries.value = next;
+-  queue.queued = queue.queued.filter(kept);
++  const sent = unsentDropped(queue);
+   queue.unhovered = new Set([...sent].filter((iid) => !isReloading(queue, iid)));
+ }
+ 
+@@ -179,11 +90,6 @@ function switched(queue: Queue, mode: DiscussionDetails, rows: readonly MergeReq
+   }
+ }
+ 
+-function sentFirst(queue: Queue, iid: MergeRequestIid): void {
+-  queue.queued = [iid, ...queue.queued.filter((each) => each !== iid)];
+-  void send(queue);
+-}
+-
+ function asked(queue: Queue, iid: MergeRequestIid): void {
+   if (queue.mode() !== "lazy") {
+     return;
+@@ -196,13 +102,14 @@ function asked(queue: Queue, iid: MergeRequestIid): void {
+     return;
+   }
+   setRow(queue.entries, iid, LOADING);
+-  sentFirst(queue, iid);
++  sentFirst(queue, [iid]);
+ }
+ 
+ function reload(queue: Queue, iid: MergeRequestIid, askFirst?: () => Promise<void>): void {
+   const entry = queue.entries.value.get(iid);
+   const pressedAgain = askFirst !== undefined && entry?.kind === "loading";
+-  if (queue.mode() === "off" || isReloading(queue, iid) || pressedAgain) {
++  const offWithout = queue.mode() === "off" && entry === undefined;
++  if (offWithout || isReloading(queue, iid) || pressedAgain) {
+     return;
+   }
+   if (entry === undefined) {
+@@ -210,18 +117,25 @@ function reload(queue: Queue, iid: MergeRequestIid, askFirst?: () => Promise<voi
+   } else if (entry.kind === "loading") {
+     queue.unhovered.delete(iid);
+   } else {
+-    setRow(queue.reloads, iid, { kind: "running" });
++    setRow(queue.reloads, iid, RUNNING);
+   }
+   if (askFirst === undefined) {
+-    sentFirst(queue, iid);
+-    return;
++    sentFirst(queue, [iid]);
++  } else {
++    afterAsk(queue, [iid], askFirst);
++  }
++}
++
++function retried(queue: Queue, iids: readonly MergeRequestIid[]): void {
++  const failed = iids.filter((iid) =>
++    [queue.entries.value.get(iid)?.kind, queue.reloads.value.get(iid)?.kind].some(
++      (kind) => kind === "refused" || kind === "failed",
++    ),
++  );
++  if (failed.length > 0) {
++    marked(queue, failed);
++    sentFirst(queue, failed);
+   }
+-  const { generation } = queue;
+-  void askFirst().then(() => {
+-    if (queue.generation === generation) {
+-      sentFirst(queue, iid);
+-    }
+-  });
+ }
+ 
+ export function discussionsOf(queue: DiscussionQueue): Discussions {
+@@ -262,6 +176,29 @@ function membersOf(queue: Queue): Discussions & Pick<DiscussionQueue, "reloadDis
+   };
+ }
+ 
++function personViewsOf(
++  queue: Queue,
++): Pick<DiscussionQueue, "wantRows" | "retryRows" | "reloadRows" | "viewLeft"> {
++  return {
++    wantRows: (iids) => {
++      queuedLast(queue, iids);
++    },
++    retryRows: (iids) => {
++      retried(queue, iids);
++    },
++    reloadRows: (iids, askFirst) => {
++      const marking = iids.filter((iid) => !isReloading(queue, iid));
++      marked(queue, marking);
++      afterAsk(queue, marking, askFirst);
++    },
++    viewLeft: () => {
++      if (queue.mode() !== "full") {
++        unsentDropped(queue);
++      }
++    },
++  };
++}
++
+ export function createDiscussions(deps: {
+   readonly source: MergeRequestSource;
+   readonly mode: () => DiscussionDetails;
+@@ -292,5 +229,6 @@ export function createDiscussions(deps: {
+       dropped(queue);
+       listed(queue, rows);
+     },
++    ...personViewsOf(queue),
+   };
+ }
+diff --git a/frontend/src/ui/mergeRequestPersonView.test.ts b/frontend/src/ui/mergeRequestPersonView.test.ts
+new file mode 100644
+index 0000000..2d8b98c
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestPersonView.test.ts
+@@ -0,0 +1,605 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { shallowRef, type ShallowRef } from "vue";
++
++import {
++  createFixtureCompareSource,
++  isDiscussionId,
++  isMergeRequestIid,
++  log,
++  type DiscussionDetails,
++  type DiscussionId,
++  type FirstComment,
++  type MergeRequestIid,
++  type MergeRequestSource,
++  type SourceFailure,
++} from "../ipc";
++import { PERSON_GROUPS, type PersonGroup, type Viewer } from "../mergeRequests";
++import type { PersonEntryShown, PersonFailure, PersonViewShown } from "./mergeRequestPersonView";
++import { createMergeRequests, type MergeRequests } from "./mergeRequests";
++import type { Screen } from "./screen";
++
++type Pinned = readonly [iid: number, group: PersonGroup, serial: number];
++
++const NOW = Date.parse("2026-11-04T12:00:00Z");
++const STOPPED: SourceFailure = { kind: "WorkerStopped" };
++const PAUSE_MS = 400;
++const WRITE_MS = 300;
++const CALLS = 3;
++const ANNA: Viewer = { kind: "person", username: "anna", name: "Anna Berg" };
++const P1 = 17;
++const P3 = 19;
++const P6 = 22;
++const ANNA_CASES = 624;
++const FOLD_CASE = 609;
++const FAILING = 615;
++const LOGGED_OUT = 629;
++
++/** The ipc slice's table: p1–p7 are serials 17–23; "reviewer or other" allows both. */
++const OTHER: readonly PersonGroup[] = ["reviewer", "other"];
++const P_CASES: Readonly<
++  Record<number, readonly [me: readonly PersonGroup[], anna: readonly PersonGroup[]]>
++> = {
++  17: [OTHER, ["turn"]],
++  18: [["turn"], ["wrote"]],
++  19: [OTHER, ["started"]],
++  20: [["started"], OTHER],
++  21: [["wrote"], OTHER],
++  22: [OTHER, ["turn"]],
++  23: [OTHER, OTHER],
++};
++
++const MES_ORDER: readonly Pinned[] = [
++  [637, "turn", 1],
++  [637, "turn", 3],
++  [636, "turn", 16],
++  [637, "turn", 4],
++  [637, "turn", 5],
++  [624, "turn", 18],
++  [633, "turn", 63300],
++  [626, "turn", 62601],
++  [626, "turn", 62600],
++  [623, "turn", 62300],
++  [621, "turn", 62100],
++  [618, "turn", 61800],
++  [611, "turn", 61101],
++  [611, "turn", 61100],
++  [606, "turn", 60600],
++  [636, "started", 15],
++  [628, "started", 20],
++  [632, "started", 63200],
++  [627, "started", 62700],
++  [623, "started", 62301],
++  [617, "started", 61700],
++  [612, "started", 61200],
++  [608, "started", 60801],
++  [602, "started", 60200],
++  [636, "wrote", 14],
++  [637, "wrote", 2],
++  [628, "wrote", 21],
++  [638, "reviewer", 63801],
++  [638, "reviewer", 63800],
++  [608, "reviewer", 60800],
++  [603, "reviewer", 60300],
++  [637, "other", 6],
++  [637, "other", 7],
++  [637, "other", 8],
++  [637, "other", 9],
++  [637, "other", 10],
++  [637, "other", 11],
++  [637, "other", 12],
++  [637, "other", 13],
++  [624, "other", 17],
++  [624, "other", 19],
++  [609, "other", 22],
++  [607, "other", 23],
++  [639, "other", 63900],
++  [635, "other", 63501],
++  [635, "other", 63500],
++  [632, "other", 63201],
++  [630, "other", 63000],
++  [620, "other", 62001],
++  [620, "other", 62000],
++  [617, "other", 61701],
++  [614, "other", 61401],
++  [614, "other", 61400],
++  [605, "other", 60501],
++  [605, "other", 60500],
++  [602, "other", 60201],
++];
++
++const ANNAS_ORDER: readonly Pinned[] = [
++  [636, "turn", 14],
++  [637, "turn", 2],
++  [637, "turn", 8],
++  [624, "turn", 17],
++  [609, "turn", 22],
++  [635, "turn", 63501],
++  [635, "turn", 63500],
++  [630, "turn", 63000],
++  [620, "turn", 62001],
++  [620, "turn", 62000],
++  [605, "turn", 60501],
++  [605, "turn", 60500],
++  [602, "turn", 60200],
++  [637, "started", 1],
++  [636, "started", 16],
++  [637, "started", 5],
++  [637, "started", 7],
++  [624, "started", 19],
++  [632, "started", 63201],
++  [626, "started", 62600],
++  [621, "started", 62100],
++  [617, "started", 61701],
++  [611, "started", 61100],
++  [606, "started", 60600],
++  [602, "started", 60201],
++  [637, "wrote", 3],
++  [637, "wrote", 6],
++  [624, "wrote", 18],
++  [632, "reviewer", 63200],
++  [627, "reviewer", 62700],
++  [617, "reviewer", 61700],
++  [612, "reviewer", 61200],
++  [636, "other", 15],
++  [637, "other", 4],
++  [637, "other", 9],
++  [637, "other", 10],
++  [637, "other", 11],
++  [637, "other", 12],
++  [637, "other", 13],
++  [628, "other", 20],
++  [628, "other", 21],
++  [607, "other", 23],
++  [639, "other", 63900],
++  [638, "other", 63801],
++  [638, "other", 63800],
++  [633, "other", 63300],
++  [626, "other", 62601],
++  [623, "other", 62301],
++  [623, "other", 62300],
++  [618, "other", 61800],
++  [614, "other", 61401],
++  [614, "other", 61400],
++  [611, "other", 61101],
++  [608, "other", 60801],
++  [608, "other", 60800],
++  [603, "other", 60300],
++];
++
++let slice: MergeRequests;
++let mode: ShallowRef<DiscussionDetails>;
++let reads: MergeRequestIid[][];
++let asks: number;
++let threadReads: number;
++let writes: number;
++/** While set, every discussions read fails with STOPPED. */
++let failing: boolean;
++let calls: string[];
++
++beforeEach(() => {
++  vi.useFakeTimers();
++  vi.setSystemTime(NOW);
++  vi.spyOn(log, "info").mockImplementation(() => undefined);
++  mode = shallowRef<DiscussionDetails>("lazy");
++  reads = [];
++  asks = 0;
++  threadReads = 0;
++  writes = 0;
++  failing = false;
++  calls = [];
++  const fixture = createFixtureCompareSource(log, "?mr=list", {});
++  const source: MergeRequestSource = {
++    ...fixture,
++    askGitLabAgain: () => {
++      asks += 1;
++      calls.push("ask");
++      return fixture.askGitLabAgain();
++    },
++    readDiscussions: async (iids) => {
++      reads.push([...iids]);
++      calls.push("read");
++      return failing ? { ok: false, failure: STOPPED } : fixture.readDiscussions(iids);
++    },
++    readDiscussionThread: (...args) => {
++      threadReads += 1;
++      return fixture.readDiscussionThread(...args);
++    },
++    replyToDiscussion: (...args) => {
++      writes += 1;
++      return fixture.replyToDiscussion(...args);
++    },
++  };
++  slice = createMergeRequests({
++    source,
++    screen: shallowRef<Screen>({ kind: "mergeRequests" }),
++    report: () => undefined,
++    discussionDetails: () => mode.value,
++  });
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++  vi.restoreAllMocks();
++});
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is not an iid`);
++  }
++  return value;
++}
++
++function d(serial: number): DiscussionId {
++  const id = String(serial).padStart(40, "0");
++  if (!isDiscussionId(id)) {
++    throw new Error(`${id} is not a discussion id`);
++  }
++  return id;
++}
++
++function shown(): PersonViewShown {
++  const view = slice.personView.value;
++  if (view === null) {
++    throw new Error("the person view is closed");
++  }
++  return view;
++}
++
++function pinned(): Pinned[] {
++  return shown().entries.map((each) => [each.row.iid, each.group, Number(each.discussion.id)]);
++}
++
++function indexOf(serial: number): number {
++  return shown().entries.findIndex((each) => each.discussion.id === d(serial));
++}
++
++function entryOf(serial: number): PersonEntryShown {
++  const found = shown().entries.find((each) => each.discussion.id === d(serial));
++  if (found === undefined) {
++    throw new Error(`no entry d${serial}`);
++  }
++  return found;
++}
++
++async function everyRowRead(): Promise<void> {
++  await slice.refresh();
++  slice.openPersonView();
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
++  expect(shown().loading).toBeNull();
++}
++
++async function expanded(row: number, serial: number): Promise<void> {
++  slice.expandEntry(iid(row), d(serial));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++}
++
++function groupsOf(order: readonly Pinned[]): PersonGroup[] {
++  return [...new Set(order.map(([, group]) => group))];
++}
++
++function expectCases(side: 0 | 1): void {
++  for (const [serial, groups] of Object.entries(P_CASES)) {
++    expect(groups[side], `p-case d${serial}`).toContain(entryOf(Number(serial)).group);
++  }
++}
++
++test("over_the_list_fixture_mes_order_is_pinned", async () => {
++  await everyRowRead();
++
++  expect(shown().person).toEqual({ kind: "me", username: "sam" });
++  expect(pinned()).toEqual(MES_ORDER);
++  expect(groupsOf(MES_ORDER)).toEqual(PERSON_GROUPS);
++  expectCases(0);
++});
++
++test("over_the_list_fixture_annas_order_is_pinned", async () => {
++  await everyRowRead();
++  slice.pickPerson(ANNA);
++
++  expect(shown().person).toEqual(ANNA);
++  expect(pinned()).toEqual(ANNAS_ORDER);
++  expect(groupsOf(ANNAS_ORDER)).toEqual(PERSON_GROUPS);
++  expectCases(1);
++  expect(shown().people.find((line) => line.chosen)?.label).toBe("Anna Berg");
++  expect(shown().people[0]?.label).toBe("Me");
++});
++
++test("opening_starts_on_the_viewer_or_review_modes_reviewer", async () => {
++  mode.value = "full";
++  await slice.findProject();
++  await slice.refresh();
++  slice.openPersonView();
++  expect(shown().person).toEqual({ kind: "me", username: "sam" });
++  slice.leavePersonView();
++
++  slice.review({ kind: "person", username: "anna" });
++  slice.openPersonView();
++  expect(shown().person).toEqual(ANNA);
++  expect(shown().people.find((line) => line.chosen)?.label).toBe("Anna Berg");
++});
++
++function lastMovedToNow(row: number, serial: number): void {
++  const entry = entryOf(serial);
++  const { discussion } = entry;
++  slice.threadRead(
++    iid(row),
++    { ...discussion, last: { ...discussion.last, createdAt: NOW } },
++    entry.resolved,
++  );
++}
++
++test("picking_anna_reorders_and_empties_held", async () => {
++  await everyRowRead();
++  await expanded(ANNA_CASES, P1);
++  slice.collapseEntry(d(P1));
++  await expanded(FOLD_CASE, P6);
++
++  slice.pickPerson(ANNA);
++  expect(pinned()).toEqual(ANNAS_ORDER);
++  const kept = indexOf(P6);
++  lastMovedToNow(ANNA_CASES, P1);
++  lastMovedToNow(FOLD_CASE, P6);
++
++  expect(indexOf(P1)).toBe(0);
++  expect(indexOf(P6)).toBe(kept);
++});
++
++test("an_expanded_entry_keeps_its_place_when_its_discussion_changes", async () => {
++  await everyRowRead();
++  const before = indexOf(P1);
++  await expanded(ANNA_CASES, P1);
++  slice.setReplyText(d(P1), "Thanks, merged the test.");
++  const sending = slice.sendReply(d(P1), "comment");
++  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
++  await sending;
++
++  expect(entryOf(P1).group).toBe("wrote");
++  expect(indexOf(P1)).toBe(before);
++  slice.collapseEntry(d(P1));
++  expect(indexOf(P1)).toBe(before);
++
++  const [asksBefore, readsBefore] = [asks, reads.length];
++  slice.refreshPersonView();
++  expect(shown().reloading).toBe(true);
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
++  expect(asks - asksBefore).toBe(1);
++  expect(reads.length).toBeGreaterThan(readsBefore);
++  expect(shown().reloading).toBe(false);
++  expect(indexOf(P1)).toBeLessThan(before);
++  expect(
++    pinned()
++      .filter(([, group]) => group === "wrote")
++      .map(([, , serial]) => serial),
++  ).toContain(P1);
++});
++
++test("the_refresh_keeps_an_expanded_entry_and_reads_its_thread_again", async () => {
++  await everyRowRead();
++  await expanded(ANNA_CASES, P1);
++  const [threadsBefore, place, called] = [threadReads, indexOf(P1), reads.length];
++  const listed = slice.shownRows.value.filter((row) => row.openDiscussions > 0);
++
++  slice.refreshPersonView();
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
++  expect(threadReads - threadsBefore).toBe(1);
++  expect(asks).toBe(2);
++  expect(reads[called]).toEqual(listed.map((row) => row.iid));
++  expect(indexOf(P1)).toBe(place);
++});
++
++test("a_resolved_entry_stays_marked_until_back_and_back_drops_it_and_counts", async () => {
++  await everyRowRead();
++  const [place, total] = [indexOf(P1), shown().counts.total];
++  const count = slice.rows.value.find((row) => row.iid === ANNA_CASES)?.openDiscussions ?? 0;
++  await expanded(ANNA_CASES, P1);
++
++  const resolving = slice.setResolved(d(P1), true);
++  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
++  await resolving;
++  expect(entryOf(P1).resolved).toBe(true);
++  expect(entryOf(P3).resolved).toBe(false);
++  expect(indexOf(P1)).toBe(place);
++  expect(shown().counts.total).toBe(total - 1);
++
++  slice.leavePersonView();
++  expect(slice.rows.value.find((row) => row.iid === ANNA_CASES)?.openDiscussions).toBe(count - 1);
++  slice.openPersonView();
++  expect(indexOf(P1)).toBe(-1);
++  expect(shown().entries).toHaveLength(MES_ORDER.length - 1);
++});
++
++test("the_loading_counts_follow_the_answers", async () => {
++  await slice.refresh();
++  const asked = slice.shownRows.value.filter((row) => row.openDiscussions > 0).length;
++  slice.openPersonView();
++  expect(shown().loading).toEqual({ answered: 0, asked });
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  expect(shown().loading).toEqual({ answered: 10, asked });
++  expect(shown().entries.length).toBeGreaterThan(0);
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  expect(shown().loading).toEqual({ answered: 20, asked });
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  expect(shown().loading).toBeNull();
++  expect(reads.map((call) => call.length)).toEqual([asked, asked - 10, asked - 20]);
++});
++
++test("a_failed_row_is_listed_with_its_failure", async () => {
++  await everyRowRead();
++  const failures: readonly PersonFailure[] = shown().failures;
++  const reasons = failures.map(({ row, failure }) => [
++    row.iid,
++    failure.kind === "refused" ? failure.answer.kind : failure.cause.kind,
++  ]);
++  expect(reasons).toEqual([
++    [LOGGED_OUT, "notLoggedIn"],
++    [FAILING, "failed"],
++  ]);
++  const [entries, counts] = [shown().entries.length, shown().counts];
++
++  slice.retryRow(iid(FAILING));
++  expect(reads.at(-1)).toEqual([FAILING]);
++  expect(shown().failures.map(({ row }) => row.iid)).toEqual([LOGGED_OUT]);
++  expect(shown().loading).toEqual({ answered: expect.any(Number), asked: expect.any(Number) });
++  expect([shown().entries.length, shown().counts]).toEqual([entries, counts]);
++});
++
++test("back_collapses_every_entry_and_keeps_their_texts", async () => {
++  await everyRowRead();
++  await expanded(ANNA_CASES, P1);
++  await expanded(ANNA_CASES, P3);
++  slice.setReplyText(d(P1), "one");
++  slice.setReplyText(d(P3), "three");
++
++  slice.leavePersonView();
++  expect(slice.personView.value).toBeNull();
++  expect(slice.expanded.value.size).toBe(0);
++  expect(slice.threads.value.size).toBe(0);
++  slice.openPersonView();
++  await expanded(ANNA_CASES, P1);
++  expect([...slice.expanded.value]).toEqual([d(P1)]);
++  expect(slice.replyTexts.value.get(d(P1))).toBe("one");
++  expect(slice.replyTexts.value.get(d(P3))).toBe("three");
++});
++
++test("two_entries_expand_and_one_write_runs_at_a_time", async () => {
++  await everyRowRead();
++  await expanded(ANNA_CASES, P1);
++  slice.expandEntry(iid(ANNA_CASES), d(P1));
++  await expanded(ANNA_CASES, P3);
++  expect([...slice.threads.value.keys()]).toEqual([d(P1), d(P3)]);
++  expect(threadReads).toBe(2);
++  slice.setReplyText(d(P1), "one");
++  slice.setReplyText(d(P3), "three");
++
++  const first = slice.sendReply(d(P1), "comment");
++  expect(slice.writing.value).toBe("comment");
++  await slice.sendReply(d(P3), "comment");
++  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
++  await first;
++  expect(writes).toBe(1);
++  expect(slice.replyTexts.value.get(d(P3))).toBe("three");
++});
++
++test("the_view_asks_again_after_a_switch_to_off_and_keeps_its_reads_after_back", async () => {
++  await everyRowRead();
++  mode.value = "off";
++  await vi.advanceTimersByTimeAsync(0);
++  expect(shown().loading).toEqual({ answered: 0, asked: expect.any(Number) });
++  expect(shown().entries).toEqual([]);
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
++  expect(pinned()).toEqual(MES_ORDER);
++
++  slice.leavePersonView();
++  const called = reads.length;
++  slice.openPersonView();
++  expect(shown().loading).toBeNull();
++  expect(pinned()).toEqual(MES_ORDER);
++  slice.leavePersonView();
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
++  expect(reads).toHaveLength(called);
++});
++
++test("a_first_comment_reaches_the_entry", async () => {
++  await everyRowRead();
++  const first: FirstComment = entryOf(P1).discussion.first;
++  expect(first.body.blocks.length).toBeGreaterThan(1);
++});
++
++test("a_list_refresh_lets_a_collapsed_entry_take_its_new_place", async () => {
++  await everyRowRead();
++  const before = indexOf(P1);
++  await expanded(ANNA_CASES, P1);
++  slice.setReplyText(d(P1), "Thanks, merged the test.");
++  const sending = slice.sendReply(d(P1), "comment");
++  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
++  await sending;
++  slice.collapseEntry(d(P1));
++  expect(indexOf(P1)).toBe(before);
++
++  await slice.refresh();
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
++  expect(entryOf(P1).group).toBe("wrote");
++  expect(indexOf(P1)).toBeLessThan(before);
++});
++
++test("a_failed_reload_is_listed_and_a_running_one_is_not", async () => {
++  await everyRowRead();
++  const listed = slice.shownRows.value.filter((row) => row.openDiscussions > 0);
++  const entries = shown().entries;
++  failing = true;
++  slice.refreshPersonView();
++  expect(shown().failures).toEqual([]);
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++
++  const failures: readonly PersonFailure[] = shown().failures;
++  expect(failures.map(({ row }) => row.iid)).toEqual(listed.map((row) => row.iid));
++  expect(failures.every(({ failure }) => failure.kind === "failed")).toBe(true);
++  expect(shown().entries).toEqual(entries);
++
++  failing = false;
++  slice.retryRow(iid(ANNA_CASES));
++  expect(shown().failures.map(({ row }) => row.iid)).not.toContain(ANNA_CASES);
++  expect(shown().reloading).toBe(true);
++});
++
++test("the_counts_sum_each_rows_unresolved_discussions_for_the_person", async () => {
++  await everyRowRead();
++  const turns = MES_ORDER.filter(([, group]) => group === "turn").length;
++  expect(shown().counts).toEqual({ viewersTurn: turns, viewerWrote: 16, total: MES_ORDER.length });
++  slice.pickPerson(ANNA);
++  const annas = ANNAS_ORDER.filter(([, group]) => group === "turn").length;
++  expect(shown().counts).toEqual({
++    viewersTurn: annas,
++    viewerWrote: 20,
++    total: ANNAS_ORDER.length,
++  });
++});
++
++test("the_people_include_every_writer_of_a_read_discussion", async () => {
++  await everyRowRead();
++  const zoe = { username: "zoe", name: "Zoe Quinn", picture: null };
++  const { discussion } = entryOf(P1);
++  slice.threadRead(
++    iid(ANNA_CASES),
++    { ...discussion, last: { ...discussion.last, author: zoe } },
++    false,
++  );
++  expect(shown().people.map((line) => line.label)).toContain("Zoe Quinn");
++});
++
++test("a_closed_view_neither_refreshes_nor_expands", async () => {
++  await slice.refresh();
++  slice.refreshPersonView();
++  slice.expandEntry(iid(ANNA_CASES), d(P1));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
++  expect([asks, reads.length, threadReads]).toEqual([1, 0, 0]);
++  expect(slice.expanded.value.size).toBe(0);
++});
++
++test("a_refresh_at_opening_asks_gitlab_before_reading_any_row", async () => {
++  await slice.refresh();
++  calls = [];
++  slice.openPersonView();
++  slice.refreshPersonView();
++  const listed = slice.shownRows.value.filter((row) => row.openDiscussions > 0);
++  expect([...slice.discussions.value.keys()]).toEqual(listed.map((row) => row.iid));
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
++  expect(calls.slice(0, 2)).toEqual(["ask", "read"]);
++  expect(shown().loading).toBeNull();
++});
++
++test("a_refresh_reloads_a_row_whose_every_discussion_was_resolved_here", async () => {
++  await everyRowRead();
++  await expanded(FOLD_CASE, P6);
++  const resolving = slice.setResolved(d(P6), true);
++  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
++  await resolving;
++  slice.leavePersonView();
++  expect(slice.rows.value.find((row) => row.iid === FOLD_CASE)?.openDiscussions).toBe(0);
++
++  slice.openPersonView();
++  const called = reads.length;
++  slice.refreshPersonView();
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
++  expect(reads[called]).toContain(FOLD_CASE);
++});
+diff --git a/frontend/src/ui/mergeRequestPersonView.ts b/frontend/src/ui/mergeRequestPersonView.ts
+new file mode 100644
+index 0000000..3398280
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestPersonView.ts
+@@ -0,0 +1,295 @@
++import { computed, shallowRef, watch, type ComputedRef, type Ref, type ShallowRef } from "vue";
++
++import type {
++  DiscussionId,
++  MergeRequestIid,
++  MergeRequestRow,
++  MergeRequestSource,
++  OpenDiscussion,
++  Person,
++} from "../ipc";
++import {
++  keptInPlace,
++  personEntries,
++  personLines,
++  turnCounts,
++  type PersonEntry,
++  type PersonLine,
++  type TurnCounts,
++  type Viewer,
++} from "../mergeRequests";
++import { unmarkedOf } from "./mergeRequestDiscussionRows";
++import type {
++  DiscussionFailure,
++  DiscussionLoad,
++  DiscussionQueue,
++  Reload,
++} from "./mergeRequestDiscussions";
++import { askAgain } from "./mergeRequestsRefresh";
++import type { Threads } from "./mergeRequestThread";
++
++export type PersonEntryShown = PersonEntry<OpenDiscussion, MergeRequestRow> & {
++  /** Resolved from the view (the entry's mark, C3): shown "Resolved" until Back or a reload. */
++  readonly resolved: boolean;
++};
++export type PersonFailure = { readonly row: MergeRequestRow; readonly failure: DiscussionFailure };
++export type PersonViewShown = {
++  readonly person: Viewer;
++  readonly entries: readonly PersonEntryShown[];
++  /** F1 over the shown rows with `openDiscussions > 0`; null once every one has an answered entry. */
++  readonly loading: { readonly answered: number; readonly asked: number } | null;
++  /** F2: each shown row whose entry is refused/failed, or whose reload failed, in the list's order. */
++  readonly failures: readonly PersonFailure[];
++  /** B2: personLines over the shown rows and every writer of their read discussions. */
++  readonly people: readonly PersonLine<Person>[];
++  /** For turnSummaryText: turnCounts of each row's unresolved discussions for the person, summed. */
++  readonly counts: TurnCounts;
++  /** A reload of a shown row is running (the header's icon spins). */
++  readonly reloading: boolean;
++};
++export type PersonView = {
++  /** null: the page shows its row list. */
++  readonly personView: ComputedRef<PersonViewShown | null>;
++  /** A1, B1: the person is the slice's `viewer` (Me, or review mode's reviewer); held empty. */
++  openPersonView(): void;
++  /** A1 Back: every expanded entry collapses, `boxClosed(iid)` for each row with resolved marks, `viewLeft()`, null. */
++  leavePersonView(): void;
++  /** B2: re-sorts everything (held becomes the expanded entries; the previous order is not kept). */
++  pickPerson(person: Viewer): void;
++  /** E1, E2: `expandThread` + held; already expanded: nothing. */
++  expandEntry(iid: MergeRequestIid, discussion: DiscussionId): void;
++  /** E2: `collapseThread`; the entry stays held. */
++  collapseEntry(discussion: DiscussionId): void;
++  /** F2. */
++  retryRow(iid: MergeRequestIid): void;
++  /** C4: one askGitLabAgain, `reloadRows` of every shown row with a count or an entry, then `threadsRefreshed(null)`;
++   *  held becomes the expanded entries once the reloads are queued. */
++  refreshPersonView(): void;
++};
++
++type Deps = {
++  readonly source: MergeRequestSource;
++  readonly me: Readonly<Ref<string | null>>;
++  readonly viewer: Readonly<Ref<Viewer>>;
++  readonly shownRows: Readonly<Ref<readonly MergeRequestRow[]>>;
++  readonly queue: Pick<
++    DiscussionQueue,
++    "discussions" | "reloads" | "wantRows" | "retryRows" | "reloadRows" | "viewLeft" | "boxClosed"
++  >;
++  readonly threads: Pick<Threads, "expanded" | "expandThread" | "collapseThread">;
++  readonly threadsRefreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void;
++};
++
++/** C3: the entries expanded since `order` was raised (opening, a pick, a refresh) keep their places under it. */
++type Open = {
++  readonly person: Viewer;
++  readonly held: ReadonlySet<DiscussionId>;
++  readonly order: number;
++};
++/** The entries in their shown order, made under `open`. */
++type Ordered = { readonly entries: readonly PersonEntryShown[]; readonly open: Open };
++type Read = { readonly row: MergeRequestRow; readonly entry: ReadLoad };
++type ReadLoad = Extract<DiscussionLoad, { kind: "read" }>;
++type View = { readonly state: ShallowRef<Open | null>; readonly reordered: () => number };
++
++function readRows(deps: Deps): readonly Read[] {
++  const loads = deps.queue.discussions.value;
++  return deps.shownRows.value.flatMap((row) => {
++    const entry = loads.get(row.iid);
++    return entry?.kind === "read" ? [{ row, entry }] : [];
++  });
++}
++
++function entriesOf(read: readonly Read[], person: Viewer): readonly PersonEntryShown[] {
++  const resolved = new Set(read.flatMap(({ entry }) => [...entry.resolved]));
++  const listed = read.map(({ row, entry }) => ({ row, discussions: entry.discussions }));
++  return personEntries(listed, person.username).map((shown) => ({
++    ...shown,
++    resolved: resolved.has(shown.discussion.id),
++  }));
++}
++
++function loadingOf(deps: Deps): PersonViewShown["loading"] {
++  const loads = deps.queue.discussions.value;
++  const asked = deps.shownRows.value.filter((row) => row.openDiscussions > 0);
++  const answered = asked.filter((row) => {
++    const kind = loads.get(row.iid)?.kind;
++    return kind !== undefined && kind !== "loading";
++  }).length;
++  return answered === asked.length ? null : { answered, asked: asked.length };
++}
++
++function failureOf(
++  entry: DiscussionLoad | undefined,
++  reload: Reload | undefined,
++): DiscussionFailure | null {
++  if (entry?.kind === "refused" || entry?.kind === "failed") {
++    return entry;
++  }
++  return reload === undefined || reload.kind === "running" ? null : reload;
++}
++
++function failuresOf(deps: Deps): readonly PersonFailure[] {
++  const loads = deps.queue.discussions.value;
++  const reloads = deps.queue.reloads.value;
++  return deps.shownRows.value.flatMap((row) => {
++    const failure = failureOf(loads.get(row.iid), reloads.get(row.iid));
++    return failure === null ? [] : [{ row, failure }];
++  });
++}
++
++function countsOf(read: readonly Read[], person: Viewer): TurnCounts {
++  const each = read.map(({ row, entry }) =>
++    turnCounts(unmarkedOf(entry), person.username, row.author?.username ?? null),
++  );
++  function sum(key: keyof TurnCounts): number {
++    return each.reduce((total, counts) => total + counts[key], 0);
++  }
++  return { viewersTurn: sum("viewersTurn"), viewerWrote: sum("viewerWrote"), total: sum("total") };
++}
++
++function shownOf(deps: Deps, { open, entries }: Ordered): PersonViewShown {
++  const read = readRows(deps);
++  const writers = read.flatMap(({ entry }) =>
++    entry.discussions.flatMap((discussion) =>
++      [...discussion.earlier, discussion.last].map((comment) => comment.author),
++    ),
++  );
++  const reloads = deps.queue.reloads.value;
++  return {
++    person: open.person,
++    entries,
++    loading: loadingOf(deps),
++    failures: failuresOf(deps),
++    people: personLines(deps.shownRows.value, writers, deps.me.value, open.person),
++    counts: countsOf(read, open.person),
++    reloading: deps.shownRows.value.some((row) => reloads.get(row.iid)?.kind === "running"),
++  };
++}
++
++function orderedOf(deps: Deps, state: ShallowRef<Open | null>): ComputedRef<Ordered | null> {
++  return computed((previous?: Ordered | null): Ordered | null => {
++    const open = state.value;
++    if (open === null) {
++      return null;
++    }
++    const next = entriesOf(readRows(deps), open.person);
++    const entries =
++      previous?.open.order === open.order
++        ? keptInPlace(previous.entries, next, open.held, (shown) => shown.discussion.id)
++        : next;
++    return { entries, open };
++  });
++}
++
++/** F1, RK61: while the view is open, every shown row with open discussions and no entry is wanted. */
++function demand(deps: Deps, state: ShallowRef<Open | null>): void {
++  watch([state, deps.shownRows, deps.queue.discussions], () => {
++    if (state.value === null) {
++      return;
++    }
++    const loads = deps.queue.discussions.value;
++    const missing = deps.shownRows.value
++      .filter((row) => row.openDiscussions > 0 && !loads.has(row.iid))
++      .map((row) => row.iid);
++    deps.queue.wantRows(missing);
++  });
++}
++
++/** The view re-sorted: held becomes the expanded entries. */
++function resorted(deps: Deps, view: View, person?: Viewer): void {
++  const open = view.state.value;
++  if (open !== null) {
++    view.state.value = {
++      person: person ?? open.person,
++      held: new Set(deps.threads.expanded.value),
++      order: view.reordered(),
++    };
++  }
++}
++
++function leave(deps: Deps, state: ShallowRef<Open | null>): void {
++  if (state.value === null) {
++    return;
++  }
++  for (const discussion of deps.threads.expanded.value) {
++    deps.threads.collapseThread(discussion);
++  }
++  for (const iid of deps.queue.discussions.value.keys()) {
++    deps.queue.boxClosed(iid);
++  }
++  deps.queue.viewLeft();
++  state.value = null;
++}
++
++function refresh(deps: Deps, view: View): void {
++  if (view.state.value === null) {
++    return;
++  }
++  const loads = deps.queue.discussions.value;
++  const iids = deps.shownRows.value
++    .filter((row) => row.openDiscussions > 0 || loads.has(row.iid))
++    .map((row) => row.iid);
++  const asked = askAgain(deps.source);
++  deps.queue.reloadRows(iids, () => asked);
++  deps.threadsRefreshed(null, asked);
++  resorted(deps, view);
++}
++
++function actionsOf(deps: Deps, view: View): Omit<PersonView, "personView"> {
++  const { state } = view;
++  return {
++    openPersonView: () => {
++      state.value = { person: deps.viewer.value, held: new Set(), order: view.reordered() };
++    },
++    leavePersonView: () => {
++      leave(deps, state);
++    },
++    pickPerson: (person) => {
++      resorted(deps, view, person);
++    },
++    expandEntry: (iid, discussion) => {
++      const open = state.value;
++      if (open !== null) {
++        deps.threads.expandThread(iid, discussion);
++        state.value = { ...open, held: new Set(open.held).add(discussion) };
++      }
++    },
++    collapseEntry: (discussion) => {
++      deps.threads.collapseThread(discussion);
++    },
++    retryRow: (iid) => {
++      deps.queue.retryRows([iid]);
++    },
++    refreshPersonView: () => {
++      refresh(deps, view);
++    },
++  };
++}
++
++export function createPersonView(deps: Deps): PersonView & {
++  /** The list was refreshed (rows replaced): held becomes the expanded entries. */
++  readonly rowsReplaced: () => void;
++} {
++  const state = shallowRef<Open | null>(null);
++  let orders = 0;
++  const view: View = {
++    state,
++    reordered: () => {
++      orders += 1;
++      return orders;
++    },
++  };
++  const ordered = orderedOf(deps, state);
++  demand(deps, state);
++  return {
++    personView: computed(() => {
++      const shown = ordered.value;
++      return shown === null ? null : shownOf(deps, shown);
++    }),
++    ...actionsOf(deps, view),
++    rowsReplaced: () => {
++      resorted(deps, view);
++    },
++  };
++}
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index 715eec5..b51d849 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -1863,3 +1863,90 @@ test("review_mode_comes_back_on_a_new_slice_over_the_same_storage", async () =>
+   });
+   expect(reopened.slice.reviewSort.value?.kind).toBe("sorted");
+ });
++
++async function viewRead(live: Rig): Promise<readonly MergeRequestIid[]> {
++  live.mode.value = "lazy";
++  await loaded(live);
++  live.slice.openPersonView();
++  await nextTick();
++  const asked = ROWS.filter((row) => row.openDiscussions > 0).map((row) => row.iid);
++  expect(live.discussionCalls.map((call) => call.iids)).toEqual([asked]);
++  answerFirstCall(live, () => ({ kind: "open", discussions: [lastBy(ANNA_PERSON)] }));
++  await settled();
++  expect(live.slice.personView.value?.loading).toBeNull();
++  return asked;
++}
++
++const ANNA_PERSON: Person = { username: "anna", name: "Anna Berg", picture: null };
++
++test("closing_the_page_leaves_the_view", async () => {
++  const live = rig();
++  const [first] = await viewRead(live);
++  const { id } = lastBy(ANNA_PERSON);
++  live.slice.expandEntry(first ?? iid(0), id);
++  expect(live.slice.expanded.value.size).toBe(1);
++
++  live.slice.close();
++  expect(live.screen.value).toEqual({ kind: "files" });
++  expect(live.slice.personView.value).toBeNull();
++  expect(live.slice.expanded.value.size).toBe(0);
++  live.slice.show();
++  expect(live.slice.personView.value).toBeNull();
++});
++
++test("a_list_refresh_keeps_the_view_open_and_loads_again", async () => {
++  const live = rig();
++  const asked = await viewRead(live);
++
++  const reloading = live.slice.refresh();
++  await settled();
++  loadAt(live, 1).send({ me: "sam", rows: ROWS });
++  loadAt(live, 1).end(LOADED);
++  await reloading;
++  await nextTick();
++  expect(live.slice.personView.value?.loading).toEqual({ answered: 0, asked: asked.length });
++  expect(live.discussionCalls.map((call) => call.iids)).toEqual([asked, asked]);
++});
++
++test("leaving_the_view_under_lazy_sends_no_ask_it_queued_and_closing_without_it_keeps_the_lists", async () => {
++  const live = rig();
++  live.mode.value = "lazy";
++  await loaded(live);
++  live.slice.askDiscussions(iid(639));
++  live.slice.askDiscussions(iid(638));
++  live.slice.close();
++  expect(live.slice.discussions.value.get(iid(638))).toEqual({ kind: "loading" });
++
++  live.slice.show();
++  live.slice.openPersonView();
++  await nextTick();
++  live.slice.expandEntry(iid(640), lastBy(ANNA_PERSON).id);
++  live.slice.leavePersonView();
++  expect(live.slice.expanded.value.size).toBe(0);
++  live.slice.expandEntry(iid(640), lastBy(ANNA_PERSON).id);
++  expect(live.slice.expanded.value.size).toBe(0);
++  expect(live.slice.discussions.value.get(iid(638))).toBeUndefined();
++  expect([...live.slice.discussions.value.keys()]).toEqual([639]);
++  answerFirstCall(live, () => ({ kind: "open", discussions: [] }));
++  await settled();
++  expect(live.discussionCalls).toHaveLength(1);
++});
++
++test("a_row_without_an_author_counts_in_the_view", async () => {
++  const live = rig();
++  live.mode.value = "lazy";
++  await loaded(
++    live,
++    ROWS.map((row) => ({ ...row, author: null })),
++  );
++  live.slice.openPersonView();
++  await nextTick();
++  answerFirstCall(live, () => ({ kind: "open", discussions: [lastBy(ANNA_PERSON)] }));
++  await settled();
++  const asked = ROWS.filter((row) => row.openDiscussions > 0).length;
++  expect(live.slice.personView.value?.counts).toEqual({
++    viewersTurn: 0,
++    viewerWrote: 0,
++    total: asked,
++  });
++});
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index bf8ad8a..f1ba93f 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -7,12 +7,10 @@ import type {
+   MergeRequestIid,
+   MergeRequestRow,
+   MergeRequestSource,
+-  OpenReply,
+-  WebPage,
+ } from "../ipc";
+ import type { CalendarDay } from "../mergeRequests";
+ import { RECHECK_PAUSE_MS } from "./glab";
+-import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
++import { createRowActions, type RowActions } from "./mergeRequestActions";
+ import { createDescriptions, type Descriptions } from "./mergeRequestDescriptions";
+ import {
+   createDiscussions,
+@@ -29,13 +27,15 @@ import {
+   type PeopleChanges,
+   type PeopleSearcher,
+ } from "./mergeRequestPeople";
++import { createPersonView, type PersonView } from "./mergeRequestPersonView";
+ import { createRerequests, type Rerequests } from "./mergeRequestRerequests";
+ import { loadList, type ListLoad, type ListState } from "./mergeRequestsList";
++import { pagesOf, type Opening, type Pages } from "./mergeRequestsPages";
+ import { createRefreshes, type Refreshes } from "./mergeRequestsRefresh";
+ import { shownOf, type Shown } from "./mergeRequestsShown";
+-import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
++import { listFailureText } from "./mergeRequestsText";
+ import { createThreads, type Threads } from "./mergeRequestThread";
+-import { attempt, type Problem } from "./problem";
++import type { Problem } from "./problem";
+ import type { Screen } from "./screen";
+ 
+ export type {
+@@ -48,9 +48,7 @@ export { rowPeopleAsks } from "./mergeRequestPeople";
+ export type { RerequestAsk } from "./mergeRequestRerequests";
+ export type { ListLoad } from "./mergeRequestsList";
+ 
+-export type Opening =
+-  | { readonly kind: "fetching" }
+-  | { readonly kind: "refused"; readonly reply: Exclude<OpenReply, { readonly kind: "opened" }> };
++export type { Opening } from "./mergeRequestsPages";
+ 
+ export type MergeRequests = RowActions &
+   Rerequests &
+@@ -61,6 +59,8 @@ export type MergeRequests = RowActions &
+   Links &
+   Shown &
+   Refreshes &
++  PersonView &
++  Pages &
+   PeopleChanges & {
+     /** The mention list's own search (request rule 6): a second instance, never the people box's. */
+     readonly mentionSearch: PeopleSearcher;
+@@ -73,15 +73,10 @@ export type MergeRequests = RowActions &
+     readonly search: Readonly<ShallowRef<string>>;
+     readonly dueDates: ComputedRef<ReadonlyMap<MergeRequestIid, CalendarDay>>;
+     readonly openings: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>>;
+-    readonly pageProblem: Readonly<ShallowRef<string | null>>;
+-    findProject(): Promise<void>;
+     show(): void;
+     close(): void;
+     setSearch(text: string): void;
+     setDueDate(iid: MergeRequestIid, day: CalendarDay | null): void;
+-    openChanges(iid: MergeRequestIid): Promise<void>;
+-    openPage(clicked: PageKind, page: WebPage): Promise<void>;
+-    dismissPageProblem(): void;
+   };
+ 
+ type Deps = {
+@@ -149,38 +144,6 @@ function show(state: State): void {
+   }
+ }
+ 
+-async function findProject(state: State): Promise<void> {
+-  const outcome = await attempt(() => state.source.findGitLabProject());
+-  if (outcome.ok) {
+-    state.project.value = outcome.value;
+-  } else {
+-    state.report({ action: "mergeRequests", step: "find", cause: outcome.cause });
+-  }
+-}
+-
+-async function openChanges(state: State, iid: MergeRequestIid): Promise<void> {
+-  if (!claimRow(state.openings, iid, { kind: "fetching" })) {
+-    return;
+-  }
+-  const outcome = await attempt(() => state.source.openMergeRequest(iid));
+-  if (!outcome.ok) {
+-    setRow(state.openings, iid, null);
+-    state.report({ action: "mergeRequests", step: "open", cause: outcome.cause });
+-    return;
+-  }
+-  const reply = outcome.value;
+-  setRow(state.openings, iid, reply.kind === "opened" ? null : { kind: "refused", reply });
+-}
+-
+-async function openPage(state: State, clicked: PageKind, page: WebPage): Promise<void> {
+-  const outcome = await attempt(() => state.source.openPage(page));
+-  if (!outcome.ok) {
+-    state.report({ action: "mergeRequests", step: clicked, cause: outcome.cause });
+-    return;
+-  }
+-  state.pageProblem.value = pageProblemText(outcome.value, clicked);
+-}
+-
+ function discussingOf(
+   deps: Deps,
+   rows: () => readonly MergeRequestRow[],
+@@ -192,20 +155,12 @@ function discussingOf(
+   return { discussionQueue, threads, threadsRefreshed: refreshed };
+ }
+ 
+-function createState(deps: Deps): State {
++function createState(deps: Deps, viewReplaced: () => void): State {
+   const project = shallowRef<GitLabProject>({ kind: "none" });
+   const repository = computed(() =>
+     project.value.kind === "found" ? project.value.repository : null,
+   );
+   const rows = shallowRef<readonly MergeRequestRow[]>([]);
+-  const discussing = discussingOf(
+-    deps,
+-    () => rows.value,
+-    (iid, openDiscussions) => {
+-      withRow(state, iid, { openDiscussions });
+-    },
+-  );
+-  const linkQueue = createLinks(deps);
+   const state: State = {
+     ...deps,
+     project,
+@@ -220,12 +175,19 @@ function createState(deps: Deps): State {
+     pageProblem: shallowRef<string | null>(null),
+     dueDates: createDueDates(repository, deps.storage),
+     rowActions: createRowActions(deps),
+-    ...discussing,
+-    linkQueue,
++    ...discussingOf(
++      deps,
++      () => rows.value,
++      (iid, openDiscussions) => {
++        withRow(state, iid, { openDiscussions });
++      },
++    ),
++    linkQueue: createLinks(deps),
+     rowsReplaced: (replaced) => {
+-      discussing.discussionQueue.replaced(replaced);
+-      linkQueue.dropped();
+-      discussing.threadsRefreshed(null);
++      state.discussionQueue.replaced(replaced);
++      state.linkQueue.dropped();
++      state.threadsRefreshed(null);
++      viewReplaced();
+     },
+     shown: null,
+     running: null,
+@@ -242,22 +204,34 @@ function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setD
+   };
+ }
+ 
+-function pageOpenerOf(
++/** The list's shown rows and the person view over them; `rowsReplaced` is the view's. */
++function shownAndViewOf(
+   state: State,
+-): Pick<MergeRequests, "pageProblem" | "openPage" | "dismissPageProblem"> {
++  people: PeopleChanges,
++): Shown & PersonView & { readonly rowsReplaced: () => void } {
++  const shown = shownOf({ ...state, openPeopleBoxes: people.openPeopleBoxes }, state.storage);
++  return { ...shown, ...createPersonView({ ...state, ...shown, queue: state.discussionQueue }) };
++}
++
++function screensOf(state: State, view: PersonView): Pick<MergeRequests, "show" | "close"> {
+   return {
+-    pageProblem: state.pageProblem,
+-    openPage: (clicked, page) => openPage(state, clicked, page),
+-    dismissPageProblem: () => {
+-      state.pageProblem.value = null;
++    show: () => {
++      show(state);
++    },
++    close: () => {
++      view.leavePersonView();
++      state.screen.value = { kind: "files" };
+     },
+   };
+ }
+ 
+ export function createMergeRequests(deps: Deps): MergeRequests {
+-  const state = createState(deps);
++  const state = createState(deps, () => {
++    replaced();
++  });
+   const { me, rows, search } = state;
+   const people = peopleOf(state);
++  const { rowsReplaced: replaced, ...shown } = shownAndViewOf(state, people);
+   return {
+     project: state.project,
+     me,
+@@ -267,23 +241,16 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     failure: computed(() =>
+       state.listing.value.kind === "done" ? listFailureText(state.listing.value.end) : null,
+     ),
+-    ...shownOf({ ...state, openPeopleBoxes: people.openPeopleBoxes }, deps.storage),
++    ...shown,
+     search,
+     setSearch: (text) => {
+       search.value = text;
+     },
+     ...dueDatesOf(state),
+     openings: state.openings,
+-    ...pageOpenerOf(state),
+-    findProject: () => findProject(state),
+-    show: () => {
+-      show(state);
+-    },
+-    close: () => {
+-      state.screen.value = { kind: "files" };
+-    },
++    ...pagesOf(state),
++    ...screensOf(state, shown),
+     ...createRefreshes(state),
+-    openChanges: (iid) => openChanges(state, iid),
+     ...state.rowActions,
+     ...people,
+     mentionSearch: createPeopleSearch(deps.source),
+diff --git a/frontend/src/ui/mergeRequestsPages.ts b/frontend/src/ui/mergeRequestsPages.ts
+new file mode 100644
+index 0000000..a39b4f7
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestsPages.ts
+@@ -0,0 +1,76 @@
++import type { ShallowRef } from "vue";
++
++import type {
++  GitLabProject,
++  MergeRequestIid,
++  MergeRequestSource,
++  OpenReply,
++  WebPage,
++} from "../ipc";
++import { claimRow, setRow } from "./mergeRequestActions";
++import { pageProblemText, type PageKind } from "./mergeRequestsText";
++import { attempt, type Problem } from "./problem";
++
++export type Opening =
++  | { readonly kind: "fetching" }
++  | { readonly kind: "refused"; readonly reply: Exclude<OpenReply, { readonly kind: "opened" }> };
++
++export type Pages = {
++  readonly pageProblem: Readonly<ShallowRef<string | null>>;
++  findProject(): Promise<void>;
++  openChanges(iid: MergeRequestIid): Promise<void>;
++  openPage(clicked: PageKind, page: WebPage): Promise<void>;
++  dismissPageProblem(): void;
++};
++
++type State = {
++  readonly source: MergeRequestSource;
++  readonly report: (problem: Problem) => void;
++  readonly project: ShallowRef<GitLabProject>;
++  readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
++  readonly pageProblem: ShallowRef<string | null>;
++};
++
++async function findProject(state: State): Promise<void> {
++  const outcome = await attempt(() => state.source.findGitLabProject());
++  if (outcome.ok) {
++    state.project.value = outcome.value;
++  } else {
++    state.report({ action: "mergeRequests", step: "find", cause: outcome.cause });
++  }
++}
++
++async function openChanges(state: State, iid: MergeRequestIid): Promise<void> {
++  if (!claimRow(state.openings, iid, { kind: "fetching" })) {
++    return;
++  }
++  const outcome = await attempt(() => state.source.openMergeRequest(iid));
++  if (!outcome.ok) {
++    setRow(state.openings, iid, null);
++    state.report({ action: "mergeRequests", step: "open", cause: outcome.cause });
++    return;
++  }
++  const reply = outcome.value;
++  setRow(state.openings, iid, reply.kind === "opened" ? null : { kind: "refused", reply });
++}
++
++async function openPage(state: State, clicked: PageKind, page: WebPage): Promise<void> {
++  const outcome = await attempt(() => state.source.openPage(page));
++  if (!outcome.ok) {
++    state.report({ action: "mergeRequests", step: clicked, cause: outcome.cause });
++    return;
++  }
++  state.pageProblem.value = pageProblemText(outcome.value, clicked);
++}
++
++export function pagesOf(state: State): Pages {
++  return {
++    pageProblem: state.pageProblem,
++    findProject: () => findProject(state),
++    openChanges: (iid) => openChanges(state, iid),
++    openPage: (clicked, page) => openPage(state, clicked, page),
++    dismissPageProblem: () => {
++      state.pageProblem.value = null;
++    },
++  };
++}
+diff --git a/frontend/src/ui/mergeRequestsRefresh.ts b/frontend/src/ui/mergeRequestsRefresh.ts
+index d4c8f11..9b85d28 100644
+--- a/frontend/src/ui/mergeRequestsRefresh.ts
++++ b/frontend/src/ui/mergeRequestsRefresh.ts
+@@ -17,7 +17,7 @@ export function isBeingRead(load: ThreadLoad): boolean {
+   return load.kind === "loading" || (load.kind === "read" && load.refreshing);
+ }
+ 
+-async function askAgain(source: MergeRequestSource): Promise<void> {
++export async function askAgain(source: MergeRequestSource): Promise<void> {
+   const outcome = await attempt(() => source.askGitLabAgain());
+   if (!outcome.ok) {
+     log.info("mergeRequests.ask_again_failed", { kind: outcome.cause.kind });
+diff --git a/frontend/src/ui/mergeRequestsShown.ts b/frontend/src/ui/mergeRequestsShown.ts
+index a6a37d0..7a39478 100644
+--- a/frontend/src/ui/mergeRequestsShown.ts
++++ b/frontend/src/ui/mergeRequestsShown.ts
+@@ -4,6 +4,7 @@ import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } fro
+ import type { DiscussionDetails, MergeRequestIid, MergeRequestRow } from "../ipc";
+ import {
+   filtered,
++  keptInPlace,
+   reviewOrdered,
+   searched,
+   summaryText,
+@@ -95,25 +96,6 @@ function heldOf(
+   return held;
+ }
+ 
+-/** A held row stays at its index in the order shown before; the other rows fill the rest in `next`'s order. */
+-function keptInPlace(
+-  previous: readonly MergeRequestRow[],
+-  next: readonly MergeRequestRow[],
+-  held: ReadonlySet<MergeRequestIid>,
+-): readonly MergeRequestRow[] {
+-  const nextOf = new Map(next.map((row) => [row.iid, row]));
+-  const kept = previous.flatMap((row, at) => {
+-    const now = held.has(row.iid) ? nextOf.get(row.iid) : undefined;
+-    return now === undefined ? [] : [{ row: now, at }];
+-  });
+-  const keptRows = new Set(kept.map(({ row }) => row));
+-  const order = next.filter((row) => !keptRows.has(row));
+-  for (const { row, at } of kept) {
+-    order.splice(at, 0, row);
+-  }
+-  return order;
+-}
+-
+ function boxesOf(
+   boxes: ShallowRef<ReadonlySet<MergeRequestIid>>,
+ ): Pick<Shown, "discussionsBoxOpened" | "discussionsBoxClosed"> {
+@@ -150,7 +132,7 @@ export function shownOf(listed: Listed, storage?: StorageLike): Shown {
+         : ordered(listed, passing, viewer.value);
+     return previous === undefined
+       ? next
+-      : { ...next, rows: keptInPlace(previous.rows, next.rows, held) };
++      : { ...next, rows: keptInPlace(previous.rows, next.rows, held, (row) => row.iid) };
+   });
+   const shownRows = computed(() => shown.value.rows);
+   return {

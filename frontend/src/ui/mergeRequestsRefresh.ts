@@ -17,7 +17,7 @@ export function isBeingRead(load: ThreadLoad): boolean {
   return load.kind === "loading" || (load.kind === "read" && load.refreshing);
 }
 
-async function askAgain(source: MergeRequestSource): Promise<void> {
+export async function askAgain(source: MergeRequestSource): Promise<void> {
   const outcome = await attempt(() => source.askGitLabAgain());
   if (!outcome.ok) {
     log.info("mergeRequests.ask_again_failed", { kind: outcome.cause.kind });

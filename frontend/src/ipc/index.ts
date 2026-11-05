@@ -96,6 +96,7 @@ export type {
   DiscussionThread,
   DiscussionThreadReply,
   DiscussionWriteReply,
+  FirstComment,
   MarkdownPreviewReply,
   OpenDiscussion,
   ReplyKind,

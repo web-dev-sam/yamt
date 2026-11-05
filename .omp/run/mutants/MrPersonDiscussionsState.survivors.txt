@@ -1,0 +1,7 @@
+just mutants HEAD: 747 mutants over 8 files; ui 727 killed / 9 survived / 2 no-cov; ipc/index.ts 4 survived / 1 no-cov (IN_APP lines, untouched)
+src/ui/mergeRequestPersonView.ts:279 orders += 1 → -= 1 — equivalent: each order only has to differ from the previous one; a falling counter is just as unique
+src/ui/mergeRequestDiscussionQueue.ts:73 [] → ["Stryker was here"] — equivalent: the set is only probed with iids (numbers); code moved verbatim
+src/ui/mergeRequestDiscussionQueue.ts:138 [] → ["Stryker was here"] — equivalent: same reason (moved from becameLazy)
+src/ui/mergeRequestDiscussionQueue.ts:127 generation += 1 → -= 1 — equivalent: generations are only compared for equality (moved code)
+src/ui/mergeRequestDiscussions.ts:86 exhaustive default (no coverage) — equivalent: unreachable `never` arm, unchanged line
+src/ui/mergeRequests.ts:141, mergeRequestsRefresh.ts:17, mergeRequestsShown.ts:63, :93 — not on changed lines (pre-existing survivors in unchanged code)

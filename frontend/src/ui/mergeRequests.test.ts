@@ -1863,3 +1863,90 @@ test("review_mode_comes_back_on_a_new_slice_over_the_same_storage", async () => 
   });
   expect(reopened.slice.reviewSort.value?.kind).toBe("sorted");
 });
+
+async function viewRead(live: Rig): Promise<readonly MergeRequestIid[]> {
+  live.mode.value = "lazy";
+  await loaded(live);
+  live.slice.openPersonView();
+  await nextTick();
+  const asked = ROWS.filter((row) => row.openDiscussions > 0).map((row) => row.iid);
+  expect(live.discussionCalls.map((call) => call.iids)).toEqual([asked]);
+  answerFirstCall(live, () => ({ kind: "open", discussions: [lastBy(ANNA_PERSON)] }));
+  await settled();
+  expect(live.slice.personView.value?.loading).toBeNull();
+  return asked;
+}
+
+const ANNA_PERSON: Person = { username: "anna", name: "Anna Berg", picture: null };
+
+test("closing_the_page_leaves_the_view", async () => {
+  const live = rig();
+  const [first] = await viewRead(live);
+  const { id } = lastBy(ANNA_PERSON);
+  live.slice.expandEntry(first ?? iid(0), id);
+  expect(live.slice.expanded.value.size).toBe(1);
+
+  live.slice.close();
+  expect(live.screen.value).toEqual({ kind: "files" });
+  expect(live.slice.personView.value).toBeNull();
+  expect(live.slice.expanded.value.size).toBe(0);
+  live.slice.show();
+  expect(live.slice.personView.value).toBeNull();
+});
+
+test("a_list_refresh_keeps_the_view_open_and_loads_again", async () => {
+  const live = rig();
+  const asked = await viewRead(live);
+
+  const reloading = live.slice.refresh();
+  await settled();
+  loadAt(live, 1).send({ me: "sam", rows: ROWS });
+  loadAt(live, 1).end(LOADED);
+  await reloading;
+  await nextTick();
+  expect(live.slice.personView.value?.loading).toEqual({ answered: 0, asked: asked.length });
+  expect(live.discussionCalls.map((call) => call.iids)).toEqual([asked, asked]);
+});
+
+test("leaving_the_view_under_lazy_sends_no_ask_it_queued_and_closing_without_it_keeps_the_lists", async () => {
+  const live = rig();
+  live.mode.value = "lazy";
+  await loaded(live);
+  live.slice.askDiscussions(iid(639));
+  live.slice.askDiscussions(iid(638));
+  live.slice.close();
+  expect(live.slice.discussions.value.get(iid(638))).toEqual({ kind: "loading" });
+
+  live.slice.show();
+  live.slice.openPersonView();
+  await nextTick();
+  live.slice.expandEntry(iid(640), lastBy(ANNA_PERSON).id);
+  live.slice.leavePersonView();
+  expect(live.slice.expanded.value.size).toBe(0);
+  live.slice.expandEntry(iid(640), lastBy(ANNA_PERSON).id);
+  expect(live.slice.expanded.value.size).toBe(0);
+  expect(live.slice.discussions.value.get(iid(638))).toBeUndefined();
+  expect([...live.slice.discussions.value.keys()]).toEqual([639]);
+  answerFirstCall(live, () => ({ kind: "open", discussions: [] }));
+  await settled();
+  expect(live.discussionCalls).toHaveLength(1);
+});
+
+test("a_row_without_an_author_counts_in_the_view", async () => {
+  const live = rig();
+  live.mode.value = "lazy";
+  await loaded(
+    live,
+    ROWS.map((row) => ({ ...row, author: null })),
+  );
+  live.slice.openPersonView();
+  await nextTick();
+  answerFirstCall(live, () => ({ kind: "open", discussions: [lastBy(ANNA_PERSON)] }));
+  await settled();
+  const asked = ROWS.filter((row) => row.openDiscussions > 0).length;
+  expect(live.slice.personView.value?.counts).toEqual({
+    viewersTurn: 0,
+    viewerWrote: 0,
+    total: asked,
+  });
+});
