@@ -1,5 +1,21 @@
 {
-  "MrMentionsDesign": {
-    "owned": ["docs/slices/briefs/mr-mentions-*.md"]
+  "MrMentionsCore": {
+    "owned": [
+      "frontend/src/mergeRequests/internal/mentions.ts",
+      "frontend/src/mergeRequests/internal/mentions.test.ts",
+      "frontend/src/mergeRequests/internal/suggestions.ts",
+      "frontend/src/mergeRequests/index.ts",
+      "frontend/src/mergeRequests/AGENTS.md"
+    ]
+  },
+  "MrMentionsSearch": {
+    "owned": [
+      "frontend/src/ui/mergeRequestPeople.ts",
+      "frontend/src/ui/mergeRequestPeople.test.ts",
+      "frontend/src/ui/mergeRequests.ts",
+      "frontend/src/ui/mergeRequests.test.ts",
+      "frontend/src/ui/MergeRequestPeople.vue",
+      "frontend/src/ui/MergeRequestPeopleSearch.vue"
+    ]
   }
 }

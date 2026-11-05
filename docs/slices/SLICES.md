@@ -11,13 +11,15 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 Request `docs/slices/request-mr-mentions.md` (rules 1–7, acceptance, non-goals); base `180d6c6c`; facts
 `.omp/run/notes/PlanScoutMentionFacts.md`. Owner's answers: the thread reply field and the range window's "Text to
 post" box, not the local note boxes; people only, no groups or `@all`. Reopens the threads request's "`@` completion"
-non-goal. "Plan first": the design and slice graph go to the owner before any implementer starts.
+non-goal. "Plan first": design and order shown to the owner (Gate A); owner: "Yes, build it"; the Post box's bare `@`
+lists the merge request's people only once its page is loaded, else search only (owner: "No, search is enough
+there"; option B rejected). Order: core ∥ search, list (smoke 1), post (smoke 2), docs keeper, final.
 
 | row | slice                                                                                                        | owner                 | status  | evidence                                                                                                     |
 | --- | ------------------------------------------------------------------------------------------------------------ | --------------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
 | 1   | design                                                                                                       | designer              | done    | `MrMentionsDesign`: option A (frontend only, no Rust/IPC), four briefs + verify. Notes `MrMentionsDesign.md` |
-| 2   | core (`briefs/mr-mentions-core.md`): mention word, line order, edit                                          | web-impl              | planned |                                                                                                              |
-| 3   | search (`briefs/mr-mentions-search.md`): second search instance, people box unchanged                        | web-impl              | planned |                                                                                                              |
+| 2   | core (`briefs/mr-mentions-core.md`): mention word, line order, edit                                          | web-impl              | running |                                                                                                              |
+| 3   | search (`briefs/mr-mentions-search.md`): second search instance, people box unchanged                        | web-impl              | running |                                                                                                              |
 | 4   | list (`briefs/mr-mentions-list.md`): caret measure, list, keys, reply field; wires both MR pages; after 2, 3 | web-impl              | planned |                                                                                                              |
 | 5   | post (`briefs/mr-mentions-post.md`): range "Text to post" box, `?gitlab=listed` fixture; after 4             | web-impl              | planned |                                                                                                              |
 | 6   | docs keeper; verify (`briefs/mr-mentions-verify.md`): smoke after 4 and 5, final                             | docs-keeper, verifier | planned |                                                                                                              |
