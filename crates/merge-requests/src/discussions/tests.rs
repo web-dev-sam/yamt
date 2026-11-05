@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 
+use super::pages::MAX_DISCUSSION_PAGES;
 use super::sample::{
     ORIGIN, answer, comment, discussion, hex, iids, mentioning, merge_request, on_file,
     on_gitlab_com, open, project, system_note, with_id,
