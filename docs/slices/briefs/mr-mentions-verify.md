@@ -43,7 +43,7 @@ Windows open only on a private display. Screenshots come only from the session o
 
 ### B. WebKit fixture, the reply field
 
-Start: `just app-session start-fixture --name mmv --diff --mr list --open-mr --size 1600x1000`. Every step runs in yamt Dark and in yamt Light (`--settings '{"theme":"light"}'`) unless noted.
+Start: `just app-session start-fixture --name mmv --diff --mr list --open-mr --size 1600x1000`. Every step runs in yamt Dark and in yamt Light (`start-fixture` has no settings option: set `<html data-theme="light">` live, #2495) unless noted.
 
 1. **Bare `@`.** In d01's reply field type `@` → the listbox under the caret line.
    - Its lines are !637's author, assignees, reviewers, approvers, then d01's writers, each once. Each line shows a picture, the name and a muted `@username`.
