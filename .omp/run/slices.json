@@ -7,5 +7,13 @@
       "docs/plan.md",
       ".omp/skills/risk-register/**"
     ]
+  },
+  "MrReviewFixesR3": {
+    "owned": [
+      "frontend/src/ui/mergeRequestsShown.ts",
+      "frontend/src/ui/MergeRequestDiscussions.vue",
+      "frontend/src/ui/MergeRequestDiscussionsBox.test.ts",
+      "frontend/src/ui/AGENTS.md"
+    ]
   }
 }
