@@ -16,5 +16,11 @@
       "tests/glab/mr-threads/graphql-people-an.json",
       "tests/glab/README.md"
     ]
+  },
+  "MrMentionsCoreR1": {
+    "owned": [
+      "frontend/src/mergeRequests/internal/mentions.ts",
+      "frontend/src/mergeRequests/internal/mentions.test.ts"
+    ]
   }
 }
