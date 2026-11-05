@@ -16,6 +16,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every merge-request action is about a second faster. A lost login or a missing project is noticed by the action
   that meets it ("not logged in" as before), and the page's Refresh and the discussions box's reload button check
   both again.
+- A discussion waiting on the merge request's author names the author ("Dmitri Volkov's turn") instead of "Author's
+  turn".
+- A row's discussions button is drawn purple, as the turn words are, when at least one of its open discussions waits
+  for you (or for review mode's reviewer).
+- Escape no longer closes the merge-request page; Back (a click, or Enter/Space on it) does.
+- Review mode sorts by the soonest due date first, then the most discussions waiting for the reviewer, then the fewest
+  discussions the reviewer wrote in; a row keeps its place while its discussions box or thread is open and moves when
+  they close.
 
 ## [0.6.9] - 2026-11-04
 
