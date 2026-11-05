@@ -101,6 +101,7 @@ function toggle(): void {
       <header
         v-tooltip="expanded ? null : SHOW_THREAD_KEY"
         class="flex min-w-0 items-center gap-x-2"
+        :class="{ 'flex-wrap gap-y-1': expanded }"
       >
         <MergeRequestPicture :person="starter" size="box" aria-hidden="true" />
         <span class="shrink-0 font-semibold">{{ noteAuthorName(starter) }}</span>
@@ -108,7 +109,9 @@ function toggle(): void {
         <span class="min-w-0 truncate text-fg-muted"
           >{{ mergeRequestReference(entry.row.iid) }} {{ entry.row.title }}</span
         >
-        <span class="shrink-0 text-fg-muted">{{ placeText(discussion.place) }}</span>
+        <span class="max-w-full shrink-0 truncate text-fg-muted">{{
+          placeText(discussion.place)
+        }}</span>
         <template v-if="expanded">
           <ReuseStatus />
           <span v-if="thread !== null" class="flex shrink-0 items-center gap-2">

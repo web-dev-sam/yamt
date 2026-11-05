@@ -12,6 +12,7 @@ import { vTooltip } from "./tooltip";
 const props = defineProps<{ writers: readonly (Person | null)[] }>();
 
 const GAP_PX = 4;
+const COUNTED_MAX = 99;
 const ROW = { gap: `${GAP_PX}px` };
 const SLOT = pictureBox("box");
 
@@ -25,7 +26,10 @@ const more = computed(() => {
   const { folded } = fold.value;
   return folded.length === 0
     ? null
-    : { text: moreText(folded.length), tip: foldedWritersText(folded.map(noteAuthorName)) };
+    : {
+        text: folded.length > COUNTED_MAX ? `${COUNTED_MAX}+` : moreText(folded.length),
+        tip: foldedWritersText(folded.map(noteAuthorName)),
+      };
 });
 </script>
 

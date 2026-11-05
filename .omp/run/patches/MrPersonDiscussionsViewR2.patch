@@ -1,0 +1,116 @@
+diff --git a/frontend/src/ui/MergeRequestPersonEntry.vue b/frontend/src/ui/MergeRequestPersonEntry.vue
+index fde7701..b5a91cc 100644
+--- a/frontend/src/ui/MergeRequestPersonEntry.vue
++++ b/frontend/src/ui/MergeRequestPersonEntry.vue
+@@ -101,6 +101,7 @@ function toggle(): void {
+       <header
+         v-tooltip="expanded ? null : SHOW_THREAD_KEY"
+         class="flex min-w-0 items-center gap-x-2"
++        :class="{ 'flex-wrap gap-y-1': expanded }"
+       >
+         <MergeRequestPicture :person="starter" size="box" aria-hidden="true" />
+         <span class="shrink-0 font-semibold">{{ noteAuthorName(starter) }}</span>
+@@ -108,7 +109,9 @@ function toggle(): void {
+         <span class="min-w-0 truncate text-fg-muted"
+           >{{ mergeRequestReference(entry.row.iid) }} {{ entry.row.title }}</span
+         >
+-        <span class="shrink-0 text-fg-muted">{{ placeText(discussion.place) }}</span>
++        <span class="max-w-full shrink-0 truncate text-fg-muted">{{
++          placeText(discussion.place)
++        }}</span>
+         <template v-if="expanded">
+           <ReuseStatus />
+           <span v-if="thread !== null" class="flex shrink-0 items-center gap-2">
+diff --git a/frontend/src/ui/MergeRequestPersonViewPage.test.ts b/frontend/src/ui/MergeRequestPersonViewPage.test.ts
+index c1eedcd..6ede125 100644
+--- a/frontend/src/ui/MergeRequestPersonViewPage.test.ts
++++ b/frontend/src/ui/MergeRequestPersonViewPage.test.ts
+@@ -15,6 +15,7 @@ import { TURN_MARK } from "./mergeRequestPeopleLook";
+ import MergeRequestPersonView from "./MergeRequestPersonView.vue";
+ import { createMergeRequests, type MergeRequests } from "./mergeRequests";
+ import { registerMergeRequests } from "./mergeRequestsStore";
++import MergeRequestWriters from "./MergeRequestWriters.vue";
+ import type { Screen } from "./screen";
+ 
+ const rowWidth = vi.hoisted(() => ({ px: Number.POSITIVE_INFINITY }));
+@@ -175,7 +176,7 @@ test("an_entry_shows_its_starter_time_merge_request_place_and_first_comment", as
+     new RegExp(`data-tooltip="${dateTimeText(at)}">\\d+ (hours|days) ago</span>`, "u"),
+   );
+   expect(p1).toContain(`>!${ANNA_CASES} ${rowTitle(ANNA_CASES)}</span>`);
+-  expect(p1).toContain('<span class="shrink-0 text-fg-muted">Overview</span>');
++  expect(p1).toContain('<span class="max-w-full shrink-0 truncate text-fg-muted">Overview</span>');
+   expect(p1).toContain('aria-expanded="false" aria-label="Show the whole thread"');
+   expect(p1).toContain('data-tooltip="Shift: show the thread"');
+   expect(html).toContain(`<li aria-keyshortcuts="Shift" data-discussion-id="${d(P1)}"`);
+@@ -233,6 +234,34 @@ test("a_narrow_writers_row_folds_the_oldest_into_a_chip_that_keeps_to_one_pictur
+   expect(p6.split(PICTURE_SLOT).length - 1).toBe(starterChipAndShown);
+ });
+ 
++const SHOWN_BESIDE_CHIP = 3;
++
++/** A narrow writers row of `folded` + 3 unknown writers: its chip's attributes and text. */
++async function chipOf(folded: number): Promise<{ attributes: string; text: string }> {
++  const writers = Array.from({ length: folded + SHOWN_BESIDE_CHIP }, () => null);
++  const html = await renderToString(
++    createSSRApp({ render: () => h(MergeRequestWriters, { writers }) }),
++  );
++  const [, attributes = "", text = ""] = /<span ([^>]*)>([^<]*)<\/span>/u.exec(html) ?? [];
++  return { attributes, text };
++}
++
++function tipNaming(folded: number): string {
++  return `data-tooltip="${folded} more: ${Array.from({ length: folded }, () => "Someone").join(", ")}"`;
++}
++
++test("a_fold_above_99_writers_reads_99_plus_and_its_tip_still_names_every_one", async () => {
++  rowWidth.px = NARROW_ROW_PX;
++
++  const ninetyNine = await chipOf(99);
++  expect(ninetyNine.text).toBe("+99");
++  expect(ninetyNine.attributes).toContain(tipNaming(99));
++  const hundred = await chipOf(100);
++  expect(hundred.text).toBe("99+");
++  expect(hundred.attributes).toContain(tipNaming(100));
++  expect(hundred.attributes).toContain(PICTURE_SLOT);
++});
++
+ test("the_turn_word_reads_from_the_persons_side", async () => {
+   await everyRowRead();
+   const mine = await view();
+@@ -269,10 +298,12 @@ test("an_expanded_entry_shows_the_inline_thread_and_hides_the_clamp", async () =
+   expect(turnOf(p1)).toBe("Ben Okafor's turn");
+   const head = p1.slice(p1.indexOf("<header"), p1.indexOf("</header>"));
+   expect(turnOf(head)).toBe("Ben Okafor's turn");
++  expect(head).toMatch(/^<header class="flex min-w-0 items-center gap-x-2 flex-wrap gap-y-1"/u);
+   expect(p1.split("Ben Okafor&#39;s turn")).toHaveLength(2);
+   expect(p1).not.toContain(WRITERS_ROW);
+   const p3 = entryOf(html, P3);
+   expect(p3).toContain(CLAMP);
++  expect(p3).toMatch(/<header [^>]*class="flex min-w-0 items-center gap-x-2"/u);
+   expect(p3).not.toContain("<textarea");
+ });
+ 
+diff --git a/frontend/src/ui/MergeRequestWriters.vue b/frontend/src/ui/MergeRequestWriters.vue
+index 0b663a3..0d2fa3b 100644
+--- a/frontend/src/ui/MergeRequestWriters.vue
++++ b/frontend/src/ui/MergeRequestWriters.vue
+@@ -12,6 +12,7 @@ import { vTooltip } from "./tooltip";
+ const props = defineProps<{ writers: readonly (Person | null)[] }>();
+ 
+ const GAP_PX = 4;
++const COUNTED_MAX = 99;
+ const ROW = { gap: `${GAP_PX}px` };
+ const SLOT = pictureBox("box");
+ 
+@@ -25,7 +26,10 @@ const more = computed(() => {
+   const { folded } = fold.value;
+   return folded.length === 0
+     ? null
+-    : { text: moreText(folded.length), tip: foldedWritersText(folded.map(noteAuthorName)) };
++    : {
++        text: folded.length > COUNTED_MAX ? `${COUNTED_MAX}+` : moreText(folded.length),
++        tip: foldedWritersText(folded.map(noteAuthorName)),
++      };
+ });
+ </script>
+ 

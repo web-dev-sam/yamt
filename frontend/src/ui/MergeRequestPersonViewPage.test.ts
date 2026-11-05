@@ -15,6 +15,7 @@ import { TURN_MARK } from "./mergeRequestPeopleLook";
 import MergeRequestPersonView from "./MergeRequestPersonView.vue";
 import { createMergeRequests, type MergeRequests } from "./mergeRequests";
 import { registerMergeRequests } from "./mergeRequestsStore";
+import MergeRequestWriters from "./MergeRequestWriters.vue";
 import type { Screen } from "./screen";
 
 const rowWidth = vi.hoisted(() => ({ px: Number.POSITIVE_INFINITY }));
@@ -175,7 +176,7 @@ test("an_entry_shows_its_starter_time_merge_request_place_and_first_comment", as
     new RegExp(`data-tooltip="${dateTimeText(at)}">\\d+ (hours|days) ago</span>`, "u"),
   );
   expect(p1).toContain(`>!${ANNA_CASES} ${rowTitle(ANNA_CASES)}</span>`);
-  expect(p1).toContain('<span class="shrink-0 text-fg-muted">Overview</span>');
+  expect(p1).toContain('<span class="max-w-full shrink-0 truncate text-fg-muted">Overview</span>');
   expect(p1).toContain('aria-expanded="false" aria-label="Show the whole thread"');
   expect(p1).toContain('data-tooltip="Shift: show the thread"');
   expect(html).toContain(`<li aria-keyshortcuts="Shift" data-discussion-id="${d(P1)}"`);
@@ -233,6 +234,34 @@ test("a_narrow_writers_row_folds_the_oldest_into_a_chip_that_keeps_to_one_pictur
   expect(p6.split(PICTURE_SLOT).length - 1).toBe(starterChipAndShown);
 });
 
+const SHOWN_BESIDE_CHIP = 3;
+
+/** A narrow writers row of `folded` + 3 unknown writers: its chip's attributes and text. */
+async function chipOf(folded: number): Promise<{ attributes: string; text: string }> {
+  const writers = Array.from({ length: folded + SHOWN_BESIDE_CHIP }, () => null);
+  const html = await renderToString(
+    createSSRApp({ render: () => h(MergeRequestWriters, { writers }) }),
+  );
+  const [, attributes = "", text = ""] = /<span ([^>]*)>([^<]*)<\/span>/u.exec(html) ?? [];
+  return { attributes, text };
+}
+
+function tipNaming(folded: number): string {
+  return `data-tooltip="${folded} more: ${Array.from({ length: folded }, () => "Someone").join(", ")}"`;
+}
+
+test("a_fold_above_99_writers_reads_99_plus_and_its_tip_still_names_every_one", async () => {
+  rowWidth.px = NARROW_ROW_PX;
+
+  const ninetyNine = await chipOf(99);
+  expect(ninetyNine.text).toBe("+99");
+  expect(ninetyNine.attributes).toContain(tipNaming(99));
+  const hundred = await chipOf(100);
+  expect(hundred.text).toBe("99+");
+  expect(hundred.attributes).toContain(tipNaming(100));
+  expect(hundred.attributes).toContain(PICTURE_SLOT);
+});
+
 test("the_turn_word_reads_from_the_persons_side", async () => {
   await everyRowRead();
   const mine = await view();
@@ -269,10 +298,12 @@ test("an_expanded_entry_shows_the_inline_thread_and_hides_the_clamp", async () =
   expect(turnOf(p1)).toBe("Ben Okafor's turn");
   const head = p1.slice(p1.indexOf("<header"), p1.indexOf("</header>"));
   expect(turnOf(head)).toBe("Ben Okafor's turn");
+  expect(head).toMatch(/^<header class="flex min-w-0 items-center gap-x-2 flex-wrap gap-y-1"/u);
   expect(p1.split("Ben Okafor&#39;s turn")).toHaveLength(2);
   expect(p1).not.toContain(WRITERS_ROW);
   const p3 = entryOf(html, P3);
   expect(p3).toContain(CLAMP);
+  expect(p3).toMatch(/<header [^>]*class="flex min-w-0 items-center gap-x-2"/u);
   expect(p3).not.toContain("<textarea");
 });
 
