@@ -3,6 +3,7 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 import type {
   GitLabCheck,
   MergeRequestRef,
+  MergeRequestRow,
   Message,
   RangeStart,
   ReviewSource,
@@ -168,6 +169,18 @@ async function send(state: State): Promise<void> {
   }
   state.threads.replace(reply.list);
   state.result.value = reply;
+}
+
+/** The loaded row of the merge request the range lines up with (design §2.2): when `check` is `linedUp`, the first of
+ *  `rows` whose `page` equals `check.mergeRequest.webUrl`; else null (the Post box then shows search results only). */
+export function linedUpRow(
+  check: GitLabCheck | null,
+  rows: readonly MergeRequestRow[],
+): MergeRequestRow | null {
+  if (check?.kind !== "linedUp") {
+    return null;
+  }
+  return rows.find((row) => row.page === check.mergeRequest.webUrl) ?? null;
 }
 
 export function createGitLabCheck(

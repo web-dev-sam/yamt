@@ -1,6 +1,13 @@
 import { expect, test } from "vitest";
 
-import { gitLabCheck, pendingPosting, postOutcome, type GitLabScript } from "./fixtureGitLab";
+import {
+  gitLabCheck,
+  mergeRequestOf,
+  pendingPosting,
+  postOutcome,
+  type GitLabScript,
+} from "./fixtureGitLab";
+import { fixtureRows } from "./fixtureMergeRequestData";
 import type { RangeStart } from "./rangeDomain";
 
 const COMMIT_ID_RIGHT: RangeStart = {
@@ -47,12 +54,44 @@ test("a right side labelled as a merge base is refused as impossible", () => {
 });
 
 test("a pending posting links the merge request's Changes page", () => {
-  expect(pendingPosting("Hi", 7)).toEqual({
+  expect(pendingPosting(mergeRequestOf("linedUp"), "Hi", 7)).toEqual({
     kind: "pending",
     text: "Hi",
     draft_note: 7,
     merge_request: "!12",
     link: "https://gitlab.example.com/team/taskboard/-/merge_requests/12/diffs",
+  });
+});
+
+test.each<GitLabScript>(["linedUp", "checking", "refusal", "stopped"])(
+  "%s lines up with !12",
+  (script) => {
+    expect(gitLabCheck(script, COMMIT_ID_RIGHT)).toEqual({
+      kind: "linedUp",
+      merge_request: {
+        reference: "!12",
+        title: "Reminders on cards",
+        web_url: "https://gitlab.example.com/team/taskboard/-/merge_requests/12",
+      },
+    });
+  },
+);
+
+test("listed_lines_up_with_the_newest_listed_row", () => {
+  const [newest] = fixtureRows(0, 1);
+  const page = "https://gitlab.example/taskboard/taskboard/-/merge_requests/640";
+
+  expect(newest).toMatchObject({ iid: 640, page });
+  expect(gitLabCheck("listed", COMMIT_ID_RIGHT)).toEqual({
+    kind: "linedUp",
+    merge_request: { reference: "!640", title: newest?.title, web_url: page },
+  });
+  expect(pendingPosting(mergeRequestOf("listed"), "Hi", 7)).toEqual({
+    kind: "pending",
+    text: "Hi",
+    draft_note: 7,
+    merge_request: "!640",
+    link: `${page}/diffs`,
   });
 });
 

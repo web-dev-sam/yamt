@@ -1,0 +1,423 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index 2b68338..8c6bcd8 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -4,6 +4,8 @@ The range window (`yamt --diff=<range>`, plan §2 #103–#107) has its own `Rang
+ 
+ The range window's threads and GitLab (plan §2 #116–#120) come through `ReviewSource` (`ReviewSource.ts`: `listThreads`, `addThread`, `addNote`, `queueMessage`, `unqueueMessage`, `checkGitLab`, `sendQueue` with a progress callback over a `Channel`), which `RangeSource` extends: the `ThreadId`/`MessageId` brands in `domain.ts`, a thread's `ThreadPlace` in `threadLine.ts` (plan §2 #145–#148: `start` a `DiffLine` in GitLab's one-column order, `end` the `ThreadLine` whose column shows the box; `toThreadPlace` brands every number naming `….place.start.left`/`….place.end.right`, `fromThreadPlace` hands it back as is; `diffLineOf`, `onePlace`, `sameDiffLine`, `isOneLine`), camelCase shapes and their conversions in `reviewDomain.ts`, the app's in `tauriReview.ts`, fixture mode's in memory in `fixtureReview.ts` (`?threads=seeded`: one one-line thread of each line kind on the review case's `src/board/board.ts` with a queued, a refused, a pending and an `aiAnswer` message, then two range threads with a `notQueued` note each: unchanged 400/388 to added 405 and removed 254 to added 259; the store's refusals as Rust's: `EmptyMessage`, `UnknownRangeFile`, `UnknownThread`, `UnknownMessage`, `MessagePending`, `SendRunning`; each post after a 300 ms pause, progress per message) over `fixtureGitLab.ts` (`?gitlab=<script>`: `linedUp` by default, `checking` answers after 3 s, one not-lined-up answer per script, `refusal` refuses and `stopped` times out at the second post; an unknown script logs `review.fixture_miss`).
+ 
++`?gitlab=listed` lines up like `linedUp`, but with `?mr=list`'s newest row, !640 (`fixtureGitLab.ts` `mergeRequestOf`: its reference, title and `page` as `web_url`; every other script lines up with !12), so the Post box's mention list knows !640's people once the merge-request page loaded its rows (plan §2 #191, #192). A send's pending posting names the script's merge request; the seeded pending note names !12 (`mergeRequestOf("linedUp")`, sent before).
++
+ Your own notes until they are on GitLab (plan §2 #123): `editNote(message, text)` and `deleteMessage(message)` answer the new `ThreadList`. `fixtureReview.ts` mirrors Rust's order: `SendRunning` while its send runs, then `UnknownMessage`, `NotANote` (an AI answer), `MessagePending`, and for an edit `EmptyMessage`; an edit of a queued or refused note leaves it `queued` with the new text; a delete drops the note and a thread left empty; ids are never reused.
+ 
+ The GitLab merge-request overview (compare and range windows) comes through `MergeRequestSource` (`MergeRequestSource.ts`: `findGitLabProject`, `askGitLabAgain`, `listMergeRequests` with a page callback, `openMergeRequest`, `openPage`), which `CompareSource` and `RangeSource` extend: the `MergeRequestIid`/`WebPage` brands in `domain.ts` (a `WebPage` is a failed job's, a merge request's, a note's or a links line's https page, minted by `isWebPage`/`toWebPage`, plan §2 #137, #162, or a description's link, http or https, minted by `isLinkedPage`, plan §2 #172), the shapes and their conversions in `mergeRequestDomain.ts` (`createdAt` to ms since 1970, a missing commit's `short_id` as `shortId`), the app's in `tauriMergeRequests.ts`: one `Channel<ListMessage>` per load carries every page, then exactly one end, and the load ends on that end message (or the command's IPC failure), never on the command's own answer, since Tauri may deliver a page after it; an unreadable page fails the load; no page reaches the callback after the load ended. `askGitLabAgain()` (plan §2 #187, owner #2423: called by every explicit refresh button) is `ask_gitlab_again` through `toResult`: the next GitLab action asks glab for the login and the project again. Both project calls sit together in each source: `tauriMergeRequests.ts` `projectCalls()`, the fixture's `projectScript(log, script)`. Fixture mode's is `fixtureMergeRequests.ts` over `fixtureMergeRequestData.ts`: `?mr=<script>` (`list`, `local`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`, `refused`, `pageFails`; `MergeRequestScript` is the keys of its `SCRIPTS` table) scripts GitLab's answers, every row with its page `<origin>/-/merge_requests/<iid>`, an opened page logs `mergeRequests.fixture_page`, and an ask again logs `mergeRequests.fixture_ask_again {}` and answers `null` at once; without `mr` the project is `none`, and an unknown script logs `mergeRequests.fixture_miss` and is `none` too.
+diff --git a/frontend/src/ipc/fixtureGitLab.test.ts b/frontend/src/ipc/fixtureGitLab.test.ts
+index 3ecd2e5..17a6868 100644
+--- a/frontend/src/ipc/fixtureGitLab.test.ts
++++ b/frontend/src/ipc/fixtureGitLab.test.ts
+@@ -1,6 +1,13 @@
+ import { expect, test } from "vitest";
+ 
+-import { gitLabCheck, pendingPosting, postOutcome, type GitLabScript } from "./fixtureGitLab";
++import {
++  gitLabCheck,
++  mergeRequestOf,
++  pendingPosting,
++  postOutcome,
++  type GitLabScript,
++} from "./fixtureGitLab";
++import { fixtureRows } from "./fixtureMergeRequestData";
+ import type { RangeStart } from "./rangeDomain";
+ 
+ const COMMIT_ID_RIGHT: RangeStart = {
+@@ -47,7 +54,7 @@ test("a right side labelled as a merge base is refused as impossible", () => {
+ });
+ 
+ test("a pending posting links the merge request's Changes page", () => {
+-  expect(pendingPosting("Hi", 7)).toEqual({
++  expect(pendingPosting(mergeRequestOf("linedUp"), "Hi", 7)).toEqual({
+     kind: "pending",
+     text: "Hi",
+     draft_note: 7,
+@@ -56,6 +63,38 @@ test("a pending posting links the merge request's Changes page", () => {
+   });
+ });
+ 
++test.each<GitLabScript>(["linedUp", "checking", "refusal", "stopped"])(
++  "%s lines up with !12",
++  (script) => {
++    expect(gitLabCheck(script, COMMIT_ID_RIGHT)).toEqual({
++      kind: "linedUp",
++      merge_request: {
++        reference: "!12",
++        title: "Reminders on cards",
++        web_url: "https://gitlab.example.com/team/taskboard/-/merge_requests/12",
++      },
++    });
++  },
++);
++
++test("listed_lines_up_with_the_newest_listed_row", () => {
++  const [newest] = fixtureRows(0, 1);
++  const page = "https://gitlab.example/taskboard/taskboard/-/merge_requests/640";
++
++  expect(newest).toMatchObject({ iid: 640, page });
++  expect(gitLabCheck("listed", COMMIT_ID_RIGHT)).toEqual({
++    kind: "linedUp",
++    merge_request: { reference: "!640", title: newest?.title, web_url: page },
++  });
++  expect(pendingPosting(mergeRequestOf("listed"), "Hi", 7)).toEqual({
++    kind: "pending",
++    text: "Hi",
++    draft_note: 7,
++    merge_request: "!640",
++    link: `${page}/diffs`,
++  });
++});
++
+ test.each<[GitLabScript, number, string]>([
+   ["linedUp", 0, "pending"],
+   ["linedUp", 1, "pending"],
+diff --git a/frontend/src/ipc/fixtureGitLab.ts b/frontend/src/ipc/fixtureGitLab.ts
+index 84a1363..83986e8 100644
+--- a/frontend/src/ipc/fixtureGitLab.ts
++++ b/frontend/src/ipc/fixtureGitLab.ts
+@@ -1,9 +1,11 @@
+ import type * as Generated from "./bindings";
++import { fixtureRows } from "./fixtureMergeRequestData";
+ import type { Log } from "./log";
+ import type { RangeSide, RangeStart } from "./rangeDomain";
+ 
+ export type GitLabScript =
+   | "linedUp"
++  | "listed"
+   | "checking"
+   | "noGlab"
+   | "loggedOut"
+@@ -52,6 +54,7 @@ function rightBranch({ label }: RangeSide): Generated.LookedAt {
+ 
+ const GITLAB_SCRIPTS: Readonly<Record<GitLabScript, true>> = {
+   linedUp: true,
++  listed: true,
+   checking: true,
+   noGlab: true,
+   loggedOut: true,
+@@ -88,6 +91,7 @@ function notLinedUp(
+ ): Generated.NotLinedUp | null {
+   const answers: Readonly<Record<GitLabScript, Generated.NotLinedUp | null>> = {
+     linedUp: null,
++    listed: null,
+     checking: null,
+     noGlab: { kind: "glabMissing" },
+     loggedOut: { kind: "notLoggedIn", detail: LOGGED_OUT },
+@@ -118,20 +122,38 @@ function notLinedUp(
+   return answers[script];
+ }
+ 
++function newestListed(): Generated.MergeRequestRef {
++  const [newest] = fixtureRows(0, 1);
++  if (newest === undefined || newest.page === null) {
++    throw new Error("?mr=list has no newest row with a page");
++  }
++  return { reference: `!${newest.iid}`, title: newest.title, web_url: newest.page };
++}
++
++/** The merge request a script lines up with: "listed" → !640 from fixtureRows (reference "!640", its title, its
++ *  page as web_url); every other script → !12. */
++export function mergeRequestOf(script: GitLabScript): Generated.MergeRequestRef {
++  return script === "listed" ? newestListed() : MERGE_REQUEST;
++}
++
+ export function gitLabCheck(script: GitLabScript, start: RangeStart): Generated.GitLabCheck {
+   const why = notLinedUp(script, start);
+   return why === null
+-    ? { kind: "linedUp", merge_request: MERGE_REQUEST }
++    ? { kind: "linedUp", merge_request: mergeRequestOf(script) }
+     : { kind: "notLinedUp", why };
+ }
+ 
+-export function pendingPosting(text: string, draftNote: number): Generated.Posting {
++export function pendingPosting(
++  mergeRequest: Generated.MergeRequestRef,
++  text: string,
++  draftNote: number,
++): Generated.Posting {
+   return {
+     kind: "pending",
+     text,
+     draft_note: draftNote,
+-    merge_request: MERGE_REQUEST.reference,
+-    link: `${MERGE_REQUEST.web_url}${DIFFS_PAGE}`,
++    merge_request: mergeRequest.reference,
++    link: `${mergeRequest.web_url}${DIFFS_PAGE}`,
+   };
+ }
+ 
+diff --git a/frontend/src/ipc/fixtureReview.test.ts b/frontend/src/ipc/fixtureReview.test.ts
+index 7a1ceeb..fcb1c41 100644
+--- a/frontend/src/ipc/fixtureReview.test.ts
++++ b/frontend/src/ipc/fixtureReview.test.ts
+@@ -597,7 +597,7 @@ test("an unknown ?gitlab script logs review.fixture_miss naming the scripts and
+       fields: {
+         gitlab: "nope",
+         known:
+-          "linedUp, checking, noGlab, loggedOut, noMergeRequest, noBranch, moved, otherBase, several, preparing, failed, refusal, stopped",
++          "linedUp, listed, checking, noGlab, loggedOut, noMergeRequest, noBranch, moved, otherBase, several, preparing, failed, refusal, stopped",
+       },
+     },
+   ]);
+@@ -653,6 +653,23 @@ test("a send posts each waiting message after a 300 ms pause, reporting progress
+   expect(postings(await threadsOf(source)).slice(0, 2)).toEqual(posted);
+ });
+ 
++test("?gitlab=listed checks lined up with !640 and its send's pending posting names !640", async () => {
++  const page = "https://gitlab.example/taskboard/taskboard/-/merge_requests/640";
++  const source = review("?threads=seeded&gitlab=listed");
++
++  expect(valueOf(await settled(source.checkGitLab()))).toMatchObject({
++    kind: "linedUp",
++    mergeRequest: { reference: "!640", webUrl: page },
++  });
++  valueOf(await settled(source.sendQueue(() => undefined)));
++
++  expect(postings(await threadsOf(source)).slice(0, 3)).toEqual([
++    expect.objectContaining({ kind: "pending", mergeRequest: "!640", link: `${page}/diffs` }),
++    expect.objectContaining({ kind: "pending", mergeRequest: "!640", link: `${page}/diffs` }),
++    expect.objectContaining({ kind: "pending", mergeRequest: "!12", draftNote: 101 }),
++  ]);
++});
++
+ test("?gitlab=refusal refuses the second queued message with GitLab's words", async () => {
+   const source = review("?threads=seeded&gitlab=refusal");
+   await source.queueMessage(messageId(3), "Third");
+diff --git a/frontend/src/ipc/fixtureReview.ts b/frontend/src/ipc/fixtureReview.ts
+index e4301b9..e15efcf 100644
+--- a/frontend/src/ipc/fixtureReview.ts
++++ b/frontend/src/ipc/fixtureReview.ts
+@@ -3,6 +3,7 @@ import type { SourceResult } from "./domain";
+ import { pause } from "./fixture";
+ import {
+   gitLabCheck,
++  mergeRequestOf,
+   postOutcome,
+   shownGitLabScript,
+   TIMED_OUT,
+@@ -187,7 +188,7 @@ function record(
+     tally.refused += 1;
+     return;
+   }
+-  message.posting = pendingPosting(text, store.next.draftNote);
++  message.posting = pendingPosting(mergeRequestOf(store.script), text, store.next.draftNote);
+   store.next.draftNote += 1;
+   tally.sent += 1;
+ }
+diff --git a/frontend/src/ipc/fixtureThreads.ts b/frontend/src/ipc/fixtureThreads.ts
+index 959df64..6208adc 100644
+--- a/frontend/src/ipc/fixtureThreads.ts
++++ b/frontend/src/ipc/fixtureThreads.ts
+@@ -1,5 +1,5 @@
+ import type * as Generated from "./bindings";
+-import { pendingPosting, REFUSAL } from "./fixtureGitLab";
++import { mergeRequestOf, pendingPosting, REFUSAL } from "./fixtureGitLab";
+ import type { RangeStart } from "./rangeDomain";
+ 
+ type Seed = Pick<Generated.Thread, "place" | "session"> & {
+@@ -37,7 +37,9 @@ function lineSeeds(): readonly Seed[] {
+         start: { kind: "unchanged", left: 5, right: 5 },
+         end: { kind: "unchangedOnLeft", left: 5, right: 5 },
+       },
+-      messages: [note(pending, pendingPosting(pending, SEEDED_DRAFT_NOTE))],
++      messages: [
++        note(pending, pendingPosting(mergeRequestOf("linedUp"), pending, SEEDED_DRAFT_NOTE)),
++      ],
+       session: null,
+     },
+     {
+diff --git a/frontend/src/ui/RangeMessageEditor.vue b/frontend/src/ui/RangeMessageEditor.vue
+index b2eb686..e64fe4e 100644
+--- a/frontend/src/ui/RangeMessageEditor.vue
++++ b/frontend/src/ui/RangeMessageEditor.vue
+@@ -2,8 +2,12 @@
+ import { computed, onMounted, useTemplateRef } from "vue";
+ 
+ import type { MessageId } from "../ipc";
++import { knownMentions } from "../mergeRequests";
+ import { boxKeydown } from "./boxKeys";
++import MergeRequestMentionList from "./MergeRequestMentionList.vue";
++import { useMentions } from "./mergeRequestMentions";
+ import { isBlank } from "./rangeDrafts";
++import { linedUpRow } from "./rangeGitLab";
+ import { useRangeStore } from "./rangeStore";
+ import {
+   CANCEL_LABEL,
+@@ -24,7 +28,13 @@ const WORDS: Readonly<Record<MessageBox, { readonly field: string; readonly subm
+ };
+ 
+ const field = useTemplateRef<HTMLTextAreaElement>("field");
+-const { threads } = useRangeStore();
++const { threads, gitlab, mergeRequests } = useRangeStore();
++const mentions =
++  props.box === "post"
++    ? useMentions(field, () =>
++        knownMentions(linedUpRow(gitlab.check.value, mergeRequests.rows.value), []),
++      )
++    : null;
+ 
+ const text = computed(
+   () =>
+@@ -33,6 +43,7 @@ const text = computed(
+ );
+ const off = computed(() => props.offTitle !== null || isBlank(text.value));
+ const words = computed(() => WORDS[props.box]);
++const fieldAria = computed(() => mentions?.fieldAria.value ?? {});
+ 
+ onMounted(() => {
+   field.value?.focus({ preventScroll: true });
+@@ -50,27 +61,42 @@ function typed(event: Event): void {
+ }
+ 
+ function submit(): void {
++  mentions?.close();
+   if (!off.value) {
+     emit("submit", text.value);
+   }
+ }
+ 
+ function keydown(event: KeyboardEvent): void {
++  if (mentions?.keydown(event) === true) {
++    return;
++  }
+   boxKeydown(event, navigator.platform, { submit, cancel: () => emit("cancel") });
+ }
+ </script>
+ 
+ <template>
+   <div class="flex flex-col gap-2">
+-    <textarea
+-      ref="field"
+-      :value="text"
+-      :aria-label="words.field"
+-      rows="4"
+-      class="w-full resize-y rounded border border-control-border bg-panel-inline px-2 py-1 outline-none focus:border-primary"
+-      @input="typed"
+-      @keydown="keydown"
+-    />
++    <div class="relative">
++      <textarea
++        ref="field"
++        :value="text"
++        v-bind="fieldAria"
++        :aria-label="words.field"
++        rows="4"
++        class="block w-full resize-y rounded border border-control-border bg-panel-inline px-2 py-1 outline-none focus:border-primary"
++        @input="typed"
++        @keydown="keydown"
++      />
++      <MergeRequestMentionList
++        v-if="mentions !== null && mentions.list.value !== null && mentions.anchor.value !== null"
++        :list="mentions.list.value"
++        :highlight="mentions.highlight.value"
++        :list-id="mentions.listId"
++        :anchor="mentions.anchor.value"
++        @pick="mentions.pick"
++      />
++    </div>
+     <div class="flex gap-2">
+       <span :title="offTitle ?? undefined">
+         <button
+diff --git a/frontend/src/ui/rangeGitLab.test.ts b/frontend/src/ui/rangeGitLab.test.ts
+index b1b03a1..7461a92 100644
+--- a/frontend/src/ui/rangeGitLab.test.ts
++++ b/frontend/src/ui/rangeGitLab.test.ts
+@@ -5,6 +5,7 @@ import {
+   createFixtureRangeSource,
+   log,
+   type GitLabCheck,
++  type MergeRequestRow,
+   type Message,
+   type RangeSource,
+   type RangeStart,
+@@ -14,7 +15,7 @@ import {
+ } from "../ipc";
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import type { Problem } from "./problem";
+-import { createGitLabCheck, type GitLabState, type PostBody } from "./rangeGitLab";
++import { createGitLabCheck, linedUpRow, type GitLabState, type PostBody } from "./rangeGitLab";
+ import { createRangeThreads, type RangeThreads } from "./rangeThreads";
+ 
+ const TEXT: PostBody = { kind: "text", text: "Is this still used?" };
+@@ -39,6 +40,11 @@ const LINED_UP: GitLabCheck = {
+     webUrl: "https://gitlab.example.com/team/taskboard/-/merge_requests/12",
+   },
+ };
++const NEWEST_PAGE = "https://gitlab.example/taskboard/taskboard/-/merge_requests/640";
++const LINED_UP_NEWEST: GitLabCheck = {
++  kind: "linedUp",
++  mergeRequest: { reference: "!640", title: "Snooze a reminder", webUrl: NEWEST_PAGE },
++};
+ const SEEDED = "?range=review&threads=seeded";
+ const MICROTASKS = 10;
+ 
+@@ -396,3 +402,31 @@ test("a failed check and a failed send report their step and keep the last answe
+     { action: "threads", step: "send", cause: { kind: "SendRunning" } },
+   ]);
+ });
++
++async function listedRows(): Promise<readonly MergeRequestRow[]> {
++  const rows: MergeRequestRow[] = [];
++  await createFixtureRangeSource(log, "?mr=list").listMergeRequests(
++    (page) => {
++      rows.push(...page.rows);
++    },
++    () => undefined,
++  );
++  return rows;
++}
++
++test("the_lined_up_row_is_the_loaded_row_at_the_merge_requests_page", async () => {
++  const rows = await listedRows();
++
++  expect(rows.map((row) => row.iid).slice(0, 2)).toEqual([640, 639]);
++  expect(linedUpRow(LINED_UP_NEWEST, [...rows].reverse())).toBe(rows[0]);
++});
++
++test("no_loaded_row_or_no_lined_up_merge_request_gives_none", async () => {
++  const rows = await listedRows();
++
++  expect(rows.length).toBeGreaterThan(1);
++  expect(linedUpRow(LINED_UP_NEWEST, [])).toBeNull();
++  expect(linedUpRow(LINED_UP, rows)).toBeNull();
++  expect(linedUpRow({ kind: "notLinedUp", why: { kind: "glabMissing" } }, rows)).toBeNull();
++  expect(linedUpRow(null, rows)).toBeNull();
++});
+diff --git a/frontend/src/ui/rangeGitLab.ts b/frontend/src/ui/rangeGitLab.ts
+index 5011fcf..91c5c45 100644
+--- a/frontend/src/ui/rangeGitLab.ts
++++ b/frontend/src/ui/rangeGitLab.ts
+@@ -3,6 +3,7 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ import type {
+   GitLabCheck,
+   MergeRequestRef,
++  MergeRequestRow,
+   Message,
+   RangeStart,
+   ReviewSource,
+@@ -170,6 +171,18 @@ async function send(state: State): Promise<void> {
+   state.result.value = reply;
+ }
+ 
++/** The loaded row of the merge request the range lines up with (design §2.2): when `check` is `linedUp`, the first of
++ *  `rows` whose `page` equals `check.mergeRequest.webUrl`; else null (the Post box then shows search results only). */
++export function linedUpRow(
++  check: GitLabCheck | null,
++  rows: readonly MergeRequestRow[],
++): MergeRequestRow | null {
++  if (check?.kind !== "linedUp") {
++    return null;
++  }
++  return rows.find((row) => row.page === check.mergeRequest.webUrl) ?? null;
++}
++
+ export function createGitLabCheck(
+   source: ReviewSource,
+   threads: RangeThreads,

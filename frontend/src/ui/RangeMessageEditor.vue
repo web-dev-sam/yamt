@@ -2,8 +2,12 @@
 import { computed, onMounted, useTemplateRef } from "vue";
 
 import type { MessageId } from "../ipc";
+import { knownMentions } from "../mergeRequests";
 import { boxKeydown } from "./boxKeys";
+import MergeRequestMentionList from "./MergeRequestMentionList.vue";
+import { useMentions } from "./mergeRequestMentions";
 import { isBlank } from "./rangeDrafts";
+import { linedUpRow } from "./rangeGitLab";
 import { useRangeStore } from "./rangeStore";
 import {
   CANCEL_LABEL,
@@ -24,7 +28,13 @@ const WORDS: Readonly<Record<MessageBox, { readonly field: string; readonly subm
 };
 
 const field = useTemplateRef<HTMLTextAreaElement>("field");
-const { threads } = useRangeStore();
+const { threads, gitlab, mergeRequests } = useRangeStore();
+const mentions =
+  props.box === "post"
+    ? useMentions(field, () =>
+        knownMentions(linedUpRow(gitlab.check.value, mergeRequests.rows.value), []),
+      )
+    : null;
 
 const text = computed(
   () =>
@@ -33,6 +43,7 @@ const text = computed(
 );
 const off = computed(() => props.offTitle !== null || isBlank(text.value));
 const words = computed(() => WORDS[props.box]);
+const fieldAria = computed(() => mentions?.fieldAria.value ?? {});
 
 onMounted(() => {
   field.value?.focus({ preventScroll: true });
@@ -50,27 +61,42 @@ function typed(event: Event): void {
 }
 
 function submit(): void {
+  mentions?.close();
   if (!off.value) {
     emit("submit", text.value);
   }
 }
 
 function keydown(event: KeyboardEvent): void {
+  if (mentions?.keydown(event) === true) {
+    return;
+  }
   boxKeydown(event, navigator.platform, { submit, cancel: () => emit("cancel") });
 }
 </script>
 
 <template>
   <div class="flex flex-col gap-2">
-    <textarea
-      ref="field"
-      :value="text"
-      :aria-label="words.field"
-      rows="4"
-      class="w-full resize-y rounded border border-control-border bg-panel-inline px-2 py-1 outline-none focus:border-primary"
-      @input="typed"
-      @keydown="keydown"
-    />
+    <div class="relative">
+      <textarea
+        ref="field"
+        :value="text"
+        v-bind="fieldAria"
+        :aria-label="words.field"
+        rows="4"
+        class="block w-full resize-y rounded border border-control-border bg-panel-inline px-2 py-1 outline-none focus:border-primary"
+        @input="typed"
+        @keydown="keydown"
+      />
+      <MergeRequestMentionList
+        v-if="mentions !== null && mentions.list.value !== null && mentions.anchor.value !== null"
+        :list="mentions.list.value"
+        :highlight="mentions.highlight.value"
+        :list-id="mentions.listId"
+        :anchor="mentions.anchor.value"
+        @pick="mentions.pick"
+      />
+    </div>
     <div class="flex gap-2">
       <span :title="offTitle ?? undefined">
         <button

@@ -3,6 +3,7 @@ import type { SourceResult } from "./domain";
 import { pause } from "./fixture";
 import {
   gitLabCheck,
+  mergeRequestOf,
   postOutcome,
   shownGitLabScript,
   TIMED_OUT,
@@ -187,7 +188,7 @@ function record(
     tally.refused += 1;
     return;
   }
-  message.posting = pendingPosting(text, store.next.draftNote);
+  message.posting = pendingPosting(mergeRequestOf(store.script), text, store.next.draftNote);
   store.next.draftNote += 1;
   tally.sent += 1;
 }

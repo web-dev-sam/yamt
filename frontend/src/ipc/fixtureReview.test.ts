@@ -597,7 +597,7 @@ test("an unknown ?gitlab script logs review.fixture_miss naming the scripts and 
       fields: {
         gitlab: "nope",
         known:
-          "linedUp, checking, noGlab, loggedOut, noMergeRequest, noBranch, moved, otherBase, several, preparing, failed, refusal, stopped",
+          "linedUp, listed, checking, noGlab, loggedOut, noMergeRequest, noBranch, moved, otherBase, several, preparing, failed, refusal, stopped",
       },
     },
   ]);
@@ -651,6 +651,23 @@ test("a send posts each waiting message after a 300 ms pause, reporting progress
   ];
   expect(sent.kind === "notLinedUp" ? [] : postings(sent.list.threads).slice(0, 2)).toEqual(posted);
   expect(postings(await threadsOf(source)).slice(0, 2)).toEqual(posted);
+});
+
+test("?gitlab=listed checks lined up with !640 and its send's pending posting names !640", async () => {
+  const page = "https://gitlab.example/taskboard/taskboard/-/merge_requests/640";
+  const source = review("?threads=seeded&gitlab=listed");
+
+  expect(valueOf(await settled(source.checkGitLab()))).toMatchObject({
+    kind: "linedUp",
+    mergeRequest: { reference: "!640", webUrl: page },
+  });
+  valueOf(await settled(source.sendQueue(() => undefined)));
+
+  expect(postings(await threadsOf(source)).slice(0, 3)).toEqual([
+    expect.objectContaining({ kind: "pending", mergeRequest: "!640", link: `${page}/diffs` }),
+    expect.objectContaining({ kind: "pending", mergeRequest: "!640", link: `${page}/diffs` }),
+    expect.objectContaining({ kind: "pending", mergeRequest: "!12", draftNote: 101 }),
+  ]);
 });
 
 test("?gitlab=refusal refuses the second queued message with GitLab's words", async () => {

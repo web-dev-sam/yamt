@@ -1,0 +1,4 @@
+just mutants HEAD (stryker on fixtureGitLab, fixtureReview, fixtureThreads, rangeGitLab): 614 killed, 38 survived, 4 no coverage; score 93.60
+fixtureGitLab.ts:127 `||`→`&&` / condition→false (×4) and 127:53, 128 NoCoverage — equivalent: fixtureRows(0,1) always has a row with a page; the guard only narrows the types (noUncheckedIndexedAccess, page nullable)
+fixtureGitLab.ts:57 `listed: true`→false — equivalent: GITLAB_SCRIPTS is a membership table read only through Object.hasOwn
+fixtureThreads.ts:41 mergeRequestOf("linedUp")→mergeRequestOf("") — equivalent: every script except "listed" gives !12

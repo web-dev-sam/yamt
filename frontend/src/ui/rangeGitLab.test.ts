@@ -5,6 +5,7 @@ import {
   createFixtureRangeSource,
   log,
   type GitLabCheck,
+  type MergeRequestRow,
   type Message,
   type RangeSource,
   type RangeStart,
@@ -14,7 +15,7 @@ import {
 } from "../ipc";
 import { RECHECK_PAUSE_MS } from "./glab";
 import type { Problem } from "./problem";
-import { createGitLabCheck, type GitLabState, type PostBody } from "./rangeGitLab";
+import { createGitLabCheck, linedUpRow, type GitLabState, type PostBody } from "./rangeGitLab";
 import { createRangeThreads, type RangeThreads } from "./rangeThreads";
 
 const TEXT: PostBody = { kind: "text", text: "Is this still used?" };
@@ -38,6 +39,11 @@ const LINED_UP: GitLabCheck = {
     title: "Reminders on cards",
     webUrl: "https://gitlab.example.com/team/taskboard/-/merge_requests/12",
   },
+};
+const NEWEST_PAGE = "https://gitlab.example/taskboard/taskboard/-/merge_requests/640";
+const LINED_UP_NEWEST: GitLabCheck = {
+  kind: "linedUp",
+  mergeRequest: { reference: "!640", title: "Snooze a reminder", webUrl: NEWEST_PAGE },
 };
 const SEEDED = "?range=review&threads=seeded";
 const MICROTASKS = 10;
@@ -395,4 +401,32 @@ test("a failed check and a failed send report their step and keep the last answe
     { action: "threads", step: "check", cause: { kind: "WorkerStopped" } },
     { action: "threads", step: "send", cause: { kind: "SendRunning" } },
   ]);
+});
+
+async function listedRows(): Promise<readonly MergeRequestRow[]> {
+  const rows: MergeRequestRow[] = [];
+  await createFixtureRangeSource(log, "?mr=list").listMergeRequests(
+    (page) => {
+      rows.push(...page.rows);
+    },
+    () => undefined,
+  );
+  return rows;
+}
+
+test("the_lined_up_row_is_the_loaded_row_at_the_merge_requests_page", async () => {
+  const rows = await listedRows();
+
+  expect(rows.map((row) => row.iid).slice(0, 2)).toEqual([640, 639]);
+  expect(linedUpRow(LINED_UP_NEWEST, [...rows].reverse())).toBe(rows[0]);
+});
+
+test("no_loaded_row_or_no_lined_up_merge_request_gives_none", async () => {
+  const rows = await listedRows();
+
+  expect(rows.length).toBeGreaterThan(1);
+  expect(linedUpRow(LINED_UP_NEWEST, [])).toBeNull();
+  expect(linedUpRow(LINED_UP, rows)).toBeNull();
+  expect(linedUpRow({ kind: "notLinedUp", why: { kind: "glabMissing" } }, rows)).toBeNull();
+  expect(linedUpRow(null, rows)).toBeNull();
 });

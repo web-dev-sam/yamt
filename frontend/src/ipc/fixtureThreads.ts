@@ -1,5 +1,5 @@
 import type * as Generated from "./bindings";
-import { pendingPosting, REFUSAL } from "./fixtureGitLab";
+import { mergeRequestOf, pendingPosting, REFUSAL } from "./fixtureGitLab";
 import type { RangeStart } from "./rangeDomain";
 
 type Seed = Pick<Generated.Thread, "place" | "session"> & {
@@ -37,7 +37,9 @@ function lineSeeds(): readonly Seed[] {
         start: { kind: "unchanged", left: 5, right: 5 },
         end: { kind: "unchangedOnLeft", left: 5, right: 5 },
       },
-      messages: [note(pending, pendingPosting(pending, SEEDED_DRAFT_NOTE))],
+      messages: [
+        note(pending, pendingPosting(mergeRequestOf("linedUp"), pending, SEEDED_DRAFT_NOTE)),
+      ],
       session: null,
     },
     {

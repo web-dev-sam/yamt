@@ -1,9 +1,11 @@
 import type * as Generated from "./bindings";
+import { fixtureRows } from "./fixtureMergeRequestData";
 import type { Log } from "./log";
 import type { RangeSide, RangeStart } from "./rangeDomain";
 
 export type GitLabScript =
   | "linedUp"
+  | "listed"
   | "checking"
   | "noGlab"
   | "loggedOut"
@@ -52,6 +54,7 @@ function rightBranch({ label }: RangeSide): Generated.LookedAt {
 
 const GITLAB_SCRIPTS: Readonly<Record<GitLabScript, true>> = {
   linedUp: true,
+  listed: true,
   checking: true,
   noGlab: true,
   loggedOut: true,
@@ -88,6 +91,7 @@ function notLinedUp(
 ): Generated.NotLinedUp | null {
   const answers: Readonly<Record<GitLabScript, Generated.NotLinedUp | null>> = {
     linedUp: null,
+    listed: null,
     checking: null,
     noGlab: { kind: "glabMissing" },
     loggedOut: { kind: "notLoggedIn", detail: LOGGED_OUT },
@@ -118,20 +122,38 @@ function notLinedUp(
   return answers[script];
 }
 
+function newestListed(): Generated.MergeRequestRef {
+  const [newest] = fixtureRows(0, 1);
+  if (newest === undefined || newest.page === null) {
+    throw new Error("?mr=list has no newest row with a page");
+  }
+  return { reference: `!${newest.iid}`, title: newest.title, web_url: newest.page };
+}
+
+/** The merge request a script lines up with: "listed" → !640 from fixtureRows (reference "!640", its title, its
+ *  page as web_url); every other script → !12. */
+export function mergeRequestOf(script: GitLabScript): Generated.MergeRequestRef {
+  return script === "listed" ? newestListed() : MERGE_REQUEST;
+}
+
 export function gitLabCheck(script: GitLabScript, start: RangeStart): Generated.GitLabCheck {
   const why = notLinedUp(script, start);
   return why === null
-    ? { kind: "linedUp", merge_request: MERGE_REQUEST }
+    ? { kind: "linedUp", merge_request: mergeRequestOf(script) }
     : { kind: "notLinedUp", why };
 }
 
-export function pendingPosting(text: string, draftNote: number): Generated.Posting {
+export function pendingPosting(
+  mergeRequest: Generated.MergeRequestRef,
+  text: string,
+  draftNote: number,
+): Generated.Posting {
   return {
     kind: "pending",
     text,
     draft_note: draftNote,
-    merge_request: MERGE_REQUEST.reference,
-    link: `${MERGE_REQUEST.web_url}${DIFFS_PAGE}`,
+    merge_request: mergeRequest.reference,
+    link: `${mergeRequest.web_url}${DIFFS_PAGE}`,
   };
 }
 
