@@ -1,0 +1,282 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index 8061947..55fa190 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -25,3 +25,5 @@ Review mode (request `docs/slices/request-mr-review-mode.md` rules 1–3, 5, 6,
+ Job log (request `docs/slices/request-ci-job-log.md` rules 4–6, design `docs/slices/briefs/ci-job-log-design.md` §1.2, §1.7–1.9, plan §2 #159): `jobLogView(raw)` turns the raw `/trace` text into `LogLine`s of styled `LogRun`s as GitLab's job page shows it (`lib/gitlab/ci/ansi2json/converter.rb`, `parser.rb`, `style.rb`, `line.rb`; bold from `ansi2html.rb`), in one scan: a break is `\r*\n`; the 32-character timestamp prefix is stripped from every line when the first line has it, and a line whose prefix ends in `+` continues the one before (only the `\n` goes, a `\r` before it then clears); `section_start`/`section_end` markers vanish and end a line that has text; a lone `\r` clears the line; only `ESC[…m` (SGR) is applied, by GitLab's exact-text code table (`sgr.ts` `penAfter`: `01` is nothing, `38;5;n` an indexed colour, `38;2;…` no truecolor, its numbers read as codes); every other escape, and C0 controls but tab, vanish; an escape cut off at a line's end drops the rest; 30–37 show bright while bold; the style carries across lines; a line without text is not shown; neighbouring text in equal styles is one run. Run text is text, never markup (RK57). `text` is the shown lines joined by `"\n"`: what the page's `search/` matcher runs over; `hitPlaces` maps its `{ line, from, to }` hits onto runs (a `from` at a run's end starts the next run, a `to` there ends in that run; a hit outside the view is left out). `basicColour` turns a 256-colour index into one of the 16 `AnsiColour`s, 16–255 the nearest on xterm's default palette (the triples classify, never paint: the page maps `AnsiColour` to the `--color-ansi-*` tokens). `jobLogSearch`: `firstHit` the last match, `steppedHit` wraps both ways, `hitCountText` "3 of 17", `NO_RESULTS`; for the page's highlights only the lines near the view count: `firstLineBelow(count, edge, y)` the first line whose growing `edge` is past `y` (binary search), `placesOnLines(places, first, end)` the places on lines `first` to `end` exclusive (binary search on the line order `hitPlaces` gives).
+ 
+ People on a merge request (request `docs/slices/request-mr-people.md` rule 2, design `docs/slices/briefs/mr-people-design.md` option A §1.1, §1.6, §1.8, plan §2 #169): `peopleSuggestions(rows, row, group, me)` is the empty add field's list, each username once, at most `SUGGESTED_PEOPLE` (20, GitLab's autocomplete `LIMIT`): "Me" first when there is a viewer (their person from the row or any loaded row, else `null`: initials), then the row's own author, assignees, reviewers and approvers in that order, then everyone else on the loaded rows by how many rows hold them in `group`, then by `displayName` (`choices`'s `peopleOf` and `byCountThenLabel`, shared, never copied). People already in `group` stay listed; the page marks them. `KnownPeople` and `Suggestion` are generic in the person, so the window's rows and pictures pass through. `searchedText` is what GitLab is asked for: trimmed, one leading `@` dropped, trimmed again; `""` is the empty field, never sent. `ME_WORD` (`filters`) is the one spelling of "Me", read by the filters' words and the choices.
++
++Mentions (request `docs/slices/request-mr-mentions.md` rules 1, 2, 4, design `docs/slices/briefs/mr-mentions-design.md` option A §2.1–2.2, plan §2 #191–#192): `mentionWordAt(text, caret)` is rule 1, the `MentionWord` being typed or null: scanning back from the caret over word characters (code points matching `[\p{L}\p{N}_.-]`) must reach an `@` that starts the text or follows whitespace, `(`, `[` or `{` (so `a@b.c` is no mention, RK76); `typed` is the text between the `@` and the caret, `end` the caret plus the word characters after it; a caret outside the text is null. `knownMentions(row, writers)` is the merge request's people for a field: the row's author, assignees, reviewers and approvers (reusing `suggestions`'s `peopleOnRow`), then the non-null writers, each username once, in that order; a null row gives the writers only. `mentionLines(known, found, typed)` is rule 2's list: the known people matching `typed`, then the found ones; a person's terms are the name without its spaces and the username, lower-cased; inside each group those with a term starting with the typed text come before those whose `"<name term> <username term>"` contains it (order kept); each username once, the first wins; at most `MENTION_LINES` (10, GitLab's `gfm_auto_complete.js` `limit`). A blank `typed` lists every known person and no found one. `mentionEdit(word, username)` is rule 4: it replaces the whole word, `start` to `end`, with `"@<username> "` (one space).
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+index c18c4b2..d6fa204 100644
+--- a/frontend/src/mergeRequests/index.ts
++++ b/frontend/src/mergeRequests/index.ts
+@@ -41,6 +41,15 @@ export {
+   type KnownPeople,
+   type Suggestion,
+ } from "./internal/suggestions";
++export {
++  MENTION_LINES,
++  knownMentions,
++  mentionEdit,
++  mentionLines,
++  mentionWordAt,
++  type MentionEdit,
++  type MentionWord,
++} from "./internal/mentions";
+ export { byDueDate, merged } from "./internal/order";
+ export {
+   reviewFailedText,
+diff --git a/frontend/src/mergeRequests/internal/mentions.test.ts b/frontend/src/mergeRequests/internal/mentions.test.ts
+new file mode 100644
+index 0000000..82024d8
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/mentions.test.ts
+@@ -0,0 +1,144 @@
++import { expect, test } from "vitest";
++
++import {
++  MENTION_LINES,
++  knownMentions,
++  mentionEdit,
++  mentionLines,
++  mentionWordAt,
++  type KnownPeople,
++  type MentionWord,
++  type Person,
++} from "../index";
++
++function person(username: string, name: string): Person {
++  return { username, name };
++}
++
++function usernames(people: readonly Person[]): readonly string[] {
++  return people.map((one) => one.username);
++}
++
++function atEnd(text: string): MentionWord | null {
++  return mentionWordAt(text, text.length);
++}
++
++test("a_word_starts_at_the_text_start_or_after_a_space_a_line_break_or_an_opening_bracket", () => {
++  expect(atEnd("@an")).toEqual({ start: 0, end: 3, typed: "an" });
++  for (const before of [" ", "\n", "\t"]) {
++    expect(atEnd(`x${before}@an`)).toEqual({ start: 2, end: 5, typed: "an" });
++  }
++  for (const bracket of ["(", "[", "{"]) {
++    expect(atEnd(`${bracket}@an`)).toEqual({ start: 1, end: 4, typed: "an" });
++  }
++});
++
++test("an_at_after_a_letter_starts_no_word", () => {
++  expect(mentionWordAt("a@b.c", 3)).toBeNull();
++  expect(atEnd("a@b.c")).toBeNull();
++  expect(atEnd("x@y")).toBeNull();
++  expect(atEnd("see x@y")).toBeNull();
++  expect(atEnd("@@a")).toBeNull();
++  expect(atEnd(")@a")).toBeNull();
++});
++
++test("a_caret_inside_the_word_searches_the_text_before_it", () => {
++  expect(mentionWordAt("@anna x", 3)).toEqual({ start: 0, end: 5, typed: "an" });
++  expect(mentionWordAt("@a1_b.c-dë e", 2)).toEqual({ start: 0, end: 10, typed: "a" });
++  expect(mentionWordAt("x @an", 4)).toEqual({ start: 2, end: 5, typed: "a" });
++  expect(mentionWordAt("@an x", 3)).toEqual({ start: 0, end: 3, typed: "an" });
++});
++
++test("a_space_or_a_caret_outside_ends_the_word", () => {
++  expect(atEnd("@an ")).toBeNull();
++  expect(atEnd("@an x")).toBeNull();
++  expect(mentionWordAt("x @an", 2)).toBeNull();
++  expect(mentionWordAt("@an", -1)).toBeNull();
++  expect(mentionWordAt("@an", 4)).toBeNull();
++  expect(atEnd("@")).toEqual({ start: 0, end: 1, typed: "" });
++});
++
++test("a_name_with_an_accent_stays_one_word", () => {
++  expect(atEnd("@zoë")).toEqual({ start: 0, end: 4, typed: "zoë" });
++  expect(atEnd("@an.na-b_1")).toEqual({ start: 0, end: 10, typed: "an.na-b_1" });
++  expect(atEnd("hi @😀x")).toBeNull();
++});
++
++const BEN = person("ben", "Ben Ode");
++const ANNA = person("anna", "Anna Berg");
++const ANNA2 = person("anna2", "Anna Two");
++const ADAM = person("adam", "Adam Fox");
++const DSCOTT = person("dscott", "Dana Scott");
++
++test("known_people_come_before_found_people", () => {
++  expect(usernames(mentionLines([BEN, ANNA], [ANNA2, ADAM], "a"))).toEqual([
++    "anna",
++    "anna2",
++    "adam",
++  ]);
++});
++
++test("starts_with_comes_before_contains_in_each_group", () => {
++  expect(usernames(mentionLines([DSCOTT, ANNA], [], "an"))).toEqual(["anna", "dscott"]);
++  expect(usernames(mentionLines([], [DSCOTT, ANNA], "AN"))).toEqual(["anna", "dscott"]);
++  expect(usernames(mentionLines([BEN], [DSCOTT, ANNA], "an"))).toEqual(["anna", "dscott"]);
++});
++
++test("a_name_matches_without_its_spaces", () => {
++  expect(usernames(mentionLines([ANNA], [], "annaberg"))).toEqual(["anna"]);
++  expect(usernames(mentionLines([ADAM, ANNA], [], "berg"))).toEqual(["anna"]);
++  expect(usernames(mentionLines([ANNA, person("bergo", "Bo Bergo")], [], "berg"))).toEqual([
++    "bergo",
++    "anna",
++  ]);
++});
++
++test("each_person_is_listed_once", () => {
++  const foundAnna = person("anna", "Anna B.");
++  const lines = mentionLines([ADAM, ANNA], [foundAnna, ANNA2], "a");
++  expect(usernames(lines)).toEqual(["adam", "anna", "anna2"]);
++  expect(lines[1]).toBe(ANNA);
++});
++
++test("at_most_ten_lines", () => {
++  const known = Array.from({ length: 8 }, (_, index) => person(`known${index}`, "Kim"));
++  const found = Array.from({ length: 8 }, (_, index) => person(`found${index}`, "Kim"));
++  const lines = mentionLines(known, found, "kim");
++  expect(lines).toHaveLength(MENTION_LINES);
++  expect(usernames(lines).slice(-2)).toEqual(["found0", "found1"]);
++});
++
++test("a_blank_text_lists_every_known_person_and_no_found_one", () => {
++  expect(usernames(mentionLines([BEN, ANNA, BEN], [ADAM], ""))).toEqual(["ben", "anna"]);
++  expect(usernames(mentionLines([BEN, ANNA], [ADAM], " "))).toEqual(["ben", "anna"]);
++});
++
++test("known_mentions_are_the_row_then_the_writers_each_once", () => {
++  const row: KnownPeople<Person> = {
++    author: BEN,
++    assignees: [ANNA],
++    reviewers: [{ person: ADAM }],
++    approvedBy: [DSCOTT, ANNA],
++  };
++  expect(usernames(knownMentions(row, [null, ANNA2, BEN, null, ANNA2]))).toEqual([
++    "ben",
++    "anna",
++    "adam",
++    "dscott",
++    "anna2",
++  ]);
++  expect(usernames(knownMentions({ ...row, author: null }, []))).toEqual([
++    "anna",
++    "adam",
++    "dscott",
++  ]);
++  expect(usernames(knownMentions(null, [ANNA2, null, BEN, ANNA2]))).toEqual(["anna2", "ben"]);
++});
++
++test("the_pick_replaces_the_whole_word_and_adds_one_space", () => {
++  expect(mentionEdit({ start: 4, end: 9, typed: "an" }, "anna")).toEqual({
++    from: 4,
++    to: 9,
++    insert: "@anna ",
++  });
++});
+diff --git a/frontend/src/mergeRequests/internal/mentions.ts b/frontend/src/mergeRequests/internal/mentions.ts
+new file mode 100644
+index 0000000..3656268
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/mentions.ts
+@@ -0,0 +1,83 @@
++import type { Person } from "./filters";
++import { peopleOnRow, type KnownPeople } from "./suggestions";
++
++/** GitLab's `@` list shows 10 lines (gfm_auto_complete.js `limit: 10`, request rule 2). */
++export const MENTION_LINES = 10;
++
++/** The mention being typed: `text[start]` is "@"; `typed` is the text between it and the caret; `end` (≥ the
++ *  caret) is where the word's characters stop. */
++export type MentionWord = { readonly start: number; readonly end: number; readonly typed: string };
++
++/** Rule 4: replace the whole word with "@<username> " (one space). */
++export type MentionEdit = { readonly from: number; readonly to: number; readonly insert: string };
++
++/** Request rule 1. `caret` is a UTF-16 index (a textarea's `selectionStart`); null: the caret is in no mention word. */
++export function mentionWordAt(text: string, caret: number): MentionWord | null {
++  if (caret < 0 || caret > text.length) {
++    return null;
++  }
++  const at = /@[\p{L}\p{N}_.-]*$/u.exec(text.slice(0, caret));
++  if (at === null) {
++    return null;
++  }
++  const start = at.index;
++  if (start > 0 && !/[\s([{]/u.test(text.charAt(start - 1))) {
++    return null;
++  }
++  const wordStop = text.slice(caret).search(/[^\p{L}\p{N}_.-]/u);
++  const end = wordStop < 0 ? text.length : caret + wordStop;
++  return { start, end, typed: text.slice(start + 1, caret) };
++}
++
++function eachUsernameOnce<P extends Person>(people: readonly P[]): readonly P[] {
++  const seen = new Set<string>();
++  return people.filter((person) => {
++    const first = !seen.has(person.username);
++    seen.add(person.username);
++    return first;
++  });
++}
++
++/** The merge request's people for a field (rule 2): `row`'s author, assignees, reviewers, approvers (suggestions'
++ *  `peopleOnRow`), then the non-null `writers`, each username once, in that order; a null `row`: the writers only. */
++export function knownMentions<P extends Person>(
++  row: KnownPeople<P> | null,
++  writers: readonly (P | null)[],
++): readonly P[] {
++  const present = writers.filter((writer) => writer !== null);
++  return eachUsernameOnce([...(row === null ? [] : peopleOnRow(row)), ...present]);
++}
++
++function matchOf(person: Person, query: string): "starts" | "contains" | null {
++  const nameTerm = person.name.replace(/\s+/gu, "").toLowerCase();
++  const usernameTerm = person.username.toLowerCase();
++  if (nameTerm.startsWith(query) || usernameTerm.startsWith(query)) {
++    return "starts";
++  }
++  return `${nameTerm} ${usernameTerm}`.includes(query) ? "contains" : null;
++}
++
++function matching<P extends Person>(people: readonly P[], query: string): readonly P[] {
++  return [
++    ...people.filter((person) => matchOf(person, query) === "starts"),
++    ...people.filter((person) => matchOf(person, query) === "contains"),
++  ];
++}
++
++/** Rule 2's lines: `known` matching `typed`, then `found` matching it; inside each, starts-with before contains (order
++ *  kept); each username once (the first wins); at most MENTION_LINES. A blank `typed`: every known person, no found. */
++export function mentionLines<P extends Person>(
++  known: readonly P[],
++  found: readonly P[],
++  typed: string,
++): readonly P[] {
++  const query = typed.toLowerCase();
++  const lines =
++    typed.trim() === "" ? known : [...matching(known, query), ...matching(found, query)];
++  return eachUsernameOnce(lines).slice(0, MENTION_LINES);
++}
++
++/** Rule 4: the edit that replaces `word` with "@<username> ". */
++export function mentionEdit(word: MentionWord, username: string): MentionEdit {
++  return { from: word.start, to: word.end, insert: `@${username} ` };
++}
+diff --git a/frontend/src/mergeRequests/internal/suggestions.ts b/frontend/src/mergeRequests/internal/suggestions.ts
+index 35193e7..4473678 100644
+--- a/frontend/src/mergeRequests/internal/suggestions.ts
++++ b/frontend/src/mergeRequests/internal/suggestions.ts
+@@ -18,7 +18,7 @@ export type Suggestion<P extends Person> =
+   | { readonly kind: "me"; readonly username: string; readonly person: P | null }
+   | { readonly kind: "known"; readonly person: P };
+ 
+-function peopleOnRow<P extends Person>(row: KnownPeople<P>): readonly P[] {
++export function peopleOnRow<P extends Person>(row: KnownPeople<P>): readonly P[] {
+   return [
+     ...(row.author === null ? [] : [row.author]),
+     ...row.assignees,

@@ -41,6 +41,15 @@ export {
   type KnownPeople,
   type Suggestion,
 } from "./internal/suggestions";
+export {
+  MENTION_LINES,
+  knownMentions,
+  mentionEdit,
+  mentionLines,
+  mentionWordAt,
+  type MentionEdit,
+  type MentionWord,
+} from "./internal/mentions";
 export { byDueDate, merged } from "./internal/order";
 export {
   reviewFailedText,

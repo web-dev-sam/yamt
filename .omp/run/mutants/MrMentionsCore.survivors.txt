@@ -1,0 +1,3 @@
+just mutants HEAD → no Rust changes; Stryker mutated mentions.ts + suggestions.ts: 152 killed, 2 survived, 0 no-cov (mentions.ts 98.04%, suggestions.ts 100%)
+frontend/src/mergeRequests/internal/mentions.ts:16 `caret < 0` → `caret <= 0` — equivalent: at caret 0 the text before is empty, so the @ regex finds nothing and the result is null either way
+frontend/src/mergeRequests/internal/mentions.ts:52 `/\s+/gu` → `/\s/gu` — equivalent: a global replace with "" removes the same whitespace either way; `\s+` is the brief's literal rule

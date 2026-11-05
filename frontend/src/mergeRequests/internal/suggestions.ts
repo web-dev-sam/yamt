@@ -18,7 +18,7 @@ export type Suggestion<P extends Person> =
   | { readonly kind: "me"; readonly username: string; readonly person: P | null }
   | { readonly kind: "known"; readonly person: P };
 
-function peopleOnRow<P extends Person>(row: KnownPeople<P>): readonly P[] {
+export function peopleOnRow<P extends Person>(row: KnownPeople<P>): readonly P[] {
   return [
     ...(row.author === null ? [] : [row.author]),
     ...row.assignees,
