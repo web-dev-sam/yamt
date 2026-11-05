@@ -786,9 +786,10 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   `www.`, `mailto:`/`xmpp:`, commit ids, `GL-1`, `iteration:`, `group/project>`); a fenced block with a blank edge, an
   unknown language or one of `GITLAB_DRAWN_LANGUAGES` (diagrams, math, suggestions, GeoJSON, STL); nesting past
   `MAX_NESTING − 1`. Else the blocks GitLab's preview reduces to (`parseInline(source, "commonMark")`: CommonMark's
-  flanking rules, a run's neighbours read past `~`; the AI chat keeps the default `"yamt"` mode), table cells always
-  `start`. `localPreview.test.ts` checks it against every entry of `frontend/fixtures/markdown/gitlab-preview.json`
-  (§3.9). The range root (`RangeApp`, `rangeStore.ts`) owns the threads (`rangeThreads.ts`, `rangeOpen.ts` — each
+  flanking rules, a run's neighbours read past `~`; the AI chat keeps the default `"yamt"` mode), each table cell its
+  column's Markdown alignment (`CELL_ALIGN`: `:-:` `center`, `-:` `end`, `:-` and `-` `start`). `localPreview.test.ts`
+  checks it against every entry of `frontend/fixtures/markdown/gitlab-preview.json` (§3.9). The range root
+  (`RangeApp`, `rangeStore.ts`) owns the threads (`rangeThreads.ts`, `rangeOpen.ts` — each
   stored thread's box key and open state —, `rangeDrafts.ts`: a draft holds its `place`, and a drag of the same place
   — the same `start`, the same shown column and line of `end` — focuses it, any other opens a new draft;
   `rangeAdds.ts` the one reactive record of adds in flight, which Ask AI reads, #124), GitLab (`rangeGitLab.ts`) and the
@@ -1083,9 +1084,11 @@ reply, one resolve or unresolve, or one `bulk_publish` (RK54).
   it with `dom_query` and walks it on an allow-list: paragraphs (an inline run beside blocks becomes one; `div` ends a
   run), headings h1–h6, code (`element.rs` `code`: `data-canonical-lang`, else `lang`; the `<pre>`'s text, one final
   newline dropped), lists (`ol start`; `element.rs` `task_box`: GitLab's `task-list-item-checkbox` as the item's first
-  element or text, or its first `<p>`'s, → `done`/`open`/`inapplicable`, else `none`), quotes, rules, tables (`align`
-  only from `text-align: left|center|right`, else `start`), `<details>` (`open`, its `summary`; a `summary` elsewhere
-  gives nothing); inlines text, emphasis, strong, strike, inline code, line break, links and images (`data-src` before
+  element or text, or its first `<p>`'s, → `done`/`open`/`inapplicable`, else `none`), quotes, rules, tables
+  (`element.rs` `align`: `align="center"`/`"right"` as gitlab.com writes it, else exactly `text-align: center`/`right`,
+  the one style GitLab's sanitizer keeps on a cell, → `center`/`end`, else `start`), `<details>` (`open`, its `summary`;
+  a `summary` elsewhere gives nothing); inlines text, emphasis, strong, strike, inline code, line break, links and
+  images (`data-src` before
   `src`; the caption `alt`, else `title`, else the address as written; the `size` from the `<img>`'s `width` and
   `height`, each only in GitLab's form `\A\d{1,4}(%|px)?\z` (Banzai `AttributesFilter::VALID_SIZE_REGEX`; a bare number
   is pixels; `size.rs` `image_length`/`image_size`: width, height or both, none when neither side is in that form, #184);
