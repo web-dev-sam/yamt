@@ -14,7 +14,8 @@
       "frontend/src/ui/MergeRequestThreadPanel.test.ts",
       "frontend/src/ui/AGENTS.md",
       "tests/glab/mr-threads/graphql-people-an.json",
-      "tests/glab/README.md"
+      "tests/glab/README.md",
+      "frontend/src/ui/mergeRequestMentions.test.ts"
     ]
   }
 }
