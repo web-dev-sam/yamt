@@ -18,7 +18,8 @@ padding of the cell's right edge. Paste the values.
 ## Smoke (after the slice's commit)
 
 **B. WebKit fixture.** `just app-session start-fixture --name tav --diff --mr list --size 1600x1000`, the
-merge-requests page, yamt Dark, then yamt Light (`--settings '{"theme":"light"}'`):
+merge-requests page, yamt Dark, then yamt Light (start-fixture takes no `--settings`: Back → Settings → "Light" →
+Back → the merge-requests page, #2483). d01 is on !637:
 
 1. **Description (rule 1).** !640's description panel: the table "Card / State / Days" reads left, centre, right in
    the head and both body rows; borders and header weight as before (no other table styling changed).
