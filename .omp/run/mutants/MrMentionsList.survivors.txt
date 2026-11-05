@@ -1,0 +1,13 @@
+just mutants HEAD → 63.50% (341 killed, 19 survived, 177 no-cov). menuKeys.ts and mergeRequestMentionLines.ts 100%; the no-cov in mergeRequestsText.ts are older default branches.
+mergeRequestMentions.ts:152 input listener event "" — wiring: smoke steps 1–2 (typing opens and filters the list)
+mergeRequestMentions.ts:157 click/keyup array and strings — wiring: step 7.5 (a click reopens the list) and step 4 (ArrowRight keyup reopens it)
+mergeRequestMentions.ts:163 focus listener event "" — wiring: blur() then focus() brings the list back
+mergeRequestMentions.ts:167 compositionstart/end array, strings and call — wiring: the synthetic composition check (start closes, end reopens)
+mergeRequestMentions.ts:171 blur event "" — wiring: blur() closes the list
+mergeRequestMentions.ts:174 scroll event "" — wiring: scrollTop=0 re-places the list (918.5 → 896.5)
+mergeRequestMentions.ts:150 listen() body / :229 listen(state) removed — wiring: steps 1–8 (no reads, no list)
+mergeRequestMentions.ts:187 open===null→true and :216 composing:true — wiring: step 1 (the list would never open)
+mergeRequestMentions.ts:197 watch getter → undefined — wiring: the highlight resets when the lines change (Down Down, then b resets to Ben)
+mergeRequestMentions.ts:223, 225 aria-controls/aria-activedescendant → undefined — wiring: step 1 read shows controls v-1 and active v-1-0
+mergeRequestMentions.ts:236 keydown → undefined — wiring: steps 4–6 (Enter picks, Escape twice, Tab picks)
+All no-cov mutants in mergeRequestMentions.ts and in textareaCaret.ts caretBox/visibleRoom — wiring, DOM only: placement in step 3, picks in steps 4 and 6, the scroll check

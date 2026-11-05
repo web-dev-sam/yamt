@@ -202,6 +202,19 @@ test("the_field_has_its_placeholder_and_no_toolbar", async () => {
   expect(html).toContain('role="dialog" aria-label="Thread: Overview" tabindex="-1"');
 });
 
+test("the_reply_field_offers_mentions", async () => {
+  await shown(THREADS, 1);
+  slice.setReplyText(d(1), "@an");
+  const html = await panel();
+
+  const field = tagOf(html, "@an");
+  expect(field).toMatch(/^<textarea /u);
+  expect(field).toContain('aria-autocomplete="list"');
+  expect(field).not.toContain("aria-activedescendant");
+  expect(field).not.toContain("aria-controls");
+  expect(html).not.toContain('role="listbox"');
+});
+
 test("preview_shows_loading_then_blocks_and_nothing_for_empty", async () => {
   await shown(THREADS, 1);
   slice.setReplyText(d(1), "**Preview** of @anna");

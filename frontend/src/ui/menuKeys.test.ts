@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
+import { MENU_ITEMS, stepMenuItem, wrappedIndex } from "./menuKeys";
 
 test("Escape and Tab close a menu", () => {
   expect(stepMenuItem({ count: 3, focused: 1 }, { key: "Escape" })).toEqual({ kind: "close" });
@@ -34,6 +34,14 @@ test("other keys, and arrows in an empty menu, are left alone", () => {
   expect(stepMenuItem({ count: 0, focused: -1 }, { key: "ArrowDown" })).toEqual({
     kind: "ignore",
   });
+});
+
+test("wrappedIndex wraps both ways", () => {
+  expect(wrappedIndex(4, 1, 1)).toBe(2);
+  expect(wrappedIndex(4, 3, 1)).toBe(0);
+  expect(wrappedIndex(4, 2, -1)).toBe(1);
+  expect(wrappedIndex(4, 0, -1)).toBe(3);
+  expect(wrappedIndex(1, 0, 1)).toBe(0);
 });
 
 test("a radio item is stepped: menus step over plain, checkbox and radio items", () => {

@@ -47,6 +47,7 @@ export const SEARCH_PEOPLE = "Search people";
 export const SEARCH_PEOPLE_PLACEHOLDER = "Search people…";
 export const SEARCHING_PEOPLE = "Searching…";
 export const NO_ONE_FOUND = "No one found";
+export const MENTION_PEOPLE = "People to mention";
 export const NO_ONE = "None";
 export const SET_DUE_DATE = "Set a due date";
 export const CLEAR_DUE_DATE = "Clear";

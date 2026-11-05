@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, useTemplateRef, watch } from "vue";
 
-import type { DescriptionBlock } from "../ipc";
+import type { DescriptionBlock, Person } from "../ipc";
+import { knownMentions } from "../mergeRequests";
 import { boxKeydown } from "./boxKeys";
 import MergeRequestDescriptionBlocks from "./MergeRequestDescriptionBlocks.vue";
+import MergeRequestMentionList from "./MergeRequestMentionList.vue";
+import { useMentions } from "./mergeRequestMentions";
 import type { Preview } from "./mergeRequestPreview";
 import { useMergeRequests } from "./mergeRequestsStore";
 import type { Thread } from "./mergeRequestThread";
@@ -38,9 +41,10 @@ const MAX_LINES = 12;
 const BUTTON =
   "rounded border border-control-border px-3 py-0.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted";
 
-const { replyTexts, setReplyText, showPreview, showWrite, sendReply, setResolved } =
+const { rows, replyTexts, setReplyText, showPreview, showWrite, sendReply, setResolved } =
   useMergeRequests();
 const field = useTemplateRef<HTMLTextAreaElement>("field");
+const mentions = useMentions(field, mentionPeople);
 
 const text = computed({
   get: () => replyTexts.value.get(props.thread.shown.discussion) ?? "",
@@ -103,6 +107,11 @@ function pixels(value: string): number {
   return Number.parseFloat(value);
 }
 
+function mentionPeople(): readonly Person[] {
+  const row = rows.value.find((shown) => shown.iid === props.thread.shown.iid) ?? null;
+  return knownMentions(row, loaded.value?.thread.comments.map((comment) => comment.author) ?? []);
+}
+
 function fit(): void {
   const element = field.value;
   if (element === null || !writing.value) {
@@ -137,13 +146,22 @@ function keepFocus(): void {
 }
 
 function send(kind: "comment" | "draft"): void {
+  mentions.close();
   if (!add.value.disabled) {
     keepFocus();
     void sendReply(kind);
   }
 }
 
+function preview(): void {
+  mentions.close();
+  showPreview();
+}
+
 function keyPressed(event: KeyboardEvent): void {
+  if (mentions.keydown(event)) {
+    return;
+  }
   boxKeydown(event, navigator.platform, {
     submit: () => {
       send("comment");
@@ -175,20 +193,30 @@ function toggleResolved(): void {
         type="button"
         :aria-pressed="!writing"
         class="rounded px-2 py-0.5 hover:bg-hover aria-pressed:bg-row-selected"
-        @click="showPreview"
+        @click="preview"
       >
         {{ PREVIEW }}
       </button>
     </div>
-    <textarea
-      v-show="writing"
-      ref="field"
-      v-model="text"
-      :placeholder="REPLY_PLACEHOLDER"
-      :aria-label="REPLY_PLACEHOLDER"
-      class="w-full resize-none overflow-y-auto rounded border border-control-border bg-panel px-2 py-1 leading-5 outline-none focus:border-primary"
-      @keydown="keyPressed"
-    ></textarea>
+    <div v-show="writing" class="relative">
+      <textarea
+        ref="field"
+        v-model="text"
+        v-bind="mentions.fieldAria.value"
+        :placeholder="REPLY_PLACEHOLDER"
+        :aria-label="REPLY_PLACEHOLDER"
+        class="block w-full resize-none overflow-y-auto rounded border border-control-border bg-panel px-2 py-1 leading-5 outline-none focus:border-primary"
+        @keydown="keyPressed"
+      ></textarea>
+      <MergeRequestMentionList
+        v-if="mentions.list.value !== null && mentions.anchor.value !== null"
+        :list="mentions.list.value"
+        :highlight="mentions.highlight.value"
+        :list-id="mentions.listId"
+        :anchor="mentions.anchor.value"
+        @pick="mentions.pick"
+      />
+    </div>
     <div
       v-if="shownPreview !== null"
       class="max-h-60 min-h-[4.5rem] overflow-y-auto rounded border border-control-border px-2 py-1 [overflow-wrap:anywhere]"

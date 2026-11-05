@@ -1,0 +1,1176 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index da23634..cf791f0 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -72,7 +72,9 @@ Merge-request conflicts (plan §2 #138–#143): `MergeRequestRow.vue` shows the
+ 
+ The merge window of a merge request (plan §2 #138–#143): `question.ts` is what is asked; `questionText.ts` is its words (`cancel: null` draws one button; a bullet list is kind `lines`). Abort of a merge yamt started (`mergeRequest`, written only by `listing.ts`) asks by returnTo/branchBefore, then shows the one-button notice if git left anything (`leftoverText.ts`, the page's `gitRefused` line uses it too), then `closeEndedMerge`. `pushing.ts` offers the push after Continue answers ReadyToPush: only Push pushes (RK45), a failure asks pushFailed again, Keep Local or Escape closes once. A failed push is the `push` problem ("Could not push <branch>"); a failed `closeEndedMerge`, after the push offer or after Abort's leftovers, is the `closeMerge` problem of the merge read before the action began ("Could not close the merge of <target> into <branch>"), never Abort's. Once Continue answers ReadyToPush, or Abort answers leftovers, git stays running: the window is ended for every reader.
+ 
+-People on a merge request (request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, plan §2 #169, #170): `useMergeRequests()` carries `peopleSearch`/`searchPeople`/`endPeopleSearch` (the window's one search, 250 ms after the last call, newest answer only), `peopleAsks`/`changePeople` (`mergeRequestPeople.ts`: one change at a time per merge request, `queue[0]` running, `notDone` kept until the box closes; `rowPeopleAsks(peopleAsks, iid)` is the one reader of a row's asks, empty for a row with none) and `openPeopleBoxes`/`peopleBoxOpened`/`peopleBoxClosed`: `shownRows` holds a row whose box is open (rule 9; the one hold rule, `mergeRequestsShown.ts` `heldOf`/`keptInPlace`, which also holds a row whose discussions box or thread panel is open, #2476: a held row stays shown and keeps its index in the order shown before, the other rows fill the rest), so `MergeRequestPeople.vue` calls Opened when `useHoverBox`'s `open` turns true and Closed when it turns false or the box unmounts open. On a row with `mayRerequest` the box always shows both groups ("None" when empty; a row with nobody opens it from the dimmed icon), each header with a `user-plus` add button that opens `MergeRequestPeopleSearch.vue` under it (one field per box, `adding`): a `role="combobox"` field over a `role="listbox"` of `mergeRequestPeopleLines.ts` `pickList` (the core's `peopleSuggestions` while empty, else the search's people; "Already an assignee/reviewer" lines `aria-disabled`, a queued add spinning), arrows over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines change (`keptHighlight`), Enter or a click (its `mousedown` prevented) adds, and once that add is answered the field clears unless its text changed meanwhile (not at the pick, so the picked line shows its spinner) and takes focus back only from `document.body`, never from a control the user moved to while waiting; Escape closes the field (focus to its add button), a second Escape the box. Each assignee and reviewer line ends with `MergeRequestPersonMenu.vue` (`ellipsis-vertical`, one `useDropdownMenu<true>` menu with "Remove assignee/reviewer", `position: fixed` inside the box so the hover box holds it; the spinner, `aria-disabled` and no menu while that remove is queued or running). A change GitLab did not make is one `peopleChangeText` sentence (`personState` under the listed person for a remove, else `groupNotices` under the group). Every control of a line carries `data-control`, its key built once on the line (`BoxLine`'s `review.rerequest.control` and `menuControl`, null when not shown) and bound by the template; when a reply removes the focused one (`lineControls` over the same lines), focus moves to the box.
++People on a merge request (request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, plan §2 #169, #170): `useMergeRequests()` carries `peopleSearch: PeopleSearcher` (`{ state, search, end }`, one of the slice's two `createPeopleSearch` instances, the other being the mention list's `mentionSearch`: each 250 ms after its last call, newest answer only, the same text while searching or found asks nothing, and neither touches the other, #191), `peopleAsks`/`changePeople` (`mergeRequestPeople.ts`: one change at a time per merge request, `queue[0]` running, `notDone` kept until the box closes; `rowPeopleAsks(peopleAsks, iid)` is the one reader of a row's asks, empty for a row with none) and `openPeopleBoxes`/`peopleBoxOpened`/`peopleBoxClosed`: `shownRows` holds a row whose box is open (rule 9; the one hold rule, `mergeRequestsShown.ts` `heldOf`/`keptInPlace`, which also holds a row whose discussions box or thread panel is open, #2476: a held row stays shown and keeps its index in the order shown before, the other rows fill the rest), so `MergeRequestPeople.vue` calls Opened when `useHoverBox`'s `open` turns true and Closed when it turns false or the box unmounts open. On a row with `mayRerequest` the box always shows both groups ("None" when empty; a row with nobody opens it from the dimmed icon), each header with a `user-plus` add button that opens `MergeRequestPeopleSearch.vue` under it (one field per box, `adding`): a `role="combobox"` field over a `role="listbox"` of `mergeRequestPeopleLines.ts` `pickList` (the core's `peopleSuggestions` while empty, else the search's people; "Already an assignee/reviewer" lines `aria-disabled`, a queued add spinning), arrows over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines change (`keptHighlight`), Enter or a click (its `mousedown` prevented) adds, and once that add is answered the field clears unless its text changed meanwhile (not at the pick, so the picked line shows its spinner) and takes focus back only from `document.body`, never from a control the user moved to while waiting; Escape closes the field (focus to its add button), a second Escape the box. Each assignee and reviewer line ends with `MergeRequestPersonMenu.vue` (`ellipsis-vertical`, one `useDropdownMenu<true>` menu with "Remove assignee/reviewer", `position: fixed` inside the box so the hover box holds it; the spinner, `aria-disabled` and no menu while that remove is queued or running). A change GitLab did not make is one `peopleChangeText` sentence (`personState` under the listed person for a remove, else `groupNotices` under the group). Every control of a line carries `data-control`, its key built once on the line (`BoxLine`'s `review.rerequest.control` and `menuControl`, null when not shown) and bound by the template; when a reply removes the focused one (`lineControls` over the same lines), focus moves to the box.
++
++Mentions (request `docs/slices/request-mr-mentions.md`, design `docs/slices/briefs/mr-mentions-design.md` option A, plan §2 #191, #192, RK73, RK76): `@` completion in the thread panel's reply field (`MergeRequestReplyField.vue`, both windows) and the range window's Post box (`RangeMessageEditor.vue`). Each field calls `mergeRequestMentions.ts` `useMentions(field, known)` once; it reads the field on `input` (not while composing), `click`, `keyup`, `focus` (a task later: WebKit reports the caret at 0 while focus comes back to a textarea) and `compositionend`, with `compositionstart`/`compositionend` holding the composing flag, closes on `blur` and re-measures on the field's `scroll`. Each read is `mergeRequestMentionLines.ts` `mentionRead` (the core's `mentionWordAt`; null while composing, with a selection, or in the word Escape or `close()` dismissed, until the caret leaves it): no word closes and ends `mentionSearch`, a word asks `mentionSearch.search(typed)` and, after `nextTick` (the field's `fit` has run), measures `{ caret: textareaCaret.ts caretBox(field, word.start), field, room: visibleRoom(field) }` (a mirror div with `mirrorStyle`; the room is the viewport cut by every clipping ancestor). The list is `mentionList` (the core's `mentionLines` over `known` then the search's people, at most 10, the people box's `peopleSearchText` as a muted note when the search is refused or failed; null, so closed, with neither). The field's `keydown` calls `mentions.keydown(event)` first: `mentionKey` takes Escape (dismiss), Up/Down (`menuKeys.ts` `wrappedIndex`), Enter/Tab (pick) only while the list is open and no modifier is held, prevents and stops them, so `boxKeydown`, the panel's Escape listeners and the window's keys never see them; anything else, Ctrl+Enter included, is the field's. A send, Preview and Queue call `close()`. `MergeRequestMentionList.vue` is an absolute `z-10` child of a `relative` wrapper around the textarea, never teleported (the pointer stays inside the panel's and the box's hover areas, and it scrolls with the field's box); it measures its own content (`useElementSize`) and is placed by `mentionPlace`: under the `@`'s line when it fits in the room, else above, else on the larger side with its height capped; `role="listbox"` "People to mention", options `${listId}-${index}` (`mentionOptionId`, the field's `aria-activedescendant`) with `mousedown` prevented and a click pick. A pick (`mentionEdit`) focuses the field, selects the word and writes `@username ` with `document.execCommand("insertText")`, so the field's own input handler stays the one writer and WebKit keeps one undo step (measured: undo restores the typed word, selected; `setRangeText` was measured to corrupt the undo). The reply field's people are `knownMentions(the shown thread's row, the loaded thread's comment authors)`; the Post box's are the row `rangeGitLab.ts` `linedUpRow(check, rows)` finds (the loaded row whose `page` is the lined-up merge request's `webUrl`, else none) with no writers. Pictures are only those rows, threads and searches carry (RK53); the only call is the search (RK54).
+ 
+ A merge request's description (request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, plan §2 #171–#174): the row's info column (`w-7`, between the approvals and the links column, always rendered so the column stays) holds a button only when `row.hasDescription`; it calls `toggleDescription({ iid, title })` and carries `data-description-opener="<iid>"`. `MergeRequestsView.vue` renders the window's one `MergeRequestDescription.vue` after the list while `description` is set, keyed by the iid (a replace is a new panel), and closes it when the page unmounts. The panel is a non-modal `role="dialog"` that takes focus on mount; Escape and the close button call `closeDescription` and return focus to the row's opener when it is still listed. Escape is a window `keydown` listener in the bubble phase that acts only on an Escape nothing took (`defaultPrevented`) and not while a question is asked (a modal `dialog`'s cancel is the keydown's default action, so its Escape reaches the window unprevented): a focused field or box (the search field with text, a people box, a job log) handles Escape first, and the page's own listener, registered before the panel's, closes an open filter menu and otherwise leaves every Escape alone. A press outside it closes it (`onClickOutside`), ignoring every opener (whose toggle closes or replaces) and every element with `data-refreshes-list` (Refresh and the failed list's Retry: rule 2 keeps the panel over a list refresh, and onClickOutside would close it on their clicks, keyboard ones included); `useHoverBox`'s pinned rule reads the same attribute, so a refresh keeps a pinned discussions box and its thread panel too; a new refresh trigger carries the attribute. A scroll leaves it open. Its renderers use interpolation only and never `href`, `v-html`, `innerHTML` or `title` (RK66): `MergeRequestDescriptionBlocks.vue` and `MergeRequestDescriptionInlines.vue` each render nested content by referring to themselves, with `editor/theme.css`'s `markdown-*` classes; a link is an `a` with `role="link"`, `tabindex="0"` and no `href`, whose click or Enter calls `openPage("link", page)` for a `page` link (branded in `ipc/descriptionDomain.ts` `toDescriptionReply` by `ipc/domain.ts` `isLinkedPage`, http or https) and does nothing for a `refused` one; task boxes are Lucide icons with `role="img"` and their word; `MergeRequestDescriptionImage.vue` loads `imageAddress(image)` with `referrerpolicy="no-referrer"` and shows the caption (else the `web` address, else "picture") when that is null or the image fails; its `style` is `mergeRequestImageSize.ts` `imageStyle(size, natural)` (plan §2 #184: GitLab's width as given, never wider than the column, with its proportions; a pixel height scaled from the natural ratio once the image loaded; both by their ratio; a height in % ignored; no size: `max-width: 100%`, `height: auto`); `MergeRequestDescriptionCode.vue` hosts one `MarkdownView` through `useMarkdownCode`. The words are `mergeRequestDescriptionText.ts`. The thread panel's comments and previews render through the same blocks and inlines.
+ 
+diff --git a/frontend/src/ui/MergeRequestMentionList.vue b/frontend/src/ui/MergeRequestMentionList.vue
+new file mode 100644
+index 0000000..513d3e1
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestMentionList.vue
+@@ -0,0 +1,70 @@
++<script setup lang="ts">
++import { useElementSize } from "@vueuse/core";
++import { computed, useTemplateRef, watch } from "vue";
++
++import {
++  mentionOptionId,
++  mentionPlace,
++  type MentionAnchor,
++  type MentionList,
++} from "./mergeRequestMentionLines";
++import MergeRequestPicture from "./MergeRequestPicture.vue";
++import { MENTION_PEOPLE } from "./mergeRequestsText";
++
++const props = defineProps<{
++  list: MentionList;
++  highlight: number;
++  listId: string;
++  anchor: MentionAnchor;
++}>();
++const emit = defineEmits<{ pick: [index: number] }>();
++
++const content = useTemplateRef<HTMLDivElement>("content");
++const size = useElementSize(content, undefined, { box: "border-box" });
++
++const place = computed(() => {
++  const { left, top, maxHeight } = mentionPlace(props.anchor, {
++    width: size.width.value,
++    height: size.height.value,
++  });
++  return { left: `${left}px`, top: `${top}px`, maxHeight: `${maxHeight}px` };
++});
++const activeId = computed(() => mentionOptionId(props.listId, props.highlight));
++
++watch(
++  activeId,
++  (id) => {
++    document.getElementById(id)?.scrollIntoView({ block: "nearest" });
++  },
++  { flush: "post" },
++);
++</script>
++
++<template>
++  <div class="absolute z-10 overflow-y-auto rounded-md shadow-lg" :style="place">
++    <div
++      ref="content"
++      class="w-max max-w-80 rounded-md border border-control-border bg-panel-inline p-1"
++    >
++      <ul :id="listId" role="listbox" :aria-label="MENTION_PEOPLE">
++        <li
++          v-for="(line, index) in list.lines"
++          :id="mentionOptionId(listId, index)"
++          :key="line.username"
++          role="option"
++          :aria-selected="index === highlight"
++          class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-hover aria-selected:bg-row-selected"
++          @mousedown.prevent
++          @click="emit('pick', index)"
++        >
++          <MergeRequestPicture :person="line.picture" size="box" aria-hidden="true" />
++          <span>{{ line.label }}</span>
++          <span class="text-fg-muted">@{{ line.username }}</span>
++        </li>
++      </ul>
++      <p v-if="list.note !== null" role="status" class="px-2 py-1 text-fg-muted">
++        {{ list.note }}
++      </p>
++    </div>
++  </div>
++</template>
+diff --git a/frontend/src/ui/MergeRequestReplyField.vue b/frontend/src/ui/MergeRequestReplyField.vue
+index f5456a6..b5582a6 100644
+--- a/frontend/src/ui/MergeRequestReplyField.vue
++++ b/frontend/src/ui/MergeRequestReplyField.vue
+@@ -1,9 +1,12 @@
+ <script setup lang="ts">
+ import { computed, nextTick, onMounted, useTemplateRef, watch } from "vue";
+ 
+-import type { DescriptionBlock } from "../ipc";
++import type { DescriptionBlock, Person } from "../ipc";
++import { knownMentions } from "../mergeRequests";
+ import { boxKeydown } from "./boxKeys";
+ import MergeRequestDescriptionBlocks from "./MergeRequestDescriptionBlocks.vue";
++import MergeRequestMentionList from "./MergeRequestMentionList.vue";
++import { useMentions } from "./mergeRequestMentions";
+ import type { Preview } from "./mergeRequestPreview";
+ import { useMergeRequests } from "./mergeRequestsStore";
+ import type { Thread } from "./mergeRequestThread";
+@@ -38,9 +41,10 @@ const MAX_LINES = 12;
+ const BUTTON =
+   "rounded border border-control-border px-3 py-0.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted";
+ 
+-const { replyTexts, setReplyText, showPreview, showWrite, sendReply, setResolved } =
++const { rows, replyTexts, setReplyText, showPreview, showWrite, sendReply, setResolved } =
+   useMergeRequests();
+ const field = useTemplateRef<HTMLTextAreaElement>("field");
++const mentions = useMentions(field, mentionPeople);
+ 
+ const text = computed({
+   get: () => replyTexts.value.get(props.thread.shown.discussion) ?? "",
+@@ -103,6 +107,11 @@ function pixels(value: string): number {
+   return Number.parseFloat(value);
+ }
+ 
++function mentionPeople(): readonly Person[] {
++  const row = rows.value.find((shown) => shown.iid === props.thread.shown.iid) ?? null;
++  return knownMentions(row, loaded.value?.thread.comments.map((comment) => comment.author) ?? []);
++}
++
+ function fit(): void {
+   const element = field.value;
+   if (element === null || !writing.value) {
+@@ -137,13 +146,22 @@ function keepFocus(): void {
+ }
+ 
+ function send(kind: "comment" | "draft"): void {
++  mentions.close();
+   if (!add.value.disabled) {
+     keepFocus();
+     void sendReply(kind);
+   }
+ }
+ 
++function preview(): void {
++  mentions.close();
++  showPreview();
++}
++
+ function keyPressed(event: KeyboardEvent): void {
++  if (mentions.keydown(event)) {
++    return;
++  }
+   boxKeydown(event, navigator.platform, {
+     submit: () => {
+       send("comment");
+@@ -175,20 +193,30 @@ function toggleResolved(): void {
+         type="button"
+         :aria-pressed="!writing"
+         class="rounded px-2 py-0.5 hover:bg-hover aria-pressed:bg-row-selected"
+-        @click="showPreview"
++        @click="preview"
+       >
+         {{ PREVIEW }}
+       </button>
+     </div>
+-    <textarea
+-      v-show="writing"
+-      ref="field"
+-      v-model="text"
+-      :placeholder="REPLY_PLACEHOLDER"
+-      :aria-label="REPLY_PLACEHOLDER"
+-      class="w-full resize-none overflow-y-auto rounded border border-control-border bg-panel px-2 py-1 leading-5 outline-none focus:border-primary"
+-      @keydown="keyPressed"
+-    ></textarea>
++    <div v-show="writing" class="relative">
++      <textarea
++        ref="field"
++        v-model="text"
++        v-bind="mentions.fieldAria.value"
++        :placeholder="REPLY_PLACEHOLDER"
++        :aria-label="REPLY_PLACEHOLDER"
++        class="block w-full resize-none overflow-y-auto rounded border border-control-border bg-panel px-2 py-1 leading-5 outline-none focus:border-primary"
++        @keydown="keyPressed"
++      ></textarea>
++      <MergeRequestMentionList
++        v-if="mentions.list.value !== null && mentions.anchor.value !== null"
++        :list="mentions.list.value"
++        :highlight="mentions.highlight.value"
++        :list-id="mentions.listId"
++        :anchor="mentions.anchor.value"
++        @pick="mentions.pick"
++      />
++    </div>
+     <div
+       v-if="shownPreview !== null"
+       class="max-h-60 min-h-[4.5rem] overflow-y-auto rounded border border-control-border px-2 py-1 [overflow-wrap:anywhere]"
+diff --git a/frontend/src/ui/MergeRequestThreadPanel.test.ts b/frontend/src/ui/MergeRequestThreadPanel.test.ts
+index 13e4ec7..b458bf0 100644
+--- a/frontend/src/ui/MergeRequestThreadPanel.test.ts
++++ b/frontend/src/ui/MergeRequestThreadPanel.test.ts
+@@ -202,6 +202,19 @@ test("the_field_has_its_placeholder_and_no_toolbar", async () => {
+   expect(html).toContain('role="dialog" aria-label="Thread: Overview" tabindex="-1"');
+ });
+ 
++test("the_reply_field_offers_mentions", async () => {
++  await shown(THREADS, 1);
++  slice.setReplyText(d(1), "@an");
++  const html = await panel();
++
++  const field = tagOf(html, "@an");
++  expect(field).toMatch(/^<textarea /u);
++  expect(field).toContain('aria-autocomplete="list"');
++  expect(field).not.toContain("aria-activedescendant");
++  expect(field).not.toContain("aria-controls");
++  expect(html).not.toContain('role="listbox"');
++});
++
+ test("preview_shows_loading_then_blocks_and_nothing_for_empty", async () => {
+   await shown(THREADS, 1);
+   slice.setReplyText(d(1), "**Preview** of @anna");
+diff --git a/frontend/src/ui/menuKeys.test.ts b/frontend/src/ui/menuKeys.test.ts
+index 7e98d32..c924dfa 100644
+--- a/frontend/src/ui/menuKeys.test.ts
++++ b/frontend/src/ui/menuKeys.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
++import { MENU_ITEMS, stepMenuItem, wrappedIndex } from "./menuKeys";
+ 
+ test("Escape and Tab close a menu", () => {
+   expect(stepMenuItem({ count: 3, focused: 1 }, { key: "Escape" })).toEqual({ kind: "close" });
+@@ -36,6 +36,14 @@ test("other keys, and arrows in an empty menu, are left alone", () => {
+   });
+ });
+ 
++test("wrappedIndex wraps both ways", () => {
++  expect(wrappedIndex(4, 1, 1)).toBe(2);
++  expect(wrappedIndex(4, 3, 1)).toBe(0);
++  expect(wrappedIndex(4, 2, -1)).toBe(1);
++  expect(wrappedIndex(4, 0, -1)).toBe(3);
++  expect(wrappedIndex(1, 0, 1)).toBe(0);
++});
++
+ test("a radio item is stepped: menus step over plain, checkbox and radio items", () => {
+   expect(MENU_ITEMS.split(", ")).toEqual([
+     "[role=menuitem]",
+diff --git a/frontend/src/ui/menuKeys.ts b/frontend/src/ui/menuKeys.ts
+index a259830..2869561 100644
+--- a/frontend/src/ui/menuKeys.ts
++++ b/frontend/src/ui/menuKeys.ts
+@@ -7,6 +7,11 @@ type MenuStep =
+   | { readonly kind: "focus"; readonly index: number }
+   | { readonly kind: "ignore" };
+ 
++/** `index` moved by `step`, wrapping over `count` (> 0) items; `stepMenuItem` uses it. */
++export function wrappedIndex(count: number, index: number, step: number): number {
++  return (index + step + count) % count;
++}
++
+ export function stepMenuItem(
+   menu: { readonly count: number; readonly focused: number },
+   event: Pick<KeyboardEvent, "key">,
+@@ -18,5 +23,5 @@ export function stepMenuItem(
+   if (step === undefined || menu.count === 0) {
+     return { kind: "ignore" };
+   }
+-  return { kind: "focus", index: (menu.focused + step + menu.count) % menu.count };
++  return { kind: "focus", index: wrappedIndex(menu.count, menu.focused, step) };
+ }
+diff --git a/frontend/src/ui/mergeRequestMentionLines.test.ts b/frontend/src/ui/mergeRequestMentionLines.test.ts
+new file mode 100644
+index 0000000..c33a7be
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestMentionLines.test.ts
+@@ -0,0 +1,240 @@
++import { expect, test } from "vitest";
++
++import type { Person } from "../ipc";
++import {
++  highlightAfter,
++  mentionKey,
++  mentionList,
++  mentionOptionId,
++  mentionPlace,
++  mentionRead,
++  type MentionAnchor,
++  type MentionInput,
++  type MentionLine,
++  type MentionList,
++} from "./mergeRequestMentionLines";
++import type { PeopleSearch } from "./mergeRequests";
++import { peopleSearchText } from "./mergeRequestsText";
++
++const PLATFORM = "Linux x86_64";
++const SAM: Person = { username: "sam", name: "Sam Weller", picture: null };
++const ANNA: Person = { username: "anna", name: "Anna Berg", picture: "yamt-picture://anna" };
++const BEN: Person = { username: "ben", name: "Ben Okafor", picture: null };
++const DANA: Person = { username: "dana", name: "", picture: null };
++const ERIK: Person = { username: "erik", name: "Erik Lund", picture: null };
++const RANA: Person = { username: "rana", name: "Rana Ali", picture: null };
++
++const EMPTY: PeopleSearch = { kind: "empty" };
++const KEYS = { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, isComposing: false };
++
++function input(change: Partial<MentionInput>): MentionInput {
++  return { known: [SAM, ANNA, BEN], typed: "", search: EMPTY, platform: PLATFORM, ...change };
++}
++
++function usernames(list: MentionList | null): readonly string[] | null {
++  return list === null ? null : list.lines.map((line) => line.username);
++}
++
++function line(person: Person): MentionLine {
++  return { username: person.username, picture: person, label: person.name };
++}
++
++function key(name: string, change: Partial<typeof KEYS> = {}): Parameters<typeof mentionKey>[0] {
++  return { key: name, ...KEYS, ...change };
++}
++
++const OPEN: MentionList = { lines: [line(SAM), line(ANNA)], note: null };
++const NOTE_ONLY: MentionList = { lines: [], note: "glab is missing" };
++
++test("known_people_show_at_once_and_search_results_follow", () => {
++  const bare = mentionList(input({}));
++  expect(bare).toEqual({ lines: [line(SAM), line(ANNA), line(BEN)], note: null });
++  expect(bare?.lines[1]?.picture).toBe(ANNA);
++
++  expect(usernames(mentionList(input({ typed: "an" })))).toEqual(["anna"]);
++  const found: PeopleSearch = { kind: "found", text: "an", people: [ERIK, RANA, ANNA] };
++  expect(usernames(mentionList(input({ typed: "an", search: found })))).toEqual(["anna", "rana"]);
++  const searching: PeopleSearch = { kind: "searching", text: "an", people: [RANA] };
++  expect(usernames(mentionList(input({ typed: "an", search: searching })))).toEqual([
++    "anna",
++    "rana",
++  ]);
++
++  expect(mentionList(input({ known: [DANA], typed: "da" }))?.lines).toEqual([
++    { username: "dana", picture: DANA, label: "dana" },
++  ]);
++});
++
++test("a_refused_or_failed_search_keeps_the_known_people_with_the_people_box_words", () => {
++  const refused = {
++    kind: "refused",
++    text: "an",
++    reply: { kind: "glabMissing" },
++  } as const satisfies PeopleSearch;
++  expect(mentionList(input({ typed: "an", search: refused }))).toEqual({
++    lines: [line(ANNA)],
++    note: peopleSearchText(refused, PLATFORM),
++  });
++  const failed = {
++    kind: "failed",
++    text: "an",
++    cause: { kind: "WorkerStopped" },
++  } as const satisfies PeopleSearch;
++  expect(mentionList(input({ typed: "an", search: failed }))).toEqual({
++    lines: [line(ANNA)],
++    note: "Could not search people: yamt's worker stopped; try again.",
++  });
++  expect(mentionList(input({ typed: "zz", search: failed }))).toEqual({
++    lines: [],
++    note: "Could not search people: yamt's worker stopped; try again.",
++  });
++});
++
++test("nothing_to_show_closes_the_list", () => {
++  expect(mentionList(input({ typed: "zz" }))).toBeNull();
++  expect(mentionList(input({ known: [] }))).toBeNull();
++  const searching: PeopleSearch = { kind: "searching", text: "zz", people: [] };
++  expect(mentionList(input({ typed: "zz", search: searching }))).toBeNull();
++  const nobody: PeopleSearch = { kind: "found", text: "zz", people: [] };
++  expect(mentionList(input({ typed: "zz", search: nobody }))).toBeNull();
++});
++
++test("a_composition_never_opens_the_list", () => {
++  const read = { text: "@an", selectionStart: 3, selectionEnd: 3 };
++  expect(mentionRead({ ...read, composing: true }, null)).toBeNull();
++  expect(mentionRead({ ...read, composing: false }, null)).toEqual({
++    start: 0,
++    end: 3,
++    typed: "an",
++  });
++  expect(mentionKey(key("Enter", { isComposing: true }), OPEN)).toBeNull();
++});
++
++test("a_selection_opens_no_list", () => {
++  expect(
++    mentionRead({ text: "@anna", selectionStart: 1, selectionEnd: 3, composing: false }, null),
++  ).toBeNull();
++});
++
++test("a_dismissed_word_stays_closed_until_another_word_starts", () => {
++  const text = "hi @an @be";
++  expect(mentionRead({ text, selectionStart: 6, selectionEnd: 6, composing: false }, 3)).toBeNull();
++  expect(mentionRead({ text, selectionStart: 5, selectionEnd: 5, composing: false }, 3)).toBeNull();
++  expect(mentionRead({ text, selectionStart: 10, selectionEnd: 10, composing: false }, 3)).toEqual({
++    start: 7,
++    end: 10,
++    typed: "be",
++  });
++  expect(mentionRead({ text, selectionStart: 6, selectionEnd: 6, composing: false }, 7)).toEqual({
++    start: 3,
++    end: 6,
++    typed: "an",
++  });
++  expect(mentionRead({ text, selectionStart: 2, selectionEnd: 2, composing: false }, 3)).toBeNull();
++});
++
++test("an_open_list_takes_escape_enter_tab_and_arrows_only", () => {
++  expect(mentionKey(key("Escape"), OPEN)).toEqual({ kind: "close" });
++  expect(mentionKey(key("ArrowDown"), OPEN)).toEqual({ kind: "step", step: 1 });
++  expect(mentionKey(key("ArrowUp"), OPEN)).toEqual({ kind: "step", step: -1 });
++  expect(mentionKey(key("Enter"), OPEN)).toEqual({ kind: "pick" });
++  expect(mentionKey(key("Tab"), OPEN)).toEqual({ kind: "pick" });
++  expect(mentionKey(key("a"), OPEN)).toBeNull();
++  expect(mentionKey(key("Home"), OPEN)).toBeNull();
++
++  expect(mentionKey(key("Enter", { ctrlKey: true }), OPEN)).toBeNull();
++  expect(mentionKey(key("Enter", { metaKey: true }), OPEN)).toBeNull();
++  expect(mentionKey(key("Enter", { shiftKey: true }), OPEN)).toBeNull();
++  expect(mentionKey(key("Tab", { shiftKey: true }), OPEN)).toBeNull();
++  expect(mentionKey(key("ArrowDown", { altKey: true }), OPEN)).toBeNull();
++  expect(mentionKey(key("Escape", { isComposing: true }), OPEN)).toBeNull();
++
++  expect(mentionKey(key("Enter"), NOTE_ONLY)).toBeNull();
++  expect(mentionKey(key("Tab"), NOTE_ONLY)).toBeNull();
++  expect(mentionKey(key("ArrowDown"), NOTE_ONLY)).toBeNull();
++  expect(mentionKey(key("Escape"), NOTE_ONLY)).toEqual({ kind: "close" });
++
++  expect(mentionKey(key("Escape"), null)).toBeNull();
++  expect(mentionKey(key("Enter"), null)).toBeNull();
++});
++
++test("the_highlight_stays_while_the_people_stay_and_resets_otherwise", () => {
++  const two = [line(SAM), line(ANNA)];
++  expect(highlightAfter(two, [line(SAM), line(ANNA)], 1)).toBe(1);
++  expect(highlightAfter(two, [line(SAM), line(BEN)], 1)).toBe(0);
++  expect(highlightAfter(two, [line(SAM)], 1)).toBe(0);
++  expect(highlightAfter(two, [...two, line(BEN)], 1)).toBe(0);
++  expect(highlightAfter([], two, 1)).toBe(0);
++  const ab = { ...SAM, username: "ab" };
++  const c = { ...SAM, username: "c" };
++  const a = { ...SAM, username: "a" };
++  const bc = { ...SAM, username: "bc" };
++  expect(highlightAfter([line(ab), line(c)], [line(a), line(bc)], 1)).toBe(0);
++  expect(mentionOptionId("v-3", 2)).toBe("v-3-2");
++});
++
++const CARET = { left: 40, top: 20, bottom: 40 };
++const FIELD = { left: 100, top: 500, right: 400, bottom: 600 };
++
++function anchor(room: Partial<MentionAnchor["room"]>): MentionAnchor {
++  return {
++    caret: CARET,
++    field: FIELD,
++    room: { left: 0, top: 0, right: 1000, bottom: 1000, ...room },
++  };
++}
++
++test("the_list_sits_below_the_caret_when_it_fits", () => {
++  expect(mentionPlace(anchor({}), { width: 200, height: 300 })).toEqual({
++    left: 40,
++    top: 40,
++    maxHeight: 460,
++  });
++  expect(mentionPlace(anchor({ bottom: 840 }), { width: 200, height: 300 })).toEqual({
++    left: 40,
++    top: 40,
++    maxHeight: 300,
++  });
++});
++
++test("the_list_flips_above_when_there_is_no_room_below", () => {
++  expect(mentionPlace(anchor({ bottom: 839 }), { width: 200, height: 300 })).toEqual({
++    left: 40,
++    top: -280,
++    maxHeight: 520,
++  });
++  expect(mentionPlace(anchor({ top: 220, bottom: 600 }), { width: 200, height: 300 })).toEqual({
++    left: 40,
++    top: -280,
++    maxHeight: 300,
++  });
++});
++
++test("the_list_takes_the_larger_side_and_scrolls_when_neither_fits", () => {
++  expect(mentionPlace(anchor({ top: 300, bottom: 700 }), { width: 200, height: 300 })).toEqual({
++    left: 40,
++    top: -200,
++    maxHeight: 220,
++  });
++  expect(mentionPlace(anchor({ top: 400, bottom: 800 }), { width: 200, height: 300 })).toEqual({
++    left: 40,
++    top: 40,
++    maxHeight: 260,
++  });
++  expect(mentionPlace(anchor({ top: 360, bottom: 700 }), { width: 200, height: 300 })).toEqual({
++    left: 40,
++    top: 40,
++    maxHeight: 160,
++  });
++});
++
++test("the_list_moves_left_to_stay_inside_the_room", () => {
++  expect(mentionPlace(anchor({ right: 340 }), { width: 200, height: 100 }).left).toBe(40);
++  expect(mentionPlace(anchor({ right: 300 }), { width: 200, height: 100 }).left).toBe(0);
++  expect(mentionPlace(anchor({ left: 90, right: 280 }), { width: 200, height: 100 }).left).toBe(
++    -10,
++  );
++  expect(mentionPlace(anchor({ left: 120, right: 250 }), { width: 200, height: 100 }).left).toBe(
++    20,
++  );
++});
+diff --git a/frontend/src/ui/mergeRequestMentionLines.ts b/frontend/src/ui/mergeRequestMentionLines.ts
+new file mode 100644
+index 0000000..f65f0a0
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestMentionLines.ts
+@@ -0,0 +1,127 @@
++import type { Person } from "../ipc";
++import { displayName, mentionLines, mentionWordAt, type MentionWord } from "../mergeRequests";
++import { ARROW_STEPS } from "./menuKeys";
++import type { Size } from "./menuPosition";
++import type { PeopleSearch } from "./mergeRequests";
++import { peopleSearchText } from "./mergeRequestsText";
++import type { CaretBox, Rect } from "./textareaCaret";
++
++export type MentionLine = {
++  readonly username: string;
++  readonly picture: Person;
++  readonly label: string;
++};
++/** `note`: why GitLab's search is missing (the people box's words), muted under the lines (rule 5). */
++export type MentionList = { readonly lines: readonly MentionLine[]; readonly note: string | null };
++export type MentionInput = {
++  readonly known: readonly Person[];
++  readonly typed: string;
++  readonly search: PeopleSearch;
++  readonly platform: string;
++};
++export type FieldRead = {
++  readonly text: string;
++  readonly selectionStart: number;
++  readonly selectionEnd: number;
++  readonly composing: boolean;
++};
++export type MentionKey =
++  | { readonly kind: "step"; readonly step: number }
++  | { readonly kind: "pick" }
++  | { readonly kind: "close" };
++/** The caret, the field's and the room's viewport rects, measured together. */
++export type MentionAnchor = { readonly caret: CaretBox; readonly field: Rect; readonly room: Rect };
++/** Pixels relative to the field's border box. */
++export type MentionPlace = {
++  readonly left: number;
++  readonly top: number;
++  readonly maxHeight: number;
++};
++
++/** Design §2.4; null (closed) when there is no line and no note. */
++export function mentionList({ known, typed, search, platform }: MentionInput): MentionList | null {
++  const found = search.kind === "searching" || search.kind === "found" ? search.people : [];
++  const note =
++    search.kind === "refused" || search.kind === "failed"
++      ? peopleSearchText(search, platform)
++      : null;
++  const lines = mentionLines(known, found, typed).map((person) => ({
++    username: person.username,
++    picture: person,
++    label: displayName(person),
++  }));
++  return lines.length === 0 && note === null ? null : { lines, note };
++}
++
++/** The open word (design §2.1): null while composing, with a selection, with no word, or for the word Escape
++ *  dismissed (`dismissed` is that word's start). */
++export function mentionRead(read: FieldRead, dismissed: number | null): MentionWord | null {
++  if (read.composing || read.selectionStart !== read.selectionEnd) {
++    return null;
++  }
++  const word = mentionWordAt(read.text, read.selectionStart);
++  return word?.start === dismissed ? null : word;
++}
++
++/** Design §2.6's table; null: the key is the field's. */
++export function mentionKey(
++  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing">,
++  list: MentionList | null,
++): MentionKey | null {
++  if (
++    list === null ||
++    event.isComposing ||
++    event.ctrlKey ||
++    event.metaKey ||
++    event.altKey ||
++    event.shiftKey
++  ) {
++    return null;
++  }
++  if (event.key === "Escape") {
++    return { kind: "close" };
++  }
++  if (list.lines.length === 0) {
++    return null;
++  }
++  const step = ARROW_STEPS[event.key];
++  if (step !== undefined) {
++    return { kind: "step", step };
++  }
++  return event.key === "Enter" || event.key === "Tab" ? { kind: "pick" } : null;
++}
++
++function usernamesOf(lines: readonly MentionLine[]): string {
++  return lines.map((line) => line.username).join("\n");
++}
++
++/** `current` while the usernames are unchanged, else 0. */
++export function highlightAfter(
++  before: readonly MentionLine[],
++  after: readonly MentionLine[],
++  current: number,
++): number {
++  return usernamesOf(before) === usernamesOf(after) ? current : 0;
++}
++
++/** The id of the list's option at `index`: the field's `aria-activedescendant` names it. */
++export function mentionOptionId(listId: string, index: number): string {
++  return `${listId}-${index}`;
++}
++
++/** Design §2.5 "Placement". */
++export function mentionPlace({ caret, field, room }: MentionAnchor, list: Size): MentionPlace {
++  const below = room.bottom - field.top - caret.bottom;
++  const above = field.top + caret.top - room.top;
++  const onBelow = list.height <= below || below >= above;
++  const maxHeight = onBelow ? below : above;
++  const left = Math.max(
++    room.left - field.left,
++    Math.min(caret.left, room.right - field.left - list.width),
++  );
++  return {
++    left,
++    top: onBelow ? caret.bottom : caret.top - Math.min(list.height, above),
++    maxHeight,
++  };
++}
+diff --git a/frontend/src/ui/mergeRequestMentions.ts b/frontend/src/ui/mergeRequestMentions.ts
+new file mode 100644
+index 0000000..c4efd07
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestMentions.ts
+@@ -0,0 +1,245 @@
++import { useEventListener } from "@vueuse/core";
++import {
++  computed,
++  nextTick,
++  shallowRef,
++  toValue,
++  useId,
++  watch,
++  type ComputedRef,
++  type MaybeRefOrGetter,
++  type ShallowRef,
++} from "vue";
++
++import type { Person } from "../ipc";
++import { mentionEdit, type MentionWord } from "../mergeRequests";
++import { wrappedIndex } from "./menuKeys";
++import {
++  highlightAfter,
++  mentionKey,
++  mentionList,
++  mentionOptionId,
++  mentionRead,
++  type FieldRead,
++  type MentionAnchor,
++  type MentionList,
++} from "./mergeRequestMentionLines";
++import type { PeopleSearcher } from "./mergeRequestPeople";
++import { useMergeRequests } from "./mergeRequestsStore";
++import { caretBox, visibleRoom } from "./textareaCaret";
++
++export type MentionField = {
++  /** null while closed. */
++  readonly list: ComputedRef<MentionList | null>;
++  readonly highlight: Readonly<ShallowRef<number>>;
++  readonly anchor: Readonly<ShallowRef<MentionAnchor | null>>;
++  readonly listId: string;
++  /** `aria-autocomplete: "list"` always; `aria-controls` and `aria-activedescendant` while open. */
++  readonly fieldAria: ComputedRef<Readonly<Record<string, string | undefined>>>;
++  /** Call first in the field's keydown: true when the list took the key (already prevented and stopped). */
++  keydown(event: KeyboardEvent): boolean;
++  pick(index: number): void;
++  /** Closes the list and ends the mention search (Preview, a send, Queue). */
++  close(): void;
++};
++
++/** `word`: the open `@` word (null: closed); `dismissed`: the start of the word Escape or `close` shut. */
++type State = {
++  readonly field: Readonly<ShallowRef<HTMLTextAreaElement | null>>;
++  readonly search: PeopleSearcher;
++  readonly word: ShallowRef<MentionWord | null>;
++  readonly highlight: ShallowRef<number>;
++  readonly anchor: ShallowRef<MentionAnchor | null>;
++  composing: boolean;
++  dismissed: number | null;
++};
++
++function fieldRead(state: State, element: HTMLTextAreaElement): FieldRead {
++  const { value: text, selectionStart, selectionEnd } = element;
++  return { text, selectionStart, selectionEnd, composing: state.composing };
++}
++
++function shut(state: State): void {
++  if (state.word.value !== null) {
++    state.word.value = null;
++    state.search.end();
++  }
++  state.anchor.value = null;
++}
++
++function measure(state: State): void {
++  const element = state.field.value;
++  const open = state.word.value;
++  state.anchor.value =
++    element === null || open === null
++      ? null
++      : {
++          caret: caretBox(element, open.start),
++          field: element.getBoundingClientRect(),
++          room: visibleRoom(element),
++        };
++}
++
++function read(state: State): void {
++  const element = state.field.value;
++  if (element === null) {
++    return;
++  }
++  const at = fieldRead(state, element);
++  if (mentionRead(at, null)?.start !== state.dismissed) {
++    state.dismissed = null;
++  }
++  const open = mentionRead(at, state.dismissed);
++  if (open === null) {
++    shut(state);
++    return;
++  }
++  state.word.value = open;
++  state.search.search(open.typed);
++  void nextTick(() => {
++    measure(state);
++  });
++}
++
++function pick(state: State, list: MentionList | null, index: number): void {
++  const element = state.field.value;
++  const open = state.word.value;
++  const line = list?.lines[index];
++  if (element === null || open === null || line === undefined) {
++    return;
++  }
++  const edit = mentionEdit(open, line.username);
++  element.focus();
++  element.setSelectionRange(edit.from, edit.to);
++  document.execCommand("insertText", false, edit.insert);
++}
++
++function keydown(state: State, list: MentionList | null, event: KeyboardEvent): boolean {
++  const key = mentionKey(event, list);
++  if (key === null || list === null) {
++    return false;
++  }
++  event.preventDefault();
++  event.stopPropagation();
++  switch (key.kind) {
++    case "step":
++      state.highlight.value = wrappedIndex(list.lines.length, state.highlight.value, key.step);
++      break;
++    case "pick":
++      pick(state, list, state.highlight.value);
++      break;
++    case "close":
++      state.dismissed = state.word.value?.start ?? null;
++      shut(state);
++      break;
++    default: {
++      const _exhaustive: never = key;
++      return _exhaustive;
++    }
++  }
++  return true;
++}
++
++function close(state: State): void {
++  const element = state.field.value;
++  state.dismissed =
++    element === null ? null : (mentionRead(fieldRead(state, element), null)?.start ?? null);
++  shut(state);
++}
++
++function listen(state: State): void {
++  const { field } = state;
++  useEventListener(field, "input", () => {
++    if (!state.composing) {
++      read(state);
++    }
++  });
++  useEventListener(field, ["click", "keyup"], () => {
++    read(state);
++  });
++  // WebKitGTK 2.54 reports selectionStart 0 during a textarea's focus event and its microtasks when the focus comes
++  // back (shown again after Preview, or `focus()` after a blur); the caret is back by the next task (measured in the
++  // mr-mentions-list smoke).
++  useEventListener(field, "focus", () => {
++    setTimeout(() => {
++      read(state);
++    });
++  });
++  useEventListener(field, ["compositionstart", "compositionend"], (event: CompositionEvent) => {
++    state.composing = event.type === "compositionstart";
++    read(state);
++  });
++  useEventListener(field, "blur", () => {
++    shut(state);
++  });
++  useEventListener(field, "scroll", () => {
++    if (state.word.value !== null) {
++      measure(state);
++    }
++  });
++}
++
++function shownList(
++  state: State,
++  known: MaybeRefOrGetter<readonly Person[]>,
++): ComputedRef<MentionList | null> {
++  const list = computed(() => {
++    const open = state.word.value;
++    return open === null
++      ? null
++      : mentionList({
++          known: toValue(known),
++          typed: open.typed,
++          search: state.search.state.value,
++          platform: navigator.platform,
++        });
++  });
++  watch(
++    () => list.value?.lines ?? [],
++    (after, before) => {
++      state.highlight.value = highlightAfter(before, after, state.highlight.value);
++    },
++  );
++  return list;
++}
++
++/** The `@` word's list for `field` (request rules 1–7, design §2.5–2.7), searching through `mentionSearch`. */
++export function useMentions(
++  field: Readonly<ShallowRef<HTMLTextAreaElement | null>>,
++  known: MaybeRefOrGetter<readonly Person[]>,
++): MentionField {
++  const state: State = {
++    field,
++    search: useMergeRequests().mentionSearch,
++    word: shallowRef(null),
++    highlight: shallowRef(0),
++    anchor: shallowRef(null),
++    composing: false,
++    dismissed: null,
++  };
++  const listId = useId();
++  const list = shownList(state, known);
++  const fieldAria = computed(() => ({
++    "aria-autocomplete": "list",
++    "aria-controls": list.value === null ? undefined : listId,
++    "aria-activedescendant":
++      list.value === null || list.value.lines.length === 0
++        ? undefined
++        : mentionOptionId(listId, state.highlight.value),
++  }));
++  listen(state);
++  return {
++    list,
++    highlight: state.highlight,
++    anchor: state.anchor,
++    listId,
++    fieldAria,
++    keydown: (event) => keydown(state, list.value, event),
++    pick: (index) => {
++      pick(state, list.value, index);
++    },
++    close: () => {
++      close(state);
++    },
++  };
++}
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index d979d8e..a40863e 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -47,6 +47,7 @@ export const SEARCH_PEOPLE = "Search people";
+ export const SEARCH_PEOPLE_PLACEHOLDER = "Search people…";
+ export const SEARCHING_PEOPLE = "Searching…";
+ export const NO_ONE_FOUND = "No one found";
++export const MENTION_PEOPLE = "People to mention";
+ export const NO_ONE = "None";
+ export const SET_DUE_DATE = "Set a due date";
+ export const CLEAR_DUE_DATE = "Clear";
+diff --git a/frontend/src/ui/textareaCaret.test.ts b/frontend/src/ui/textareaCaret.test.ts
+new file mode 100644
+index 0000000..14257c8
+--- /dev/null
++++ b/frontend/src/ui/textareaCaret.test.ts
+@@ -0,0 +1,48 @@
++import { expect, test } from "vitest";
++
++import { mirrorStyle } from "./textareaCaret";
++
++const COPIED = {
++  direction: "rtl",
++  "padding-top": "4px",
++  "padding-right": "8px",
++  "padding-bottom": "4px",
++  "padding-left": "6px",
++  "font-family": "Inter",
++  "font-size": "13px",
++  "font-style": "italic",
++  "font-weight": "600",
++  "font-variant-ligatures": "none",
++  "font-feature-settings": '"tnum"',
++  "font-kerning": "none",
++  "line-height": "20px",
++  "letter-spacing": "0.5px",
++  "word-spacing": "2px",
++  "tab-size": "4",
++  "text-indent": "3px",
++  "text-transform": "uppercase",
++  "text-align": "right",
++};
++const IGNORED = {
++  color: "red",
++  "box-sizing": "border-box",
++  "white-space": "nowrap",
++  width: "300px",
++  "border-left-width": "1px",
++  "overflow-y": "auto",
++};
++
++test("the_mirror_copies_what_moves_a_glyph_and_wraps_like_the_field", () => {
++  expect(mirrorStyle({ ...COPIED, ...IGNORED }, 314)).toEqual({
++    ...COPIED,
++    "box-sizing": "content-box",
++    "white-space": "pre-wrap",
++    "overflow-wrap": "break-word",
++    position: "absolute",
++    visibility: "hidden",
++    top: "0",
++    left: "-9999px",
++    width: "300px",
++  });
++  expect(mirrorStyle({ "padding-left": "0.5px" }, 100)).toMatchObject({ width: "99.5px" });
++});
+diff --git a/frontend/src/ui/textareaCaret.ts b/frontend/src/ui/textareaCaret.ts
+new file mode 100644
+index 0000000..24d7e77
+--- /dev/null
++++ b/frontend/src/ui/textareaCaret.ts
+@@ -0,0 +1,101 @@
++export type Rect = {
++  readonly left: number;
++  readonly top: number;
++  readonly right: number;
++  readonly bottom: number;
++};
++/** Pixels relative to the field's border box, after its scroll: the caret's left, its line's top and bottom. */
++export type CaretBox = { readonly left: number; readonly top: number; readonly bottom: number };
++
++const COPIED: Readonly<Record<string, true>> = {
++  direction: true,
++  "padding-top": true,
++  "padding-right": true,
++  "padding-bottom": true,
++  "padding-left": true,
++  "line-height": true,
++  "letter-spacing": true,
++  "word-spacing": true,
++  "tab-size": true,
++  "text-indent": true,
++  "text-transform": true,
++  "text-align": true,
++};
++
++// CSS 2.1 §10.8.1: half of a line box's leading sits above the glyphs' inline box, half below.
++const HALF_LEADING = 0.5;
++
++function pixels(value: string | undefined): number {
++  return Number.parseFloat(value ?? "0");
++}
++
++/** The mirror's inline style for a field with `computed` style and `clientWidth` (design §2.5 step 2). */
++export function mirrorStyle(
++  computed: Readonly<Record<string, string>>,
++  clientWidth: number,
++): Readonly<Record<string, string>> {
++  const copied = Object.entries(computed).filter(
++    ([name]) => COPIED[name] === true || name.startsWith("font"),
++  );
++  const content =
++    clientWidth - pixels(computed["padding-left"]) - pixels(computed["padding-right"]);
++  return {
++    ...Object.fromEntries(copied),
++    "box-sizing": "content-box",
++    "white-space": "pre-wrap",
++    "overflow-wrap": "break-word",
++    position: "absolute",
++    visibility: "hidden",
++    top: "0",
++    left: "-9999px",
++    width: `${content}px`,
++  };
++}
++
++/** Where `index`'s caret is drawn in `field` (mirror-div measure, design §2.5). */
++export function caretBox(field: HTMLTextAreaElement, index: number): CaretBox {
++  const style = getComputedStyle(field);
++  const computed = Object.fromEntries(
++    Array.from(style, (name) => [name, style.getPropertyValue(name)] as const),
++  );
++  const mirror = document.createElement("div");
++  for (const [name, value] of Object.entries(mirrorStyle(computed, field.clientWidth))) {
++    mirror.style.setProperty(name, value);
++  }
++  const caret = document.createElement("span");
++  const rest = field.value.slice(index);
++  caret.textContent = rest === "" ? "." : rest;
++  mirror.append(field.value.slice(0, index), caret);
++  document.body.append(mirror);
++  const origin = mirror.getBoundingClientRect();
++  const glyph = caret.getClientRects()[0] ?? caret.getBoundingClientRect();
++  mirror.remove();
++  const glyphHeight = glyph.bottom - glyph.top;
++  const lineHeight = pixels(style.lineHeight);
++  const line = Number.isNaN(lineHeight) ? glyphHeight : lineHeight;
++  const leading = (line - glyphHeight) * HALF_LEADING;
++  const top = glyph.top - leading - origin.top + pixels(style.borderTopWidth) - field.scrollTop;
++  return {
++    left: glyph.left - origin.left + pixels(style.borderLeftWidth) - field.scrollLeft,
++    top,
++    bottom: top + line,
++  };
++}
++
++/** The viewport intersected with every ancestor of `element` whose overflow is not `visible` (viewport pixels). */
++export function visibleRoom(element: HTMLElement): Rect {
++  let room: Rect = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
++  for (let at = element.parentElement; at !== null; at = at.parentElement) {
++    const { overflowX, overflowY } = getComputedStyle(at);
++    if (overflowX !== "visible" || overflowY !== "visible") {
++      const box = at.getBoundingClientRect();
++      room = {
++        left: Math.max(room.left, box.left),
++        top: Math.max(room.top, box.top),
++        right: Math.min(room.right, box.right),
++        bottom: Math.min(room.bottom, box.bottom),
++      };
++    }
++  }
++  return room;
++}
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index 523c2f8..4208e6a 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -22,37 +22,37 @@ A Rust test that needs post n without making posts 1 to n − 1 first calls `Fak
+ 
+ ## Scenario folder
+ 
+-| file                                          | answers                                                                                                                                                                                                                                                                                                                                               |
+-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+-| `auth-status.out`                             | `glab auth status`: printed on **stderr**, as glab prints all of it                                                                                                                                                                                                                                                                                   |
+-| `auth-status.exit`                            | its exit status (missing = 0)                                                                                                                                                                                                                                                                                                                         |
+-| `auth-status.after-post-<k>.out`, `.exit`     | once the state file counts n posts, for the largest k ≤ n for which either file exists: they replace `auth-status.out` and `.exit` (a missing one of the pair: no output, exit 0), so glab can log out or in again mid-test                                                                                                                                    |
++| file                                          | answers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
++| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| `auth-status.out`                             | `glab auth status`: printed on **stderr**, as glab prints all of it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
++| `auth-status.exit`                            | its exit status (missing = 0)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
++| `auth-status.after-post-<k>.out`, `.exit`     | once the state file counts n posts, for the largest k ≤ n for which either file exists: they replace `auth-status.out` and `.exit` (a missing one of the pair: no output, exit 0), so glab can log out or in again mid-test                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+ | `api-status.after-post-<k>`                   | for the largest k ≤ n with such a file: a status line (`401 Unauthorized`) makes every `glab api` call, any method or endpoint, answer it with the body `{"message":"<status line>"}`, stderr `glab: <status line> (HTTP <code>)` and exit 1 (status line and headers first with `--include`), counting no post; `graphql` answering 401 prints as glab does for GraphQL (below); the line `anonymous` answers as GitLab answers a call without a token (below): a GraphQL mutation (`--input -`) gets GitLab's denial in a `200 OK`, the body `{"errors":[{"message":"<denial>"}],"data":null}`, stderr `glab: <denial>` and exit 1, any other POST or PUT `401 Unauthorized`, a GET or a GraphQL read answers as usual; an empty file answers as usual |
+-| `project.json`                                | `glab api` GET `projects/:fullpath`                                                                                                                                                                                                                                                                                                                   |
+-| `merge-requests.json`                         | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests`                                                                                                                                                                                                                                                                     |
+-| `merge-request-<iid>.json`                    | `glab api` GET `…/merge_requests/<iid>` for that iid                                                                                                                                                                                                                                                                                                  |
+-| `merge-request.json`                          | `glab api` GET `…/merge_requests/<iid>` for any iid without its own file                                                                                                                                                                                                                                                                              |
+-| `draft-notes-<iid>.json`                      | `glab api` GET `…/merge_requests/<iid>/draft_notes` for that iid (the viewer's drafts on one merge request; `--paginate` accepted)                                                                                                                                                                                                                    |
+-| `draft-notes.json`                            | `glab api` GET `…/draft_notes` without its own `draft-notes-<iid>.json` (`--paginate` accepted)                                                                                                                                                                                                                                                       |
+-| `markdown.json`                               | `glab api` POST `markdown` (GitLab's Markdown preview): answered as `post-<n>` is (status missing = `201 Created`, `markdown.status`, `.err`, `.exit`, `.sleep` beside it) but never counted, since a preview writes nothing                                                                                                                          |
+-| `post-<n>.json`                               | the body of the n-th POST `…/draft_notes`, POST `…/draft_notes/bulk_publish` (submit a review), POST `…/discussions/<id>/notes` (a reply), PUT `…/discussions/<id>` (resolve or unresolve) or `glab api graphql --input -` (a GraphQL mutation: the re-request, or adding or removing an assignee or a reviewer; n from 1, counted in the state file) |
+-| `post-<n>.status`                             | its HTTP status line (missing = `201 Created`)                                                                                                                                                                                                                                                                                                        |
+-| `post-<n>.err`                                | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body")                                                                                                               |
+-| `post-<n>.exit`                               | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout                                                                                                                                                                                                                                            |
+-| `post-<n>.sleep`                              | seconds to wait before answering (a post that hangs)                                                                                                                                                                                                                                                                                                  |
+-| `graphql-page-<n>.json`                       | `glab api graphql` without `--input -` and without a field `iids`, `search` or `iid` and not the links lookup: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`)                                                                                                                               |
+-| `graphql-links-<iids0>.json`                  | `glab api graphql` without `--input -`, with a field `query` starting `query MergeRequestLinks` (a merge request's links lookup), whatever its other fields: `<iids0>` is the field `iids0=<JSON array>` without its quotes, brackets and spaces, its commas as `-` (`iids0=["12","13","99"]` → `graphql-links-12-13-99`)                             |
+-| `graphql-discussions-<iids>.json`             | `glab api graphql` without `--input -`, with a field `iids=<JSON array>` (the discussions query): `<iids>` is the array without its quotes, brackets and spaces, its commas as `-` (`iids=["82","81"]` → `graphql-discussions-82-81`); with a field `discussionsAfter=<cursor>`, `graphql-discussions-<iids>-after-<cursor>`                          |
+-| `graphql-people-<text>.json`                  | `glab api graphql` without `--input -` and without a field `iids`, with a field `search=<text>` (the project's people search): `<text>` as given (`search=er` → `graphql-people-er`)                                                                                                                                                                  |
+-| `graphql-description-<iid>.json`              | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `query` starting `query MergeRequestDescription` (a merge request's description) and a field `iid=<iid>`                                                                                                                                                  |
+-| `graphql-merge-request-<iid>.json`            | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `iid=<iid>` and any other query                                                                                                                                                                                                                           |
+-| `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`)                                                                                                                                                                                                                                                                           |
+-| `<answer>.after-post-<k>.json`                | for any answer but a post (`graphql-*`, `draft-notes-<iid>`, `markdown`): once the state file counts n > 0 posts, `<answer>.after-post-<k>` replaces `<answer>` for the largest k ≤ n whose `.json` exists, its `.status`, `.err`, `.exit` and `.sleep` with it, so a read after the k-th write shows it                                              |
+-| `pictures/<path>`                             | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`; a `pictures/<path>.status` answers that status line with no body instead                                                        |
+-| `pictures/<path>.sleep`                       | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists                                                                                                                                                                                                                                                      |
+-| `traces/<n>.log`                              | `glab api` GET `projects/<project>/jobs/<n>/trace` (a job's log, any project): printed with `cat` byte for byte, exit 0 (an empty file prints nothing); no such file answers `404 Not Found`                                                                                                                                                          |
+-| `traces/<n>.log.sleep`                        | seconds to wait before that log's answer, whether or not the log exists                                                                                                                                                                                                                                                                               |
+-| `uploads/<project>/uploads/<secret>/<file>`   | `glab api` GET `projects/<project>/uploads/<secret>/<file>` (the uploads API; `<project>` as asked, an id or an encoded path): printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`; a `.status` beside it answers that status line with no body instead                                                                    |
++| `project.json`                                | `glab api` GET `projects/:fullpath`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
++| `merge-requests.json`                         | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
++| `merge-request-<iid>.json`                    | `glab api` GET `…/merge_requests/<iid>` for that iid                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
++| `merge-request.json`                          | `glab api` GET `…/merge_requests/<iid>` for any iid without its own file                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
++| `draft-notes-<iid>.json`                      | `glab api` GET `…/merge_requests/<iid>/draft_notes` for that iid (the viewer's drafts on one merge request; `--paginate` accepted)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
++| `draft-notes.json`                            | `glab api` GET `…/draft_notes` without its own `draft-notes-<iid>.json` (`--paginate` accepted)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
++| `markdown.json`                               | `glab api` POST `markdown` (GitLab's Markdown preview): answered as `post-<n>` is (status missing = `201 Created`, `markdown.status`, `.err`, `.exit`, `.sleep` beside it) but never counted, since a preview writes nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
++| `post-<n>.json`                               | the body of the n-th POST `…/draft_notes`, POST `…/draft_notes/bulk_publish` (submit a review), POST `…/discussions/<id>/notes` (a reply), PUT `…/discussions/<id>` (resolve or unresolve) or `glab api graphql --input -` (a GraphQL mutation: the re-request, or adding or removing an assignee or a reviewer; n from 1, counted in the state file)                                                                                                                                                                                                                                                                                                                                                                                                    |
++| `post-<n>.status`                             | its HTTP status line (missing = `201 Created`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
++| `post-<n>.err`                                | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body")                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
++| `post-<n>.exit`                               | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
++| `post-<n>.sleep`                              | seconds to wait before answering (a post that hangs)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
++| `graphql-page-<n>.json`                       | `glab api graphql` without `--input -` and without a field `iids`, `search` or `iid` and not the links lookup: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
++| `graphql-links-<iids0>.json`                  | `glab api graphql` without `--input -`, with a field `query` starting `query MergeRequestLinks` (a merge request's links lookup), whatever its other fields: `<iids0>` is the field `iids0=<JSON array>` without its quotes, brackets and spaces, its commas as `-` (`iids0=["12","13","99"]` → `graphql-links-12-13-99`)                                                                                                                                                                                                                                                                                                                                                                                                                                |
++| `graphql-discussions-<iids>.json`             | `glab api graphql` without `--input -`, with a field `iids=<JSON array>` (the discussions query): `<iids>` is the array without its quotes, brackets and spaces, its commas as `-` (`iids=["82","81"]` → `graphql-discussions-82-81`); with a field `discussionsAfter=<cursor>`, `graphql-discussions-<iids>-after-<cursor>`                                                                                                                                                                                                                                                                                                                                                                                                                             |
++| `graphql-people-<text>.json`                  | `glab api graphql` without `--input -` and without a field `iids`, with a field `search=<text>` (the project's people search): `<text>` as given (`search=er` → `graphql-people-er`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
++| `graphql-description-<iid>.json`              | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `query` starting `query MergeRequestDescription` (a merge request's description) and a field `iid=<iid>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
++| `graphql-merge-request-<iid>.json`            | `glab api graphql` without `--input -` and without a field `iids` or `search`, with a field `iid=<iid>` and any other query                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
++| `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
++| `<answer>.after-post-<k>.json`                | for any answer but a post (`graphql-*`, `draft-notes-<iid>`, `markdown`): once the state file counts n > 0 posts, `<answer>.after-post-<k>` replaces `<answer>` for the largest k ≤ n whose `.json` exists, its `.status`, `.err`, `.exit` and `.sleep` with it, so a read after the k-th write shows it                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
++| `pictures/<path>`                             | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`; a `pictures/<path>.status` answers that status line with no body instead                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
++| `pictures/<path>.sleep`                       | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
++| `traces/<n>.log`                              | `glab api` GET `projects/<project>/jobs/<n>/trace` (a job's log, any project): printed with `cat` byte for byte, exit 0 (an empty file prints nothing); no such file answers `404 Not Found`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
++| `traces/<n>.log.sleep`                        | seconds to wait before that log's answer, whether or not the log exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
++| `uploads/<project>/uploads/<secret>/<file>`   | `glab api` GET `projects/<project>/uploads/<secret>/<file>` (the uploads API; `<project>` as asked, an id or an encoded path): printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found`; a `.status` beside it answers that status line with no body instead                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+ 
+ `glab api` keeps the value of every `-f`/`--raw-field`/`-F`/`--field` as `name=value` (the first wins when a name
+ is given twice) and, as glab does, sends a POST when a field or `--input` is given without `-X`/`--method`. A GET
+@@ -325,7 +325,9 @@ answered: <address or endpoint>            (a picture or a job's log, after its
+   `@dmitri`; d12 ben, chiara with `@all` and the group `@taskboard`; d13 chiara mentioning herself. !91: d14 anna, sam
+   (`resolveNote: false`); d15 sam, sam; d16 anna, anna. Answers: `graphql-discussions-91-90.json` (the batch, score
+   88), `-90.json` and `-91.json` (one merge request, score 46); `draft-notes-90.json` sam's drafts 501 on d01 and 502
+-  on d05, `draft-notes-91.json` none; `markdown.json` a preview of `**Preview** of @anna`. Posts on !90's d01, in
++  on d05, `draft-notes-91.json` none; `markdown.json` a preview of `**Preview** of @anna`; `graphql-people-an.json`
++  the people search for "an" (the reply field's `@an`): anna "Anna Berg" with her avatar, any other text unscripted
++  (exit 2). Posts on !90's d01, in
+   order: 1 the reply "Thanks" (`201 Created`, the note) → `graphql-discussions-90` and `-91-90.after-post-1` end d01
+   with it; 2 the draft "Later" (`201 Created`, draft 503) → `draft-notes-90.after-post-2` lists 501, 502, 503; 3
+   resolve (`200 OK`, the discussion) → `after-post-3` d01 resolved, its unedited notes' `lastEditedAt` moved; 4
+diff --git a/tests/glab/mr-threads/graphql-people-an.json b/tests/glab/mr-threads/graphql-people-an.json
+new file mode 100644
+index 0000000..8f389ad
+--- /dev/null
++++ b/tests/glab/mr-threads/graphql-people-an.json
+@@ -0,0 +1,13 @@
++{
++  "data": {
++    "project": {
++      "autocompleteUsers": [
++        {
++          "username": "anna",
++          "name": "Anna Berg",
++          "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
++        }
++      ]
++    }
++  }
++}

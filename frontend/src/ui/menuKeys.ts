@@ -7,6 +7,11 @@ type MenuStep =
   | { readonly kind: "focus"; readonly index: number }
   | { readonly kind: "ignore" };
 
+/** `index` moved by `step`, wrapping over `count` (> 0) items; `stepMenuItem` uses it. */
+export function wrappedIndex(count: number, index: number, step: number): number {
+  return (index + step + count) % count;
+}
+
 export function stepMenuItem(
   menu: { readonly count: number; readonly focused: number },
   event: Pick<KeyboardEvent, "key">,
@@ -18,5 +23,5 @@ export function stepMenuItem(
   if (step === undefined || menu.count === 0) {
     return { kind: "ignore" };
   }
-  return { kind: "focus", index: (menu.focused + step + menu.count) % menu.count };
+  return { kind: "focus", index: wrappedIndex(menu.count, menu.focused, step) };
 }
