@@ -1,0 +1,227 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index a2c5f92..7b5e1f0 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -56,7 +56,7 @@ Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of t
+ 
+ Job logs (request `docs/slices/request-ci-job-log.md`, plan §2 #158–#161): `mergeRequestJobLogs.ts` holds the window's one log box (`jobLog`): Shift over the job already loading or shown changes nothing; any other job writes a new `loading` entry, and a reply is written only into the entry it was asked for (parsed once by `mergeRequests/` `jobLogView`); `closeJobLog` sets null. The search texts are remembered per job name, no repository key (`jobSearch`/`setJobSearch`, key `yamt.mergeRequests.jobSearches`); "" forgets one. A Shift tap is `useShiftTaps()` (`useShiftHeld.ts`): Shift down then up with no other key and no pointer press between, so Shift+Tab, Shift+click and a typed capital never count. `CiStatusBox.vue` watches the count, never `open && held` (a Shift held as the box opens would count), and asks for the pointed job (its `<li>`, since a disabled button gets no pointer events), else the focused one, only while its box is open, the job has a page and focus is in no text field (`typingTarget.ts` `isTypingTarget`, window-neutral; the log's own field included, so Shift there types a capital and switches nothing). The pointed and focused jobs are forgotten when the CI box closes (Escape removes the `<li>` without its `pointerleave`). The job whose log is shown has no hover tip (its tip would cover the log's header; a Shift press does not hide a tip). `CiStatusJobLog.vue` is a DOM child of the CI box's hover area, after the box, so `useHoverBox`'s one inside rule holds both and a scroll inside the log closes nothing; it sits left of the CI box, tops level (`useMenuPlacement`, clamped), is keyed by the job's page and closes when the CI box does. Escape in the log is the log's: it prevents the default and closes, and `CiStatusBox` puts focus on that job's button (found by its `data-job-page`); `useHoverBox` ignores an Escape already `defaultPrevented`, so a second Escape closes the CI box. A refused or failed log moves focus from the field to the log body, so Shift over the job asks again as its words say. Lines are static: one `div` per line, one `span` per run with `mergeRequestLogLook.ts` `runClasses` and the run's text as text (never markup); a run with an ANSI background takes the panel colour as its text colour (every `--color-ansi-*` is ≥ 4.5:1 against `--color-panel`, so the pair is too); the log opens at its end (`useFollowEnd`). The search (`search/` `matcherOf`, case-insensitive, mapped onto runs by `hitPlaces`) paints CSS Custom Highlights `job-log-match` and `job-log-current` over those text nodes, with no DOM change; every hit counts and is stepped, but `job-log-match` holds only the hits on lines in view ± one screen (`mergeRequests/` `firstLineBelow` on the lines' `offsetTop`, `placesOnLines`), rebuilt at once on a search and once per animation frame on a scroll or a step (tens of thousands of live ranges freeze WebKitGTK for seconds); the current hit starts at the last one and is centred by `scrollTop` only; Enter / Shift+Enter step it. Each name is registered once per log with one `Highlight`, cleared and refilled on every rebuild: WebKitGTK 2.54 leaves the ranges of a `Highlight` that `CSS.highlights.set` replaces painted (#2191). Both are deleted when the log unmounts. Opening fills the field with the remembered text, selected and searched. Words in `mergeRequestLogText.ts`.
+ 
+-Discussions (request `docs/slices/request-mr-discussions.md`, design `docs/slices/briefs/mr-discussions-design.md` option A, plan §2 #163, #164): `mergeRequestDiscussions.ts` owns `discussions` (its only writer), one entry per asked row while the list stands. One call at a time; a generation is raised by `replaced` and by "off", so an older answer is dropped. "Load fully": the rows with a count above 0 are queued from `received` (`listed`), all again at `ended`'s swap (`replaced`: a Refresh, or a show 30 s or more after the last load, `RECHECK_PAUSE_MS`), and a watch on the setting asks them when it turns to full, with no reload. "Load lazily": `askDiscussions(iid)` puts that row first and asks it once. "Off": every entry and any call in flight dropped. Log `mergeRequests.discussions_read` (counts only). A refused or failed entry is a `DiscussionFailure` (`mergeRequestDiscussions.ts`). `MergeRequestDiscussions.vue` is the row's count: with "Off" or a count of 0 the plain count (`vTooltip` `discussionsText`, muted at 0), no box and no ask; else the people box's shape (`useHoverBox`, an opener button named by `discussionsText` with no tooltip, #154) whose entry comes from `useRowDiscussions`, which calls `askDiscussions` when the box opens and again when an open box loses its entry (a swap), so a hover and keyboard focus both ask. The box speaks for the slice's `viewer` (me, or review mode's person). "Open, not resolved here" is one rule, `mergeRequestDiscussionRows.ts` `unmarkedOf(entry)`, read by the box's counts, by `boxClosed` and by review mode's order (`mergeRequestsShown.ts` `reviewDetails`). One `counts` computed, `turnCounts` of the read entry's unmarked discussions (none without a read entry), feeds both the header and the opener's mark (request `docs/slices/request-mr-review-fixes.md` B1–B3): the opener button carries the turn words' look (`TURN_MARK`, `font-semibold text-primary`, the one constant both bind) exactly while `viewersTurn > 0` (`waitsForViewer`), so a discussion resolved in the box stops counting at once and moves its row in review order with it, review mode's reviewer moves the marks, and a row whose discussions were not read ("Load lazily" before its box opened, "Off") is never marked. Its `role="status"` header is `DISCUSSIONS_LOADING` with no entry or while loading, `turnSummaryText(counts)` once read, else `discussionsFailedText` (`mergeRequestsText.ts`: `glabRefusalText`, the glab words of the list, the box and a re-request reply, or `problemText` at step `discussions`) in the error colour — never the problem bar. Its list is `discussionTurns(…)` (the viewer's turn first, newest first); each line shows the author's picture and `noteAuthorName`, `agoText`, `turnText` with the row's `author` (the viewer's turn in `TURN_MARK`; the author's turn names the author), `placeText`, and `noteExcerpt` clamped to 3 lines. All of its text is interpolated, never `v-html` (RK60). `MergeRequestDiscussionSetting.vue` is Settings → "Discussion details" (`DISCUSSION_DETAILS_OPTIONS` through `ChoiceButtons`, `setDiscussionDetails` on the settings seam, the hint under it); the compare and the range root put it into `SettingsView`'s slot, and the merge window, which has no merge-request page, has no such section.
++Discussions (request `docs/slices/request-mr-discussions.md`, design `docs/slices/briefs/mr-discussions-design.md` option A, plan §2 #163, #164): `mergeRequestDiscussions.ts` owns `discussions` (its only writer), one entry per asked row while the list stands. One call at a time; a generation is raised by `replaced` and by "off", so an older answer is dropped. "Load fully": the rows with a count above 0 are queued from `received` (`listed`), all again at `ended`'s swap (`replaced`: a Refresh, or a show 30 s or more after the last load, `RECHECK_PAUSE_MS`), and a watch on the setting asks them when it turns to full, with no reload. "Load lazily": `askDiscussions(iid)` puts that row first and asks it once. "Off": every entry and any call in flight dropped. Log `mergeRequests.discussions_read` (counts only). A refused or failed entry is a `DiscussionFailure` (`mergeRequestDiscussions.ts`). `MergeRequestDiscussions.vue` is the row's count: with "Off" or a count of 0 the plain count (`vTooltip` `discussionsText`, muted at 0), no box and no ask; else the people box's shape (`useHoverBox`, an opener button named by `discussionsText` with no tooltip, #154) whose entry comes from `useRowDiscussions`, which calls `askDiscussions` when the box opens and again when an open box loses its entry (a swap), so a hover and keyboard focus both ask. The box speaks for the slice's `viewer` (me, or review mode's person). "Open, not resolved here" is one rule, `mergeRequestDiscussionRows.ts` `unmarkedOf(entry)`, read by the box's counts, by `boxClosed` and by review mode's order (`mergeRequestsShown.ts` `reviewDetails`). One `counts` computed, `turnCounts` of the read entry's unmarked discussions (none without a read entry), feeds both the header and the opener's mark (request `docs/slices/request-mr-review-fixes.md` B1–B3): the opener button carries the turn words' look (`TURN_MARK`, `font-semibold text-primary`, the one constant both bind) exactly while `viewersTurn > 0` (`waitsForViewer`), so a discussion resolved in the box stops counting at once, review mode's reviewer moves the marks, and a row whose discussions were not read ("Load lazily" before its box opened, "Off") is never marked. The box calls `discussionsBoxOpened` when `open` turns true and `discussionsBoxClosed` with `boxClosed` when it turns false or unmounts open: `shownRows` holds the row, and the shown thread's row, in place (the hold rule under People below, #2476), so the new review order applies once box and panel close. Its `role="status"` header is `DISCUSSIONS_LOADING` with no entry or while loading, `turnSummaryText(counts)` once read, else `discussionsFailedText` (`mergeRequestsText.ts`: `glabRefusalText`, the glab words of the list, the box and a re-request reply, or `problemText` at step `discussions`) in the error colour — never the problem bar. Its list is `discussionTurns(…)` (the viewer's turn first, newest first); each line shows the author's picture and `noteAuthorName`, `agoText`, `turnText` with the row's `author` (the viewer's turn in `TURN_MARK`; the author's turn names the author), `placeText`, and `noteExcerpt` clamped to 3 lines. All of its text is interpolated, never `v-html` (RK60). `MergeRequestDiscussionSetting.vue` is Settings → "Discussion details" (`DISCUSSION_DETAILS_OPTIONS` through `ChoiceButtons`, `setDiscussionDetails` on the settings seam, the hint under it); the compare and the range root put it into `SettingsView`'s slot, and the merge window, which has no merge-request page, has no such section.
+ 
+ The box's thread side (request `docs/slices/request-mr-threads.md` B4, C1, C2, C10, C11, D1, D2, design `docs/slices/briefs/mr-threads-design.md` option A §1.3, §4 items 5, 10, 13, RK59, RK73): the words speak for the slice's `viewer` on the row's `author` (`turnOf`/`discussionTurns`/`turnCounts` with `row.author?.username ?? null`). Every line is a `<button>` keyed by `discussion.id`, with `data-discussion-id`, `aria-keyshortcuts="Shift"` and the tip `SHOW_THREAD_KEY`; a click still opens the last comment's page (`aria-disabled` without one); the shown line has `aria-current="true"` and `bg-row-selected`; a line marked resolved since its answer (`DiscussionLoad.resolved`) reads `Check` + `RESOLVED` (`mergeRequestThreadText.ts`) muted instead of its turn. The header counts the unmarked discussions only; at its right `RELOAD_DISCUSSIONS` (Lucide `refresh-cw`, spinning while `reloads.get(iid)` is `running`) calls `refreshDiscussions` (below); a failed reload replaces the summary by `discussionsFailedText` in the error colour and keeps the lines. Shift is `watch(useShiftTaps())` as `CiStatusBox.vue`: the pointed line, else the focused one, only while the box is open and `!isTypingTarget(document.activeElement)` → `showThread(iid, id)`. The panel `MergeRequestThread.vue` is a DOM child of the hover area (`v-if` open and this row's thread shown, keyed by the discussion id; `anchor` the box's `useElementBounding` left/top; place and turn words from the entry's discussion, else the thread's); its `close` calls `closeThread` and focuses that line's button. While it shows, `useHoverBox`'s `pinned` holds the box: the pointer or focus leaving, a window blur and a scroll outside never close it; a `pointerdown` outside the area (a `document` listener present only while open and pinned) closes both, except one on or inside a `[data-refreshes-list]` element (Refresh and the failed list's Retry read the list again under the open box and panel). The count stays a box while its panel shows even at 0 (`boxed`, design §4 item 10). When the box closes, and when the row unmounts with its box open (the page left): `closeThread` if its thread was shown, then `boxClosed(iid)` (marked lines leave, the count drops, C10). When another row's thread is shown, an open box closes itself (`useHoverBox`'s `close`), so only the shown thread's box stays. With "Off" there is no box and so no panel (C11).
+ 
+@@ -72,7 +72,7 @@ Merge-request conflicts (plan §2 #138–#143): `MergeRequestRow.vue` shows the
+ 
+ The merge window of a merge request (plan §2 #138–#143): `question.ts` is what is asked; `questionText.ts` is its words (`cancel: null` draws one button; a bullet list is kind `lines`). Abort of a merge yamt started (`mergeRequest`, written only by `listing.ts`) asks by returnTo/branchBefore, then shows the one-button notice if git left anything (`leftoverText.ts`, the page's `gitRefused` line uses it too), then `closeEndedMerge`. `pushing.ts` offers the push after Continue answers ReadyToPush: only Push pushes (RK45), a failure asks pushFailed again, Keep Local or Escape closes once. A failed push is the `push` problem ("Could not push <branch>"); a failed `closeEndedMerge`, after the push offer or after Abort's leftovers, is the `closeMerge` problem of the merge read before the action began ("Could not close the merge of <target> into <branch>"), never Abort's. Once Continue answers ReadyToPush, or Abort answers leftovers, git stays running: the window is ended for every reader.
+ 
+-People on a merge request (request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, plan §2 #169, #170): `useMergeRequests()` carries `peopleSearch`/`searchPeople`/`endPeopleSearch` (the window's one search, 250 ms after the last call, newest answer only), `peopleAsks`/`changePeople` (`mergeRequestPeople.ts`: one change at a time per merge request, `queue[0]` running, `notDone` kept until the box closes; `rowPeopleAsks(peopleAsks, iid)` is the one reader of a row's asks, empty for a row with none) and `openPeopleBoxes`/`peopleBoxOpened`/`peopleBoxClosed`: `shownRows` keeps a row whose box is open (rule 9), so `MergeRequestPeople.vue` calls Opened when `useHoverBox`'s `open` turns true and Closed when it turns false or the box unmounts open. On a row with `mayRerequest` the box always shows both groups ("None" when empty; a row with nobody opens it from the dimmed icon), each header with a `user-plus` add button that opens `MergeRequestPeopleSearch.vue` under it (one field per box, `adding`): a `role="combobox"` field over a `role="listbox"` of `mergeRequestPeopleLines.ts` `pickList` (the core's `peopleSuggestions` while empty, else the search's people; "Already an assignee/reviewer" lines `aria-disabled`, a queued add spinning), arrows over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines change (`keptHighlight`), Enter or a click (its `mousedown` prevented) adds, and once that add is answered the field clears unless its text changed meanwhile (not at the pick, so the picked line shows its spinner) and takes focus back only from `document.body`, never from a control the user moved to while waiting; Escape closes the field (focus to its add button), a second Escape the box. Each assignee and reviewer line ends with `MergeRequestPersonMenu.vue` (`ellipsis-vertical`, one `useDropdownMenu<true>` menu with "Remove assignee/reviewer", `position: fixed` inside the box so the hover box holds it; the spinner, `aria-disabled` and no menu while that remove is queued or running). A change GitLab did not make is one `peopleChangeText` sentence (`personState` under the listed person for a remove, else `groupNotices` under the group). Every control of a line carries `data-control`, its key built once on the line (`BoxLine`'s `review.rerequest.control` and `menuControl`, null when not shown) and bound by the template; when a reply removes the focused one (`lineControls` over the same lines), focus moves to the box.
++People on a merge request (request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, plan §2 #169, #170): `useMergeRequests()` carries `peopleSearch`/`searchPeople`/`endPeopleSearch` (the window's one search, 250 ms after the last call, newest answer only), `peopleAsks`/`changePeople` (`mergeRequestPeople.ts`: one change at a time per merge request, `queue[0]` running, `notDone` kept until the box closes; `rowPeopleAsks(peopleAsks, iid)` is the one reader of a row's asks, empty for a row with none) and `openPeopleBoxes`/`peopleBoxOpened`/`peopleBoxClosed`: `shownRows` holds a row whose box is open (rule 9; the one hold rule, `mergeRequestsShown.ts` `heldOf`/`keptInPlace`, which also holds a row whose discussions box or thread panel is open, #2476: a held row stays shown and keeps its index in the order shown before, the other rows fill the rest), so `MergeRequestPeople.vue` calls Opened when `useHoverBox`'s `open` turns true and Closed when it turns false or the box unmounts open. On a row with `mayRerequest` the box always shows both groups ("None" when empty; a row with nobody opens it from the dimmed icon), each header with a `user-plus` add button that opens `MergeRequestPeopleSearch.vue` under it (one field per box, `adding`): a `role="combobox"` field over a `role="listbox"` of `mergeRequestPeopleLines.ts` `pickList` (the core's `peopleSuggestions` while empty, else the search's people; "Already an assignee/reviewer" lines `aria-disabled`, a queued add spinning), arrows over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines change (`keptHighlight`), Enter or a click (its `mousedown` prevented) adds, and once that add is answered the field clears unless its text changed meanwhile (not at the pick, so the picked line shows its spinner) and takes focus back only from `document.body`, never from a control the user moved to while waiting; Escape closes the field (focus to its add button), a second Escape the box. Each assignee and reviewer line ends with `MergeRequestPersonMenu.vue` (`ellipsis-vertical`, one `useDropdownMenu<true>` menu with "Remove assignee/reviewer", `position: fixed` inside the box so the hover box holds it; the spinner, `aria-disabled` and no menu while that remove is queued or running). A change GitLab did not make is one `peopleChangeText` sentence (`personState` under the listed person for a remove, else `groupNotices` under the group). Every control of a line carries `data-control`, its key built once on the line (`BoxLine`'s `review.rerequest.control` and `menuControl`, null when not shown) and bound by the template; when a reply removes the focused one (`lineControls` over the same lines), focus moves to the box.
+ 
+ A merge request's description (request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, plan §2 #171–#174): the row's info column (`w-7`, between the approvals and the links column, always rendered so the column stays) holds a button only when `row.hasDescription`; it calls `toggleDescription({ iid, title })` and carries `data-description-opener="<iid>"`. `MergeRequestsView.vue` renders the window's one `MergeRequestDescription.vue` after the list while `description` is set, keyed by the iid (a replace is a new panel), and closes it when the page unmounts. The panel is a non-modal `role="dialog"` that takes focus on mount; Escape and the close button call `closeDescription` and return focus to the row's opener when it is still listed. Escape is a window `keydown` listener in the bubble phase that acts only on an Escape nothing took (`defaultPrevented`) and not while a question is asked (a modal `dialog`'s cancel is the keydown's default action, so its Escape reaches the window unprevented): a focused field or box (the search field with text, a people box, a job log) handles Escape first, and the page's own listener, registered before the panel's, closes an open filter menu and otherwise leaves every Escape alone. A press outside it closes it (`onClickOutside`), ignoring every opener (whose toggle closes or replaces) and every element with `data-refreshes-list` (Refresh and the failed list's Retry: rule 2 keeps the panel over a list refresh, and onClickOutside would close it on their clicks, keyboard ones included); `useHoverBox`'s pinned rule reads the same attribute, so a refresh keeps a pinned discussions box and its thread panel too; a new refresh trigger carries the attribute. A scroll leaves it open. Its renderers use interpolation only and never `href`, `v-html`, `innerHTML` or `title` (RK66): `MergeRequestDescriptionBlocks.vue` and `MergeRequestDescriptionInlines.vue` each render nested content by referring to themselves, with `editor/theme.css`'s `markdown-*` classes; a link is an `a` with `role="link"`, `tabindex="0"` and no `href`, whose click or Enter calls `openPage("link", page)` for a `page` link (branded in `ipc/descriptionDomain.ts` `toDescriptionReply` by `ipc/domain.ts` `isLinkedPage`, http or https) and does nothing for a `refused` one; task boxes are Lucide icons with `role="img"` and their word; `MergeRequestDescriptionImage.vue` loads `imageAddress(image)` with `referrerpolicy="no-referrer"` and shows the caption (else the `web` address, else "picture") when that is null or the image fails; its `style` is `mergeRequestImageSize.ts` `imageStyle(size, natural)` (plan §2 #184: GitLab's width as given, never wider than the column, with its proportions; a pixel height scaled from the natural ratio once the image loaded; both by their ratio; a height in % ignored; no size: `max-width: 100%`, `height: auto`); `MergeRequestDescriptionCode.vue` hosts one `MarkdownView` through `useMarkdownCode`. The words are `mergeRequestDescriptionText.ts`. The thread panel's comments and previews render through the same blocks and inlines.
+ 
+diff --git a/frontend/src/ui/MergeRequestDiscussions.vue b/frontend/src/ui/MergeRequestDiscussions.vue
+index 91b54d6..350b11c 100644
+--- a/frontend/src/ui/MergeRequestDiscussions.vue
++++ b/frontend/src/ui/MergeRequestDiscussions.vue
+@@ -117,9 +117,11 @@ watch(useShiftTaps(), () => {
+   mergeRequests.showThread(props.row.iid, id);
+ });
+ watch(open, (now) => {
+-  if (!now) {
+-    boxClosedHere();
++  if (now) {
++    mergeRequests.discussionsBoxOpened(props.row.iid);
++    return;
+   }
++  boxClosedHere();
+ });
+ watch(
+   () => thread.value?.shown.iid,
+@@ -148,6 +150,7 @@ function boxClosedHere(): void {
+     mergeRequests.closeThread();
+   }
+   mergeRequests.boxClosed(props.row.iid);
++  mergeRequests.discussionsBoxClosed(props.row.iid);
+ }
+ 
+ function headerOf(shown: DiscussionLoad | undefined): Header {
+diff --git a/frontend/src/ui/MergeRequestDiscussionsBox.test.ts b/frontend/src/ui/MergeRequestDiscussionsBox.test.ts
+index 42ade5c..e40d20a 100644
+--- a/frontend/src/ui/MergeRequestDiscussionsBox.test.ts
++++ b/frontend/src/ui/MergeRequestDiscussionsBox.test.ts
+@@ -306,7 +306,7 @@ test("a_row_with_the_viewers_turn_has_a_marked_button", async () => {
+   expect([headerOf(none), waitsForViewer(none)]).toEqual(["0 of 9 wait for you | muted", false]);
+ });
+ 
+-test("a_discussion_resolved_in_the_box_moves_its_row_in_review_order_as_it_unmarks_the_button", async () => {
++test("a_discussion_resolved_in_the_box_unmarks_the_button_at_once_and_moves_its_row_once_box_and_panel_close", async () => {
+   const ASKS_SAM = 633;
+   mode.value = "full";
+   await slice.findProject();
+@@ -320,6 +320,7 @@ test("a_discussion_resolved_in_the_box_moves_its_row_in_review_order_as_it_unmar
+   }
+   expect(slice.shownRows.value[0]?.iid).toBe(ASKS_SAM);
+   expect(waitsForViewer(await box(ASKS_SAM))).toBe(true);
++  slice.discussionsBoxOpened(iid(ASKS_SAM));
+ 
+   await resolveDiscussion(ASKS_SAM, only.id);
+ 
+@@ -327,6 +328,33 @@ test("a_discussion_resolved_in_the_box_moves_its_row_in_review_order_as_it_unmar
+   expect(after).toContain(`data-discussion-id="${only.id}"`);
+   expect(headerOf(after)).toBe("No open discussions | muted");
+   expect(waitsForViewer(after)).toBe(false);
++  expect(slice.shownRows.value[0]?.iid).toBe(ASKS_SAM);
++  slice.closeThread();
++  expect(slice.shownRows.value[0]?.iid).toBe(ASKS_SAM);
++  slice.boxClosed(iid(ASKS_SAM));
++  slice.discussionsBoxClosed(iid(ASKS_SAM));
+   expect(slice.shownRows.value[0]?.iid).not.toBe(ASKS_SAM);
+   expect(slice.shownRows.value.map((row) => row.iid)).toContain(ASKS_SAM);
+ });
++
++test("a_row_whose_thread_panel_is_open_keeps_its_index_while_rows_around_it_move", async () => {
++  mode.value = "full";
++  await slice.findProject();
++  await slice.refresh();
++  slice.review({ kind: "me" });
++  await vi.advanceTimersByTimeAsync(PAUSE_MS);
++  const before = slice.shownRows.value.map((row) => row.iid);
++  const second = before[1] ?? 0;
++  expect(second).toBe(638);
++  const entry = slice.discussions.value.get(iid(second));
++  const ids = entry?.kind === "read" ? entry.discussions.map((each) => each.id) : [];
++
++  for (const id of ids) {
++    await resolveDiscussion(second, id);
++  }
++  expect(slice.shownRows.value.map((row) => row.iid)).toEqual([633, 638, 618, 623, 622, 603, 608]);
++
++  slice.closeThread();
++  slice.boxClosed(iid(second));
++  expect(slice.shownRows.value.map((row) => row.iid)).toEqual([633, 618, 623, 638, 622, 603, 608]);
++});
+diff --git a/frontend/src/ui/mergeRequestsShown.ts b/frontend/src/ui/mergeRequestsShown.ts
+index bcee4c5..b4b0762 100644
+--- a/frontend/src/ui/mergeRequestsShown.ts
++++ b/frontend/src/ui/mergeRequestsShown.ts
+@@ -1,5 +1,5 @@
+ import type { StorageLike } from "@vueuse/core";
+-import { computed, type ComputedRef, type Ref } from "vue";
++import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } from "vue";
+ 
+ import type { DiscussionDetails, MergeRequestIid, MergeRequestRow } from "../ipc";
+ import {
+@@ -22,6 +22,7 @@ import {
+   type Choices,
+   type FilterActions,
+ } from "./mergeRequestFilters";
++import type { Threads } from "./mergeRequestThread";
+ 
+ export type ReviewSort =
+   | { readonly kind: "sorted"; readonly loading: number }
+@@ -36,6 +37,9 @@ export type Shown = FilterActions & {
+   readonly viewer: ComputedRef<Viewer>;
+   /** The review order's state for the sort icon; null while the order is off (no review, or details not "full"). */
+   readonly reviewSort: ComputedRef<ReviewSort | null>;
++  /** Board item 2476: the discussions box of row `iid` opened: the row is held (`shownRows`) until it closes. */
++  discussionsBoxOpened(iid: MergeRequestIid): void;
++  discussionsBoxClosed(iid: MergeRequestIid): void;
+ };
+ 
+ type Listed = {
+@@ -47,6 +51,7 @@ type Listed = {
+   readonly dueDates: DueDates;
+   readonly discussionDetails: () => DiscussionDetails;
+   readonly discussionQueue: Pick<Discussions, "discussions">;
++  readonly threads: Pick<Threads, "thread">;
+   readonly openPeopleBoxes: Readonly<Ref<ReadonlySet<MergeRequestIid>>>;
+ };
+ 
+@@ -77,6 +82,53 @@ function ordered(listed: Listed, passing: readonly MergeRequestRow[], viewer: Vi
+     : { rows: order.rows, sort: { kind: "failed", iid: order.row.iid, failure: order.failure } };
+ }
+ 
++/** Rule 9 and board item 2476: the rows whose people box, discussions box or thread panel is open. */
++function heldOf(
++  listed: Listed,
++  discussionBoxes: ReadonlySet<MergeRequestIid>,
++): Set<MergeRequestIid> {
++  const held = new Set([...listed.openPeopleBoxes.value, ...discussionBoxes]);
++  const panel = listed.threads.thread.value;
++  if (panel !== null) {
++    held.add(panel.shown.iid);
++  }
++  return held;
++}
++
++/** A held row stays at its index in the order shown before; the other rows fill the rest in `next`'s order. */
++function keptInPlace(
++  previous: readonly MergeRequestRow[],
++  next: readonly MergeRequestRow[],
++  held: ReadonlySet<MergeRequestIid>,
++): readonly MergeRequestRow[] {
++  const nextOf = new Map(next.map((row) => [row.iid, row]));
++  const kept = previous.flatMap((row, at) => {
++    const now = held.has(row.iid) ? nextOf.get(row.iid) : undefined;
++    return now === undefined ? [] : [{ row: now, at }];
++  });
++  const keptRows = new Set(kept.map(({ row }) => row));
++  const order = next.filter((row) => !keptRows.has(row));
++  for (const { row, at } of kept) {
++    order.splice(at, 0, row);
++  }
++  return order;
++}
++
++function boxesOf(
++  boxes: ShallowRef<ReadonlySet<MergeRequestIid>>,
++): Pick<Shown, "discussionsBoxOpened" | "discussionsBoxClosed"> {
++  return {
++    discussionsBoxOpened: (iid) => {
++      boxes.value = new Set(boxes.value).add(iid);
++    },
++    discussionsBoxClosed: (iid) => {
++      const left = new Set(boxes.value);
++      left.delete(iid);
++      boxes.value = left;
++    },
++  };
++}
++
+ export function shownOf(listed: Listed, storage?: StorageLike): Shown {
+   const { me, rows, search } = listed;
+   const remembered = createRememberedFilters(
+@@ -86,13 +138,18 @@ export function shownOf(listed: Listed, storage?: StorageLike): Shown {
+   );
+   const { filters } = remembered;
+   const viewer = computed(() => viewerOf(filters.value.review, me.value, rows.value));
+-  const shown = computed((): Ordered => {
++  const discussionBoxes = shallowRef<ReadonlySet<MergeRequestIid>>(new Set());
++  const shown = computed((previous?: Ordered): Ordered => {
+     const matching = new Set(searched(filtered(rows.value, filters.value, me.value), search.value));
+-    const open = listed.openPeopleBoxes.value;
+-    const passing = rows.value.filter((row) => matching.has(row) || open.has(row.iid));
+-    return filters.value.review === null
+-      ? { rows: listed.dueDates.datedFirst(passing), sort: null }
+-      : ordered(listed, passing, viewer.value);
++    const held = heldOf(listed, discussionBoxes.value);
++    const passing = rows.value.filter((row) => matching.has(row) || held.has(row.iid));
++    const next =
++      filters.value.review === null
++        ? { rows: listed.dueDates.datedFirst(passing), sort: null }
++        : ordered(listed, passing, viewer.value);
++    return previous === undefined
++      ? next
++      : { ...next, rows: keptInPlace(previous.rows, next.rows, held) };
+   });
+   const shownRows = computed(() => shown.value.rows);
+   return {
+@@ -104,6 +161,7 @@ export function shownOf(listed: Listed, storage?: StorageLike): Shown {
+     ),
+     viewer,
+     reviewSort: computed(() => shown.value.sort),
++    ...boxesOf(discussionBoxes),
+     ...filterActions(remembered),
+   };
+ }

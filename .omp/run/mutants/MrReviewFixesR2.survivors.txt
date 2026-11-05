@@ -1,0 +1,2 @@
+just mutants HEAD → mergeRequestsShown.ts 97.62%: 82 killed, 0 timeout, 2 survived, 0 no-cov (.vue not mutated)
+mergeRequestsShown.ts:62 {kind:"none"} to {} / {kind:""} — equivalent: reviewOrdered reads any kind other than read, loading or failed as NO_TURNS. The line is unchanged since R1 (same survivor).

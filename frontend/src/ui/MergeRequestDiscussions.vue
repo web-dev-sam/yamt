@@ -117,9 +117,11 @@ watch(useShiftTaps(), () => {
   mergeRequests.showThread(props.row.iid, id);
 });
 watch(open, (now) => {
-  if (!now) {
-    boxClosedHere();
+  if (now) {
+    mergeRequests.discussionsBoxOpened(props.row.iid);
+    return;
   }
+  boxClosedHere();
 });
 watch(
   () => thread.value?.shown.iid,
@@ -148,6 +150,7 @@ function boxClosedHere(): void {
     mergeRequests.closeThread();
   }
   mergeRequests.boxClosed(props.row.iid);
+  mergeRequests.discussionsBoxClosed(props.row.iid);
 }
 
 function headerOf(shown: DiscussionLoad | undefined): Header {

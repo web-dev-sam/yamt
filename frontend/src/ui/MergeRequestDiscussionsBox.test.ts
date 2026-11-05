@@ -306,7 +306,7 @@ test("a_row_with_the_viewers_turn_has_a_marked_button", async () => {
   expect([headerOf(none), waitsForViewer(none)]).toEqual(["0 of 9 wait for you | muted", false]);
 });
 
-test("a_discussion_resolved_in_the_box_moves_its_row_in_review_order_as_it_unmarks_the_button", async () => {
+test("a_discussion_resolved_in_the_box_unmarks_the_button_at_once_and_moves_its_row_once_box_and_panel_close", async () => {
   const ASKS_SAM = 633;
   mode.value = "full";
   await slice.findProject();
@@ -320,6 +320,7 @@ test("a_discussion_resolved_in_the_box_moves_its_row_in_review_order_as_it_unmar
   }
   expect(slice.shownRows.value[0]?.iid).toBe(ASKS_SAM);
   expect(waitsForViewer(await box(ASKS_SAM))).toBe(true);
+  slice.discussionsBoxOpened(iid(ASKS_SAM));
 
   await resolveDiscussion(ASKS_SAM, only.id);
 
@@ -327,6 +328,33 @@ test("a_discussion_resolved_in_the_box_moves_its_row_in_review_order_as_it_unmar
   expect(after).toContain(`data-discussion-id="${only.id}"`);
   expect(headerOf(after)).toBe("No open discussions | muted");
   expect(waitsForViewer(after)).toBe(false);
+  expect(slice.shownRows.value[0]?.iid).toBe(ASKS_SAM);
+  slice.closeThread();
+  expect(slice.shownRows.value[0]?.iid).toBe(ASKS_SAM);
+  slice.boxClosed(iid(ASKS_SAM));
+  slice.discussionsBoxClosed(iid(ASKS_SAM));
   expect(slice.shownRows.value[0]?.iid).not.toBe(ASKS_SAM);
   expect(slice.shownRows.value.map((row) => row.iid)).toContain(ASKS_SAM);
+});
+
+test("a_row_whose_thread_panel_is_open_keeps_its_index_while_rows_around_it_move", async () => {
+  mode.value = "full";
+  await slice.findProject();
+  await slice.refresh();
+  slice.review({ kind: "me" });
+  await vi.advanceTimersByTimeAsync(PAUSE_MS);
+  const before = slice.shownRows.value.map((row) => row.iid);
+  const second = before[1] ?? 0;
+  expect(second).toBe(638);
+  const entry = slice.discussions.value.get(iid(second));
+  const ids = entry?.kind === "read" ? entry.discussions.map((each) => each.id) : [];
+
+  for (const id of ids) {
+    await resolveDiscussion(second, id);
+  }
+  expect(slice.shownRows.value.map((row) => row.iid)).toEqual([633, 638, 618, 623, 622, 603, 608]);
+
+  slice.closeThread();
+  slice.boxClosed(iid(second));
+  expect(slice.shownRows.value.map((row) => row.iid)).toEqual([633, 618, 623, 638, 622, 603, 608]);
 });

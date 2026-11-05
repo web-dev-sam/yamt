@@ -1,5 +1,5 @@
 import type { StorageLike } from "@vueuse/core";
-import { computed, type ComputedRef, type Ref } from "vue";
+import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } from "vue";
 
 import type { DiscussionDetails, MergeRequestIid, MergeRequestRow } from "../ipc";
 import {
@@ -22,6 +22,7 @@ import {
   type Choices,
   type FilterActions,
 } from "./mergeRequestFilters";
+import type { Threads } from "./mergeRequestThread";
 
 export type ReviewSort =
   | { readonly kind: "sorted"; readonly loading: number }
@@ -36,6 +37,9 @@ export type Shown = FilterActions & {
   readonly viewer: ComputedRef<Viewer>;
   /** The review order's state for the sort icon; null while the order is off (no review, or details not "full"). */
   readonly reviewSort: ComputedRef<ReviewSort | null>;
+  /** Board item 2476: the discussions box of row `iid` opened: the row is held (`shownRows`) until it closes. */
+  discussionsBoxOpened(iid: MergeRequestIid): void;
+  discussionsBoxClosed(iid: MergeRequestIid): void;
 };
 
 type Listed = {
@@ -47,6 +51,7 @@ type Listed = {
   readonly dueDates: DueDates;
   readonly discussionDetails: () => DiscussionDetails;
   readonly discussionQueue: Pick<Discussions, "discussions">;
+  readonly threads: Pick<Threads, "thread">;
   readonly openPeopleBoxes: Readonly<Ref<ReadonlySet<MergeRequestIid>>>;
 };
 
@@ -77,6 +82,53 @@ function ordered(listed: Listed, passing: readonly MergeRequestRow[], viewer: Vi
     : { rows: order.rows, sort: { kind: "failed", iid: order.row.iid, failure: order.failure } };
 }
 
+/** Rule 9 and board item 2476: the rows whose people box, discussions box or thread panel is open. */
+function heldOf(
+  listed: Listed,
+  discussionBoxes: ReadonlySet<MergeRequestIid>,
+): Set<MergeRequestIid> {
+  const held = new Set([...listed.openPeopleBoxes.value, ...discussionBoxes]);
+  const panel = listed.threads.thread.value;
+  if (panel !== null) {
+    held.add(panel.shown.iid);
+  }
+  return held;
+}
+
+/** A held row stays at its index in the order shown before; the other rows fill the rest in `next`'s order. */
+function keptInPlace(
+  previous: readonly MergeRequestRow[],
+  next: readonly MergeRequestRow[],
+  held: ReadonlySet<MergeRequestIid>,
+): readonly MergeRequestRow[] {
+  const nextOf = new Map(next.map((row) => [row.iid, row]));
+  const kept = previous.flatMap((row, at) => {
+    const now = held.has(row.iid) ? nextOf.get(row.iid) : undefined;
+    return now === undefined ? [] : [{ row: now, at }];
+  });
+  const keptRows = new Set(kept.map(({ row }) => row));
+  const order = next.filter((row) => !keptRows.has(row));
+  for (const { row, at } of kept) {
+    order.splice(at, 0, row);
+  }
+  return order;
+}
+
+function boxesOf(
+  boxes: ShallowRef<ReadonlySet<MergeRequestIid>>,
+): Pick<Shown, "discussionsBoxOpened" | "discussionsBoxClosed"> {
+  return {
+    discussionsBoxOpened: (iid) => {
+      boxes.value = new Set(boxes.value).add(iid);
+    },
+    discussionsBoxClosed: (iid) => {
+      const left = new Set(boxes.value);
+      left.delete(iid);
+      boxes.value = left;
+    },
+  };
+}
+
 export function shownOf(listed: Listed, storage?: StorageLike): Shown {
   const { me, rows, search } = listed;
   const remembered = createRememberedFilters(
@@ -86,13 +138,18 @@ export function shownOf(listed: Listed, storage?: StorageLike): Shown {
   );
   const { filters } = remembered;
   const viewer = computed(() => viewerOf(filters.value.review, me.value, rows.value));
-  const shown = computed((): Ordered => {
+  const discussionBoxes = shallowRef<ReadonlySet<MergeRequestIid>>(new Set());
+  const shown = computed((previous?: Ordered): Ordered => {
     const matching = new Set(searched(filtered(rows.value, filters.value, me.value), search.value));
-    const open = listed.openPeopleBoxes.value;
-    const passing = rows.value.filter((row) => matching.has(row) || open.has(row.iid));
-    return filters.value.review === null
-      ? { rows: listed.dueDates.datedFirst(passing), sort: null }
-      : ordered(listed, passing, viewer.value);
+    const held = heldOf(listed, discussionBoxes.value);
+    const passing = rows.value.filter((row) => matching.has(row) || held.has(row.iid));
+    const next =
+      filters.value.review === null
+        ? { rows: listed.dueDates.datedFirst(passing), sort: null }
+        : ordered(listed, passing, viewer.value);
+    return previous === undefined
+      ? next
+      : { ...next, rows: keptInPlace(previous.rows, next.rows, held) };
   });
   const shownRows = computed(() => shown.value.rows);
   return {
@@ -104,6 +161,7 @@ export function shownOf(listed: Listed, storage?: StorageLike): Shown {
     ),
     viewer,
     reviewSort: computed(() => shown.value.sort),
+    ...boxesOf(discussionBoxes),
     ...filterActions(remembered),
   };
 }
