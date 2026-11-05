@@ -12,17 +12,20 @@ import {
 } from "vue";
 
 import type { Person } from "../ipc";
-import { mentionEdit, type MentionWord } from "../mergeRequests";
 import { wrappedIndex } from "./menuKeys";
 import {
   highlightAfter,
+  MENTION_CLOSED,
   mentionKey,
   mentionList,
   mentionOptionId,
-  mentionRead,
-  type FieldRead,
+  mentionPick,
+  mentionStep,
+  type FieldText,
   type MentionAnchor,
+  type MentionEvent,
   type MentionList,
+  type MentionState,
 } from "./mergeRequestMentionLines";
 import type { PeopleSearcher } from "./mergeRequestPeople";
 import { useMergeRequests } from "./mergeRequestsStore";
@@ -43,33 +46,17 @@ export type MentionField = {
   close(): void;
 };
 
-/** `word`: the open `@` word (null: closed); `dismissed`: the start of the word Escape or `close` shut. */
 type State = {
   readonly field: Readonly<ShallowRef<HTMLTextAreaElement | null>>;
   readonly search: PeopleSearcher;
-  readonly word: ShallowRef<MentionWord | null>;
+  readonly mention: ShallowRef<MentionState>;
   readonly highlight: ShallowRef<number>;
   readonly anchor: ShallowRef<MentionAnchor | null>;
-  composing: boolean;
-  dismissed: number | null;
 };
-
-function fieldRead(state: State, element: HTMLTextAreaElement): FieldRead {
-  const { value: text, selectionStart, selectionEnd } = element;
-  return { text, selectionStart, selectionEnd, composing: state.composing };
-}
-
-function shut(state: State): void {
-  if (state.word.value !== null) {
-    state.word.value = null;
-    state.search.end();
-  }
-  state.anchor.value = null;
-}
 
 function measure(state: State): void {
   const element = state.field.value;
-  const open = state.word.value;
+  const open = state.mention.value.word;
   state.anchor.value =
     element === null || open === null
       ? null
@@ -80,35 +67,33 @@ function measure(state: State): void {
         };
 }
 
-function read(state: State): void {
-  const element = state.field.value;
-  if (element === null) {
-    return;
+function dispatch(state: State, event: MentionEvent): void {
+  const { state: next, call } = mentionStep(state.mention.value, event);
+  state.mention.value = next;
+  if (call.kind === "search") {
+    state.search.search(call.typed);
+  } else if (call.kind === "end") {
+    state.search.end();
   }
-  const at = fieldRead(state, element);
-  if (mentionRead(at, null)?.start !== state.dismissed) {
-    state.dismissed = null;
-  }
-  const open = mentionRead(at, state.dismissed);
-  if (open === null) {
-    shut(state);
-    return;
-  }
-  state.word.value = open;
-  state.search.search(open.typed);
   void nextTick(() => {
     measure(state);
   });
 }
 
+function dispatchField(state: State, eventOf: (field: FieldText) => MentionEvent): void {
+  const element = state.field.value;
+  if (element !== null) {
+    const { value: text, selectionStart, selectionEnd } = element;
+    dispatch(state, eventOf({ text, selectionStart, selectionEnd }));
+  }
+}
+
 function pick(state: State, list: MentionList | null, index: number): void {
   const element = state.field.value;
-  const open = state.word.value;
-  const line = list?.lines[index];
-  if (element === null || open === null || line === undefined) {
+  const edit = mentionPick(state.mention.value.word, list, index);
+  if (element === null || edit === null) {
     return;
   }
-  const edit = mentionEdit(open, line.username);
   element.focus();
   element.setSelectionRange(edit.from, edit.to);
   document.execCommand("insertText", false, edit.insert);
@@ -129,53 +114,34 @@ function keydown(state: State, list: MentionList | null, event: KeyboardEvent): 
       pick(state, list, state.highlight.value);
       break;
     case "close":
-      state.dismissed = state.word.value?.start ?? null;
-      shut(state);
+      dispatch(state, { kind: "escape" });
       break;
-    default: {
-      const _exhaustive: never = key;
-      return _exhaustive;
-    }
   }
   return true;
 }
 
-function close(state: State): void {
-  const element = state.field.value;
-  state.dismissed =
-    element === null ? null : (mentionRead(fieldRead(state, element), null)?.start ?? null);
-  shut(state);
-}
-
 function listen(state: State): void {
   const { field } = state;
-  useEventListener(field, "input", () => {
-    if (!state.composing) {
-      read(state);
-    }
-  });
-  useEventListener(field, ["click", "keyup"], () => {
-    read(state);
+  useEventListener(field, ["input", "click", "keyup"], () => {
+    dispatchField(state, (text) => ({ kind: "read", field: text }));
   });
   // WebKitGTK 2.54 reports selectionStart 0 during a textarea's focus event and its microtasks when the focus comes
   // back (shown again after Preview, or `focus()` after a blur); the caret is back by the next task (measured in the
   // mr-mentions-list smoke).
   useEventListener(field, "focus", () => {
     setTimeout(() => {
-      read(state);
+      dispatchField(state, (text) => ({ kind: "read", field: text }));
     });
   });
   useEventListener(field, ["compositionstart", "compositionend"], (event: CompositionEvent) => {
-    state.composing = event.type === "compositionstart";
-    read(state);
+    const composing = event.type === "compositionstart";
+    dispatchField(state, (text) => ({ kind: "compose", composing, field: text }));
   });
   useEventListener(field, "blur", () => {
-    shut(state);
+    dispatch(state, { kind: "blur" });
   });
   useEventListener(field, "scroll", () => {
-    if (state.word.value !== null) {
-      measure(state);
-    }
+    measure(state);
   });
 }
 
@@ -184,7 +150,7 @@ function shownList(
   known: MaybeRefOrGetter<readonly Person[]>,
 ): ComputedRef<MentionList | null> {
   const list = computed(() => {
-    const open = state.word.value;
+    const open = state.mention.value.word;
     return open === null
       ? null
       : mentionList({
@@ -194,12 +160,12 @@ function shownList(
           platform: navigator.platform,
         });
   });
-  watch(
-    () => list.value?.lines ?? [],
-    (after, before) => {
-      state.highlight.value = highlightAfter(before, after, state.highlight.value);
-    },
-  );
+  watch(list, (after, before) => {
+    state.highlight.value =
+      after === null || before === null
+        ? 0
+        : highlightAfter(before.lines, after.lines, state.highlight.value);
+  });
   return list;
 }
 
@@ -211,11 +177,9 @@ export function useMentions(
   const state: State = {
     field,
     search: useMergeRequests().mentionSearch,
-    word: shallowRef(null),
+    mention: shallowRef(MENTION_CLOSED),
     highlight: shallowRef(0),
     anchor: shallowRef(null),
-    composing: false,
-    dismissed: null,
   };
   const listId = useId();
   const list = shownList(state, known);
@@ -239,7 +203,7 @@ export function useMentions(
       pick(state, list.value, index);
     },
     close: () => {
-      close(state);
+      dispatchField(state, (text) => ({ kind: "close", field: text }));
     },
   };
 }

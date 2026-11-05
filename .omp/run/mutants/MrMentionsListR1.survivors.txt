@@ -1,0 +1,2 @@
+just mutants HEAD → 99.70% (332 killed, 1 survived, 0 no-cov, 4 compile errors). mergeRequestMentionLines.ts 100% (200/200). mergeRequestMentions.ts 99.25%; its listener registrations are killed too.
+mergeRequestMentions.ts:104 `key === null || list === null` → `key === null || false` — equivalent: mentionKey(event, null) already returns null (fixed contract), so the result is false either way. The guard only narrows `list` for TS.

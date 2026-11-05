@@ -3,15 +3,22 @@ import { expect, test } from "vitest";
 import type { Person } from "../ipc";
 import {
   highlightAfter,
+  MENTION_CLOSED,
   mentionKey,
   mentionList,
   mentionOptionId,
   mentionPlace,
+  mentionPick,
   mentionRead,
+  mentionStep,
+  type FieldText,
   type MentionAnchor,
+  type MentionCall,
+  type MentionEvent,
   type MentionInput,
   type MentionLine,
   type MentionList,
+  type MentionState,
 } from "./mergeRequestMentionLines";
 import type { PeopleSearch } from "./mergeRequests";
 import { peopleSearchText } from "./mergeRequestsText";
@@ -131,6 +138,140 @@ test("a_dismissed_word_stays_closed_until_another_word_starts", () => {
     typed: "an",
   });
   expect(mentionRead({ text, selectionStart: 2, selectionEnd: 2, composing: false }, 3)).toBeNull();
+});
+
+function field(text: string, caret = text.length): FieldText {
+  return { text, selectionStart: caret, selectionEnd: caret };
+}
+
+function callName(call: MentionCall): string {
+  return call.kind === "search" ? `search ${call.typed}` : call.kind;
+}
+
+function steps(
+  events: readonly MentionEvent[],
+  from: MentionState = MENTION_CLOSED,
+): { readonly state: MentionState; readonly calls: readonly string[] } {
+  let state = from;
+  const calls: string[] = [];
+  for (const event of events) {
+    const step = mentionStep(state, event);
+    state = step.state;
+    calls.push(callName(step.call));
+  }
+  return { state, calls };
+}
+
+test("a_send_forgets_its_dismissal_once_the_field_shows_another_text", () => {
+  const sent = steps([
+    { kind: "read", field: field("@an") },
+    { kind: "close", field: field("@an") },
+    { kind: "read", field: field("@an") },
+  ]);
+  expect(sent.calls).toEqual(["search an", "end", "none"]);
+  expect(sent.state).toEqual({
+    word: null,
+    dismissed: { kind: "close", start: 0, text: "@an" },
+    composing: false,
+  });
+  const next = steps([{ kind: "read", field: field("@") }], sent.state);
+  expect(next.calls).toEqual(["search "]);
+  expect(next.state).toEqual({
+    word: { start: 0, end: 1, typed: "" },
+    dismissed: null,
+    composing: false,
+  });
+  expect(steps([{ kind: "read", field: field("@ann") }], sent.state).calls).toEqual(["search ann"]);
+  expect(steps([{ kind: "read", field: field("@an", 0) }], sent.state).state.dismissed).toBeNull();
+});
+
+test("escape_keeps_its_word_closed_while_typing_in_it", () => {
+  const escaped = steps([
+    { kind: "read", field: field("hi @an @be", 6) },
+    { kind: "escape" },
+    { kind: "read", field: field("hi @ann @be", 7) },
+  ]);
+  expect(escaped.calls).toEqual(["search an", "end", "none"]);
+  expect(escaped.state).toEqual({
+    word: null,
+    dismissed: { kind: "escape", start: 3 },
+    composing: false,
+  });
+  expect(
+    steps(
+      [
+        { kind: "read", field: field("hi @ann @be") },
+        { kind: "read", field: field("hi @ann @be", 7) },
+      ],
+      escaped.state,
+    ).calls,
+  ).toEqual(["search be", "search ann"]);
+  expect(mentionStep(MENTION_CLOSED, { kind: "escape" })).toEqual({
+    state: MENTION_CLOSED,
+    call: { kind: "none" },
+  });
+});
+
+test("a_close_outside_a_word_dismisses_nothing", () => {
+  expect(steps([{ kind: "close", field: field("hello") }]).state).toEqual(MENTION_CLOSED);
+  const composing = steps([
+    { kind: "compose", composing: true, field: field("@an") },
+    { kind: "close", field: field("@an") },
+  ]).state;
+  expect(composing).toEqual({ word: null, dismissed: null, composing: true });
+});
+
+test("the_search_is_asked_once_per_open_word", () => {
+  expect(
+    steps([
+      { kind: "read", field: field("@an @an", 3) },
+      { kind: "read", field: field("@an @an", 3) },
+      { kind: "read", field: field("@an @an", 3) },
+      { kind: "read", field: field("@an @an", 2) },
+      { kind: "read", field: field("@an @an", 3) },
+      { kind: "read", field: field("@an @an", 7) },
+    ]).calls,
+  ).toEqual(["search an", "none", "none", "search a", "search an", "search an"]);
+});
+
+test("a_closing_word_ends_the_search_once", () => {
+  expect(
+    steps([
+      { kind: "read", field: field("@an") },
+      { kind: "read", field: field("@an x") },
+      { kind: "read", field: field("@an x") },
+      { kind: "read", field: field("@an") },
+      { kind: "blur" },
+      { kind: "blur" },
+    ]).calls,
+  ).toEqual(["search an", "end", "none", "search an", "end", "none"]);
+});
+
+test("a_composition_closes_the_word_and_its_end_reads_again", () => {
+  const composed = steps([
+    { kind: "read", field: field("@an") },
+    { kind: "compose", composing: true, field: field("@an") },
+    { kind: "read", field: field("@anb") },
+  ]);
+  expect(composed.calls).toEqual(["search an", "end", "none"]);
+  expect(composed.state).toEqual({ word: null, dismissed: null, composing: true });
+  const ended = steps(
+    [
+      { kind: "compose", composing: false, field: field("@anb") },
+      { kind: "read", field: field("@anbc") },
+    ],
+    composed.state,
+  );
+  expect(ended.calls).toEqual(["search anb", "search anbc"]);
+  expect(ended.state.composing).toBe(false);
+});
+
+test("a_pick_writes_an_existing_line_over_the_open_word", () => {
+  const word = { start: 3, end: 6, typed: "an" };
+  expect(mentionPick(word, OPEN, 1)).toEqual({ from: 3, to: 6, insert: "@anna " });
+  expect(mentionPick(word, OPEN, 2)).toBeNull();
+  expect(mentionPick(word, null, 0)).toBeNull();
+  expect(mentionPick(null, OPEN, 0)).toBeNull();
 });
 
 test("an_open_list_takes_escape_enter_tab_and_arrows_only", () => {

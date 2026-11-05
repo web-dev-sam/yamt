@@ -1,0 +1,846 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index cf791f0..17e4917 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -74,7 +74,7 @@ The merge window of a merge request (plan §2 #138–#143): `question.ts` is wha
+ 
+ People on a merge request (request `docs/slices/request-mr-people.md`, design `docs/slices/briefs/mr-people-design.md` option A, plan §2 #169, #170): `useMergeRequests()` carries `peopleSearch: PeopleSearcher` (`{ state, search, end }`, one of the slice's two `createPeopleSearch` instances, the other being the mention list's `mentionSearch`: each 250 ms after its last call, newest answer only, the same text while searching or found asks nothing, and neither touches the other, #191), `peopleAsks`/`changePeople` (`mergeRequestPeople.ts`: one change at a time per merge request, `queue[0]` running, `notDone` kept until the box closes; `rowPeopleAsks(peopleAsks, iid)` is the one reader of a row's asks, empty for a row with none) and `openPeopleBoxes`/`peopleBoxOpened`/`peopleBoxClosed`: `shownRows` holds a row whose box is open (rule 9; the one hold rule, `mergeRequestsShown.ts` `heldOf`/`keptInPlace`, which also holds a row whose discussions box or thread panel is open, #2476: a held row stays shown and keeps its index in the order shown before, the other rows fill the rest), so `MergeRequestPeople.vue` calls Opened when `useHoverBox`'s `open` turns true and Closed when it turns false or the box unmounts open. On a row with `mayRerequest` the box always shows both groups ("None" when empty; a row with nobody opens it from the dimmed icon), each header with a `user-plus` add button that opens `MergeRequestPeopleSearch.vue` under it (one field per box, `adding`): a `role="combobox"` field over a `role="listbox"` of `mergeRequestPeopleLines.ts` `pickList` (the core's `peopleSuggestions` while empty, else the search's people; "Already an assignee/reviewer" lines `aria-disabled`, a queued add spinning), arrows over the addable lines (`steppedHighlight`), the highlight back on the first addable line whenever the lines change (`keptHighlight`), Enter or a click (its `mousedown` prevented) adds, and once that add is answered the field clears unless its text changed meanwhile (not at the pick, so the picked line shows its spinner) and takes focus back only from `document.body`, never from a control the user moved to while waiting; Escape closes the field (focus to its add button), a second Escape the box. Each assignee and reviewer line ends with `MergeRequestPersonMenu.vue` (`ellipsis-vertical`, one `useDropdownMenu<true>` menu with "Remove assignee/reviewer", `position: fixed` inside the box so the hover box holds it; the spinner, `aria-disabled` and no menu while that remove is queued or running). A change GitLab did not make is one `peopleChangeText` sentence (`personState` under the listed person for a remove, else `groupNotices` under the group). Every control of a line carries `data-control`, its key built once on the line (`BoxLine`'s `review.rerequest.control` and `menuControl`, null when not shown) and bound by the template; when a reply removes the focused one (`lineControls` over the same lines), focus moves to the box.
+ 
+-Mentions (request `docs/slices/request-mr-mentions.md`, design `docs/slices/briefs/mr-mentions-design.md` option A, plan §2 #191, #192, RK73, RK76): `@` completion in the thread panel's reply field (`MergeRequestReplyField.vue`, both windows) and the range window's Post box (`RangeMessageEditor.vue`). Each field calls `mergeRequestMentions.ts` `useMentions(field, known)` once; it reads the field on `input` (not while composing), `click`, `keyup`, `focus` (a task later: WebKit reports the caret at 0 while focus comes back to a textarea) and `compositionend`, with `compositionstart`/`compositionend` holding the composing flag, closes on `blur` and re-measures on the field's `scroll`. Each read is `mergeRequestMentionLines.ts` `mentionRead` (the core's `mentionWordAt`; null while composing, with a selection, or in the word Escape or `close()` dismissed, until the caret leaves it): no word closes and ends `mentionSearch`, a word asks `mentionSearch.search(typed)` and, after `nextTick` (the field's `fit` has run), measures `{ caret: textareaCaret.ts caretBox(field, word.start), field, room: visibleRoom(field) }` (a mirror div with `mirrorStyle`; the room is the viewport cut by every clipping ancestor). The list is `mentionList` (the core's `mentionLines` over `known` then the search's people, at most 10, the people box's `peopleSearchText` as a muted note when the search is refused or failed; null, so closed, with neither). The field's `keydown` calls `mentions.keydown(event)` first: `mentionKey` takes Escape (dismiss), Up/Down (`menuKeys.ts` `wrappedIndex`), Enter/Tab (pick) only while the list is open and no modifier is held, prevents and stops them, so `boxKeydown`, the panel's Escape listeners and the window's keys never see them; anything else, Ctrl+Enter included, is the field's. A send, Preview and Queue call `close()`. `MergeRequestMentionList.vue` is an absolute `z-10` child of a `relative` wrapper around the textarea, never teleported (the pointer stays inside the panel's and the box's hover areas, and it scrolls with the field's box); it measures its own content (`useElementSize`) and is placed by `mentionPlace`: under the `@`'s line when it fits in the room, else above, else on the larger side with its height capped; `role="listbox"` "People to mention", options `${listId}-${index}` (`mentionOptionId`, the field's `aria-activedescendant`) with `mousedown` prevented and a click pick. A pick (`mentionEdit`) focuses the field, selects the word and writes `@username ` with `document.execCommand("insertText")`, so the field's own input handler stays the one writer and WebKit keeps one undo step (measured: undo restores the typed word, selected; `setRangeText` was measured to corrupt the undo). The reply field's people are `knownMentions(the shown thread's row, the loaded thread's comment authors)`; the Post box's are the row `rangeGitLab.ts` `linedUpRow(check, rows)` finds (the loaded row whose `page` is the lined-up merge request's `webUrl`, else none) with no writers. Pictures are only those rows, threads and searches carry (RK53); the only call is the search (RK54).
++Mentions (request `docs/slices/request-mr-mentions.md`, design `docs/slices/briefs/mr-mentions-design.md` option A, plan §2 #191, #192, RK73, RK76): `@` completion in the thread panel's reply field (`MergeRequestReplyField.vue`, both windows) and the range window's Post box (`RangeMessageEditor.vue`). Each field calls `mergeRequestMentions.ts` `useMentions(field, known)` once; it reads the field on `input`, `click`, `keyup`, `focus` (a task later: WebKit reports the caret at 0 while focus comes back to a textarea) and `compositionend`, with `compositionstart`/`compositionend` holding the composing flag (no read finds a word while composing), closes on `blur` and re-measures on the field's `scroll`. Every field event, Escape and `close()` go through the pure `mergeRequestMentionLines.ts` `mentionStep(state, event)`: the open word is `mentionRead` (the core's `mentionWordAt`; null while composing, with a selection, or in a dismissed word: Escape's until the caret leaves the word, `close()`'s while the field still shows the text it closed on, so a send that clears the text leaves no dismissal); the step asks `mentionSearch.search(typed)` only when the open word's start or typed text changed, and `end()`s it once when the word closes. After each event, past `nextTick` (the field's `fit` has run), the composable measures `{ caret: textareaCaret.ts caretBox(field, word.start), field, room: visibleRoom(field) }` (a mirror div with `mirrorStyle`; the room is the viewport cut by every clipping ancestor). The list is `mentionList` (the core's `mentionLines` over `known` then the search's people, at most 10, the people box's `peopleSearchText` as a muted note when the search is refused or failed; null, so closed, with neither). The field's `keydown` calls `mentions.keydown(event)` first: `mentionKey` takes Escape (dismiss), Up/Down (`menuKeys.ts` `wrappedIndex`), Enter/Tab (pick) only while the list is open and no modifier is held, prevents and stops them, so `boxKeydown`, the panel's Escape listeners and the window's keys never see them; anything else, Ctrl+Enter included, is the field's. A send, Preview and Queue call `close()`. `MergeRequestMentionList.vue` is an absolute `z-10` child of a `relative` wrapper around the textarea, never teleported (the pointer stays inside the panel's and the box's hover areas, and it scrolls with the field's box); it measures its own content (`useElementSize`) and is placed by `mentionPlace`: under the `@`'s line when it fits in the room, else above, else on the larger side with its height capped; `role="listbox"` "People to mention", options `${listId}-${index}` (`mentionOptionId`, the field's `aria-activedescendant`) with `mousedown` prevented and a click pick. A pick (`mentionPick`, the core's `mentionEdit`) focuses the field, selects the word and writes `@username ` with `document.execCommand("insertText")`, so the field's own input handler stays the one writer and WebKit keeps one undo step (measured: undo restores the typed word, selected; `setRangeText` was measured to corrupt the undo). The reply field's people are `knownMentions(the shown thread's row, the loaded thread's comment authors)`; the Post box's are the row `rangeGitLab.ts` `linedUpRow(check, rows)` finds (the loaded row whose `page` is the lined-up merge request's `webUrl`, else none) with no writers. Pictures are only those rows, threads and searches carry (RK53); the only call is the search (RK54).
+ 
+ A merge request's description (request `docs/slices/request-mr-description.md`, design `docs/slices/briefs/mr-description-design.md` option A, plan §2 #171–#174): the row's info column (`w-7`, between the approvals and the links column, always rendered so the column stays) holds a button only when `row.hasDescription`; it calls `toggleDescription({ iid, title })` and carries `data-description-opener="<iid>"`. `MergeRequestsView.vue` renders the window's one `MergeRequestDescription.vue` after the list while `description` is set, keyed by the iid (a replace is a new panel), and closes it when the page unmounts. The panel is a non-modal `role="dialog"` that takes focus on mount; Escape and the close button call `closeDescription` and return focus to the row's opener when it is still listed. Escape is a window `keydown` listener in the bubble phase that acts only on an Escape nothing took (`defaultPrevented`) and not while a question is asked (a modal `dialog`'s cancel is the keydown's default action, so its Escape reaches the window unprevented): a focused field or box (the search field with text, a people box, a job log) handles Escape first, and the page's own listener, registered before the panel's, closes an open filter menu and otherwise leaves every Escape alone. A press outside it closes it (`onClickOutside`), ignoring every opener (whose toggle closes or replaces) and every element with `data-refreshes-list` (Refresh and the failed list's Retry: rule 2 keeps the panel over a list refresh, and onClickOutside would close it on their clicks, keyboard ones included); `useHoverBox`'s pinned rule reads the same attribute, so a refresh keeps a pinned discussions box and its thread panel too; a new refresh trigger carries the attribute. A scroll leaves it open. Its renderers use interpolation only and never `href`, `v-html`, `innerHTML` or `title` (RK66): `MergeRequestDescriptionBlocks.vue` and `MergeRequestDescriptionInlines.vue` each render nested content by referring to themselves, with `editor/theme.css`'s `markdown-*` classes; a link is an `a` with `role="link"`, `tabindex="0"` and no `href`, whose click or Enter calls `openPage("link", page)` for a `page` link (branded in `ipc/descriptionDomain.ts` `toDescriptionReply` by `ipc/domain.ts` `isLinkedPage`, http or https) and does nothing for a `refused` one; task boxes are Lucide icons with `role="img"` and their word; `MergeRequestDescriptionImage.vue` loads `imageAddress(image)` with `referrerpolicy="no-referrer"` and shows the caption (else the `web` address, else "picture") when that is null or the image fails; its `style` is `mergeRequestImageSize.ts` `imageStyle(size, natural)` (plan §2 #184: GitLab's width as given, never wider than the column, with its proportions; a pixel height scaled from the natural ratio once the image loaded; both by their ratio; a height in % ignored; no size: `max-width: 100%`, `height: auto`); `MergeRequestDescriptionCode.vue` hosts one `MarkdownView` through `useMarkdownCode`. The words are `mergeRequestDescriptionText.ts`. The thread panel's comments and previews render through the same blocks and inlines.
+ 
+diff --git a/frontend/src/ui/mergeRequestMentionLines.test.ts b/frontend/src/ui/mergeRequestMentionLines.test.ts
+index c33a7be..6a95615 100644
+--- a/frontend/src/ui/mergeRequestMentionLines.test.ts
++++ b/frontend/src/ui/mergeRequestMentionLines.test.ts
+@@ -3,15 +3,22 @@ import { expect, test } from "vitest";
+ import type { Person } from "../ipc";
+ import {
+   highlightAfter,
++  MENTION_CLOSED,
+   mentionKey,
+   mentionList,
+   mentionOptionId,
+   mentionPlace,
++  mentionPick,
+   mentionRead,
++  mentionStep,
++  type FieldText,
+   type MentionAnchor,
++  type MentionCall,
++  type MentionEvent,
+   type MentionInput,
+   type MentionLine,
+   type MentionList,
++  type MentionState,
+ } from "./mergeRequestMentionLines";
+ import type { PeopleSearch } from "./mergeRequests";
+ import { peopleSearchText } from "./mergeRequestsText";
+@@ -133,6 +140,140 @@ test("a_dismissed_word_stays_closed_until_another_word_starts", () => {
+   expect(mentionRead({ text, selectionStart: 2, selectionEnd: 2, composing: false }, 3)).toBeNull();
+ });
+ 
++function field(text: string, caret = text.length): FieldText {
++  return { text, selectionStart: caret, selectionEnd: caret };
++}
++
++function callName(call: MentionCall): string {
++  return call.kind === "search" ? `search ${call.typed}` : call.kind;
++}
++
++function steps(
++  events: readonly MentionEvent[],
++  from: MentionState = MENTION_CLOSED,
++): { readonly state: MentionState; readonly calls: readonly string[] } {
++  let state = from;
++  const calls: string[] = [];
++  for (const event of events) {
++    const step = mentionStep(state, event);
++    state = step.state;
++    calls.push(callName(step.call));
++  }
++  return { state, calls };
++}
++
++test("a_send_forgets_its_dismissal_once_the_field_shows_another_text", () => {
++  const sent = steps([
++    { kind: "read", field: field("@an") },
++    { kind: "close", field: field("@an") },
++    { kind: "read", field: field("@an") },
++  ]);
++  expect(sent.calls).toEqual(["search an", "end", "none"]);
++  expect(sent.state).toEqual({
++    word: null,
++    dismissed: { kind: "close", start: 0, text: "@an" },
++    composing: false,
++  });
++  const next = steps([{ kind: "read", field: field("@") }], sent.state);
++  expect(next.calls).toEqual(["search "]);
++  expect(next.state).toEqual({
++    word: { start: 0, end: 1, typed: "" },
++    dismissed: null,
++    composing: false,
++  });
++  expect(steps([{ kind: "read", field: field("@ann") }], sent.state).calls).toEqual(["search ann"]);
++  expect(steps([{ kind: "read", field: field("@an", 0) }], sent.state).state.dismissed).toBeNull();
++});
++
++test("escape_keeps_its_word_closed_while_typing_in_it", () => {
++  const escaped = steps([
++    { kind: "read", field: field("hi @an @be", 6) },
++    { kind: "escape" },
++    { kind: "read", field: field("hi @ann @be", 7) },
++  ]);
++  expect(escaped.calls).toEqual(["search an", "end", "none"]);
++  expect(escaped.state).toEqual({
++    word: null,
++    dismissed: { kind: "escape", start: 3 },
++    composing: false,
++  });
++  expect(
++    steps(
++      [
++        { kind: "read", field: field("hi @ann @be") },
++        { kind: "read", field: field("hi @ann @be", 7) },
++      ],
++      escaped.state,
++    ).calls,
++  ).toEqual(["search be", "search ann"]);
++  expect(mentionStep(MENTION_CLOSED, { kind: "escape" })).toEqual({
++    state: MENTION_CLOSED,
++    call: { kind: "none" },
++  });
++});
++
++test("a_close_outside_a_word_dismisses_nothing", () => {
++  expect(steps([{ kind: "close", field: field("hello") }]).state).toEqual(MENTION_CLOSED);
++  const composing = steps([
++    { kind: "compose", composing: true, field: field("@an") },
++    { kind: "close", field: field("@an") },
++  ]).state;
++  expect(composing).toEqual({ word: null, dismissed: null, composing: true });
++});
++
++test("the_search_is_asked_once_per_open_word", () => {
++  expect(
++    steps([
++      { kind: "read", field: field("@an @an", 3) },
++      { kind: "read", field: field("@an @an", 3) },
++      { kind: "read", field: field("@an @an", 3) },
++      { kind: "read", field: field("@an @an", 2) },
++      { kind: "read", field: field("@an @an", 3) },
++      { kind: "read", field: field("@an @an", 7) },
++    ]).calls,
++  ).toEqual(["search an", "none", "none", "search a", "search an", "search an"]);
++});
++
++test("a_closing_word_ends_the_search_once", () => {
++  expect(
++    steps([
++      { kind: "read", field: field("@an") },
++      { kind: "read", field: field("@an x") },
++      { kind: "read", field: field("@an x") },
++      { kind: "read", field: field("@an") },
++      { kind: "blur" },
++      { kind: "blur" },
++    ]).calls,
++  ).toEqual(["search an", "end", "none", "search an", "end", "none"]);
++});
++
++test("a_composition_closes_the_word_and_its_end_reads_again", () => {
++  const composed = steps([
++    { kind: "read", field: field("@an") },
++    { kind: "compose", composing: true, field: field("@an") },
++    { kind: "read", field: field("@anb") },
++  ]);
++  expect(composed.calls).toEqual(["search an", "end", "none"]);
++  expect(composed.state).toEqual({ word: null, dismissed: null, composing: true });
++  const ended = steps(
++    [
++      { kind: "compose", composing: false, field: field("@anb") },
++      { kind: "read", field: field("@anbc") },
++    ],
++    composed.state,
++  );
++  expect(ended.calls).toEqual(["search anb", "search anbc"]);
++  expect(ended.state.composing).toBe(false);
++});
++
++test("a_pick_writes_an_existing_line_over_the_open_word", () => {
++  const word = { start: 3, end: 6, typed: "an" };
++  expect(mentionPick(word, OPEN, 1)).toEqual({ from: 3, to: 6, insert: "@anna " });
++  expect(mentionPick(word, OPEN, 2)).toBeNull();
++  expect(mentionPick(word, null, 0)).toBeNull();
++  expect(mentionPick(null, OPEN, 0)).toBeNull();
++});
++
+ test("an_open_list_takes_escape_enter_tab_and_arrows_only", () => {
+   expect(mentionKey(key("Escape"), OPEN)).toEqual({ kind: "close" });
+   expect(mentionKey(key("ArrowDown"), OPEN)).toEqual({ kind: "step", step: 1 });
+diff --git a/frontend/src/ui/mergeRequestMentionLines.ts b/frontend/src/ui/mergeRequestMentionLines.ts
+index f65f0a0..b9b64db 100644
+--- a/frontend/src/ui/mergeRequestMentionLines.ts
++++ b/frontend/src/ui/mergeRequestMentionLines.ts
+@@ -1,5 +1,12 @@
+ import type { Person } from "../ipc";
+-import { displayName, mentionLines, mentionWordAt, type MentionWord } from "../mergeRequests";
++import {
++  displayName,
++  mentionEdit,
++  mentionLines,
++  mentionWordAt,
++  type MentionEdit,
++  type MentionWord,
++} from "../mergeRequests";
+ import { ARROW_STEPS } from "./menuKeys";
+ import type { Size } from "./menuPosition";
+ import type { PeopleSearch } from "./mergeRequests";
+@@ -29,6 +36,30 @@ export type MentionKey =
+   | { readonly kind: "step"; readonly step: number }
+   | { readonly kind: "pick" }
+   | { readonly kind: "close" };
++/** The field's text and selection; the composing flag is the state's. */
++export type FieldText = Omit<FieldRead, "composing">;
++/** Why the word at `start` stays closed: Escape, until the caret leaves the word; `close()` (a send, Preview, Queue),
++ *  while the field still shows `text`. */
++type Dismissal =
++  | { readonly kind: "escape"; readonly start: number }
++  | { readonly kind: "close"; readonly start: number; readonly text: string };
++/** `word`: the open `@` word, null while closed. */
++export type MentionState = {
++  readonly word: MentionWord | null;
++  readonly dismissed: Dismissal | null;
++  readonly composing: boolean;
++};
++/** What reached a field's mentions: `read` is an input, click, keyup or focus (none finds a word while composing). */
++export type MentionEvent =
++  | { readonly kind: "read" | "close"; readonly field: FieldText }
++  | { readonly kind: "compose"; readonly composing: boolean; readonly field: FieldText }
++  | { readonly kind: "escape" | "blur" };
++/** The mention search's next call: `search` only when the open word changed, `end` when it closed. */
++export type MentionCall =
++  | { readonly kind: "search"; readonly typed: string }
++  | { readonly kind: "end" }
++  | { readonly kind: "none" };
++export type MentionStep = { readonly state: MentionState; readonly call: MentionCall };
+ /** The caret, the field's and the room's viewport rects, measured together. */
+ export type MentionAnchor = { readonly caret: CaretBox; readonly field: Rect; readonly room: Rect };
+ /** Pixels relative to the field's border box. */
+@@ -63,6 +94,74 @@ export function mentionRead(read: FieldRead, dismissed: number | null): MentionW
+   return word?.start === dismissed ? null : word;
+ }
+ 
++export const MENTION_CLOSED: MentionState = { word: null, dismissed: null, composing: false };
++
++function heldDismissal(dismissed: Dismissal | null, read: FieldRead): Dismissal | null {
++  const under = mentionRead(read, null);
++  if (dismissed === null || under?.start !== dismissed.start) {
++    return null;
++  }
++  return dismissed.kind === "escape" || dismissed.text === read.text ? dismissed : null;
++}
++
++function readState(read: FieldRead, dismissed: Dismissal | null): MentionState {
++  const held = heldDismissal(dismissed, read);
++  return {
++    word: mentionRead(read, held?.start ?? null),
++    dismissed: held,
++    composing: read.composing,
++  };
++}
++
++function closedDismissal(field: FieldText, composing: boolean): Dismissal | null {
++  const under = mentionRead({ ...field, composing }, null);
++  return under === null ? null : { kind: "close", start: under.start, text: field.text };
++}
++
++function stateAfter(state: MentionState, event: MentionEvent): MentionState {
++  switch (event.kind) {
++    case "read":
++      return readState({ ...event.field, composing: state.composing }, state.dismissed);
++    case "compose":
++      return readState({ ...event.field, composing: event.composing }, state.dismissed);
++    case "escape":
++      return {
++        ...state,
++        word: null,
++        dismissed: state.word === null ? null : { kind: "escape", start: state.word.start },
++      };
++    case "close":
++      return { ...state, word: null, dismissed: closedDismissal(event.field, state.composing) };
++    case "blur":
++      return { ...state, word: null };
++  }
++}
++
++function callAfter(before: MentionWord | null, after: MentionWord | null): MentionCall {
++  if (after === null) {
++    return before === null ? { kind: "none" } : { kind: "end" };
++  }
++  return before?.start === after.start && before.typed === after.typed
++    ? { kind: "none" }
++    : { kind: "search", typed: after.typed };
++}
++
++/** Design §2.6 "Closing" and the dismissal rules: the next state and the search call `event` makes. */
++export function mentionStep(state: MentionState, event: MentionEvent): MentionStep {
++  const after = stateAfter(state, event);
++  return { state: after, call: callAfter(state.word, after.word) };
++}
++
++/** Design §2.7 step 1: the edit that writes line `index` of `list` over the open `word`; null with no such line. */
++export function mentionPick(
++  word: MentionWord | null,
++  list: MentionList | null,
++  index: number,
++): MentionEdit | null {
++  const line = list?.lines[index];
++  return word === null || line === undefined ? null : mentionEdit(word, line.username);
++}
++
+ /** Design §2.6's table; null: the key is the field's. */
+ export function mentionKey(
+   event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing">,
+diff --git a/frontend/src/ui/mergeRequestMentions.test.ts b/frontend/src/ui/mergeRequestMentions.test.ts
+new file mode 100644
+index 0000000..69c4dfa
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestMentions.test.ts
+@@ -0,0 +1,306 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import type * as Vue from "vue";
++import { effectScope, nextTick, shallowRef, type EffectScope, type ShallowRef } from "vue";
++
++import { createFixtureCompareSource, log, type Person } from "../ipc";
++import { useMentions, type MentionField } from "./mergeRequestMentions";
++import type { PeopleSearcher } from "./mergeRequestPeople";
++import { createMergeRequests, type PeopleSearch } from "./mergeRequests";
++import { registerMergeRequests } from "./mergeRequestsStore";
++import type { Screen } from "./screen";
++
++const caret = vi.hoisted(() => {
++  const at: number[] = [];
++  return { box: { left: 4, top: 0, bottom: 20 }, at };
++});
++vi.mock("./textareaCaret", () => ({
++  caretBox: (_field: unknown, index: number) => {
++    caret.at.push(index);
++    return caret.box;
++  },
++  visibleRoom: () => ROOM,
++}));
++vi.mock("vue", async (importOriginal) => ({
++  ...(await importOriginal<typeof Vue>()),
++  useId: () => "mentions",
++}));
++
++const ROOM = { left: 0, top: 0, right: 800, bottom: 600 };
++const FIELD_RECT = { left: 10, top: 100, right: 410, bottom: 160 };
++const SAM: Person = { username: "sam", name: "Sam Weller", picture: null };
++const ANNA: Person = { username: "anna", name: "Anna Berg", picture: null };
++const BEN: Person = { username: "ben", name: "Ben Okafor", picture: null };
++const ERIK: Person = { username: "erik", name: "Erik Lund", picture: null };
++const FAILED = {
++  kind: "failed",
++  text: "zz",
++  cause: { kind: "WorkerStopped" },
++} as const satisfies PeopleSearch;
++
++class FakeField extends EventTarget {
++  value = "";
++  selectionStart = 0;
++  selectionEnd = 0;
++  focused = 0;
++  focus(): void {
++    this.focused += 1;
++  }
++  setSelectionRange(from: number, to: number): void {
++    this.selectionStart = from;
++    this.selectionEnd = to;
++  }
++  getBoundingClientRect(): typeof FIELD_RECT {
++    return FIELD_RECT;
++  }
++}
++
++class FakeKeyboardEvent extends Event {
++  readonly key: string;
++  readonly ctrlKey = false;
++  readonly metaKey = false;
++  readonly altKey = false;
++  readonly shiftKey = false;
++  readonly isComposing = false;
++  constructor(key: string) {
++    super("keydown", { cancelable: true, bubbles: true });
++    this.key = key;
++  }
++}
++
++let scope: EffectScope;
++let searched: ShallowRef<PeopleSearch>;
++let calls: string[];
++let fake: FakeField;
++let field: ShallowRef<HTMLTextAreaElement | null>;
++let written: string[];
++
++beforeEach(() => {
++  vi.stubGlobal("HTMLTextAreaElement", FakeField);
++  vi.stubGlobal("KeyboardEvent", FakeKeyboardEvent);
++  written = [];
++  vi.stubGlobal("document", {
++    execCommand: (command: string, ui: boolean, text: string) => {
++      written.push(`${command} ${String(ui)} ${text}`);
++      return true;
++    },
++  });
++  caret.at.length = 0;
++  calls = [];
++  searched = shallowRef<PeopleSearch>({ kind: "empty" });
++  const mentionSearch: PeopleSearcher = {
++    state: searched,
++    search: (typed) => {
++      calls.push(`search ${typed}`);
++    },
++    end: () => {
++      calls.push("end");
++    },
++  };
++  const slice = createMergeRequests({
++    source: createFixtureCompareSource(log, "?mr=list", {}),
++    screen: shallowRef<Screen>({ kind: "files" }),
++    report: () => undefined,
++    discussionDetails: () => "lazy",
++  });
++  registerMergeRequests({ ...slice, mentionSearch });
++  fake = new FakeField();
++  field = shallowRef(textarea(fake));
++  scope = effectScope();
++});
++
++afterEach(() => {
++  scope.stop();
++  vi.useRealTimers();
++  vi.unstubAllGlobals();
++});
++
++function textarea(element: FakeField): HTMLTextAreaElement {
++  if (element instanceof HTMLTextAreaElement) {
++    return element;
++  }
++  throw new Error("HTMLTextAreaElement is not the stub");
++}
++
++function keyEvent(key: string): KeyboardEvent {
++  const event = new FakeKeyboardEvent(key);
++  if (event instanceof KeyboardEvent) {
++    return event;
++  }
++  throw new Error("KeyboardEvent is not the stub");
++}
++
++function mentions(): MentionField {
++  const made = scope.run(() => useMentions(field, () => [SAM, ANNA, BEN]));
++  if (made === undefined) {
++    throw new Error("scope stopped");
++  }
++  return made;
++}
++
++function type(text: string, caretAt = text.length, kind = "input"): void {
++  fake.value = text;
++  fake.selectionStart = caretAt;
++  fake.selectionEnd = caretAt;
++  fake.dispatchEvent(new Event(kind));
++}
++
++function shown(made: MentionField): readonly string[] | null {
++  return made.list.value === null ? null : made.list.value.lines.map((line) => line.username);
++}
++
++test("typing_a_word_opens_its_list_and_searches_once", async () => {
++  const made = mentions();
++  expect(shown(made)).toBeNull();
++  expect(made.fieldAria.value).toEqual({
++    "aria-autocomplete": "list",
++    "aria-controls": undefined,
++    "aria-activedescendant": undefined,
++  });
++  type("hi @an");
++  type("hi @an", 6, "keyup");
++  type("hi @an", 6, "click");
++  expect(calls).toEqual(["search an"]);
++  expect(shown(made)).toEqual(["anna"]);
++  expect(made.listId).toBe("mentions");
++  expect(made.fieldAria.value).toEqual({
++    "aria-autocomplete": "list",
++    "aria-controls": "mentions",
++    "aria-activedescendant": "mentions-0",
++  });
++  expect(made.anchor.value).toBeNull();
++  await nextTick();
++  expect(made.anchor.value).toEqual({ caret: caret.box, field: FIELD_RECT, room: ROOM });
++  expect(caret.at).toEqual([3, 3, 3]);
++});
++
++test("the_search_answer_joins_the_list_and_a_failure_shows_its_note", () => {
++  const made = mentions();
++  type("@ik");
++  searched.value = { kind: "found", text: "ik", people: [ERIK] };
++  expect(shown(made)).toEqual(["erik"]);
++  type("@zz");
++  searched.value = FAILED;
++  expect(made.list.value).toEqual({
++    lines: [],
++    note: "Could not search people: yamt's worker stopped; try again.",
++  });
++  expect(made.fieldAria.value).toEqual({
++    "aria-autocomplete": "list",
++    "aria-controls": "mentions",
++    "aria-activedescendant": undefined,
++  });
++  expect(made.keydown(keyEvent("Enter"))).toBe(false);
++});
++
++test("the_arrows_move_the_highlight_and_enter_writes_the_pick", () => {
++  const made = mentions();
++  type("@");
++  expect(shown(made)).toEqual(["sam", "anna", "ben"]);
++  const down = keyEvent("ArrowDown");
++  expect(made.keydown(down)).toBe(true);
++  expect(down.defaultPrevented).toBe(true);
++  expect(down.cancelBubble).toBe(true);
++  expect(made.highlight.value).toBe(1);
++  expect(made.fieldAria.value["aria-activedescendant"]).toBe("mentions-1");
++  expect(made.keydown(keyEvent("ArrowUp"))).toBe(true);
++  expect(made.keydown(keyEvent("ArrowUp"))).toBe(true);
++  expect(made.highlight.value).toBe(2);
++  expect(made.keydown(keyEvent("Enter"))).toBe(true);
++  expect(fake.focused).toBe(1);
++  expect([fake.selectionStart, fake.selectionEnd]).toEqual([0, 1]);
++  expect(written).toEqual(["insertText false @ben "]);
++  const letter = keyEvent("a");
++  expect(made.keydown(letter)).toBe(false);
++  expect(letter.defaultPrevented).toBe(false);
++});
++
++test("the_highlight_resets_when_the_people_change_or_the_list_closes", async () => {
++  const made = mentions();
++  type("@");
++  await nextTick();
++  made.keydown(keyEvent("ArrowDown"));
++  type("@", 1, "keyup");
++  await nextTick();
++  expect(made.highlight.value).toBe(1);
++  type("@a");
++  await nextTick();
++  expect(made.highlight.value).toBe(0);
++  made.keydown(keyEvent("ArrowDown"));
++  made.keydown(keyEvent("Escape"));
++  await nextTick();
++  expect(made.highlight.value).toBe(0);
++});
++
++test("a_pick_writes_only_an_existing_line_of_an_open_word", () => {
++  const made = mentions();
++  made.pick(0);
++  type("@an");
++  made.pick(1);
++  expect(written).toEqual([]);
++  made.pick(0);
++  expect(written).toEqual(["insertText false @anna "]);
++  field.value = null;
++  made.pick(0);
++  expect(written).toEqual(["insertText false @anna "]);
++});
++
++test("escape_closes_the_list_and_keeps_its_word_closed", () => {
++  const made = mentions();
++  expect(made.keydown(keyEvent("Escape"))).toBe(false);
++  type("@an");
++  expect(made.keydown(keyEvent("Escape"))).toBe(true);
++  expect(shown(made)).toBeNull();
++  type("@ann");
++  expect(shown(made)).toBeNull();
++  expect(calls).toEqual(["search an", "end"]);
++});
++
++test("a_send_closes_the_list_until_the_field_shows_another_text", async () => {
++  const made = mentions();
++  type("@an");
++  made.close();
++  expect(shown(made)).toBeNull();
++  type("@an", 3, "keyup");
++  expect(shown(made)).toBeNull();
++  await nextTick();
++  expect(made.anchor.value).toBeNull();
++  type("@");
++  expect(shown(made)).toEqual(["sam", "anna", "ben"]);
++  expect(calls).toEqual(["search an", "end", "search "]);
++  field.value = null;
++  made.close();
++  expect(shown(made)).toEqual(["sam", "anna", "ben"]);
++});
++
++test("blur_closes_and_focus_reads_a_task_later", () => {
++  vi.useFakeTimers();
++  const made = mentions();
++  type("@an");
++  fake.dispatchEvent(new Event("blur"));
++  expect(shown(made)).toBeNull();
++  fake.dispatchEvent(new Event("focus"));
++  expect(shown(made)).toBeNull();
++  vi.advanceTimersByTime(0);
++  expect(shown(made)).toEqual(["anna"]);
++});
++
++test("a_composition_closes_the_list_until_it_ends", () => {
++  const made = mentions();
++  type("@an");
++  fake.dispatchEvent(new Event("compositionstart"));
++  expect(shown(made)).toBeNull();
++  type("@anb");
++  expect(shown(made)).toBeNull();
++  type("@an", 3, "compositionend");
++  expect(shown(made)).toEqual(["anna"]);
++});
++
++test("a_scroll_measures_the_open_word_again", async () => {
++  const made = mentions();
++  type("@an");
++  await nextTick();
++  caret.box = { left: 4, top: -20, bottom: 0 };
++  fake.dispatchEvent(new Event("scroll"));
++  expect(made.anchor.value?.caret).toEqual({ left: 4, top: -20, bottom: 0 });
++  caret.box = { left: 4, top: 0, bottom: 20 };
++});
+diff --git a/frontend/src/ui/mergeRequestMentions.ts b/frontend/src/ui/mergeRequestMentions.ts
+index c4efd07..ca5b814 100644
+--- a/frontend/src/ui/mergeRequestMentions.ts
++++ b/frontend/src/ui/mergeRequestMentions.ts
+@@ -12,17 +12,20 @@ import {
+ } from "vue";
+ 
+ import type { Person } from "../ipc";
+-import { mentionEdit, type MentionWord } from "../mergeRequests";
+ import { wrappedIndex } from "./menuKeys";
+ import {
+   highlightAfter,
++  MENTION_CLOSED,
+   mentionKey,
+   mentionList,
+   mentionOptionId,
+-  mentionRead,
+-  type FieldRead,
++  mentionPick,
++  mentionStep,
++  type FieldText,
+   type MentionAnchor,
++  type MentionEvent,
+   type MentionList,
++  type MentionState,
+ } from "./mergeRequestMentionLines";
+ import type { PeopleSearcher } from "./mergeRequestPeople";
+ import { useMergeRequests } from "./mergeRequestsStore";
+@@ -43,33 +46,17 @@ export type MentionField = {
+   close(): void;
+ };
+ 
+-/** `word`: the open `@` word (null: closed); `dismissed`: the start of the word Escape or `close` shut. */
+ type State = {
+   readonly field: Readonly<ShallowRef<HTMLTextAreaElement | null>>;
+   readonly search: PeopleSearcher;
+-  readonly word: ShallowRef<MentionWord | null>;
++  readonly mention: ShallowRef<MentionState>;
+   readonly highlight: ShallowRef<number>;
+   readonly anchor: ShallowRef<MentionAnchor | null>;
+-  composing: boolean;
+-  dismissed: number | null;
+ };
+ 
+-function fieldRead(state: State, element: HTMLTextAreaElement): FieldRead {
+-  const { value: text, selectionStart, selectionEnd } = element;
+-  return { text, selectionStart, selectionEnd, composing: state.composing };
+-}
+-
+-function shut(state: State): void {
+-  if (state.word.value !== null) {
+-    state.word.value = null;
+-    state.search.end();
+-  }
+-  state.anchor.value = null;
+-}
+-
+ function measure(state: State): void {
+   const element = state.field.value;
+-  const open = state.word.value;
++  const open = state.mention.value.word;
+   state.anchor.value =
+     element === null || open === null
+       ? null
+@@ -80,35 +67,33 @@ function measure(state: State): void {
+         };
+ }
+ 
+-function read(state: State): void {
+-  const element = state.field.value;
+-  if (element === null) {
+-    return;
++function dispatch(state: State, event: MentionEvent): void {
++  const { state: next, call } = mentionStep(state.mention.value, event);
++  state.mention.value = next;
++  if (call.kind === "search") {
++    state.search.search(call.typed);
++  } else if (call.kind === "end") {
++    state.search.end();
+   }
+-  const at = fieldRead(state, element);
+-  if (mentionRead(at, null)?.start !== state.dismissed) {
+-    state.dismissed = null;
+-  }
+-  const open = mentionRead(at, state.dismissed);
+-  if (open === null) {
+-    shut(state);
+-    return;
+-  }
+-  state.word.value = open;
+-  state.search.search(open.typed);
+   void nextTick(() => {
+     measure(state);
+   });
+ }
+ 
++function dispatchField(state: State, eventOf: (field: FieldText) => MentionEvent): void {
++  const element = state.field.value;
++  if (element !== null) {
++    const { value: text, selectionStart, selectionEnd } = element;
++    dispatch(state, eventOf({ text, selectionStart, selectionEnd }));
++  }
++}
++
+ function pick(state: State, list: MentionList | null, index: number): void {
+   const element = state.field.value;
+-  const open = state.word.value;
+-  const line = list?.lines[index];
+-  if (element === null || open === null || line === undefined) {
++  const edit = mentionPick(state.mention.value.word, list, index);
++  if (element === null || edit === null) {
+     return;
+   }
+-  const edit = mentionEdit(open, line.username);
+   element.focus();
+   element.setSelectionRange(edit.from, edit.to);
+   document.execCommand("insertText", false, edit.insert);
+@@ -129,53 +114,34 @@ function keydown(state: State, list: MentionList | null, event: KeyboardEvent):
+       pick(state, list, state.highlight.value);
+       break;
+     case "close":
+-      state.dismissed = state.word.value?.start ?? null;
+-      shut(state);
++      dispatch(state, { kind: "escape" });
+       break;
+-    default: {
+-      const _exhaustive: never = key;
+-      return _exhaustive;
+-    }
+   }
+   return true;
+ }
+ 
+-function close(state: State): void {
+-  const element = state.field.value;
+-  state.dismissed =
+-    element === null ? null : (mentionRead(fieldRead(state, element), null)?.start ?? null);
+-  shut(state);
+-}
+-
+ function listen(state: State): void {
+   const { field } = state;
+-  useEventListener(field, "input", () => {
+-    if (!state.composing) {
+-      read(state);
+-    }
+-  });
+-  useEventListener(field, ["click", "keyup"], () => {
+-    read(state);
++  useEventListener(field, ["input", "click", "keyup"], () => {
++    dispatchField(state, (text) => ({ kind: "read", field: text }));
+   });
+   // WebKitGTK 2.54 reports selectionStart 0 during a textarea's focus event and its microtasks when the focus comes
+   // back (shown again after Preview, or `focus()` after a blur); the caret is back by the next task (measured in the
+   // mr-mentions-list smoke).
+   useEventListener(field, "focus", () => {
+     setTimeout(() => {
+-      read(state);
++      dispatchField(state, (text) => ({ kind: "read", field: text }));
+     });
+   });
+   useEventListener(field, ["compositionstart", "compositionend"], (event: CompositionEvent) => {
+-    state.composing = event.type === "compositionstart";
+-    read(state);
++    const composing = event.type === "compositionstart";
++    dispatchField(state, (text) => ({ kind: "compose", composing, field: text }));
+   });
+   useEventListener(field, "blur", () => {
+-    shut(state);
++    dispatch(state, { kind: "blur" });
+   });
+   useEventListener(field, "scroll", () => {
+-    if (state.word.value !== null) {
+-      measure(state);
+-    }
++    measure(state);
+   });
+ }
+ 
+@@ -184,7 +150,7 @@ function shownList(
+   known: MaybeRefOrGetter<readonly Person[]>,
+ ): ComputedRef<MentionList | null> {
+   const list = computed(() => {
+-    const open = state.word.value;
++    const open = state.mention.value.word;
+     return open === null
+       ? null
+       : mentionList({
+@@ -194,12 +160,12 @@ function shownList(
+           platform: navigator.platform,
+         });
+   });
+-  watch(
+-    () => list.value?.lines ?? [],
+-    (after, before) => {
+-      state.highlight.value = highlightAfter(before, after, state.highlight.value);
+-    },
+-  );
++  watch(list, (after, before) => {
++    state.highlight.value =
++      after === null || before === null
++        ? 0
++        : highlightAfter(before.lines, after.lines, state.highlight.value);
++  });
+   return list;
+ }
+ 
+@@ -211,11 +177,9 @@ export function useMentions(
+   const state: State = {
+     field,
+     search: useMergeRequests().mentionSearch,
+-    word: shallowRef(null),
++    mention: shallowRef(MENTION_CLOSED),
+     highlight: shallowRef(0),
+     anchor: shallowRef(null),
+-    composing: false,
+-    dismissed: null,
+   };
+   const listId = useId();
+   const list = shownList(state, known);
+@@ -239,7 +203,7 @@ export function useMentions(
+       pick(state, list.value, index);
+     },
+     close: () => {
+-      close(state);
++      dispatchField(state, (text) => ({ kind: "close", field: text }));
+     },
+   };
+ }
