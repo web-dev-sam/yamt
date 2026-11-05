@@ -38,7 +38,7 @@ export type DiscussionQueue = Discussions & {
    *  only a row with an entry (the person view's) is read again. */
   reloadDiscussions(iid: MergeRequestIid, askFirst?: () => Promise<void>): void;
   /** F1 (owner 2026-11-05): each iid without an entry gets `loading` and is queued last, whatever the setting; an iid in
-   *  `unhovered` (a running call's, after a switch to "lazy") leaves `unhovered` instead of being asked again. */
+   *  `unhovered` (a running call's, after a switch to "lazy" or a Back) leaves `unhovered` instead of being asked again. */
   wantRows(iids: readonly MergeRequestIid[]): void;
   /** F2's Retry, first in the queue: a `refused`/`failed` entry becomes `loading`; a read entry whose reload failed is
    *  reloaded (entry kept). Any other iid: nothing. */
@@ -47,8 +47,8 @@ export type DiscussionQueue = Discussions & {
    *  then all queued first in the given order; only in the generation it started in; an iid already reloading: nothing. */
   reloadRows(iids: readonly MergeRequestIid[], askFirst: () => Promise<void>): void;
   /** The person view left: unless the setting is "full", every queued iid not in the running call and not reloading loses
-   *  its `loading` entry and leaves the queue (no call after Back); read entries stay. So does a `loading` entry a pending
-   *  ask holds, and the running call's iids its answer lacks. */
+   *  its `loading` entry and leaves the queue (no call after Back), as does every `loading` entry a pending ask holds; the
+   *  running call's iids its answer lacks are dropped when it lands; read entries stay. */
   viewLeft(): void;
 };
 

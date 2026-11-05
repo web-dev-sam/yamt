@@ -63,7 +63,7 @@ export type PersonView = {
   /** F2. */
   retryRow(iid: MergeRequestIid): void;
   /** C4: one askGitLabAgain, `reloadRows` of every shown row with a count or an entry, then `threadsRefreshed(null)`;
-   *  held becomes the expanded entries once the reloads are queued. */
+   *  C3: held becomes the expanded entries, which keep their places in the order shown; the others re-sort. */
   refreshPersonView(): void;
 };
 
@@ -80,7 +80,8 @@ type Deps = {
   readonly threadsRefreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void;
 };
 
-/** C3: the entries expanded since `order` was raised (opening, a pick, a refresh) keep their places under it. */
+/** C3: the `held` entries keep their places in the order last shown; opening and a pick raise `order`, which sorts
+ *  afresh. */
 type Open = {
   readonly person: Viewer;
   readonly held: ReadonlySet<DiscussionId>;
@@ -196,15 +197,11 @@ function demand(deps: Deps, state: ShallowRef<Open | null>): void {
   });
 }
 
-/** The view re-sorted: held becomes the expanded entries. */
-function resorted(deps: Deps, view: View, person?: Viewer): void {
-  const open = view.state.value;
+/** C3 after a refresh: held becomes the expanded entries; the collapsed ones re-sort around them. */
+function reheld(deps: Deps, state: ShallowRef<Open | null>): void {
+  const open = state.value;
   if (open !== null) {
-    view.state.value = {
-      person: person ?? open.person,
-      held: new Set(deps.threads.expanded.value),
-      order: view.reordered(),
-    };
+    state.value = { ...open, held: new Set(deps.threads.expanded.value) };
   }
 }
 
@@ -233,7 +230,7 @@ function refresh(deps: Deps, view: View): void {
   const asked = askAgain(deps.source);
   deps.queue.reloadRows(iids, () => asked);
   deps.threadsRefreshed(null, asked);
-  resorted(deps, view);
+  reheld(deps, view.state);
 }
 
 function actionsOf(deps: Deps, view: View): Omit<PersonView, "personView"> {
@@ -246,7 +243,13 @@ function actionsOf(deps: Deps, view: View): Omit<PersonView, "personView"> {
       leave(deps, state);
     },
     pickPerson: (person) => {
-      resorted(deps, view, person);
+      if (state.value !== null) {
+        state.value = {
+          person,
+          held: new Set(deps.threads.expanded.value),
+          order: view.reordered(),
+        };
+      }
     },
     expandEntry: (iid, discussion) => {
       const open = state.value;
@@ -268,7 +271,7 @@ function actionsOf(deps: Deps, view: View): Omit<PersonView, "personView"> {
 }
 
 export function createPersonView(deps: Deps): PersonView & {
-  /** The list was refreshed (rows replaced): held becomes the expanded entries. */
+  /** The list was refreshed (rows replaced): as a refresh of the view, held becomes the expanded entries. */
   readonly rowsReplaced: () => void;
 } {
   const state = shallowRef<Open | null>(null);
@@ -289,7 +292,7 @@ export function createPersonView(deps: Deps): PersonView & {
     }),
     ...actionsOf(deps, view),
     rowsReplaced: () => {
-      resorted(deps, view);
+      reheld(deps, state);
     },
   };
 }

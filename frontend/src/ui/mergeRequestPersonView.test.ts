@@ -569,11 +569,16 @@ test("the_people_include_every_writer_of_a_read_discussion", async () => {
 
 test("a_closed_view_neither_refreshes_nor_expands", async () => {
   await slice.refresh();
+  await slice.refresh();
+  expect(slice.personView.value).toBeNull();
+  const asksBefore = asks;
   slice.refreshPersonView();
+  slice.pickPerson(ANNA);
   slice.expandEntry(iid(ANNA_CASES), d(P1));
   await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
-  expect([asks, reads.length, threadReads]).toEqual([1, 0, 0]);
+  expect([asks - asksBefore, reads.length, threadReads]).toEqual([0, 0, 0]);
   expect(slice.expanded.value.size).toBe(0);
+  expect(slice.personView.value).toBeNull();
 });
 
 test("a_refresh_at_opening_asks_gitlab_before_reading_any_row", async () => {
@@ -613,4 +618,38 @@ test("a_refresh_reloads_a_row_whose_every_discussion_was_resolved_here", async (
   slice.refreshPersonView();
   await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
   expect(reads[called]).toContain(FOLD_CASE);
+});
+
+test("a_reload_keeps_the_expanded_entry_at_its_index_and_re_sorts_the_collapsed_ones", async () => {
+  await everyRowRead();
+  await expanded(ANNA_CASES, P1);
+  await expanded(ANNA_CASES, P3);
+  slice.setReplyText(d(P3), "Done.");
+  const sending = slice.sendReply(d(P3), "comment");
+  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
+  await sending;
+  const resolving = slice.setResolved(d(P3), true);
+  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
+  await resolving;
+  slice.collapseEntry(d(P3));
+  const shownBefore: Pinned[] = [
+    [637, "other", 13],
+    [ANNA_CASES, "other", P1],
+    [ANNA_CASES, "wrote", P3],
+    [FOLD_CASE, "other", P6],
+  ];
+  expect(pinned().slice(38, 42)).toEqual(shownBefore);
+
+  slice.refreshPersonView();
+  expect(indexOf(P1)).toBe(39);
+  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
+  expect(shown().loading).toBeNull();
+  expect(indexOf(P3)).toBe(-1);
+  expect(pinned().slice(38, 42)).toEqual([
+    [637, "other", 13],
+    [ANNA_CASES, "other", P1],
+    [FOLD_CASE, "other", P6],
+    [607, "other", 23],
+  ]);
+  expect(pinned()).toEqual(MES_ORDER.filter(([, , serial]) => serial !== P3));
 });

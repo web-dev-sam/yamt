@@ -1,0 +1,169 @@
+diff --git a/frontend/src/ui/mergeRequestDiscussions.ts b/frontend/src/ui/mergeRequestDiscussions.ts
+index 3828ac8..05f7557 100644
+--- a/frontend/src/ui/mergeRequestDiscussions.ts
++++ b/frontend/src/ui/mergeRequestDiscussions.ts
+@@ -38,7 +38,7 @@ export type DiscussionQueue = Discussions & {
+    *  only a row with an entry (the person view's) is read again. */
+   reloadDiscussions(iid: MergeRequestIid, askFirst?: () => Promise<void>): void;
+   /** F1 (owner 2026-11-05): each iid without an entry gets `loading` and is queued last, whatever the setting; an iid in
+-   *  `unhovered` (a running call's, after a switch to "lazy") leaves `unhovered` instead of being asked again. */
++   *  `unhovered` (a running call's, after a switch to "lazy" or a Back) leaves `unhovered` instead of being asked again. */
+   wantRows(iids: readonly MergeRequestIid[]): void;
+   /** F2's Retry, first in the queue: a `refused`/`failed` entry becomes `loading`; a read entry whose reload failed is
+    *  reloaded (entry kept). Any other iid: nothing. */
+@@ -47,8 +47,8 @@ export type DiscussionQueue = Discussions & {
+    *  then all queued first in the given order; only in the generation it started in; an iid already reloading: nothing. */
+   reloadRows(iids: readonly MergeRequestIid[], askFirst: () => Promise<void>): void;
+   /** The person view left: unless the setting is "full", every queued iid not in the running call and not reloading loses
+-   *  its `loading` entry and leaves the queue (no call after Back); read entries stay. So does a `loading` entry a pending
+-   *  ask holds, and the running call's iids its answer lacks. */
++   *  its `loading` entry and leaves the queue (no call after Back), as does every `loading` entry a pending ask holds; the
++   *  running call's iids its answer lacks are dropped when it lands; read entries stay. */
+   viewLeft(): void;
+ };
+ 
+diff --git a/frontend/src/ui/mergeRequestPersonView.test.ts b/frontend/src/ui/mergeRequestPersonView.test.ts
+index f9d6588..4d19ca6 100644
+--- a/frontend/src/ui/mergeRequestPersonView.test.ts
++++ b/frontend/src/ui/mergeRequestPersonView.test.ts
+@@ -569,11 +569,16 @@ test("the_people_include_every_writer_of_a_read_discussion", async () => {
+ 
+ test("a_closed_view_neither_refreshes_nor_expands", async () => {
+   await slice.refresh();
++  await slice.refresh();
++  expect(slice.personView.value).toBeNull();
++  const asksBefore = asks;
+   slice.refreshPersonView();
++  slice.pickPerson(ANNA);
+   slice.expandEntry(iid(ANNA_CASES), d(P1));
+   await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
+-  expect([asks, reads.length, threadReads]).toEqual([1, 0, 0]);
++  expect([asks - asksBefore, reads.length, threadReads]).toEqual([0, 0, 0]);
+   expect(slice.expanded.value.size).toBe(0);
++  expect(slice.personView.value).toBeNull();
+ });
+ 
+ test("a_refresh_at_opening_asks_gitlab_before_reading_any_row", async () => {
+@@ -614,3 +619,37 @@ test("a_refresh_reloads_a_row_whose_every_discussion_was_resolved_here", async (
+   await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
+   expect(reads[called]).toContain(FOLD_CASE);
+ });
++
++test("a_reload_keeps_the_expanded_entry_at_its_index_and_re_sorts_the_collapsed_ones", async () => {
++  await everyRowRead();
++  await expanded(ANNA_CASES, P1);
++  await expanded(ANNA_CASES, P3);
++  slice.setReplyText(d(P3), "Done.");
++  const sending = slice.sendReply(d(P3), "comment");
++  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
++  await sending;
++  const resolving = slice.setResolved(d(P3), true);
++  await vi.advanceTimersByTimeAsync(WRITE_MS + PAUSE_MS);
++  await resolving;
++  slice.collapseEntry(d(P3));
++  const shownBefore: Pinned[] = [
++    [637, "other", 13],
++    [ANNA_CASES, "other", P1],
++    [ANNA_CASES, "wrote", P3],
++    [FOLD_CASE, "other", P6],
++  ];
++  expect(pinned().slice(38, 42)).toEqual(shownBefore);
++
++  slice.refreshPersonView();
++  expect(indexOf(P1)).toBe(39);
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
++  expect(shown().loading).toBeNull();
++  expect(indexOf(P3)).toBe(-1);
++  expect(pinned().slice(38, 42)).toEqual([
++    [637, "other", 13],
++    [ANNA_CASES, "other", P1],
++    [FOLD_CASE, "other", P6],
++    [607, "other", 23],
++  ]);
++  expect(pinned()).toEqual(MES_ORDER.filter(([, , serial]) => serial !== P3));
++});
+diff --git a/frontend/src/ui/mergeRequestPersonView.ts b/frontend/src/ui/mergeRequestPersonView.ts
+index 3398280..7133c30 100644
+--- a/frontend/src/ui/mergeRequestPersonView.ts
++++ b/frontend/src/ui/mergeRequestPersonView.ts
+@@ -63,7 +63,7 @@ export type PersonView = {
+   /** F2. */
+   retryRow(iid: MergeRequestIid): void;
+   /** C4: one askGitLabAgain, `reloadRows` of every shown row with a count or an entry, then `threadsRefreshed(null)`;
+-   *  held becomes the expanded entries once the reloads are queued. */
++   *  C3: held becomes the expanded entries, which keep their places in the order shown; the others re-sort. */
+   refreshPersonView(): void;
+ };
+ 
+@@ -80,7 +80,8 @@ type Deps = {
+   readonly threadsRefreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void;
+ };
+ 
+-/** C3: the entries expanded since `order` was raised (opening, a pick, a refresh) keep their places under it. */
++/** C3: the `held` entries keep their places in the order last shown; opening and a pick raise `order`, which sorts
++ *  afresh. */
+ type Open = {
+   readonly person: Viewer;
+   readonly held: ReadonlySet<DiscussionId>;
+@@ -196,15 +197,11 @@ function demand(deps: Deps, state: ShallowRef<Open | null>): void {
+   });
+ }
+ 
+-/** The view re-sorted: held becomes the expanded entries. */
+-function resorted(deps: Deps, view: View, person?: Viewer): void {
+-  const open = view.state.value;
++/** C3 after a refresh: held becomes the expanded entries; the collapsed ones re-sort around them. */
++function reheld(deps: Deps, state: ShallowRef<Open | null>): void {
++  const open = state.value;
+   if (open !== null) {
+-    view.state.value = {
+-      person: person ?? open.person,
+-      held: new Set(deps.threads.expanded.value),
+-      order: view.reordered(),
+-    };
++    state.value = { ...open, held: new Set(deps.threads.expanded.value) };
+   }
+ }
+ 
+@@ -233,7 +230,7 @@ function refresh(deps: Deps, view: View): void {
+   const asked = askAgain(deps.source);
+   deps.queue.reloadRows(iids, () => asked);
+   deps.threadsRefreshed(null, asked);
+-  resorted(deps, view);
++  reheld(deps, view.state);
+ }
+ 
+ function actionsOf(deps: Deps, view: View): Omit<PersonView, "personView"> {
+@@ -246,7 +243,13 @@ function actionsOf(deps: Deps, view: View): Omit<PersonView, "personView"> {
+       leave(deps, state);
+     },
+     pickPerson: (person) => {
+-      resorted(deps, view, person);
++      if (state.value !== null) {
++        state.value = {
++          person,
++          held: new Set(deps.threads.expanded.value),
++          order: view.reordered(),
++        };
++      }
+     },
+     expandEntry: (iid, discussion) => {
+       const open = state.value;
+@@ -268,7 +271,7 @@ function actionsOf(deps: Deps, view: View): Omit<PersonView, "personView"> {
+ }
+ 
+ export function createPersonView(deps: Deps): PersonView & {
+-  /** The list was refreshed (rows replaced): held becomes the expanded entries. */
++  /** The list was refreshed (rows replaced): as a refresh of the view, held becomes the expanded entries. */
+   readonly rowsReplaced: () => void;
+ } {
+   const state = shallowRef<Open | null>(null);
+@@ -289,7 +292,7 @@ export function createPersonView(deps: Deps): PersonView & {
+     }),
+     ...actionsOf(deps, view),
+     rowsReplaced: () => {
+-      resorted(deps, view);
++      reheld(deps, state);
+     },
+   };
+ }

@@ -1,0 +1,3 @@
+just mutants HEAD → 98.85% score: 257 killed, 1 survived, 2 no coverage (mergeRequestDiscussions.ts 66/0/2, mergeRequestPersonView.ts 191/1/0)
+frontend/src/ui/mergeRequestPersonView.ts:282 `orders += 1` → `-= 1` — equivalent: `order` is only compared for equality and every value is still distinct. The line is unchanged by this round.
+frontend/src/ui/mergeRequestDiscussions.ts:76 NoCoverage on the exhaustive `default: never` arm — equivalent: types make it unreachable. Unchanged line; this round only touched doc comments in this file.
