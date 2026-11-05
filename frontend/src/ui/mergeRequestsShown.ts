@@ -86,11 +86,11 @@ function ordered(listed: Listed, passing: readonly MergeRequestRow[], viewer: Vi
 function heldOf(
   listed: Listed,
   discussionBoxes: ReadonlySet<MergeRequestIid>,
+  panelRow: MergeRequestIid | null,
 ): Set<MergeRequestIid> {
   const held = new Set([...listed.openPeopleBoxes.value, ...discussionBoxes]);
-  const panel = listed.threads.thread.value;
-  if (panel !== null) {
-    held.add(panel.shown.iid);
+  if (panelRow !== null) {
+    held.add(panelRow);
   }
   return held;
 }
@@ -139,9 +139,10 @@ export function shownOf(listed: Listed, storage?: StorageLike): Shown {
   const { filters } = remembered;
   const viewer = computed(() => viewerOf(filters.value.review, me.value, rows.value));
   const discussionBoxes = shallowRef<ReadonlySet<MergeRequestIid>>(new Set());
+  const panelRow = computed(() => listed.threads.thread.value?.shown.iid ?? null);
   const shown = computed((previous?: Ordered): Ordered => {
     const matching = new Set(searched(filtered(rows.value, filters.value, me.value), search.value));
-    const held = heldOf(listed, discussionBoxes.value);
+    const held = heldOf(listed, discussionBoxes.value, panelRow.value);
     const passing = rows.value.filter((row) => matching.has(row) || held.has(row.iid));
     const next =
       filters.value.review === null

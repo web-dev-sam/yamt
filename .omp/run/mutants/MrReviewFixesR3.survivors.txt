@@ -1,0 +1,3 @@
+just mutants HEAD → mergeRequestsShown.ts 96.55%: 84 killed, 0 timeout, 3 survived, 0 no-cov (.vue not mutated)
+mergeRequestsShown.ts:92 `if (panelRow !== null)` → `if (true)`: equivalent. It adds null to `held`, and `held` is only read by `held.has(row.iid)` with a real iid, so null never matches.
+mergeRequestsShown.ts:62 {kind:"none"} → {} / {kind:""}: equivalent and unchanged since R1. reviewOrdered reads any other kind as NO_TURNS.

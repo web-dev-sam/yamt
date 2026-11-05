@@ -358,3 +358,23 @@ test("a_row_whose_thread_panel_is_open_keeps_its_index_while_rows_around_it_move
   slice.boxClosed(iid(second));
   expect(slice.shownRows.value.map((row) => row.iid)).toEqual([633, 618, 623, 638, 622, 603, 608]);
 });
+
+test("typing_a_reply_rewrites_the_panel_but_leaves_the_shown_rows_as_they_were", async () => {
+  const EVERY_READ_MS = 10 * (WRITE_MS + PAUSE_MS);
+  mode.value = "full";
+  await slice.findProject();
+  await slice.refresh();
+  slice.review({ kind: "me" });
+  slice.showThread(iid(THREADS), d(1));
+  await vi.advanceTimersByTimeAsync(EVERY_READ_MS);
+  const before = slice.shownRows.value;
+  const loads = slice.discussions.value;
+  const panel = slice.thread.value;
+
+  slice.setReplyText(d(1), "Agreed");
+  await vi.advanceTimersByTimeAsync(PAUSE_MS);
+
+  expect(slice.discussions.value).toBe(loads);
+  expect(slice.thread.value).not.toBe(panel);
+  expect(slice.shownRows.value).toBe(before);
+});

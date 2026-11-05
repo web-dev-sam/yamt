@@ -123,6 +123,11 @@ watch(open, (now) => {
   }
   boxClosedHere();
 });
+watch(boxed, (now) => {
+  if (!now && open.value) {
+    close();
+  }
+});
 watch(
   () => thread.value?.shown.iid,
   (iid) => {
