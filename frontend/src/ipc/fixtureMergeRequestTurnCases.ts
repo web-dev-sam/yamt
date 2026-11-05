@@ -20,7 +20,16 @@ export type FixtureDiscussion = {
   readonly drafts: Generated.PendingDraft[];
 };
 /** Where a seeded merge request's discussions start: `now` the store's creation; `takeNote` hands out note numbers. */
-type Seed = { readonly iid: number; readonly now: number; readonly takeNote: () => number };
+export type Seed = { readonly iid: number; readonly now: number; readonly takeNote: () => number };
+type Change = (comment: FixtureComment) => FixtureComment;
+/** One scripted discussion: its id's serial, its comments, how many hours before `now` its last one is, and what
+ *  changes its comments beyond their text (by position). */
+export type Script = {
+  readonly serial: number;
+  readonly said: readonly Said[];
+  readonly hoursAgo: number;
+  readonly changes: readonly Change[];
+};
 
 const HOUR_MS = 3_600_000;
 const HALF_HOUR_MS = 1_800_000;
@@ -102,6 +111,7 @@ const LOCKED_CASES: readonly (readonly Said[])[] = [
   ],
 ];
 const LOCKED_FIRST_SERIAL = THREADS_CASES.length + 1;
+export const PERSON_FIRST_SERIAL = LOCKED_FIRST_SERIAL + LOCKED_CASES.length;
 const DRAFTS: Readonly<Record<string, string>> = {
   [discussionId(OPTIONS_SERIAL)]: "I'll take the second option.",
   [discussionId(COPY_SERIAL)]: "Agreed, I'll fix the copy.",
@@ -112,7 +122,7 @@ const PLACES: Readonly<Record<string, Generated.DiscussionPlace>> = {
 };
 /** d01's comments beyond their text: every element of a description and sized images in anna's first, an edit by
  *  another person, a sized sketch beside a code `@sam` (no mention), and an edit by the author. */
-const RICH_CHANGES: readonly ((comment: FixtureComment) => FixtureComment)[] = [
+const RICH_CHANGES: readonly Change[] = [
   (comment) => ({ ...comment, body: optionsBody() }),
   (comment) => edited(comment, "dmitri"),
   (comment) => ({ ...comment, body: sketchBody() }),
@@ -162,28 +172,24 @@ function sketchBody(): Generated.Description {
   return { blocks: [{ kind: "paragraph", inlines: drawn }] };
 }
 
-/** Each discussion's comments an hour apart from two days before `now`, its last `at + 1` hours before it. */
-function scripted(
-  seed: Seed,
-  cases: readonly (readonly Said[])[],
-  firstSerial: number,
-): FixtureDiscussion[] {
+/** Each discussion's comments an hour apart from two days before `now`, its last `hoursAgo` hours before it. */
+export function scripted(seed: Seed, scripts: readonly Script[]): FixtureDiscussion[] {
   const { iid, now } = seed;
   const started = now - STARTED_HOURS_AGO * HOUR_MS;
-  return cases.map((said, at) => {
-    const id = discussionId(firstSerial + at);
-    const last = now - (at + 1) * HOUR_MS;
+  return scripts.map(({ serial, said, hoursAgo, changes }) => {
+    const id = discussionId(serial);
+    const last = now - hoursAgo * HOUR_MS;
     const comments = said.map((each, index) => {
       const time = index === said.length - 1 ? last : started + index * HOUR_MS;
       const comment = textComment({ iid, said: each, time, note: seed.takeNote() });
-      const change = id === discussionId(OPTIONS_SERIAL) ? RICH_CHANGES[index] : undefined;
+      const change = changes[index];
       return change === undefined ? comment : change(comment);
     });
     const draft = DRAFTS[id];
     return {
       id,
       place: PLACES[id] ?? { kind: "overview" },
-      mayResolve: id !== discussionId(LOCKED_FIRST_SERIAL),
+      mayResolve: serial !== LOCKED_FIRST_SERIAL,
       resolved: false,
       comments,
       drafts: draft === undefined ? [] : [{ text: draft }],
@@ -191,13 +197,22 @@ function scripted(
   });
 }
 
+function inOrder(cases: readonly (readonly Said[])[], firstSerial: number): Script[] {
+  return cases.map((said, at) => ({
+    serial: firstSerial + at,
+    said,
+    hoursAgo: at + 1,
+    changes: firstSerial + at === OPTIONS_SERIAL ? RICH_CHANGES : [],
+  }));
+}
+
 /** The scripted discussions of !637 and !636, or null for any other merge request. */
 export function turnCases(seed: Seed): FixtureDiscussion[] | null {
   switch (seed.iid) {
     case THREADS_IID:
-      return scripted(seed, THREADS_CASES, OPTIONS_SERIAL);
+      return scripted(seed, inOrder(THREADS_CASES, OPTIONS_SERIAL));
     case LOCKED_THREADS_IID:
-      return scripted(seed, LOCKED_CASES, LOCKED_FIRST_SERIAL);
+      return scripted(seed, inOrder(LOCKED_CASES, LOCKED_FIRST_SERIAL));
     default:
       return null;
   }

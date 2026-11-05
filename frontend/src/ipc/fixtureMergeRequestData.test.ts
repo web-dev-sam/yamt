@@ -159,3 +159,17 @@ test("no picture address outside data: (catches the fixture loading a remote pic
   expect(pictures.get("ben")).toBe("data:image/png;base64,AAAA");
   expect([pictures.get("chiara"), pictures.get("dmitri")]).toEqual([null, null]);
 });
+
+test("the person case rows count their cases and are neither sam's nor anna's (catches a case hidden by the box or turned into the author's)", () => {
+  const rows = fixtureRows(0, LISTED);
+  const cases = [624, 628, 609, 607].map((iid) => {
+    const { openDiscussions, author } = rowOf(rows, iid);
+    return [iid, openDiscussions, author?.username];
+  });
+  expect(cases).toEqual([
+    [624, 3, "ben"],
+    [628, 2, "chiara"],
+    [609, 1, "ben"],
+    [607, 1, "dmitri"],
+  ]);
+});

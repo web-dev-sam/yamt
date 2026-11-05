@@ -1,0 +1,956 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index 8c6bcd8..fea5477 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -20,7 +20,7 @@ Changing a merge request's people (request `docs/slices/request-mr-people.md`, p
+ 
+ A failed job's log (request `docs/slices/request-ci-job-log.md`, plan §2 row 158): `readJobLog(page)` → `JobLogReply` (`mergeRequestDomain.ts`, an alias of the generated type: `log { text, cut }` with the raw text, colour codes and all, or `notOffered`, `noLog`, `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), passed through unchanged by `tauriMergeRequests.ts`; Rust answers only a job page this window's list offered and keeps the logs for the run. Fixture mode answers every script after `LOG_PAUSE_MS` (400 ms), logging `mergeRequests.fixture_job_log { page }` first, from `fixtureMergeRequestLogs.ts` `fixtureJobLog(page, listed)` (the `LISTED_ROWS` = 500 rows), answered by row and job name: every `lint:docs` a short timestamped log (`cut: false`; sections with and without `\e[0K` before `section_start`, a `\r` progress line, `\r\n` ends, a `00O+` continuation, basic, bright, 256 and truecolor runs, an OSC title, a markup line); every `test:unit` about 9,000 lines under 512,000 bytes, built once, `cut: true`; the `lint:docs` and `test:unit` of `NO_LOG_IID` (!632) `noLog` and `failed` "glab timed out", of `LOGGED_OUT_LOG_IID` (!624) `notLoggedIn` and `glabMissing`; any other page, or a listed job of another name, `notOffered`. No string in the file names a `#`-hex colour (the palette fence).
+ 
+-Each row's open discussions (request `docs/slices/request-mr-discussions.md`, plan §2 rows 162–164, 179): `readDiscussions(iids)` → `RowDiscussions[]` (a non-empty prefix of at most Rust's `DISCUSSION_BATCH` distinct iids, in order, for a non-empty ask; the caller asks again for the rest), converted by `discussionDomain.ts` `toRowDiscussions(raw, index, uploadedPicture)`: the iid branded, each discussion's `id` a `DiscussionId` (`domain.ts` `isDiscussionId`: 40 lowercase hex digits; anything else throws), its `earlier` person comments (`TurnComment { author, mentions }`) and its `last` note with `createdAt` in milliseconds, `author` the domain `Person` (its picture as `toMergeRequestPage` makes it; `mergeRequestDomain.ts` `toPerson`), `page` through `toWebPage` and its `mentions` as sent; the refusals `glabMissing`, `notLoggedIn { detail }`, `failed { message }` as sent; a bad iid, id, time or page throws with its field path. The discussion types live in `discussionDomain.ts`; `index.ts` re-exports those the window imports. Fixture mode: one `DiscussionStore` per source (`fixtureMergeRequestDiscussions.ts` `createDiscussionStore(listedRows)`, made in `createFixtureMergeRequests`), each merge request's discussions seeded at its first ask and changed by the thread script's writes; every stored note's number comes from `takeNote(store)`, starting above every listed row's notes (`7000 + 10 × listedRows`); `discussionsScript(log, store)` logs `mergeRequests.fixture_discussions { iids }` (comma-joined) and answers after `DISCUSSIONS_PAUSE_MS` (400 ms) the first `FIXTURE_ANSWERED` (10) distinct iids by `fixtureDiscussions(iid, store)`, the unresolved ones only: !637 (`THREADS_IID`, 13) and !636 (`LOCKED_THREADS_IID`, 3) the turn rule's cases of `docs/slices/briefs/mr-threads-fixtures.md` "!90's" and "!91's discussions" (`fixtureMergeRequestTurnCases.ts`, ids `d01` to `d16`: the decimal serial padded to 40 digits, `…0001` to `…0016`, the same ids as `tests/glab/mr-threads`; the first comment 48 h before the store was made, the last of the n-th discussion n hours before; a comment's mentions are the `@username`s of `PEOPLE` in its text, `@all` and a group none); every other row its `openDiscussions` one-comment discussions — discussion 0's by the next row's author, discussion 1's (newer) by the row's first reviewer, so both turns occur for `sam` and another reviewer waits (review mode's orders, pinned by `the_review_orders_the_smoke_expects`) —, a markup text, !638's 400-character line, pageless notes on every sixth row, ids `iid × 100 + n` in decimal digits; !615 (`DISCUSSIONS_FAILED_IID`, reviewed by chiara, none of sam's) `failed`, !629 (`DISCUSSIONS_LOGGED_OUT_IID`) `notLoggedIn`, an iid no row has `failed`. The setting: `setDiscussionDetails(current, details)` on `ChunkSource`/`SettingsSource` as `setAntialiasing`, in `tauri.ts` and `fixtureSettings.ts`; `DiscussionDetails` (`"full" | "lazy" | "off"`) aliases the generated type in `domain.ts`.
++Each row's open discussions (request `docs/slices/request-mr-discussions.md`, plan §2 rows 162–164, 179): `readDiscussions(iids)` → `RowDiscussions[]` (a non-empty prefix of at most Rust's `DISCUSSION_BATCH` distinct iids, in order, for a non-empty ask; the caller asks again for the rest), converted by `discussionDomain.ts` `toRowDiscussions(raw, index, uploadedPicture)`: the iid branded, each discussion's `id` a `DiscussionId` (`domain.ts` `isDiscussionId`: 40 lowercase hex digits; anything else throws), its `first` person comment (`FirstComment { createdAt, body }`, the starter: `earlier[0]`, else `last`; `createdAt` in milliseconds, `body` through `toDescription`, request `docs/slices/request-mr-person-discussions.md` D1, D2), its `earlier` person comments (`TurnComment { author, mentions }`) and its `last` note with `createdAt` in milliseconds, `author` the domain `Person` (its picture as `toMergeRequestPage` makes it; `mergeRequestDomain.ts` `toPerson`), `page` through `toWebPage` and its `mentions` as sent; the refusals `glabMissing`, `notLoggedIn { detail }`, `failed { message }` as sent; a bad iid, id, time or page (`first.body`'s links too) throws with its field path. The discussion types live in `discussionDomain.ts`; `index.ts` re-exports those the window imports. Fixture mode: one `DiscussionStore` per source (`fixtureMergeRequestDiscussions.ts` `createDiscussionStore(listedRows)`, made in `createFixtureMergeRequests`), each merge request's discussions seeded at its first ask and changed by the thread script's writes; every stored note's number comes from `takeNote(store)`, starting above every listed row's notes (`7000 + 10 × listedRows`); `openDiscussion` takes `first` from the discussion's first stored comment (its `createdAt` and `body`); `discussionsScript(log, store)` logs `mergeRequests.fixture_discussions { iids }` (comma-joined) and answers after `DISCUSSIONS_PAUSE_MS` (400 ms) the first `FIXTURE_ANSWERED` (10) distinct iids by `fixtureDiscussions(iid, store)`, the unresolved ones only: !637 (`THREADS_IID`, 13) and !636 (`LOCKED_THREADS_IID`, 3) the turn rule's cases of `docs/slices/briefs/mr-threads-fixtures.md` "!90's" and "!91's discussions" (`fixtureMergeRequestTurnCases.ts`, ids `d01` to `d16`: the decimal serial padded to 40 digits, `…0001` to `…0016`, the same ids as `tests/glab/mr-threads`; the first comment 48 h before the store was made, the last of the n-th discussion n hours before; a comment's mentions are the `@username`s of `PEOPLE` in its text, `@all` and a group none); the person view's cases of `docs/slices/briefs/mr-person-discussions-design.md` §2.7 (`fixtureMergeRequestPersonCases.ts` `personCases`, through `scripted`; ids `…0017` to `…0023`, p1 to p7; each first comment 48 h before the store, each last `serial` hours before, so no two share an hour; no mentions; rows neither sam's nor anna's, none reviewed by either, so the earlier smokes' review orders hold): !624 (`ANNA_CASES_IID`) p1 anna → ben → chiara → dmitri, anna's first formatted (bold, inline code, a link, a 160 px web image, six lines: the clamp cuts; Anna's turn), p2 sam → anna (Me's turn, Anna wrote), p3 anna → ben → anna (Anna started); !628 (`SAM_CASES_IID`) p4 sam → chiara → sam (Me started), p5 ben → chiara → sam (Me wrote); !609 (`FOLD_CASE_IID`) p6, fourteen comments among ben, chiara, dmitri, anna and a deleted user ending with chiara (the writers row's `+N` fold; Anna's turn); !607 (`OTHERS_CASE_IID`) p7 dmitri → chiara (neither's); the reviewer group comes from the generated rows (sam: !638, anna: !632), pinned by `the_listed_rows_give_sam_and_anna_each_a_reviewer_group_discussion`; every other row its `openDiscussions` one-comment discussions — discussion 0's by the next row's author, discussion 1's (newer) by the row's first reviewer, so both turns occur for `sam` and another reviewer waits (review mode's orders, pinned by `the_review_orders_the_smoke_expects`) —, a markup text, !638's 400-character line, pageless notes on every sixth row, ids `iid × 100 + n` in decimal digits; !615 (`DISCUSSIONS_FAILED_IID`, reviewed by chiara, none of sam's) `failed`, !629 (`DISCUSSIONS_LOGGED_OUT_IID`) `notLoggedIn`, an iid no row has `failed`. The setting: `setDiscussionDetails(current, details)` on `ChunkSource`/`SettingsSource` as `setAntialiasing`, in `tauri.ts` and `fixtureSettings.ts`; `DiscussionDetails` (`"full" | "lazy" | "off"`) aliases the generated type in `domain.ts`.
+ 
+ A discussion's thread, replies, resolves, the review's submit and the preview (request `docs/slices/request-mr-threads.md`, plan §2 rows 180–182): `readDiscussionThread(iid, discussion)` → `DiscussionThreadReply` (`read { thread }`: the `discussion` as the box gets it, `resolved`, every person `comments` (`DiscussionComment { author, createdAt, edited: NoteEdit { at, by } | null, body: Description, page }`), the viewer's `drafts` here (`PendingDraft { text }`), `pending` on the merge request, `commenting` `allowed | locked | notAllowed`, `mayResolve`; or `notFound`, `glabMissing`, `notLoggedIn { detail }`, `failed { message }`), converted by `discussionDomain.ts` `toDiscussionThreadReply(raw, uploadedPicture)` (times in ms, people as `toPerson`, pages through `toWebPage`, bodies through `descriptionDomain.ts` `toDescription(raw, field)`); `replyToDiscussion(iid, discussion, kind: comment | draft, text)`, `resolveDiscussion(iid, discussion, resolve)` and `submitReview(iid)` → `DiscussionWriteReply` (`sent`, `refused { reason }`, `glabMissing`, `notLoggedIn`, `failed`) as sent; `previewMarkdown(iid, text)` → `MarkdownPreviewReply` (`read { preview: Description }`, …) through `toMarkdownPreviewReply`. Fixture mode (`fixtureMergeRequestThreads.ts` `threadsScript(log, store)`, the discussions script's store): a read logs `mergeRequests.fixture_thread { iid, discussion }` and answers after 400 ms; a write logs `mergeRequests.fixture_write { kind: comment|draft|resolve|unresolve|submit, iid, discussion }` (`discussion` empty for submit) and a preview `mergeRequests.fixture_preview { iid }`, both answering after 300 ms; no log line holds a text. d01 of !637 is the rich thread (anna's first comment !640's description blocks, a both-sized image and a mention of ben; sam's edited by dmitri; dmitri's with a `width: 50%` image beside a code `@sam`; anna's last edited by herself); drafts in d01 ("I'll take the second option.") and d05, so `pending: 2`; any other discussion's comments are one paragraph per line. `commenting` is `locked` on !636, else `allowed`; `mayResolve` false on !636's first discussion. Scripted words: a blank text → `refused` "There is nothing to send."; a text starting `refuse` → `refused` "403 Forbidden"; starting `fail` → `failed` "glab timed out"; an unknown iid or discussion → `notFound` to a read, `refused` "404 Not Found" to a write; any other comment, draft or resolve on !636 → `refused` "403 Forbidden"; else `sent`: a comment appends sam's comment (now) as the discussion's `last`, a draft appends a `PendingDraft`, resolve/unresolve set `resolved` (a resolved discussion leaves the next `readDiscussions`), submit turns every draft of the merge request into sam's comments. A comment's body and a preview are rendered by `fixtureMergeRequestRendering.ts` (`renderedText`; `textComment` builds a stored comment): blank → no blocks; a preview starting `fail` → `failed` "glab timed out"; else a paragraph per non-empty line, `**x**` strong, `@name` a link to `https://gitlab.com/name`.
+ 
+diff --git a/frontend/src/ipc/discussionDomain.test.ts b/frontend/src/ipc/discussionDomain.test.ts
+index ef8718a..f12cfa5 100644
+--- a/frontend/src/ipc/discussionDomain.test.ts
++++ b/frontend/src/ipc/discussionDomain.test.ts
+@@ -9,6 +9,7 @@ import {
+   type Commenting,
+   type DiscussionComment,
+   type DiscussionNote,
++  type FirstComment,
+   type Mention,
+   type NoteEdit,
+   type PendingDraft,
+@@ -44,6 +45,7 @@ function discussion(change: Partial<Generated.OpenDiscussion> = {}): Generated.O
+   return {
+     id: D01,
+     place: { kind: "overview" },
++    first: { createdAt: "2026-11-01T08:00:00Z", body: comment().body },
+     earlier: [
+       { author: BEN, mentions: [SAM_MENTION] },
+       { author: null, mentions: [] },
+@@ -80,9 +82,25 @@ const LAST_CONVERTED: DiscussionNote = {
+   page: webPage(NOTE),
+   mentions: [BEN_MENTION],
+ };
++const DOCS_BODY: Description = {
++  blocks: [
++    {
++      kind: "paragraph",
++      inlines: [
++        {
++          kind: "link",
++          link: { kind: "page", page: webPage(DOCS) },
++          inlines: [{ kind: "text", text: "docs" }],
++        },
++      ],
++    },
++  ],
++};
++const FIRST_CONVERTED: FirstComment = { createdAt: Date.UTC(2026, 10, 1, 8), body: DOCS_BODY };
+ const DISCUSSION_CONVERTED = {
+   id: D01,
+   place: { kind: "overview" },
++  first: FIRST_CONVERTED,
+   earlier: EARLIER_CONVERTED,
+   last: LAST_CONVERTED,
+ };
+@@ -122,6 +140,27 @@ test("a_bad_last_note_names_its_field", () => {
+   );
+ });
+ 
++test("the_first_comment_converts_its_time_and_brands_its_links", () => {
++  const early = { ...discussion().first, createdAt: "first thing" };
++  expect(() => toRowDiscussions(rowOf(discussion({ first: early })), 2, uploadedPicture)).toThrow(
++    'rows[2].answer.discussions[0].first.createdAt must be an ISO 8601 time, got "first thing"',
++  );
++  const link: Generated.DescriptionInline = {
++    kind: "link",
++    link: { kind: "page", page: "ftp://x" },
++    inlines: [{ kind: "text", text: "files" }],
++  };
++  const body: Generated.Description = { blocks: [{ kind: "paragraph", inlines: [link] }] };
++  const unsafe = { ...discussion().first, body };
++  expect(() => toRowDiscussions(rowOf(discussion({ first: unsafe })), 0, uploadedPicture)).toThrow(
++    'rows[0].answer.discussions[0].first.body.link.page must be an http or https address, got "ftp://x"',
++  );
++  const thread = { ...readThread(), discussion: discussion({ first: early }) };
++  expect(() => toDiscussionThreadReply({ kind: "read", thread }, uploadedPicture)).toThrow(
++    "thread.discussion.first.createdAt must be an ISO 8601 time",
++  );
++});
++
+ function comment(change: Partial<Generated.DiscussionComment> = {}): Generated.DiscussionComment {
+   return {
+     author: BEN,
+@@ -166,30 +205,22 @@ function threadOf(comments: Generated.DiscussionComment[]): Generated.Discussion
+ 
+ test("toDiscussionThreadReply_converts_times_people_pages_and_bodies", () => {
+   const raw = threadOf([comment(), comment({ author: null, edited: null, page: null })]);
+-  const body: Description = {
+-    blocks: [
+-      {
+-        kind: "paragraph",
+-        inlines: [
+-          {
+-            kind: "link",
+-            link: { kind: "page", page: webPage(DOCS) },
+-            inlines: [{ kind: "text", text: "docs" }],
+-          },
+-        ],
+-      },
+-    ],
+-  };
+   const edit: NoteEdit = { at: Date.UTC(2026, 10, 1, 11, 30), by: ANNA_CONVERTED };
+   const comments: readonly DiscussionComment[] = [
+     {
+       author: BEN_CONVERTED,
+       createdAt: Date.UTC(2026, 10, 1, 9),
+       edited: edit,
+-      body,
++      body: DOCS_BODY,
+       page: webPage(NOTE),
+     },
+-    { author: null, createdAt: Date.UTC(2026, 10, 1, 9), edited: null, body, page: null },
++    {
++      author: null,
++      createdAt: Date.UTC(2026, 10, 1, 9),
++      edited: null,
++      body: DOCS_BODY,
++      page: null,
++    },
+   ];
+ 
+   expect(toDiscussionThreadReply(raw, uploadedPicture)).toEqual({
+diff --git a/frontend/src/ipc/discussionDomain.ts b/frontend/src/ipc/discussionDomain.ts
+index 570e000..190c031 100644
+--- a/frontend/src/ipc/discussionDomain.ts
++++ b/frontend/src/ipc/discussionDomain.ts
+@@ -27,9 +27,16 @@ export type DiscussionNote = {
+   readonly mentions: readonly Mention[];
+ };
+ export type TurnComment = { readonly author: Person | null; readonly mentions: readonly Mention[] };
++export type FirstComment = {
++  /** Milliseconds since 1970, from GitLab's ISO 8601 time. */
++  readonly createdAt: number;
++  readonly body: Description;
++};
+ export type OpenDiscussion = {
+   readonly id: DiscussionId;
+   readonly place: DiscussionPlace;
++  /** The first person note (earlier[0], else last): its time and GitLab's rendering (request D1, D2). */
++  readonly first: FirstComment;
+   readonly earlier: readonly TurnComment[];
+   readonly last: DiscussionNote;
+ };
+@@ -100,6 +107,10 @@ function toDiscussion(
+   return {
+     id: toDiscussionId(raw.id, `${field}.id`),
+     place: raw.place,
++    first: {
++      createdAt: toTime(raw.first.createdAt, `${field}.first.createdAt`),
++      body: toDescription(raw.first.body, `${field}.first.body`),
++    },
+     earlier: raw.earlier.map(({ author, mentions }) => ({
+       author: toAuthor(author, uploadedPicture),
+       mentions,
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.test.ts b/frontend/src/ipc/fixtureMergeRequestData.test.ts
+index 8fc36f6..aa8b966 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.test.ts
+@@ -159,3 +159,17 @@ test("no picture address outside data: (catches the fixture loading a remote pic
+   expect(pictures.get("ben")).toBe("data:image/png;base64,AAAA");
+   expect([pictures.get("chiara"), pictures.get("dmitri")]).toEqual([null, null]);
+ });
++
++test("the person case rows count their cases and are neither sam's nor anna's (catches a case hidden by the box or turned into the author's)", () => {
++  const rows = fixtureRows(0, LISTED);
++  const cases = [624, 628, 609, 607].map((iid) => {
++    const { openDiscussions, author } = rowOf(rows, iid);
++    return [iid, openDiscussions, author?.username];
++  });
++  expect(cases).toEqual([
++    [624, 3, "ben"],
++    [628, 2, "chiara"],
++    [609, 1, "ben"],
++    [607, 1, "dmitri"],
++  ]);
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.ts b/frontend/src/ipc/fixtureMergeRequestData.ts
+index 7b7d0bc..87217fa 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.ts
+@@ -19,9 +19,20 @@ export const THREADS_IID = 637;
+ export const LOCKED_THREADS_IID = 636;
+ const THREADS_DISCUSSIONS = 13;
+ const LOCKED_DISCUSSIONS = 3;
++/** The rows whose discussions are the person view's cases (`fixtureMergeRequestTurnCases.ts` `PERSON_CASES`). */
++export const ANNA_CASES_IID = 624;
++export const SAM_CASES_IID = 628;
++export const FOLD_CASE_IID = 609;
++export const OTHERS_CASE_IID = 607;
++const ANNA_CASES = 3;
++const SAM_CASES = 2;
+ const OPEN_DISCUSSIONS: Readonly<Record<number, number>> = {
+   [THREADS_IID]: THREADS_DISCUSSIONS,
+   [LOCKED_THREADS_IID]: LOCKED_DISCUSSIONS,
++  [ANNA_CASES_IID]: ANNA_CASES,
++  [SAM_CASES_IID]: SAM_CASES,
++  [FOLD_CASE_IID]: 1,
++  [OTHERS_CASE_IID]: 1,
+ };
+ const NEWEST_CREATED = Date.parse("2026-10-30T09:00:00Z");
+ const CREATED_STEP_MS = 21_600_000;
+diff --git a/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts b/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
+index 7629dad..93c2068 100644
+--- a/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts
+@@ -6,31 +6,40 @@ import {
+   filtered,
+   reviewing,
+   reviewOrdered,
++  turnOf,
+   withDraft,
+   type CalendarDay,
+   type Filters,
+   type ReviewDetails,
+ } from "../mergeRequests";
+ import type * as Generated from "./bindings";
+-import { toRowDiscussions } from "./discussionDomain";
++import { toRowDiscussions, type OpenDiscussion } from "./discussionDomain";
+ import { TIMED_OUT } from "./fixtureGitLab";
+ import {
++  ANNA_CASES_IID,
+   FIXTURE_ME,
+   fixtureRows,
+   fixtureUploadedPicture,
++  FOLD_CASE_IID,
+   LOGGED_OUT_DETAIL,
++  OTHERS_CASE_IID,
++  SAM_CASES_IID,
+ } from "./fixtureMergeRequestData";
+ import {
+   createDiscussionStore,
+   DISCUSSIONS_FAILED_IID,
+   DISCUSSIONS_LOGGED_OUT_IID,
+   fixtureDiscussions,
++  openDiscussion,
++  storedDiscussions,
+   type DiscussionStore,
+ } from "./fixtureMergeRequestDiscussions";
++import type { FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
+ import { toMergeRequestPage } from "./mergeRequestDomain";
+ 
+ const LISTED = fixtureRows(0, 500);
+-const TURN_CASES: ReadonlySet<number> = new Set([637, 636]);
++const PERSON_CASE_ROWS = [ANNA_CASES_IID, SAM_CASES_IID, FOLD_CASE_IID, OTHERS_CASE_IID];
++const TURN_CASES: ReadonlySet<number> = new Set([637, 636, ...PERSON_CASE_ROWS]);
+ const SCRIPTED: ReadonlySet<number> = new Set([DISCUSSIONS_FAILED_IID, DISCUSSIONS_LOGGED_OUT_IID]);
+ const HOUR_MS = 3_600_000;
+ const LONG_LINE = 400;
+@@ -51,8 +60,8 @@ function openOf(
+ const UNSCRIPTED = LISTED.filter((row) => !SCRIPTED.has(row.iid));
+ const GENERATED = UNSCRIPTED.filter((row) => !TURN_CASES.has(row.iid));
+ 
+-function everyDiscussion(): readonly Generated.OpenDiscussion[] {
+-  return GENERATED.flatMap((row) => openOf(row.iid));
++function everyDiscussion(store: DiscussionStore): readonly Generated.OpenDiscussion[] {
++  return GENERATED.flatMap((row) => openOf(row.iid, store));
+ }
+ 
+ function isSams(discussion: Generated.OpenDiscussion | undefined): boolean {
+@@ -67,12 +76,15 @@ test("every_listed_row_with_open_discussions_has_that_many", () => {
+ });
+ 
+ test("every_discussion_id_is_40_hex_and_unique_and_only_the_due_rows_ask_their_reviewer", () => {
+-  const ids = UNSCRIPTED.flatMap((row) => openOf(row.iid).map((discussion) => discussion.id));
++  const store = createDiscussionStore(500);
++  const ids = UNSCRIPTED.flatMap((row) =>
++    openOf(row.iid, store).map((discussion) => discussion.id),
++  );
+   expect(ids.every((id) => /^[0-9a-f]{40}$/u.test(id))).toBe(true);
+   expect(new Set(ids).size).toBe(ids.length);
+-  expect(everyDiscussion().every((discussion) => discussion.earlier.length === 0)).toBe(true);
++  expect(everyDiscussion(store).every((discussion) => discussion.earlier.length === 0)).toBe(true);
+   const asking = GENERATED.flatMap((row) =>
+-    openOf(row.iid)
++    openOf(row.iid, store)
+       .filter((discussion) => discussion.last.mentions.length > 0)
+       .map(
+         ({ last }) =>
+@@ -95,12 +107,13 @@ test("every_listed_row_with_open_discussions_has_that_many", () => {
+ });
+ 
+ test("both_turns_occur_for_sam_and_some_rows_wait_only", () => {
++  const store = createDiscussionStore(500);
+   const pairs = GENERATED.filter((row) => row.openDiscussions === 2);
+-  const opens = GENERATED.map((row) => openOf(row.iid)).filter((open) => open.length > 0);
++  const opens = GENERATED.map((row) => openOf(row.iid, store)).filter((open) => open.length > 0);
+ 
+   expect(pairs.length).toBeGreaterThan(0);
+   for (const row of pairs) {
+-    const [first, second] = openOf(row.iid);
++    const [first, second] = openOf(row.iid, store);
+     expect(row.reviewers[0]).toBeDefined();
+     expect(second?.last.author).toEqual(row.reviewers[0]?.person);
+     expect(Date.parse(second?.last.createdAt ?? "")).toBeGreaterThan(
+@@ -113,7 +126,7 @@ test("both_turns_occur_for_sam_and_some_rows_wait_only", () => {
+ });
+ 
+ test("the_markup_text_and_a_pageless_discussion_exist", () => {
+-  const all = everyDiscussion();
++  const all = everyDiscussion(createDiscussionStore(500));
+   const texts = all.map((discussion) => discussion.last.text);
+ 
+   expect(texts).toContain(MARKUP);
+@@ -281,3 +294,189 @@ test("the_review_orders_the_smoke_expects", () => {
+     failed: 615,
+   });
+ });
++
++test("every_discussion_starts_with_its_first_comment", () => {
++  const store = createDiscussionStore(500);
++  for (const row of UNSCRIPTED) {
++    const comments = (storedDiscussions(store, row.iid) ?? []).map(({ comments: [first] }) => ({
++      createdAt: first?.createdAt,
++      body: first?.body,
++    }));
++    expect(openOf(row.iid, store).map((discussion) => discussion.first)).toEqual(comments);
++  }
++  const [p1] = openOf(ANNA_CASES_IID, store);
++  expect(p1?.first.createdAt).not.toBe(p1?.last.createdAt);
++});
++
++test("the_person_cases_have_their_writers_in_order", () => {
++  const store = createDiscussionStore(500);
++
++  expect(PERSON_CASE_ROWS.map((iid) => openOf(iid, store).map(said))).toEqual([
++    ["anna ben chiara dmitri", "sam anna", "anna ben anna"],
++    ["sam chiara sam", "ben chiara sam"],
++    ["ben chiara dmitri anna deleted ben dmitri chiara anna ben deleted dmitri ben chiara"],
++    ["dmitri chiara"],
++  ]);
++  expect(openOf(FOLD_CASE_IID, store)[0]?.earlier).toHaveLength(13);
++  expect(PERSON_CASE_ROWS.flatMap((iid) => openOf(iid, store).map(({ id }) => id))).toEqual(
++    Array.from({ length: 7 }, (_, at) => String(at + 17).padStart(40, "0")),
++  );
++});
++
++test("the_person_cases_last_comments_are_at_distinct_hours_seventeen_to_twenty_three", () => {
++  const now = Date.parse("2026-11-04T12:00:00Z");
++  vi.useFakeTimers({ toFake: ["Date"] });
++  vi.setSystemTime(now);
++  const store = createDiscussionStore(500);
++  const cases = PERSON_CASE_ROWS.flatMap((iid) => openOf(iid, store));
++  vi.useRealTimers();
++
++  expect(cases.map(({ last }) => (now - Date.parse(last.createdAt)) / HOUR_MS)).toEqual([
++    17, 18, 19, 20, 21, 22, 23,
++  ]);
++  expect(cases.map(({ first }) => (now - Date.parse(first.createdAt)) / HOUR_MS)).toEqual([
++    48, 48, 48, 48, 48, 48, 48,
++  ]);
++});
++
++function plainText(inline: Generated.DescriptionInline): string {
++  switch (inline.kind) {
++    case "text":
++    case "code":
++      return inline.text;
++    case "image":
++      return inline.caption;
++    case "lineBreak":
++      return "\n";
++    case "emphasis":
++    case "strong":
++    case "strike":
++    case "link":
++      return inline.inlines.map(plainText).join("");
++    default: {
++      const _exhaustive: never = inline;
++      return _exhaustive;
++    }
++  }
++}
++
++test("p1_starts_with_a_formatted_six_line_comment_and_p2_with_a_plain_one", () => {
++  const [p1, p2] = openOf(ANNA_CASES_IID);
++  const lines = (p1?.first.body.blocks ?? []).map((block) =>
++    block.kind === "paragraph" ? block.inlines : [],
++  );
++  const inlines = lines.flat();
++
++  expect(lines.map((line) => line.map(plainText).join(""))).toEqual([
++    "The reminder list needs a second look.",
++    "The snoozeUntil field is never cleared.",
++    "See the import notes first.",
++    "the reminder list",
++    "Five lines in, the box cuts here.",
++    "And this sixth line is hidden too.",
++  ]);
++  expect(inlines.map((inline) => inline.kind)).toEqual([
++    "text",
++    "strong",
++    "text",
++    "text",
++    "code",
++    "text",
++    "text",
++    "link",
++    "text",
++    "image",
++    "text",
++    "text",
++  ]);
++  expect(inlines.find((inline) => inline.kind === "link")).toMatchObject({
++    link: { kind: "page", page: "https://gitlab.example/taskboard/taskboard/-/wikis/import" },
++  });
++  expect(inlines.find((inline) => inline.kind === "image")).toMatchObject({
++    size: { kind: "width", width: { kind: "pixels", value: 160 } },
++  });
++  expect(p1?.last.text).toBe("I'll add a test for archiving.");
++  expect(p2?.first.body).toEqual({
++    blocks: [
++      {
++        kind: "paragraph",
++        inlines: [{ kind: "text", text: "Should the snooze menu remember the last choice?" }],
++      },
++    ],
++  });
++});
++
++test("a_discussion_without_comments_throws_naming_it", () => {
++  const empty: FixtureDiscussion = {
++    id: "d99",
++    place: { kind: "overview" },
++    mayResolve: true,
++    resolved: false,
++    comments: [],
++    drafts: [],
++  };
++  expect(() => openDiscussion(empty)).toThrow("discussion d99 has no comment");
++});
++
++function converted(iid: number, store: DiscussionStore): readonly OpenDiscussion[] {
++  const { answer } = toRowDiscussions(
++    { iid, answer: fixtureDiscussions(iid, store) },
++    0,
++    fixtureUploadedPicture,
++  );
++  return answer.kind === "open" ? answer.discussions : [];
++}
++
++type Group = "turn" | "started" | "wrote" | "reviewer or other";
++
++function groupOf(discussion: OpenDiscussion, viewer: string, author: string | null): Group {
++  if (turnOf(discussion, viewer, author).kind === "viewer") {
++    return "turn";
++  }
++  const writers = [...discussion.earlier, discussion.last].map(
++    (comment) => comment.author?.username,
++  );
++  if (writers[0] === viewer) {
++    return "started";
++  }
++  return writers.includes(viewer) ? "wrote" : "reviewer or other";
++}
++
++test("the_person_cases_fall_in_the_groups_the_design_names_for_sam_and_anna", () => {
++  const store = createDiscussionStore(500);
++  const groups = PERSON_CASE_ROWS.flatMap((iid) => {
++    const author = LISTED.find((row) => row.iid === iid)?.author?.username ?? null;
++    return converted(iid, store).map((discussion) => [
++      groupOf(discussion, FIXTURE_ME, author),
++      groupOf(discussion, "anna", author),
++    ]);
++  });
++
++  expect(groups).toEqual([
++    ["reviewer or other", "turn"],
++    ["turn", "wrote"],
++    ["reviewer or other", "started"],
++    ["started", "reviewer or other"],
++    ["wrote", "reviewer or other"],
++    ["reviewer or other", "turn"],
++    ["reviewer or other", "reviewer or other"],
++  ]);
++});
++
++test("the_listed_rows_give_sam_and_anna_each_a_reviewer_group_discussion", () => {
++  const store = createDiscussionStore(SMOKE_ROWS);
++  function reviewerGroup(viewer: string): string[] {
++    return fixtureRows(0, SMOKE_ROWS)
++      .filter(({ reviewers }) => reviewers.some(({ person }) => person.username === viewer))
++      .filter(({ author }) => author?.username !== viewer)
++      .filter(({ iid }) =>
++        converted(iid, store).some(
++          (discussion) => groupOf(discussion, viewer, null) === "reviewer or other",
++        ),
++      )
++      .map(({ iid }) => `!${iid}`);
++  }
++
++  expect(reviewerGroup(FIXTURE_ME)).toContain("!638");
++  expect(reviewerGroup("anna")).toContain("!632");
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequestDiscussions.ts b/frontend/src/ipc/fixtureMergeRequestDiscussions.ts
+index b752332..f9e4db4 100644
+--- a/frontend/src/ipc/fixtureMergeRequestDiscussions.ts
++++ b/frontend/src/ipc/fixtureMergeRequestDiscussions.ts
+@@ -8,6 +8,7 @@ import {
+   LOGGED_OUT_DETAIL,
+   ORIGIN,
+ } from "./fixtureMergeRequestData";
++import { personCases } from "./fixtureMergeRequestPersonCases";
+ import { mentionsIn, renderedText, type FixtureComment } from "./fixtureMergeRequestRendering";
+ import { discussionId, turnCases, type FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
+ import type { Log } from "./log";
+@@ -122,7 +123,8 @@ export function takeNote(store: DiscussionStore): number {
+ }
+ 
+ function seeded(store: DiscussionStore, iid: number): FixtureDiscussion[] | null {
+-  const scripted = turnCases({ iid, now: store.createdAt, takeNote: () => takeNote(store) });
++  const seed = { iid, now: store.createdAt, takeNote: () => takeNote(store) };
++  const scripted = turnCases(seed) ?? personCases(seed);
+   if (scripted !== null) {
+     return scripted;
+   }
+@@ -147,14 +149,16 @@ export function storedDiscussions(store: DiscussionStore, iid: number): FixtureD
+ }
+ 
+ export function openDiscussion(discussion: FixtureDiscussion): Generated.OpenDiscussion {
++  const [first] = discussion.comments;
+   const last = discussion.comments.at(-1);
+-  if (last === undefined) {
++  if (first === undefined || last === undefined) {
+     throw new Error(`discussion ${discussion.id} has no comment`);
+   }
+   const { author, createdAt, text: said, page, mentions } = last;
+   return {
+     id: discussion.id,
+     place: discussion.place,
++    first: { createdAt: first.createdAt, body: first.body },
+     earlier: discussion.comments.slice(0, -1).map((each) => ({
+       author: each.author,
+       mentions: each.mentions,
+diff --git a/frontend/src/ipc/fixtureMergeRequestPersonCases.ts b/frontend/src/ipc/fixtureMergeRequestPersonCases.ts
+new file mode 100644
+index 0000000..5e28ea3
+--- /dev/null
++++ b/frontend/src/ipc/fixtureMergeRequestPersonCases.ts
+@@ -0,0 +1,140 @@
++import type * as Generated from "./bindings";
++import {
++  ANNA_CASES_IID,
++  FOLD_CASE_IID,
++  ORIGIN,
++  OTHERS_CASE_IID,
++  SAM_CASES_IID,
++} from "./fixtureMergeRequestData";
++import { fixtureWebImage, pixels } from "./fixtureMergeRequestDescriptions";
++import { inlines, type Said } from "./fixtureMergeRequestRendering";
++import {
++  PERSON_FIRST_SERIAL,
++  scripted,
++  type FixtureDiscussion,
++  type Script,
++  type Seed,
++} from "./fixtureMergeRequestTurnCases";
++
++type Inline = Generated.DescriptionInline;
++type PersonCase = { readonly iid: number; readonly said: readonly Said[] };
++
++const FORMATTED_WIDTH_PX = 160;
++const IMPORT_NOTES = `${ORIGIN}/-/wikis/import`;
++const FORMATTED_TEXT = [
++  "The **reminder** list needs a second look.",
++  "The `snoozeUntil` field is never cleared.",
++  `See [the import notes](${IMPORT_NOTES}) first.`,
++  `![the reminder list](banner.png){width=${FORMATTED_WIDTH_PX}px}`,
++  "Five lines in, the box cuts here.",
++  "And this sixth line is hidden too.",
++].join("\n");
++
++/** The person view's cases (`docs/slices/briefs/mr-person-discussions-design.md` §2.7), p1 first; none mentions
++ *  anyone, so each falls in the group the design names for sam and anna. */
++const PERSON_CASES: readonly PersonCase[] = [
++  {
++    iid: ANNA_CASES_IID,
++    said: [
++      ["anna", FORMATTED_TEXT],
++      ["ben", "It is cleared when a card closes."],
++      ["chiara", "Not when it is archived, though."],
++      ["dmitri", "I'll add a test for archiving."],
++    ],
++  },
++  {
++    iid: ANNA_CASES_IID,
++    said: [
++      ["sam", "Should the snooze menu remember the last choice?"],
++      ["anna", "Yes, per board."],
++    ],
++  },
++  {
++    iid: ANNA_CASES_IID,
++    said: [
++      ["anna", "The reminder badge overlaps the title."],
++      ["ben", "Only on narrow cards."],
++      ["anna", "Narrow cards are the default on phones."],
++    ],
++  },
++  {
++    iid: SAM_CASES_IID,
++    said: [
++      ["sam", "This migration needs a down step."],
++      ["chiara", "Added one."],
++      ["sam", "It drops the wrong column."],
++    ],
++  },
++  {
++    iid: SAM_CASES_IID,
++    said: [
++      ["ben", "The board query runs twice."],
++      ["chiara", "Once for the count."],
++      ["sam", "The count could come from the first one."],
++    ],
++  },
++  {
++    iid: FOLD_CASE_IID,
++    said: [
++      ["ben", "Which time zone does the due date use?"],
++      ["chiara", "The board's."],
++      ["dmitri", "The user's, since last week."],
++      ["anna", "The settings page still says the board's."],
++      [null, "It was the board's before the move."],
++      ["ben", "So the copy is out of date."],
++      ["dmitri", "And the export too."],
++      ["chiara", "The export writes UTC."],
++      ["anna", "Then the import must read UTC."],
++      ["ben", "It reads local time."],
++      [null, "That was on purpose for old files."],
++      ["dmitri", "Old files carry no zone at all."],
++      ["ben", "Then local time is right for them."],
++      ["chiara", "Agreed, only new files are UTC."],
++    ],
++  },
++  {
++    iid: OTHERS_CASE_IID,
++    said: [
++      ["dmitri", "The export button has no tooltip."],
++      ["chiara", "Added one in the next commit."],
++    ],
++  },
++];
++const FORMATTED_FIRST: Script["changes"] = [(comment) => ({ ...comment, body: formattedBody() })];
++
++/** p1's first comment as GitLab renders it: bold, inline code, a link, a sized web image, six lines in all. */
++function formattedBody(): Generated.Description {
++  const notes: Inline = {
++    kind: "link",
++    link: { kind: "page", page: IMPORT_NOTES },
++    inlines: inlines("the import notes"),
++  };
++  const image = fixtureWebImage("the reminder list", {
++    kind: "width",
++    width: pixels(FORMATTED_WIDTH_PX),
++  });
++  const lines: Inline[][] = [
++    inlines("The **reminder** list needs a second look."),
++    [
++      ...inlines("The "),
++      { kind: "code", text: "snoozeUntil" },
++      ...inlines(" field is never cleared."),
++    ],
++    [...inlines("See "), notes, ...inlines(" first.")],
++    [image],
++    inlines("Five lines in, the box cuts here."),
++    inlines("And this sixth line is hidden too."),
++  ];
++  return { blocks: lines.map((line) => ({ kind: "paragraph", inlines: line })) };
++}
++
++/** The person cases on `seed`'s merge request, or null when it has none. Each last comment is `serial` hours before
++ *  `now`, so no two cases' last comments share an hour, on one row or across rows. */
++export function personCases(seed: Seed): FixtureDiscussion[] | null {
++  const scripts = PERSON_CASES.flatMap(({ iid, said }, at): Script[] => {
++    const serial = PERSON_FIRST_SERIAL + at;
++    const changes = at === 0 ? FORMATTED_FIRST : [];
++    return iid === seed.iid ? [{ serial, said, hoursAgo: serial, changes }] : [];
++  });
++  return scripts.length === 0 ? null : scripted(seed, scripts);
++}
+diff --git a/frontend/src/ipc/fixtureMergeRequestTurnCases.ts b/frontend/src/ipc/fixtureMergeRequestTurnCases.ts
+index 10d1d6d..2726a15 100644
+--- a/frontend/src/ipc/fixtureMergeRequestTurnCases.ts
++++ b/frontend/src/ipc/fixtureMergeRequestTurnCases.ts
+@@ -20,7 +20,16 @@ export type FixtureDiscussion = {
+   readonly drafts: Generated.PendingDraft[];
+ };
+ /** Where a seeded merge request's discussions start: `now` the store's creation; `takeNote` hands out note numbers. */
+-type Seed = { readonly iid: number; readonly now: number; readonly takeNote: () => number };
++export type Seed = { readonly iid: number; readonly now: number; readonly takeNote: () => number };
++type Change = (comment: FixtureComment) => FixtureComment;
++/** One scripted discussion: its id's serial, its comments, how many hours before `now` its last one is, and what
++ *  changes its comments beyond their text (by position). */
++export type Script = {
++  readonly serial: number;
++  readonly said: readonly Said[];
++  readonly hoursAgo: number;
++  readonly changes: readonly Change[];
++};
+ 
+ const HOUR_MS = 3_600_000;
+ const HALF_HOUR_MS = 1_800_000;
+@@ -102,6 +111,7 @@ const LOCKED_CASES: readonly (readonly Said[])[] = [
+   ],
+ ];
+ const LOCKED_FIRST_SERIAL = THREADS_CASES.length + 1;
++export const PERSON_FIRST_SERIAL = LOCKED_FIRST_SERIAL + LOCKED_CASES.length;
+ const DRAFTS: Readonly<Record<string, string>> = {
+   [discussionId(OPTIONS_SERIAL)]: "I'll take the second option.",
+   [discussionId(COPY_SERIAL)]: "Agreed, I'll fix the copy.",
+@@ -112,7 +122,7 @@ const PLACES: Readonly<Record<string, Generated.DiscussionPlace>> = {
+ };
+ /** d01's comments beyond their text: every element of a description and sized images in anna's first, an edit by
+  *  another person, a sized sketch beside a code `@sam` (no mention), and an edit by the author. */
+-const RICH_CHANGES: readonly ((comment: FixtureComment) => FixtureComment)[] = [
++const RICH_CHANGES: readonly Change[] = [
+   (comment) => ({ ...comment, body: optionsBody() }),
+   (comment) => edited(comment, "dmitri"),
+   (comment) => ({ ...comment, body: sketchBody() }),
+@@ -162,28 +172,24 @@ function sketchBody(): Generated.Description {
+   return { blocks: [{ kind: "paragraph", inlines: drawn }] };
+ }
+ 
+-/** Each discussion's comments an hour apart from two days before `now`, its last `at + 1` hours before it. */
+-function scripted(
+-  seed: Seed,
+-  cases: readonly (readonly Said[])[],
+-  firstSerial: number,
+-): FixtureDiscussion[] {
++/** Each discussion's comments an hour apart from two days before `now`, its last `hoursAgo` hours before it. */
++export function scripted(seed: Seed, scripts: readonly Script[]): FixtureDiscussion[] {
+   const { iid, now } = seed;
+   const started = now - STARTED_HOURS_AGO * HOUR_MS;
+-  return cases.map((said, at) => {
+-    const id = discussionId(firstSerial + at);
+-    const last = now - (at + 1) * HOUR_MS;
++  return scripts.map(({ serial, said, hoursAgo, changes }) => {
++    const id = discussionId(serial);
++    const last = now - hoursAgo * HOUR_MS;
+     const comments = said.map((each, index) => {
+       const time = index === said.length - 1 ? last : started + index * HOUR_MS;
+       const comment = textComment({ iid, said: each, time, note: seed.takeNote() });
+-      const change = id === discussionId(OPTIONS_SERIAL) ? RICH_CHANGES[index] : undefined;
++      const change = changes[index];
+       return change === undefined ? comment : change(comment);
+     });
+     const draft = DRAFTS[id];
+     return {
+       id,
+       place: PLACES[id] ?? { kind: "overview" },
+-      mayResolve: id !== discussionId(LOCKED_FIRST_SERIAL),
++      mayResolve: serial !== LOCKED_FIRST_SERIAL,
+       resolved: false,
+       comments,
+       drafts: draft === undefined ? [] : [{ text: draft }],
+@@ -191,13 +197,22 @@ function scripted(
+   });
+ }
+ 
++function inOrder(cases: readonly (readonly Said[])[], firstSerial: number): Script[] {
++  return cases.map((said, at) => ({
++    serial: firstSerial + at,
++    said,
++    hoursAgo: at + 1,
++    changes: firstSerial + at === OPTIONS_SERIAL ? RICH_CHANGES : [],
++  }));
++}
++
+ /** The scripted discussions of !637 and !636, or null for any other merge request. */
+ export function turnCases(seed: Seed): FixtureDiscussion[] | null {
+   switch (seed.iid) {
+     case THREADS_IID:
+-      return scripted(seed, THREADS_CASES, OPTIONS_SERIAL);
++      return scripted(seed, inOrder(THREADS_CASES, OPTIONS_SERIAL));
+     case LOCKED_THREADS_IID:
+-      return scripted(seed, LOCKED_CASES, LOCKED_FIRST_SERIAL);
++      return scripted(seed, inOrder(LOCKED_CASES, LOCKED_FIRST_SERIAL));
+     default:
+       return null;
+   }
+diff --git a/frontend/src/ipc/fixtureMergeRequests.test.ts b/frontend/src/ipc/fixtureMergeRequests.test.ts
+index e6ef8a2..94e5081 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.test.ts
+@@ -130,7 +130,14 @@ test("the list holds every case the page filters and shows (catches a fixture th
+     newest - 6 * hour,
+     newest - 24 * hour,
+   ]);
+-  const turnCases: Readonly<Record<number, number>> = { 637: 13, 636: 3 };
++  const turnCases: Readonly<Record<number, number>> = {
++    637: 13,
++    636: 3,
++    624: 3,
++    628: 2,
++    609: 1,
++    607: 1,
++  };
+   expect(rows.map((row) => [row.openDiscussions, row.approvedBy.length])).toEqual(
+     Array.from({ length: 40 }, (_, at) => [turnCases[640 - at] ?? at % 3, at % 4]),
+   );
+@@ -519,6 +526,17 @@ test("discussions_answer_a_prefix_of_ten_after_400_ms_and_log_the_ask", async ()
+       {
+         id: "63900".padStart(40, "0"),
+         place: { kind: "file", path: "src/board/card.ts", line: 11 },
++        first: {
++          createdAt: Date.parse("2026-10-30T04:00:00Z"),
++          body: {
++            blocks: [
++              {
++                kind: "paragraph",
++                inlines: [{ kind: "text", text: "Could you look at this again?" }],
++              },
++            ],
++          },
++        },
+         earlier: [],
+         last: {
+           author: { username: "chiara", name: "Chiara Rossi", picture: null },
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index 9c13fca..de536d9 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -506,6 +506,12 @@ test("uploadedImage_is_the_picture_scheme_address_of_the_key", () => {
+ 
+ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", async () => {
+   const note = "https://gitlab.example/x/-/merge_requests/12#note_7001";
++  const docs: Generated.DescriptionInline = {
++    kind: "link",
++    link: { kind: "page", page: "https://docs.example/board" },
++    inlines: [{ kind: "text", text: "docs" }],
++  };
++  const firstBody: Generated.Description = { blocks: [{ kind: "paragraph", inlines: [docs] }] };
+   const rows: Generated.RowDiscussions[] = [
+     {
+       iid: 12,
+@@ -515,6 +521,7 @@ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", as
+           {
+             id: D01,
+             place: { kind: "file", path: "src/a.ts", line: 4 },
++            first: { createdAt: "2026-10-29T08:00:00Z", body: firstBody },
+             earlier: [{ author: ANNA_RAW, mentions: [SAM_MENTION] }],
+             last: {
+               author: { username: "ben", name: "Ben Okafor", picture: { kind: "uploaded" } },
+@@ -527,6 +534,7 @@ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", as
+           {
+             id: D02,
+             place: { kind: "overview" },
++            first: { createdAt: "2026-10-29T10:00:00Z", body: { blocks: [] } },
+             earlier: [],
+             last: {
+               author: null,
+@@ -555,6 +563,7 @@ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", as
+             {
+               id: D01,
+               place: { kind: "file", path: "src/a.ts", line: 4 },
++              first: { createdAt: Date.parse("2026-10-29T08:00:00Z"), body: firstBody },
+               earlier: [
+                 {
+                   author: { username: "anna", name: "Anna Berg", picture: null },
+@@ -576,6 +585,7 @@ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", as
+             {
+               id: D02,
+               place: { kind: "overview" },
++              first: { createdAt: Date.parse("2026-10-29T10:00:00Z"), body: { blocks: [] } },
+               earlier: [],
+               last: {
+                 author: null,
+@@ -621,7 +631,13 @@ test.each([
+         answer: {
+           kind: "open",
+           discussions: [
+-            { id: D01, place: { kind: "overview" }, earlier: [], last: { ...last, ...change } },
++            {
++              id: D01,
++              place: { kind: "overview" },
++              first: { createdAt: "2026-10-29T09:00:00Z", body: { blocks: [] } },
++              earlier: [],
++              last: { ...last, ...change },
++            },
+           ],
+         },
+       },
+@@ -719,7 +735,13 @@ test("each_thread_method_calls_its_command_with_its_arguments", async () => {
+     data: {
+       kind: "read",
+       thread: {
+-        discussion: { id: D01, place: { kind: "overview" }, earlier: [], last },
++        discussion: {
++          id: D01,
++          place: { kind: "overview" },
++          first: { createdAt: "2026-11-02T09:00:00Z", body },
++          earlier: [],
++          last,
++        },
+         resolved: false,
+         comments: [
+           {
+@@ -745,7 +767,10 @@ test("each_thread_method_calls_its_command_with_its_arguments", async () => {
+     value: {
+       kind: "read",
+       thread: {
+-        discussion: { last: { author: shownBen, createdAt: Date.UTC(2026, 10, 2, 10) } },
++        discussion: {
++          first: { createdAt: Date.UTC(2026, 10, 2, 9), body },
++          last: { author: shownBen, createdAt: Date.UTC(2026, 10, 2, 10) },
++        },
+         comments: [{ author: shownBen, edited: { at: Date.UTC(2026, 10, 2, 11), by: shownBen } }],
+       },
+     },
+@@ -803,6 +828,7 @@ test("a_thread_or_preview_with_a_bad_page_throws_naming_it", async () => {
+         discussion: {
+           id: "d01",
+           place: { kind: "overview" },
++          first: { createdAt: "2026-11-02T10:00:00Z", body: { blocks: [] } },
+           earlier: [],
+           last: {
+             author: null,
+diff --git a/frontend/src/ui/mergeRequestDiscussions.test.ts b/frontend/src/ui/mergeRequestDiscussions.test.ts
+index 23783aa..02f3f74 100644
+--- a/frontend/src/ui/mergeRequestDiscussions.test.ts
++++ b/frontend/src/ui/mergeRequestDiscussions.test.ts
+@@ -68,6 +68,7 @@ beforeAll(async () => {
+   DISCUSSION = {
+     id,
+     place: { kind: "file", path: "src/board/card.ts", line: 12 },
++    first: { createdAt: 0, body: { blocks: [] } },
+     earlier: [],
+     last: { author, createdAt: 0, text: NOTE_TEXT, page, mentions: [] },
+   };
+diff --git a/frontend/src/ui/mergeRequestThread.test.ts b/frontend/src/ui/mergeRequestThread.test.ts
+index e78e447..d011b02 100644
+--- a/frontend/src/ui/mergeRequestThread.test.ts
++++ b/frontend/src/ui/mergeRequestThread.test.ts
+@@ -86,6 +86,7 @@ function discussionOf(id: DiscussionId, text = "Rename this"): OpenDiscussion {
+   return {
+     id,
+     place: { kind: "overview" },
++    first: { createdAt: 0, body: { blocks: [] } },
+     earlier: [],
+     last: { author: null, createdAt: 0, text, page: null, mentions: [] },
+   };
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index f7003b9..715eec5 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -1706,6 +1706,7 @@ function lastBy(author: Person): OpenDiscussion {
+   return {
+     id,
+     place: { kind: "overview" },
++    first: { createdAt: T0, body: { blocks: [] } },
+     earlier: [],
+     last: { author, createdAt: T0, text: "a comment", page: null, mentions: [] },
+   };

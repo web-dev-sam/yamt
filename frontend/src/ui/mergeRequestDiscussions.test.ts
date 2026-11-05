@@ -68,6 +68,7 @@ beforeAll(async () => {
   DISCUSSION = {
     id,
     place: { kind: "file", path: "src/board/card.ts", line: 12 },
+    first: { createdAt: 0, body: { blocks: [] } },
     earlier: [],
     last: { author, createdAt: 0, text: NOTE_TEXT, page, mentions: [] },
   };

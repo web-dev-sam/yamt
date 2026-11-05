@@ -1,0 +1,10 @@
+just mutants HEAD → no Rust changes; Stryker on 5 files: 521 killed, 407 survived, 4 no cov; discussionDomain.ts 100% (74/74)
+fixtureMergeRequestDiscussions.ts:154 `||`→`&&`, `false||…`, `…||false` — equivalent: first and last are both undefined exactly when comments is empty
+fixtureMergeRequestTurnCases.ts:205 `firstSerial + at`→`-` in inOrder — equivalent: 1−at===1 only at at=0; 14−at never reaches 1 over 3 cases
+fixtureMergeRequestTurnCases.ts:216 default `return null` removed — equivalent: undefined ?? personCases(seed) behaves the same
+fixtureMergeRequestTurnCases.ts:114 PERSON_FIRST_SERIAL `+`→`-` — wiring: module-level static, not re-evaluated under the vitest runner (#732)
+fixtureMergeRequestTurnCases.ts:125-129 RICH_CHANGES arrows / [] — wiring: module-level static (#732); d01 contents pinned by fixtureMergeRequestThreads tests
+fixtureMergeRequestPersonCases.ts:103 FORMATTED_FIRST [] / ()=>undefined — wiring: module-level static (#732); p1 test pins the body
+fixtureMergeRequestPersonCases.ts:23-99 FORMATTED_TEXT / PERSON_CASES literals — data, module-level static (#732); pinned by the writers/groups/hours tests
+fixtureMergeRequestData.ts:22-36 iid constants and OPEN_DISCUSSIONS — data, module-level static (#732); pinned by the counts tests
+other survivors in fixture*.ts are on unchanged pre-existing lines (static data)

@@ -506,6 +506,12 @@ test("uploadedImage_is_the_picture_scheme_address_of_the_key", () => {
 
 test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", async () => {
   const note = "https://gitlab.example/x/-/merge_requests/12#note_7001";
+  const docs: Generated.DescriptionInline = {
+    kind: "link",
+    link: { kind: "page", page: "https://docs.example/board" },
+    inlines: [{ kind: "text", text: "docs" }],
+  };
+  const firstBody: Generated.Description = { blocks: [{ kind: "paragraph", inlines: [docs] }] };
   const rows: Generated.RowDiscussions[] = [
     {
       iid: 12,
@@ -515,6 +521,7 @@ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", as
           {
             id: D01,
             place: { kind: "file", path: "src/a.ts", line: 4 },
+            first: { createdAt: "2026-10-29T08:00:00Z", body: firstBody },
             earlier: [{ author: ANNA_RAW, mentions: [SAM_MENTION] }],
             last: {
               author: { username: "ben", name: "Ben Okafor", picture: { kind: "uploaded" } },
@@ -527,6 +534,7 @@ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", as
           {
             id: D02,
             place: { kind: "overview" },
+            first: { createdAt: "2026-10-29T10:00:00Z", body: { blocks: [] } },
             earlier: [],
             last: {
               author: null,
@@ -555,6 +563,7 @@ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", as
             {
               id: D01,
               place: { kind: "file", path: "src/a.ts", line: 4 },
+              first: { createdAt: Date.parse("2026-10-29T08:00:00Z"), body: firstBody },
               earlier: [
                 {
                   author: { username: "anna", name: "Anna Berg", picture: null },
@@ -576,6 +585,7 @@ test("readDiscussions_calls_the_command_with_the_iids_and_converts_each_row", as
             {
               id: D02,
               place: { kind: "overview" },
+              first: { createdAt: Date.parse("2026-10-29T10:00:00Z"), body: { blocks: [] } },
               earlier: [],
               last: {
                 author: null,
@@ -621,7 +631,13 @@ test.each([
         answer: {
           kind: "open",
           discussions: [
-            { id: D01, place: { kind: "overview" }, earlier: [], last: { ...last, ...change } },
+            {
+              id: D01,
+              place: { kind: "overview" },
+              first: { createdAt: "2026-10-29T09:00:00Z", body: { blocks: [] } },
+              earlier: [],
+              last: { ...last, ...change },
+            },
           ],
         },
       },
@@ -719,7 +735,13 @@ test("each_thread_method_calls_its_command_with_its_arguments", async () => {
     data: {
       kind: "read",
       thread: {
-        discussion: { id: D01, place: { kind: "overview" }, earlier: [], last },
+        discussion: {
+          id: D01,
+          place: { kind: "overview" },
+          first: { createdAt: "2026-11-02T09:00:00Z", body },
+          earlier: [],
+          last,
+        },
         resolved: false,
         comments: [
           {
@@ -745,7 +767,10 @@ test("each_thread_method_calls_its_command_with_its_arguments", async () => {
     value: {
       kind: "read",
       thread: {
-        discussion: { last: { author: shownBen, createdAt: Date.UTC(2026, 10, 2, 10) } },
+        discussion: {
+          first: { createdAt: Date.UTC(2026, 10, 2, 9), body },
+          last: { author: shownBen, createdAt: Date.UTC(2026, 10, 2, 10) },
+        },
         comments: [{ author: shownBen, edited: { at: Date.UTC(2026, 10, 2, 11), by: shownBen } }],
       },
     },
@@ -803,6 +828,7 @@ test("a_thread_or_preview_with_a_bad_page_throws_naming_it", async () => {
         discussion: {
           id: "d01",
           place: { kind: "overview" },
+          first: { createdAt: "2026-11-02T10:00:00Z", body: { blocks: [] } },
           earlier: [],
           last: {
             author: null,

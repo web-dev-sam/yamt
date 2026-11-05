@@ -9,6 +9,7 @@ import {
   type Commenting,
   type DiscussionComment,
   type DiscussionNote,
+  type FirstComment,
   type Mention,
   type NoteEdit,
   type PendingDraft,
@@ -44,6 +45,7 @@ function discussion(change: Partial<Generated.OpenDiscussion> = {}): Generated.O
   return {
     id: D01,
     place: { kind: "overview" },
+    first: { createdAt: "2026-11-01T08:00:00Z", body: comment().body },
     earlier: [
       { author: BEN, mentions: [SAM_MENTION] },
       { author: null, mentions: [] },
@@ -80,9 +82,25 @@ const LAST_CONVERTED: DiscussionNote = {
   page: webPage(NOTE),
   mentions: [BEN_MENTION],
 };
+const DOCS_BODY: Description = {
+  blocks: [
+    {
+      kind: "paragraph",
+      inlines: [
+        {
+          kind: "link",
+          link: { kind: "page", page: webPage(DOCS) },
+          inlines: [{ kind: "text", text: "docs" }],
+        },
+      ],
+    },
+  ],
+};
+const FIRST_CONVERTED: FirstComment = { createdAt: Date.UTC(2026, 10, 1, 8), body: DOCS_BODY };
 const DISCUSSION_CONVERTED = {
   id: D01,
   place: { kind: "overview" },
+  first: FIRST_CONVERTED,
   earlier: EARLIER_CONVERTED,
   last: LAST_CONVERTED,
 };
@@ -119,6 +137,27 @@ test("a_bad_last_note_names_its_field", () => {
   const pageless = { ...discussion().last, page: "http://gitlab.example/x" };
   expect(() => toRowDiscussions(rowOf(discussion({ last: pageless })), 0, uploadedPicture)).toThrow(
     "rows[0].answer.discussions[0].last.page must be an https address",
+  );
+});
+
+test("the_first_comment_converts_its_time_and_brands_its_links", () => {
+  const early = { ...discussion().first, createdAt: "first thing" };
+  expect(() => toRowDiscussions(rowOf(discussion({ first: early })), 2, uploadedPicture)).toThrow(
+    'rows[2].answer.discussions[0].first.createdAt must be an ISO 8601 time, got "first thing"',
+  );
+  const link: Generated.DescriptionInline = {
+    kind: "link",
+    link: { kind: "page", page: "ftp://x" },
+    inlines: [{ kind: "text", text: "files" }],
+  };
+  const body: Generated.Description = { blocks: [{ kind: "paragraph", inlines: [link] }] };
+  const unsafe = { ...discussion().first, body };
+  expect(() => toRowDiscussions(rowOf(discussion({ first: unsafe })), 0, uploadedPicture)).toThrow(
+    'rows[0].answer.discussions[0].first.body.link.page must be an http or https address, got "ftp://x"',
+  );
+  const thread = { ...readThread(), discussion: discussion({ first: early }) };
+  expect(() => toDiscussionThreadReply({ kind: "read", thread }, uploadedPicture)).toThrow(
+    "thread.discussion.first.createdAt must be an ISO 8601 time",
   );
 });
 
@@ -166,30 +205,22 @@ function threadOf(comments: Generated.DiscussionComment[]): Generated.Discussion
 
 test("toDiscussionThreadReply_converts_times_people_pages_and_bodies", () => {
   const raw = threadOf([comment(), comment({ author: null, edited: null, page: null })]);
-  const body: Description = {
-    blocks: [
-      {
-        kind: "paragraph",
-        inlines: [
-          {
-            kind: "link",
-            link: { kind: "page", page: webPage(DOCS) },
-            inlines: [{ kind: "text", text: "docs" }],
-          },
-        ],
-      },
-    ],
-  };
   const edit: NoteEdit = { at: Date.UTC(2026, 10, 1, 11, 30), by: ANNA_CONVERTED };
   const comments: readonly DiscussionComment[] = [
     {
       author: BEN_CONVERTED,
       createdAt: Date.UTC(2026, 10, 1, 9),
       edited: edit,
-      body,
+      body: DOCS_BODY,
       page: webPage(NOTE),
     },
-    { author: null, createdAt: Date.UTC(2026, 10, 1, 9), edited: null, body, page: null },
+    {
+      author: null,
+      createdAt: Date.UTC(2026, 10, 1, 9),
+      edited: null,
+      body: DOCS_BODY,
+      page: null,
+    },
   ];
 
   expect(toDiscussionThreadReply(raw, uploadedPicture)).toEqual({

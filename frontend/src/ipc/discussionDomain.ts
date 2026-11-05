@@ -27,9 +27,16 @@ export type DiscussionNote = {
   readonly mentions: readonly Mention[];
 };
 export type TurnComment = { readonly author: Person | null; readonly mentions: readonly Mention[] };
+export type FirstComment = {
+  /** Milliseconds since 1970, from GitLab's ISO 8601 time. */
+  readonly createdAt: number;
+  readonly body: Description;
+};
 export type OpenDiscussion = {
   readonly id: DiscussionId;
   readonly place: DiscussionPlace;
+  /** The first person note (earlier[0], else last): its time and GitLab's rendering (request D1, D2). */
+  readonly first: FirstComment;
   readonly earlier: readonly TurnComment[];
   readonly last: DiscussionNote;
 };
@@ -100,6 +107,10 @@ function toDiscussion(
   return {
     id: toDiscussionId(raw.id, `${field}.id`),
     place: raw.place,
+    first: {
+      createdAt: toTime(raw.first.createdAt, `${field}.first.createdAt`),
+      body: toDescription(raw.first.body, `${field}.first.body`),
+    },
     earlier: raw.earlier.map(({ author, mentions }) => ({
       author: toAuthor(author, uploadedPicture),
       mentions,

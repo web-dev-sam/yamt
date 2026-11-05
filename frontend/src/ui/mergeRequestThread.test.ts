@@ -86,6 +86,7 @@ function discussionOf(id: DiscussionId, text = "Rename this"): OpenDiscussion {
   return {
     id,
     place: { kind: "overview" },
+    first: { createdAt: 0, body: { blocks: [] } },
     earlier: [],
     last: { author: null, createdAt: 0, text, page: null, mentions: [] },
   };

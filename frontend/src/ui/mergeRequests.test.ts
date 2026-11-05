@@ -1706,6 +1706,7 @@ function lastBy(author: Person): OpenDiscussion {
   return {
     id,
     place: { kind: "overview" },
+    first: { createdAt: T0, body: { blocks: [] } },
     earlier: [],
     last: { author, createdAt: T0, text: "a comment", page: null, mentions: [] },
   };

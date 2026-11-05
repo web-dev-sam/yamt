@@ -8,6 +8,7 @@ import {
   LOGGED_OUT_DETAIL,
   ORIGIN,
 } from "./fixtureMergeRequestData";
+import { personCases } from "./fixtureMergeRequestPersonCases";
 import { mentionsIn, renderedText, type FixtureComment } from "./fixtureMergeRequestRendering";
 import { discussionId, turnCases, type FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
 import type { Log } from "./log";
@@ -122,7 +123,8 @@ export function takeNote(store: DiscussionStore): number {
 }
 
 function seeded(store: DiscussionStore, iid: number): FixtureDiscussion[] | null {
-  const scripted = turnCases({ iid, now: store.createdAt, takeNote: () => takeNote(store) });
+  const seed = { iid, now: store.createdAt, takeNote: () => takeNote(store) };
+  const scripted = turnCases(seed) ?? personCases(seed);
   if (scripted !== null) {
     return scripted;
   }
@@ -147,14 +149,16 @@ export function storedDiscussions(store: DiscussionStore, iid: number): FixtureD
 }
 
 export function openDiscussion(discussion: FixtureDiscussion): Generated.OpenDiscussion {
+  const [first] = discussion.comments;
   const last = discussion.comments.at(-1);
-  if (last === undefined) {
+  if (first === undefined || last === undefined) {
     throw new Error(`discussion ${discussion.id} has no comment`);
   }
   const { author, createdAt, text: said, page, mentions } = last;
   return {
     id: discussion.id,
     place: discussion.place,
+    first: { createdAt: first.createdAt, body: first.body },
     earlier: discussion.comments.slice(0, -1).map((each) => ({
       author: each.author,
       mentions: each.mentions,

@@ -6,31 +6,40 @@ import {
   filtered,
   reviewing,
   reviewOrdered,
+  turnOf,
   withDraft,
   type CalendarDay,
   type Filters,
   type ReviewDetails,
 } from "../mergeRequests";
 import type * as Generated from "./bindings";
-import { toRowDiscussions } from "./discussionDomain";
+import { toRowDiscussions, type OpenDiscussion } from "./discussionDomain";
 import { TIMED_OUT } from "./fixtureGitLab";
 import {
+  ANNA_CASES_IID,
   FIXTURE_ME,
   fixtureRows,
   fixtureUploadedPicture,
+  FOLD_CASE_IID,
   LOGGED_OUT_DETAIL,
+  OTHERS_CASE_IID,
+  SAM_CASES_IID,
 } from "./fixtureMergeRequestData";
 import {
   createDiscussionStore,
   DISCUSSIONS_FAILED_IID,
   DISCUSSIONS_LOGGED_OUT_IID,
   fixtureDiscussions,
+  openDiscussion,
+  storedDiscussions,
   type DiscussionStore,
 } from "./fixtureMergeRequestDiscussions";
+import type { FixtureDiscussion } from "./fixtureMergeRequestTurnCases";
 import { toMergeRequestPage } from "./mergeRequestDomain";
 
 const LISTED = fixtureRows(0, 500);
-const TURN_CASES: ReadonlySet<number> = new Set([637, 636]);
+const PERSON_CASE_ROWS = [ANNA_CASES_IID, SAM_CASES_IID, FOLD_CASE_IID, OTHERS_CASE_IID];
+const TURN_CASES: ReadonlySet<number> = new Set([637, 636, ...PERSON_CASE_ROWS]);
 const SCRIPTED: ReadonlySet<number> = new Set([DISCUSSIONS_FAILED_IID, DISCUSSIONS_LOGGED_OUT_IID]);
 const HOUR_MS = 3_600_000;
 const LONG_LINE = 400;
@@ -51,8 +60,8 @@ function openOf(
 const UNSCRIPTED = LISTED.filter((row) => !SCRIPTED.has(row.iid));
 const GENERATED = UNSCRIPTED.filter((row) => !TURN_CASES.has(row.iid));
 
-function everyDiscussion(): readonly Generated.OpenDiscussion[] {
-  return GENERATED.flatMap((row) => openOf(row.iid));
+function everyDiscussion(store: DiscussionStore): readonly Generated.OpenDiscussion[] {
+  return GENERATED.flatMap((row) => openOf(row.iid, store));
 }
 
 function isSams(discussion: Generated.OpenDiscussion | undefined): boolean {
@@ -67,12 +76,15 @@ test("every_listed_row_with_open_discussions_has_that_many", () => {
 });
 
 test("every_discussion_id_is_40_hex_and_unique_and_only_the_due_rows_ask_their_reviewer", () => {
-  const ids = UNSCRIPTED.flatMap((row) => openOf(row.iid).map((discussion) => discussion.id));
+  const store = createDiscussionStore(500);
+  const ids = UNSCRIPTED.flatMap((row) =>
+    openOf(row.iid, store).map((discussion) => discussion.id),
+  );
   expect(ids.every((id) => /^[0-9a-f]{40}$/u.test(id))).toBe(true);
   expect(new Set(ids).size).toBe(ids.length);
-  expect(everyDiscussion().every((discussion) => discussion.earlier.length === 0)).toBe(true);
+  expect(everyDiscussion(store).every((discussion) => discussion.earlier.length === 0)).toBe(true);
   const asking = GENERATED.flatMap((row) =>
-    openOf(row.iid)
+    openOf(row.iid, store)
       .filter((discussion) => discussion.last.mentions.length > 0)
       .map(
         ({ last }) =>
@@ -95,12 +107,13 @@ test("every_listed_row_with_open_discussions_has_that_many", () => {
 });
 
 test("both_turns_occur_for_sam_and_some_rows_wait_only", () => {
+  const store = createDiscussionStore(500);
   const pairs = GENERATED.filter((row) => row.openDiscussions === 2);
-  const opens = GENERATED.map((row) => openOf(row.iid)).filter((open) => open.length > 0);
+  const opens = GENERATED.map((row) => openOf(row.iid, store)).filter((open) => open.length > 0);
 
   expect(pairs.length).toBeGreaterThan(0);
   for (const row of pairs) {
-    const [first, second] = openOf(row.iid);
+    const [first, second] = openOf(row.iid, store);
     expect(row.reviewers[0]).toBeDefined();
     expect(second?.last.author).toEqual(row.reviewers[0]?.person);
     expect(Date.parse(second?.last.createdAt ?? "")).toBeGreaterThan(
@@ -113,7 +126,7 @@ test("both_turns_occur_for_sam_and_some_rows_wait_only", () => {
 });
 
 test("the_markup_text_and_a_pageless_discussion_exist", () => {
-  const all = everyDiscussion();
+  const all = everyDiscussion(createDiscussionStore(500));
   const texts = all.map((discussion) => discussion.last.text);
 
   expect(texts).toContain(MARKUP);
@@ -280,4 +293,190 @@ test("the_review_orders_the_smoke_expects", () => {
     review: "!638 !635 !630 !615 !614 !605",
     failed: 615,
   });
+});
+
+test("every_discussion_starts_with_its_first_comment", () => {
+  const store = createDiscussionStore(500);
+  for (const row of UNSCRIPTED) {
+    const comments = (storedDiscussions(store, row.iid) ?? []).map(({ comments: [first] }) => ({
+      createdAt: first?.createdAt,
+      body: first?.body,
+    }));
+    expect(openOf(row.iid, store).map((discussion) => discussion.first)).toEqual(comments);
+  }
+  const [p1] = openOf(ANNA_CASES_IID, store);
+  expect(p1?.first.createdAt).not.toBe(p1?.last.createdAt);
+});
+
+test("the_person_cases_have_their_writers_in_order", () => {
+  const store = createDiscussionStore(500);
+
+  expect(PERSON_CASE_ROWS.map((iid) => openOf(iid, store).map(said))).toEqual([
+    ["anna ben chiara dmitri", "sam anna", "anna ben anna"],
+    ["sam chiara sam", "ben chiara sam"],
+    ["ben chiara dmitri anna deleted ben dmitri chiara anna ben deleted dmitri ben chiara"],
+    ["dmitri chiara"],
+  ]);
+  expect(openOf(FOLD_CASE_IID, store)[0]?.earlier).toHaveLength(13);
+  expect(PERSON_CASE_ROWS.flatMap((iid) => openOf(iid, store).map(({ id }) => id))).toEqual(
+    Array.from({ length: 7 }, (_, at) => String(at + 17).padStart(40, "0")),
+  );
+});
+
+test("the_person_cases_last_comments_are_at_distinct_hours_seventeen_to_twenty_three", () => {
+  const now = Date.parse("2026-11-04T12:00:00Z");
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(now);
+  const store = createDiscussionStore(500);
+  const cases = PERSON_CASE_ROWS.flatMap((iid) => openOf(iid, store));
+  vi.useRealTimers();
+
+  expect(cases.map(({ last }) => (now - Date.parse(last.createdAt)) / HOUR_MS)).toEqual([
+    17, 18, 19, 20, 21, 22, 23,
+  ]);
+  expect(cases.map(({ first }) => (now - Date.parse(first.createdAt)) / HOUR_MS)).toEqual([
+    48, 48, 48, 48, 48, 48, 48,
+  ]);
+});
+
+function plainText(inline: Generated.DescriptionInline): string {
+  switch (inline.kind) {
+    case "text":
+    case "code":
+      return inline.text;
+    case "image":
+      return inline.caption;
+    case "lineBreak":
+      return "\n";
+    case "emphasis":
+    case "strong":
+    case "strike":
+    case "link":
+      return inline.inlines.map(plainText).join("");
+    default: {
+      const _exhaustive: never = inline;
+      return _exhaustive;
+    }
+  }
+}
+
+test("p1_starts_with_a_formatted_six_line_comment_and_p2_with_a_plain_one", () => {
+  const [p1, p2] = openOf(ANNA_CASES_IID);
+  const lines = (p1?.first.body.blocks ?? []).map((block) =>
+    block.kind === "paragraph" ? block.inlines : [],
+  );
+  const inlines = lines.flat();
+
+  expect(lines.map((line) => line.map(plainText).join(""))).toEqual([
+    "The reminder list needs a second look.",
+    "The snoozeUntil field is never cleared.",
+    "See the import notes first.",
+    "the reminder list",
+    "Five lines in, the box cuts here.",
+    "And this sixth line is hidden too.",
+  ]);
+  expect(inlines.map((inline) => inline.kind)).toEqual([
+    "text",
+    "strong",
+    "text",
+    "text",
+    "code",
+    "text",
+    "text",
+    "link",
+    "text",
+    "image",
+    "text",
+    "text",
+  ]);
+  expect(inlines.find((inline) => inline.kind === "link")).toMatchObject({
+    link: { kind: "page", page: "https://gitlab.example/taskboard/taskboard/-/wikis/import" },
+  });
+  expect(inlines.find((inline) => inline.kind === "image")).toMatchObject({
+    size: { kind: "width", width: { kind: "pixels", value: 160 } },
+  });
+  expect(p1?.last.text).toBe("I'll add a test for archiving.");
+  expect(p2?.first.body).toEqual({
+    blocks: [
+      {
+        kind: "paragraph",
+        inlines: [{ kind: "text", text: "Should the snooze menu remember the last choice?" }],
+      },
+    ],
+  });
+});
+
+test("a_discussion_without_comments_throws_naming_it", () => {
+  const empty: FixtureDiscussion = {
+    id: "d99",
+    place: { kind: "overview" },
+    mayResolve: true,
+    resolved: false,
+    comments: [],
+    drafts: [],
+  };
+  expect(() => openDiscussion(empty)).toThrow("discussion d99 has no comment");
+});
+
+function converted(iid: number, store: DiscussionStore): readonly OpenDiscussion[] {
+  const { answer } = toRowDiscussions(
+    { iid, answer: fixtureDiscussions(iid, store) },
+    0,
+    fixtureUploadedPicture,
+  );
+  return answer.kind === "open" ? answer.discussions : [];
+}
+
+type Group = "turn" | "started" | "wrote" | "reviewer or other";
+
+function groupOf(discussion: OpenDiscussion, viewer: string, author: string | null): Group {
+  if (turnOf(discussion, viewer, author).kind === "viewer") {
+    return "turn";
+  }
+  const writers = [...discussion.earlier, discussion.last].map(
+    (comment) => comment.author?.username,
+  );
+  if (writers[0] === viewer) {
+    return "started";
+  }
+  return writers.includes(viewer) ? "wrote" : "reviewer or other";
+}
+
+test("the_person_cases_fall_in_the_groups_the_design_names_for_sam_and_anna", () => {
+  const store = createDiscussionStore(500);
+  const groups = PERSON_CASE_ROWS.flatMap((iid) => {
+    const author = LISTED.find((row) => row.iid === iid)?.author?.username ?? null;
+    return converted(iid, store).map((discussion) => [
+      groupOf(discussion, FIXTURE_ME, author),
+      groupOf(discussion, "anna", author),
+    ]);
+  });
+
+  expect(groups).toEqual([
+    ["reviewer or other", "turn"],
+    ["turn", "wrote"],
+    ["reviewer or other", "started"],
+    ["started", "reviewer or other"],
+    ["wrote", "reviewer or other"],
+    ["reviewer or other", "turn"],
+    ["reviewer or other", "reviewer or other"],
+  ]);
+});
+
+test("the_listed_rows_give_sam_and_anna_each_a_reviewer_group_discussion", () => {
+  const store = createDiscussionStore(SMOKE_ROWS);
+  function reviewerGroup(viewer: string): string[] {
+    return fixtureRows(0, SMOKE_ROWS)
+      .filter(({ reviewers }) => reviewers.some(({ person }) => person.username === viewer))
+      .filter(({ author }) => author?.username !== viewer)
+      .filter(({ iid }) =>
+        converted(iid, store).some(
+          (discussion) => groupOf(discussion, viewer, null) === "reviewer or other",
+        ),
+      )
+      .map(({ iid }) => `!${iid}`);
+  }
+
+  expect(reviewerGroup(FIXTURE_ME)).toContain("!638");
+  expect(reviewerGroup("anna")).toContain("!632");
 });

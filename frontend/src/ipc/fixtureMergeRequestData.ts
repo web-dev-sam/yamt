@@ -19,9 +19,20 @@ export const THREADS_IID = 637;
 export const LOCKED_THREADS_IID = 636;
 const THREADS_DISCUSSIONS = 13;
 const LOCKED_DISCUSSIONS = 3;
+/** The rows whose discussions are the person view's cases (`fixtureMergeRequestTurnCases.ts` `PERSON_CASES`). */
+export const ANNA_CASES_IID = 624;
+export const SAM_CASES_IID = 628;
+export const FOLD_CASE_IID = 609;
+export const OTHERS_CASE_IID = 607;
+const ANNA_CASES = 3;
+const SAM_CASES = 2;
 const OPEN_DISCUSSIONS: Readonly<Record<number, number>> = {
   [THREADS_IID]: THREADS_DISCUSSIONS,
   [LOCKED_THREADS_IID]: LOCKED_DISCUSSIONS,
+  [ANNA_CASES_IID]: ANNA_CASES,
+  [SAM_CASES_IID]: SAM_CASES,
+  [FOLD_CASE_IID]: 1,
+  [OTHERS_CASE_IID]: 1,
 };
 const NEWEST_CREATED = Date.parse("2026-10-30T09:00:00Z");
 const CREATED_STEP_MS = 21_600_000;

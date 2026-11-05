@@ -130,7 +130,14 @@ test("the list holds every case the page filters and shows (catches a fixture th
     newest - 6 * hour,
     newest - 24 * hour,
   ]);
-  const turnCases: Readonly<Record<number, number>> = { 637: 13, 636: 3 };
+  const turnCases: Readonly<Record<number, number>> = {
+    637: 13,
+    636: 3,
+    624: 3,
+    628: 2,
+    609: 1,
+    607: 1,
+  };
   expect(rows.map((row) => [row.openDiscussions, row.approvedBy.length])).toEqual(
     Array.from({ length: 40 }, (_, at) => [turnCases[640 - at] ?? at % 3, at % 4]),
   );
@@ -519,6 +526,17 @@ test("discussions_answer_a_prefix_of_ten_after_400_ms_and_log_the_ask", async ()
       {
         id: "63900".padStart(40, "0"),
         place: { kind: "file", path: "src/board/card.ts", line: 11 },
+        first: {
+          createdAt: Date.parse("2026-10-30T04:00:00Z"),
+          body: {
+            blocks: [
+              {
+                kind: "paragraph",
+                inlines: [{ kind: "text", text: "Could you look at this again?" }],
+              },
+            ],
+          },
+        },
         earlier: [],
         last: {
           author: { username: "chiara", name: "Chiara Rossi", picture: null },
