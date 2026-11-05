@@ -76,6 +76,7 @@ test("known_people_come_before_found_people", () => {
     "anna2",
     "adam",
   ]);
+  expect(usernames(mentionLines([DSCOTT], [ANNA], "an"))).toEqual(["dscott", "anna"]);
 });
 
 test("starts_with_comes_before_contains_in_each_group", () => {
@@ -111,6 +112,13 @@ test("at_most_ten_lines", () => {
 test("a_blank_text_lists_every_known_person_and_no_found_one", () => {
   expect(usernames(mentionLines([BEN, ANNA, BEN], [ADAM], ""))).toEqual(["ben", "anna"]);
   expect(usernames(mentionLines([BEN, ANNA], [ADAM], " "))).toEqual(["ben", "anna"]);
+});
+
+test("a_blank_text_lists_at_most_ten_known_people", () => {
+  const known = Array.from({ length: 12 }, (_, index) => person(`writer${index}`, "Wren"));
+  const lines = mentionLines(known, [], "");
+  expect(lines).toHaveLength(MENTION_LINES);
+  expect(usernames(lines)).toEqual(usernames(known.slice(0, MENTION_LINES)));
 });
 
 test("known_mentions_are_the_row_then_the_writers_each_once", () => {
