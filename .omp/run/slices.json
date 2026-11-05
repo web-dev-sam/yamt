@@ -1,5 +1,5 @@
 {
-  "MrReviewFixes": {
+  "MrReviewFixesR1": {
     "owned": [
       "frontend/src/mergeRequests/internal/discussions.ts",
       "frontend/src/mergeRequests/internal/discussions.test.ts",
@@ -13,7 +13,15 @@
       "frontend/src/ui/MergeRequestsPage.test.ts",
       "frontend/src/ui/AGENTS.md",
       "frontend/src/ui/mergeRequests.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts"
+      "frontend/src/ipc/fixtureMergeRequestDiscussions.test.ts",
+      "frontend/src/mergeRequests/internal/order.ts",
+      "frontend/src/mergeRequests/internal/order.test.ts",
+      "frontend/src/ui/mergeRequestsShown.ts",
+      "frontend/src/ui/mergeRequestsShown.test.ts",
+      "frontend/src/ui/MergeRequestThread.vue",
+      "frontend/src/ui/MergeRequestThreadPanel.test.ts",
+      "frontend/src/ui/mergeRequestThread.ts",
+      "frontend/src/ui/mergeRequestThread.test.ts"
     ]
   }
 }
