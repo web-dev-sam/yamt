@@ -15,6 +15,7 @@ import {
   type ReviewState,
   type Reviewer,
 } from "../index";
+import { eachUsernameOnce } from "./people";
 
 const SAM: Person = { username: "sam", name: "Sam Lee" };
 const ANNA: Person = { username: "anna", name: "Anna Berg" };
@@ -34,6 +35,13 @@ test("the stack shows assignees first, then reviewers not assigned, each once", 
   const stack = peopleStack([SAM], [reviewing(ANNA), reviewing(SAM, "approved")]);
   expect(usernames(stack.shown)).toEqual(["sam", "anna"]);
   expect(stack.more).toBe(0);
+});
+
+test("each username once keeps the first, in order", () => {
+  const anna2: Person = { username: "anna", name: "Anna Second" };
+  const once = eachUsernameOnce([BOB, ANNA, SAM, anna2, BOB]);
+  expect(usernames(once)).toEqual(["bob", "anna", "sam"]);
+  expect(once[1]).toBe(ANNA);
 });
 
 test("the stack shows three and counts the rest", () => {

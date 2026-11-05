@@ -1,0 +1,2 @@
+just mutants HEAD → mentions.ts 95 killed/2 survived, people.ts 52/11, personDiscussions.ts 106/6; total 253 killed, 19 survived, score 93.01
+

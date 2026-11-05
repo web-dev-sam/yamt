@@ -222,6 +222,8 @@ test("the_fold_keeps_the_newest_writers", () => {
   expect(foldedWriters(writers, 0)).toEqual({ folded: writers, shown: [] });
   expect(foldedWriters([1], 0)).toEqual({ folded: [], shown: [1] });
   expect(foldedWriters([1, 2], 1)).toEqual({ folded: [1, 2], shown: [] });
+  expect(foldedWriters(writers, 3.5)).toEqual({ folded: [1, 2, 3, 4], shown: [5, 6] });
+  expect(foldedWriters([1, 2], 1.5)).toEqual({ folded: [1, 2], shown: [] });
 });
 
 function marked(lines: readonly PersonLine<Person>[]): readonly [string, boolean][] {

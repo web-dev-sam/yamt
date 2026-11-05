@@ -1,0 +1,151 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index 5cb29de..9d8224d 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -10,7 +10,7 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ 
+ `calendar`: the picker's month (`CalendarMonth`, month 1–12): `monthGrid` the 42 `GridDay`s of six weeks from the Monday on or before the 1st (`inMonth` false for the neighbouring months' days), `WEEKDAYS` `Mo`…`Su` (weeks start on Monday), `addDays`, `addMonths` (clamped to the target month's last day: 31 January + 1 is 28/29 February), `movedDay` (the WAI-ARIA date-picker keys: arrows a day or a week, Home/End the week's Monday/Sunday, PageUp/PageDown a month, with Shift a year, clamped; any other key `null`), `sameDay`, `monthOf`, `monthCaption` "November 2026" and `dayName` "Tuesday, 3 November 2026" (English words read in UTC, so every zone names the stored day).
+ 
+-`people`: `peopleStack` (assignees, then reviewers not assigned; `STACK_SHOWN` 3, the rest as `more`), `displayName` (the username when the name is blank), `initials` (first letters of two words), `pictureHue` (0–359 from the username), `reviewStateText`, `reviewDone` (reviewed, approved or changes requested: GitLab's "Re-request review" applies), `authorText`, `approversText` (one name per line; "No approvals"), `NO_PEOPLE_TEXT`.
++`people`: `peopleStack` (assignees, then reviewers not assigned; `STACK_SHOWN` 3, the rest as `more`), `displayName` (the username when the name is blank), `initials` (first letters of two words), `pictureHue` (0–359 from the username), `reviewStateText`, `reviewDone` (reviewed, approved or changes requested: GitLab's "Re-request review" applies), `authorText`, `approversText` (one name per line; "No approvals"), `NO_PEOPLE_TEXT`; internal `eachUsernameOnce` (the first of each username, order kept), shared by `mentions` and `personDiscussions`.
+ 
+ `labels`: `labelsShown` (the first label in GitLab's order and the rest), `moreText` "+N" (labels and the people stack).
+ 
+@@ -28,4 +28,4 @@ People on a merge request (request `docs/slices/request-mr-people.md` rule 2, de
+ 
+ Mentions (request `docs/slices/request-mr-mentions.md` rules 1, 2, 4, design `docs/slices/briefs/mr-mentions-design.md` option A §2.1–2.2, plan §2 #191–#192): `mentionWordAt(text, caret)` is rule 1, the `MentionWord` being typed or null: scanning back from the caret over word characters (code points matching `[\p{L}\p{N}_.-]`) must reach an `@` that starts the text or follows whitespace, `(`, `[` or `{` (so `a@b.c` is no mention, RK76); `typed` is the text between the `@` and the caret, `end` the caret plus the word characters after it; a caret outside the text is null. `knownMentions(row, writers)` is the merge request's people for a field: the row's author, assignees, reviewers and approvers (reusing `suggestions`'s `peopleOnRow`), then the non-null writers, each username once, in that order; a null row gives the writers only. `mentionLines(known, found, typed)` is rule 2's list: the known people matching `typed`, then the found ones; a person's terms are the name without its spaces and the username, lower-cased; inside each group those with a term starting with the typed text come before those whose `"<name term> <username term>"` contains it (order kept); each username once, the first wins; at most `MENTION_LINES` (10, GitLab's `gfm_auto_complete.js` `limit`). A blank `typed` lists every known person and no found one. `mentionEdit(word, username)` is rule 4: it replaces the whole word, `start` to `end`, with `"@<username> "` (one space).
+ 
+-One person's discussions (request `docs/slices/request-mr-person-discussions.md` B2, C2–C3, D3–D4, design `briefs/mr-person-discussions-design.md` option A §2.4, plan §2 #193): `personGroupOf(discussion, person, row)` is C2, the first `PersonGroup` that applies, in `PERSON_GROUPS` order: `turn` when `turnOf` with the person as the viewer and the row's author is `viewer`; `started` when `discussions`'s `starterOf` is the person; `wrote` when its `wroteIn`; `reviewer` when the row's reviewers name the person; else `other` (imported, never copied; a null person or a deleted writer is never the person, so a null person is always `other`). `personEntries(listed, person)` is every discussion of every listed row as a `PersonEntry` (row, discussion, group, turn), by group, then newest `last.createdAt` first; equal keys keep the input order (rows as listed, discussions as given). `keptInPlace(previous, next, held, keyOf)` (C3): a held item stays at its index in `previous`, taking its `next` version; the others fill the rest in `next`'s order; a held item missing from `next` is dropped; it is shared by the rows (by iid) and the entries (by discussion id). `laterWriters(discussion)` is D3, the writers after the first comment, oldest first: `[...earlier.slice(1), last]` when `earlier` is non-empty, else none; a person writing twice shows twice. `foldedWriters(writers, fits)` is D4: all when they fit; else the newest `max(fits − 1, 0)` shown and the rest `folded` (the "+N" takes the first slot); `fits` below 1 counts as 1. `personLines(rows, writers, me, chosen)` is B2's menu: "Me" (`ME_WORD`) first when there is a viewer, then every other username once from `peopleOnRow` of the rows and the non-null writers (`mentions`'s `knownMentions`), by `displayName` (`localeCompare` "en"), each a `PersonLine` with its value, label, person (null for a Me nobody listed has) and `chosen` (a person whose username is `me` is Me). `narrowed` reads only `label`, so it takes these lines as well as `Choice`s.
++One person's discussions (request `docs/slices/request-mr-person-discussions.md` B2, C2–C3, D3–D4, design `briefs/mr-person-discussions-design.md` option A §2.4, plan §2 #193): `personGroupOf(discussion, person, row)` is C2, the first `PersonGroup` that applies, in `PERSON_GROUPS` order: `turn` when `turnOf` with the person as the viewer and the row's author is `viewer`; `started` when `discussions`'s `starterOf` is the person; `wrote` when its `wroteIn`; `reviewer` when the row's reviewers name the person; else `other` (imported, never copied; a null person or a deleted writer is never the person, so a null person is always `other`). `personEntries(listed, person)` is every discussion of every listed row as a `PersonEntry` (row, discussion, group, turn), by group, then newest `last.createdAt` first; equal keys keep the input order (rows as listed, discussions as given). `keptInPlace(previous, next, held, keyOf)` (C3): a held item stays at its index in `previous`, taking its `next` version; the others fill the rest in `next`'s order; a held item missing from `next` is dropped; it is shared by the rows (by iid) and the entries (by discussion id). `laterWriters(discussion)` is D3, the writers after the first comment, oldest first: `[...earlier.slice(1), last]` when `earlier` is non-empty, else none; a person writing twice shows twice. `foldedWriters(writers, fits)` is D4: all when they fit; else the newest `max(fits − 1, 0)` shown and the rest `folded` (the "+N" takes the first slot); `fits` is floored, and below 1 counts as 1. `personLines(rows, writers, me, chosen)` is B2's menu: "Me" (`ME_WORD`) first when there is a viewer, then every other username once from `peopleOnRow` of the rows and the non-null writers (`people`'s `eachUsernameOnce`), by `displayName` (`localeCompare` "en"), each a `PersonLine` with its value, label, person (null for a Me nobody listed has) and `chosen` (a person whose username is `me` is Me). `narrowed` reads only `label`, so it takes these lines as well as `Choice`s.
+diff --git a/frontend/src/mergeRequests/internal/mentions.ts b/frontend/src/mergeRequests/internal/mentions.ts
+index 3656268..1ec8495 100644
+--- a/frontend/src/mergeRequests/internal/mentions.ts
++++ b/frontend/src/mergeRequests/internal/mentions.ts
+@@ -1,4 +1,5 @@
+ import type { Person } from "./filters";
++import { eachUsernameOnce } from "./people";
+ import { peopleOnRow, type KnownPeople } from "./suggestions";
+ 
+ /** GitLab's `@` list shows 10 lines (gfm_auto_complete.js `limit: 10`, request rule 2). */
+@@ -29,15 +30,6 @@ export function mentionWordAt(text: string, caret: number): MentionWord | null {
+   return { start, end, typed: text.slice(start + 1, caret) };
+ }
+ 
+-function eachUsernameOnce<P extends Person>(people: readonly P[]): readonly P[] {
+-  const seen = new Set<string>();
+-  return people.filter((person) => {
+-    const first = !seen.has(person.username);
+-    seen.add(person.username);
+-    return first;
+-  });
+-}
+-
+ /** The merge request's people for a field (rule 2): `row`'s author, assignees, reviewers, approvers (suggestions'
+  *  `peopleOnRow`), then the non-null `writers`, each username once, in that order; a null `row`: the writers only. */
+ export function knownMentions<P extends Person>(
+diff --git a/frontend/src/mergeRequests/internal/people.test.ts b/frontend/src/mergeRequests/internal/people.test.ts
+index 32fe620..f95e22a 100644
+--- a/frontend/src/mergeRequests/internal/people.test.ts
++++ b/frontend/src/mergeRequests/internal/people.test.ts
+@@ -15,6 +15,7 @@ import {
+   type ReviewState,
+   type Reviewer,
+ } from "../index";
++import { eachUsernameOnce } from "./people";
+ 
+ const SAM: Person = { username: "sam", name: "Sam Lee" };
+ const ANNA: Person = { username: "anna", name: "Anna Berg" };
+@@ -36,6 +37,13 @@ test("the stack shows assignees first, then reviewers not assigned, each once",
+   expect(stack.more).toBe(0);
+ });
+ 
++test("each username once keeps the first, in order", () => {
++  const anna2: Person = { username: "anna", name: "Anna Second" };
++  const once = eachUsernameOnce([BOB, ANNA, SAM, anna2, BOB]);
++  expect(usernames(once)).toEqual(["bob", "anna", "sam"]);
++  expect(once[1]).toBe(ANNA);
++});
++
+ test("the stack shows three and counts the rest", () => {
+   expect(STACK_SHOWN).toBe(3);
+   const stack = peopleStack([SAM, ANNA], [reviewing(BOB), reviewing(ZOE), reviewing(ANNA)]);
+diff --git a/frontend/src/mergeRequests/internal/people.ts b/frontend/src/mergeRequests/internal/people.ts
+index 2c5e8a4..c40203d 100644
+--- a/frontend/src/mergeRequests/internal/people.ts
++++ b/frontend/src/mergeRequests/internal/people.ts
+@@ -39,6 +39,16 @@ export function displayName(person: Person): string {
+   return person.name.trim() === "" ? person.username : person.name;
+ }
+ 
++/** Each username once, the first wins, order kept. */
++export function eachUsernameOnce<P extends Person>(people: readonly P[]): readonly P[] {
++  const seen = new Set<string>();
++  return people.filter((person) => {
++    const first = !seen.has(person.username);
++    seen.add(person.username);
++    return first;
++  });
++}
++
+ export function initials(person: Person): string {
+   return displayName(person)
+     .trim()
+diff --git a/frontend/src/mergeRequests/internal/personDiscussions.test.ts b/frontend/src/mergeRequests/internal/personDiscussions.test.ts
+index aefb2f9..02cdc97 100644
+--- a/frontend/src/mergeRequests/internal/personDiscussions.test.ts
++++ b/frontend/src/mergeRequests/internal/personDiscussions.test.ts
+@@ -222,6 +222,8 @@ test("the_fold_keeps_the_newest_writers", () => {
+   expect(foldedWriters(writers, 0)).toEqual({ folded: writers, shown: [] });
+   expect(foldedWriters([1], 0)).toEqual({ folded: [], shown: [1] });
+   expect(foldedWriters([1, 2], 1)).toEqual({ folded: [1, 2], shown: [] });
++  expect(foldedWriters(writers, 3.5)).toEqual({ folded: [1, 2, 3, 4], shown: [5, 6] });
++  expect(foldedWriters([1, 2], 1.5)).toEqual({ folded: [1, 2], shown: [] });
+ });
+ 
+ function marked(lines: readonly PersonLine<Person>[]): readonly [string, boolean][] {
+diff --git a/frontend/src/mergeRequests/internal/personDiscussions.ts b/frontend/src/mergeRequests/internal/personDiscussions.ts
+index fb0653a..2979fed 100644
+--- a/frontend/src/mergeRequests/internal/personDiscussions.ts
++++ b/frontend/src/mergeRequests/internal/personDiscussions.ts
+@@ -8,8 +8,7 @@ import {
+   type Viewer,
+ } from "./discussions";
+ import { ME_WORD, type Person } from "./filters";
+-import { knownMentions } from "./mentions";
+-import { displayName } from "./people";
++import { displayName, eachUsernameOnce } from "./people";
+ import { peopleOnRow, type KnownPeople } from "./suggestions";
+ 
+ /** Request C2, in this order. */
+@@ -106,15 +105,16 @@ export function laterWriters<P extends Person>(discussion: {
+ }
+ 
+ /** D4: all when `writers.length <= fits`; else the newest `max(fits − 1, 0)` shown and the rest `folded` (the "+N"
+- *  takes the first slot). `fits` < 1 counts as 1. */
++ *  takes the first slot). `fits` is floored; below 1 it counts as 1. */
+ export function foldedWriters<P>(
+   writers: readonly P[],
+   fits: number,
+ ): { readonly folded: readonly P[]; readonly shown: readonly P[] } {
+-  if (writers.length <= Math.max(fits, 1)) {
++  const slots = Math.max(Math.floor(fits), 1);
++  if (writers.length <= slots) {
+     return { folded: [], shown: writers };
+   }
+-  const cut = writers.length - Math.max(fits - 1, 0);
++  const cut = writers.length - (slots - 1);
+   return { folded: writers.slice(0, cut), shown: writers.slice(cut) };
+ }
+ 
+@@ -127,7 +127,10 @@ export function personLines<P extends Person>(
+   me: string | null,
+   chosen: Viewer,
+ ): readonly PersonLine<P>[] {
+-  const known = knownMentions(null, [...rows.flatMap(peopleOnRow), ...writers]);
++  const known = eachUsernameOnce([
++    ...rows.flatMap(peopleOnRow),
++    ...writers.filter((writer) => writer !== null),
++  ]);
+   const mine: readonly PersonLine<P>[] =
+     me === null
+       ? []

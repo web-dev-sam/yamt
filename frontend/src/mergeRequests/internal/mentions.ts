@@ -1,4 +1,5 @@
 import type { Person } from "./filters";
+import { eachUsernameOnce } from "./people";
 import { peopleOnRow, type KnownPeople } from "./suggestions";
 
 /** GitLab's `@` list shows 10 lines (gfm_auto_complete.js `limit: 10`, request rule 2). */
@@ -27,15 +28,6 @@ export function mentionWordAt(text: string, caret: number): MentionWord | null {
   const wordStop = text.slice(caret).search(/[^\p{L}\p{N}_.-]/u);
   const end = wordStop < 0 ? text.length : caret + wordStop;
   return { start, end, typed: text.slice(start + 1, caret) };
-}
-
-function eachUsernameOnce<P extends Person>(people: readonly P[]): readonly P[] {
-  const seen = new Set<string>();
-  return people.filter((person) => {
-    const first = !seen.has(person.username);
-    seen.add(person.username);
-    return first;
-  });
 }
 
 /** The merge request's people for a field (rule 2): `row`'s author, assignees, reviewers, approvers (suggestions'

@@ -8,8 +8,7 @@ import {
   type Viewer,
 } from "./discussions";
 import { ME_WORD, type Person } from "./filters";
-import { knownMentions } from "./mentions";
-import { displayName } from "./people";
+import { displayName, eachUsernameOnce } from "./people";
 import { peopleOnRow, type KnownPeople } from "./suggestions";
 
 /** Request C2, in this order. */
@@ -106,15 +105,16 @@ export function laterWriters<P extends Person>(discussion: {
 }
 
 /** D4: all when `writers.length <= fits`; else the newest `max(fits − 1, 0)` shown and the rest `folded` (the "+N"
- *  takes the first slot). `fits` < 1 counts as 1. */
+ *  takes the first slot). `fits` is floored; below 1 it counts as 1. */
 export function foldedWriters<P>(
   writers: readonly P[],
   fits: number,
 ): { readonly folded: readonly P[]; readonly shown: readonly P[] } {
-  if (writers.length <= Math.max(fits, 1)) {
+  const slots = Math.max(Math.floor(fits), 1);
+  if (writers.length <= slots) {
     return { folded: [], shown: writers };
   }
-  const cut = writers.length - Math.max(fits - 1, 0);
+  const cut = writers.length - (slots - 1);
   return { folded: writers.slice(0, cut), shown: writers.slice(cut) };
 }
 
@@ -127,7 +127,10 @@ export function personLines<P extends Person>(
   me: string | null,
   chosen: Viewer,
 ): readonly PersonLine<P>[] {
-  const known = knownMentions(null, [...rows.flatMap(peopleOnRow), ...writers]);
+  const known = eachUsernameOnce([
+    ...rows.flatMap(peopleOnRow),
+    ...writers.filter((writer) => writer !== null),
+  ]);
   const mine: readonly PersonLine<P>[] =
     me === null
       ? []

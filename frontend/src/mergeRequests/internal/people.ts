@@ -39,6 +39,16 @@ export function displayName(person: Person): string {
   return person.name.trim() === "" ? person.username : person.name;
 }
 
+/** Each username once, the first wins, order kept. */
+export function eachUsernameOnce<P extends Person>(people: readonly P[]): readonly P[] {
+  const seen = new Set<string>();
+  return people.filter((person) => {
+    const first = !seen.has(person.username);
+    seen.add(person.username);
+    return first;
+  });
+}
+
 export function initials(person: Person): string {
   return displayName(person)
     .trim()
