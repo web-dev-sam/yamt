@@ -4606,7 +4606,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-agent"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "serde",
  "specta",
@@ -4621,7 +4621,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-app"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "gtk",
  "serde",
@@ -4647,7 +4647,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-cli"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "proptest",
  "serde_json",
@@ -4661,7 +4661,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-compare"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4673,7 +4673,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-conflict-repo"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "tempfile",
  "thiserror 2.0.21",
@@ -4681,7 +4681,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-gitio"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "serde_json",
  "tempfile",
@@ -4692,7 +4692,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-local-merge"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4706,7 +4706,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-lsp-host"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "serde",
  "specta",
@@ -4716,7 +4716,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-merge-core"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "imara-diff",
  "proptest",
@@ -4726,7 +4726,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-merge-requests"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "dom_query",
  "serde",
@@ -4743,7 +4743,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-pipe"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "serde",
  "specta",
@@ -4753,7 +4753,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-range"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "serde",
  "specta",
@@ -4766,7 +4766,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-review"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4782,7 +4782,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-session"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "serde",
  "specta",
@@ -4795,7 +4795,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-settings"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_json",
