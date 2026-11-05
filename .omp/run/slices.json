@@ -1,21 +1,20 @@
 {
-  "MrMentionsCore": {
+  "MrMentionsList": {
     "owned": [
-      "frontend/src/mergeRequests/internal/mentions.ts",
-      "frontend/src/mergeRequests/internal/mentions.test.ts",
-      "frontend/src/mergeRequests/internal/suggestions.ts",
-      "frontend/src/mergeRequests/index.ts",
-      "frontend/src/mergeRequests/AGENTS.md"
-    ]
-  },
-  "MrMentionsSearch": {
-    "owned": [
-      "frontend/src/ui/mergeRequestPeople.ts",
-      "frontend/src/ui/mergeRequestPeople.test.ts",
-      "frontend/src/ui/mergeRequests.ts",
-      "frontend/src/ui/mergeRequests.test.ts",
-      "frontend/src/ui/MergeRequestPeople.vue",
-      "frontend/src/ui/MergeRequestPeopleSearch.vue"
+      "frontend/src/ui/mergeRequestMentionLines.ts",
+      "frontend/src/ui/mergeRequestMentionLines.test.ts",
+      "frontend/src/ui/mergeRequestMentions.ts",
+      "frontend/src/ui/MergeRequestMentionList.vue",
+      "frontend/src/ui/textareaCaret.ts",
+      "frontend/src/ui/textareaCaret.test.ts",
+      "frontend/src/ui/menuKeys.ts",
+      "frontend/src/ui/menuKeys.test.ts",
+      "frontend/src/ui/mergeRequestsText.ts",
+      "frontend/src/ui/MergeRequestReplyField.vue",
+      "frontend/src/ui/MergeRequestThreadPanel.test.ts",
+      "frontend/src/ui/AGENTS.md",
+      "tests/glab/mr-threads/graphql-people-an.json",
+      "tests/glab/README.md"
     ]
   }
 }
