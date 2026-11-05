@@ -6,6 +6,31 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## One person's discussions (session 55; owner: "Plan a view reachable from the MR list … all discussions where a selected person was participating")
+
+Request `docs/slices/request-mr-person-discussions.md` (parts A–F, acceptance, non-goals, reopens); base `197f8c6e`;
+facts `.omp/run/notes/PlanScoutPersonDiscussionsFacts.md` (the read drops every note's text but the last; the window
+holds one thread at a time; the turn rule already takes any person). "Plan": design and order shown to the owner
+before any build. Owner's answers: every open discussion, the person's first; opening loads every missing row
+under any setting; the chevron on every entry (request "Owner's answers"). Owner #2497: build right after the
+design, no questions; the orchestrator decides (user experience, security) and lists every decision at the end.
+Design option A (`briefs/mr-person-discussions-design.md` §2.8: 14 decisions taken, proposed plan #193–#194).
+Order: rust ∥ threads, core after one of them (two implementers at most), `just bindings` after rust, ipc, state,
+view (wires the window), docs keeper ∥ smoke, final.
+
+| row | slice                                                                                  | owner                 | status  | evidence                                                                                                           |
+| --- | -------------------------------------------------------------------------------------- | --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
+| 1   | design                                                                                 | designer              | done    | `MrPersonDiscussionsDesign`: option A, six briefs + verify, no open question. Notes `MrPersonDiscussionsDesign.md` |
+| 2   | rust (`briefs/mr-person-discussions-rust.md`): first comment in the read, offers       | rust-impl             | running |                                                                                                                    |
+| 3   | threads (`briefs/mr-person-discussions-threads.md`): keyed threads, panel body split   | web-impl              | running |                                                                                                                    |
+| 4   | core (`briefs/mr-person-discussions-core.md`): five groups, `keptInPlace`, writers row | web-impl              | todo    |                                                                                                                    |
+| 4b  | `just bindings` after row 2                                                            | orchestrator          | todo    |                                                                                                                    |
+| 5   | ipc (`briefs/mr-person-discussions-ipc.md`): domain `first`, fixtures; after 2, 3, 4b  | web-impl              | todo    |                                                                                                                    |
+| 6   | state (`briefs/mr-person-discussions-state.md`): queue, view state; after 4, 5         | web-impl              | todo    |                                                                                                                    |
+| 7   | view (`briefs/mr-person-discussions-view.md`): button, menu, entries; wires the window | web-impl              | todo    |                                                                                                                    |
+| 8   | docs keeper; verify (`briefs/mr-person-discussions-verify.md`): smoke after 7, final   | docs-keeper, verifier | todo    |                                                                                                                    |
+| 9   | owner check on the GitLab playground                                                   | human                 | todo    |                                                                                                                    |
+
 ## `@` completion in comment fields (session 54; owner: "Implement @ autocomplete when authoring comments/discussions (Plan first)")
 
 Request `docs/slices/request-mr-mentions.md` (rules 1–7, acceptance, non-goals); base `180d6c6c`; facts
