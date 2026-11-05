@@ -1,12 +1,6 @@
 import type { ShallowRef } from "vue";
 
-import type {
-  GitLabProject,
-  MergeRequestIid,
-  MergeRequestSource,
-  OpenReply,
-  WebPage,
-} from "../ipc";
+import type { MergeRequestIid, MergeRequestSource, OpenReply, WebPage } from "../ipc";
 import { claimRow, setRow } from "./mergeRequestActions";
 import { pageProblemText, type PageKind } from "./mergeRequestsText";
 import { attempt, type Problem } from "./problem";
@@ -17,7 +11,6 @@ export type Opening =
 
 export type Pages = {
   readonly pageProblem: Readonly<ShallowRef<string | null>>;
-  findProject(): Promise<void>;
   openChanges(iid: MergeRequestIid): Promise<void>;
   openPage(clicked: PageKind, page: WebPage): Promise<void>;
   dismissPageProblem(): void;
@@ -26,19 +19,9 @@ export type Pages = {
 type State = {
   readonly source: MergeRequestSource;
   readonly report: (problem: Problem) => void;
-  readonly project: ShallowRef<GitLabProject>;
   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
   readonly pageProblem: ShallowRef<string | null>;
 };
-
-async function findProject(state: State): Promise<void> {
-  const outcome = await attempt(() => state.source.findGitLabProject());
-  if (outcome.ok) {
-    state.project.value = outcome.value;
-  } else {
-    state.report({ action: "mergeRequests", step: "find", cause: outcome.cause });
-  }
-}
 
 async function openChanges(state: State, iid: MergeRequestIid): Promise<void> {
   if (!claimRow(state.openings, iid, { kind: "fetching" })) {
@@ -66,7 +49,6 @@ async function openPage(state: State, clicked: PageKind, page: WebPage): Promise
 export function pagesOf(state: State): Pages {
   return {
     pageProblem: state.pageProblem,
-    findProject: () => findProject(state),
     openChanges: (iid) => openChanges(state, iid),
     openPage: (clicked, page) => openPage(state, clicked, page),
     dismissPageProblem: () => {

@@ -1,4 +1,4 @@
-import { computed, shallowRef, watch } from "vue";
+import { computed, watch } from "vue";
 
 import type {
   DiscussionDetails,
@@ -6,26 +6,20 @@ import type {
   MergeRequestRow,
   MergeRequestSource,
 } from "../ipc";
-import { setRow } from "./mergeRequestActions";
 import {
-  afterAsk,
+  asked,
+  becameFull,
+  becameLazy,
+  createQueue,
   dropped,
-  isReloading,
-  LOADING,
-  marked,
+  leftView,
   queuedLast,
-  RUNNING,
-  sentFirst,
-  unsentDropped,
+  reload,
+  retried,
+  rowsReloaded,
   type Queue,
 } from "./mergeRequestDiscussionQueue";
-import {
-  boxClosed,
-  threadRead,
-  type DiscussionLoad,
-  type Discussions,
-  type Reload,
-} from "./mergeRequestDiscussionRows";
+import { boxClosed, threadRead, type Discussions } from "./mergeRequestDiscussionRows";
 
 export type {
   DiscussionFailure,
@@ -53,7 +47,8 @@ export type DiscussionQueue = Discussions & {
    *  then all queued first in the given order; only in the generation it started in; an iid already reloading: nothing. */
   reloadRows(iids: readonly MergeRequestIid[], askFirst: () => Promise<void>): void;
   /** The person view left: unless the setting is "full", every queued iid not in the running call and not reloading loses
-   *  its `loading` entry and leaves the queue (no call after Back); read entries stay. */
+   *  its `loading` entry and leaves the queue (no call after Back); read entries stay. So does a `loading` entry a pending
+   *  ask holds, and the running call's iids its answer lacks. */
   viewLeft(): void;
 };
 
@@ -66,15 +61,10 @@ function listed(queue: Queue, rows: readonly MergeRequestRow[]): void {
   }
 }
 
-function becameLazy(queue: Queue): void {
-  const sent = unsentDropped(queue);
-  queue.unhovered = new Set([...sent].filter((iid) => !isReloading(queue, iid)));
-}
-
 function switched(queue: Queue, mode: DiscussionDetails, rows: readonly MergeRequestRow[]): void {
   switch (mode) {
     case "full":
-      queue.unhovered = new Set();
+      becameFull(queue);
       listed(queue, rows);
       return;
     case "lazy":
@@ -87,54 +77,6 @@ function switched(queue: Queue, mode: DiscussionDetails, rows: readonly MergeReq
       const _exhaustive: never = mode;
       return _exhaustive;
     }
-  }
-}
-
-function asked(queue: Queue, iid: MergeRequestIid): void {
-  if (queue.mode() !== "lazy") {
-    return;
-  }
-  if (queue.unhovered.has(iid)) {
-    queue.unhovered.delete(iid);
-    return;
-  }
-  if (queue.entries.value.has(iid)) {
-    return;
-  }
-  setRow(queue.entries, iid, LOADING);
-  sentFirst(queue, [iid]);
-}
-
-function reload(queue: Queue, iid: MergeRequestIid, askFirst?: () => Promise<void>): void {
-  const entry = queue.entries.value.get(iid);
-  const pressedAgain = askFirst !== undefined && entry?.kind === "loading";
-  const offWithout = queue.mode() === "off" && entry === undefined;
-  if (offWithout || isReloading(queue, iid) || pressedAgain) {
-    return;
-  }
-  if (entry === undefined) {
-    setRow(queue.entries, iid, LOADING);
-  } else if (entry.kind === "loading") {
-    queue.unhovered.delete(iid);
-  } else {
-    setRow(queue.reloads, iid, RUNNING);
-  }
-  if (askFirst === undefined) {
-    sentFirst(queue, [iid]);
-  } else {
-    afterAsk(queue, [iid], askFirst);
-  }
-}
-
-function retried(queue: Queue, iids: readonly MergeRequestIid[]): void {
-  const failed = iids.filter((iid) =>
-    [queue.entries.value.get(iid)?.kind, queue.reloads.value.get(iid)?.kind].some(
-      (kind) => kind === "refused" || kind === "failed",
-    ),
-  );
-  if (failed.length > 0) {
-    marked(queue, failed);
-    sentFirst(queue, failed);
   }
 }
 
@@ -187,13 +129,11 @@ function personViewsOf(
       retried(queue, iids);
     },
     reloadRows: (iids, askFirst) => {
-      const marking = iids.filter((iid) => !isReloading(queue, iid));
-      marked(queue, marking);
-      afterAsk(queue, marking, askFirst);
+      rowsReloaded(queue, iids, askFirst);
     },
     viewLeft: () => {
       if (queue.mode() !== "full") {
-        unsentDropped(queue);
+        leftView(queue);
       }
     },
   };
@@ -206,17 +146,7 @@ export function createDiscussions(deps: {
   /** The row's open-discussions count as a reload or a box close found it (D2, C10). */
   readonly counted: (iid: MergeRequestIid, count: number) => void;
 }): DiscussionQueue {
-  const queue: Queue = {
-    source: deps.source,
-    mode: deps.mode,
-    counted: deps.counted,
-    entries: shallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>(new Map()),
-    reloads: shallowRef<ReadonlyMap<MergeRequestIid, Reload>>(new Map()),
-    queued: [],
-    unhovered: new Set(),
-    running: null,
-    generation: 0,
-  };
+  const queue = createQueue(deps);
   watch(deps.mode, (mode) => {
     switched(queue, mode, deps.rows());
   });

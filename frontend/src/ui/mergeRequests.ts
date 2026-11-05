@@ -35,7 +35,7 @@ import { createRefreshes, type Refreshes } from "./mergeRequestsRefresh";
 import { shownOf, type Shown } from "./mergeRequestsShown";
 import { listFailureText } from "./mergeRequestsText";
 import { createThreads, type Threads } from "./mergeRequestThread";
-import type { Problem } from "./problem";
+import { attempt, type Problem } from "./problem";
 import type { Screen } from "./screen";
 
 export type {
@@ -73,6 +73,7 @@ export type MergeRequests = RowActions &
     readonly search: Readonly<ShallowRef<string>>;
     readonly dueDates: ComputedRef<ReadonlyMap<MergeRequestIid, CalendarDay>>;
     readonly openings: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>>;
+    findProject(): Promise<void>;
     show(): void;
     close(): void;
     setSearch(text: string): void;
@@ -100,6 +101,8 @@ type State = Deps &
     readonly linkQueue: LinkQueue;
     readonly threads: Threads;
     readonly threadsRefreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void;
+    /** The person view's `rowsReplaced`, set once by `createMergeRequests` after it builds the view. */
+    viewReplaced: (() => void) | null;
   };
 
 type RowPatch = Partial<Pick<MergeRequestRow, "assignees" | "reviewers" | "openDiscussions">>;
@@ -144,6 +147,15 @@ function show(state: State): void {
   }
 }
 
+async function findProject(state: State): Promise<void> {
+  const outcome = await attempt(() => state.source.findGitLabProject());
+  if (outcome.ok) {
+    state.project.value = outcome.value;
+  } else {
+    state.report({ action: "mergeRequests", step: "find", cause: outcome.cause });
+  }
+}
+
 function discussingOf(
   deps: Deps,
   rows: () => readonly MergeRequestRow[],
@@ -155,7 +167,7 @@ function discussingOf(
   return { discussionQueue, threads, threadsRefreshed: refreshed };
 }
 
-function createState(deps: Deps, viewReplaced: () => void): State {
+function createState(deps: Deps): State {
   const project = shallowRef<GitLabProject>({ kind: "none" });
   const repository = computed(() =>
     project.value.kind === "found" ? project.value.repository : null,
@@ -187,8 +199,9 @@ function createState(deps: Deps, viewReplaced: () => void): State {
       state.discussionQueue.replaced(replaced);
       state.linkQueue.dropped();
       state.threadsRefreshed(null);
-      viewReplaced();
+      state.viewReplaced?.();
     },
+    viewReplaced: null,
     shown: null,
     running: null,
   };
@@ -204,15 +217,6 @@ function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setD
   };
 }
 
-/** The list's shown rows and the person view over them; `rowsReplaced` is the view's. */
-function shownAndViewOf(
-  state: State,
-  people: PeopleChanges,
-): Shown & PersonView & { readonly rowsReplaced: () => void } {
-  const shown = shownOf({ ...state, openPeopleBoxes: people.openPeopleBoxes }, state.storage);
-  return { ...shown, ...createPersonView({ ...state, ...shown, queue: state.discussionQueue }) };
-}
-
 function screensOf(state: State, view: PersonView): Pick<MergeRequests, "show" | "close"> {
   return {
     show: () => {
@@ -225,13 +229,23 @@ function screensOf(state: State, view: PersonView): Pick<MergeRequests, "show" |
   };
 }
 
-export function createMergeRequests(deps: Deps): MergeRequests {
-  const state = createState(deps, () => {
-    replaced();
+/** The person view over the shown rows; a list refresh reaches it through `state.viewReplaced`. */
+function personViewOf(state: State, shown: Shown): PersonView {
+  const { rowsReplaced, ...view } = createPersonView({
+    ...state,
+    ...shown,
+    queue: state.discussionQueue,
   });
+  state.viewReplaced = rowsReplaced;
+  return view;
+}
+
+export function createMergeRequests(deps: Deps): MergeRequests {
+  const state = createState(deps);
   const { me, rows, search } = state;
   const people = peopleOf(state);
-  const { rowsReplaced: replaced, ...shown } = shownAndViewOf(state, people);
+  const shown = shownOf({ ...state, openPeopleBoxes: people.openPeopleBoxes }, state.storage);
+  const view = personViewOf(state, shown);
   return {
     project: state.project,
     me,
@@ -242,14 +256,16 @@ export function createMergeRequests(deps: Deps): MergeRequests {
       state.listing.value.kind === "done" ? listFailureText(state.listing.value.end) : null,
     ),
     ...shown,
+    ...view,
     search,
     setSearch: (text) => {
       search.value = text;
     },
     ...dueDatesOf(state),
     openings: state.openings,
+    findProject: () => findProject(state),
     ...pagesOf(state),
-    ...screensOf(state, shown),
+    ...screensOf(state, view),
     ...createRefreshes(state),
     ...state.rowActions,
     ...people,

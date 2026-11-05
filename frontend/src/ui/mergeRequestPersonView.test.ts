@@ -588,6 +588,17 @@ test("a_refresh_at_opening_asks_gitlab_before_reading_any_row", async () => {
   expect(shown().loading).toBeNull();
 });
 
+test("back_before_a_refresh_is_answered_reads_nothing", async () => {
+  await slice.refresh();
+  slice.openPersonView();
+  const asksBefore = asks;
+  slice.refreshPersonView();
+  slice.leavePersonView();
+  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
+  expect([asks - asksBefore, reads.length]).toEqual([1, 0]);
+  expect(slice.discussions.value.size).toBe(0);
+});
+
 test("a_refresh_reloads_a_row_whose_every_discussion_was_resolved_here", async () => {
   await everyRowRead();
   await expanded(FOLD_CASE, P6);

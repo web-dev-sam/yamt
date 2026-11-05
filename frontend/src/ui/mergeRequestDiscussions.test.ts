@@ -922,8 +922,25 @@ test("a_wanted_row_in_flight_after_a_switch_to_lazy_is_kept_not_asked_again", as
   expect(callAt(live, 1).iids).toEqual(sent.slice(1));
 });
 
+test("a_switch_back_to_full_keeps_the_running_calls_rows", async () => {
+  const live = rig();
+  live.queue.listed(ROWS.slice(0, 20));
+  const [first, ...rest] = openIids(ROWS.slice(0, 20));
+  live.mode.value = "lazy";
+  await nextTick();
+  live.mode.value = "full";
+  await nextTick();
+
+  await answered(live, 0, [first ?? iid(0)]);
+  expect(rest.map((each) => entry(live, each))).toEqual(rest.map(() => LOADING));
+  expect(callAt(live, 1).iids).toEqual(rest);
+});
+
 test("leaving_under_lazy_or_off_sends_nothing_more", async () => {
-  const [earlier, sent, unsent] = [[iid(639)], [iid(638), iid(637)], [iid(636), iid(635)]];
+  const earlier = [iid(639)];
+  const sent = Array.from({ length: BATCH + 2 }, (_, at) => iid(638 - at));
+  const unsent = [iid(600), iid(601)];
+  const [answeredSent, rest] = [sent.slice(0, BATCH), sent.slice(BATCH)];
   for (const mode of ["lazy", "off", "full"] as const) {
     const live = rig(mode);
     live.queue.wantRows(earlier);
@@ -933,16 +950,47 @@ test("leaving_under_lazy_or_off_sends_nothing_more", async () => {
     expect(callAt(live, 1).iids).toEqual(sent);
 
     live.queue.viewLeft();
-    await answered(live, 1);
+    await answered(live, 1, answeredSent);
     expect(entry(live, 639)).toEqual(read());
-    expect(entry(live, 638)).toEqual(read());
+    expect(answeredSent.map((each) => entry(live, each))).toEqual(answeredSent.map(() => read()));
     if (mode === "full") {
-      expect(entry(live, 636)).toEqual(LOADING);
-      expect(callAt(live, 2).iids).toEqual(unsent);
+      expect(entry(live, 600)).toEqual(LOADING);
+      expect(callAt(live, 2).iids).toEqual([...rest, ...unsent]);
     } else {
-      expect(entry(live, 636)).toBeUndefined();
+      expect([...rest, ...unsent].map((each) => entry(live, each))).toEqual(
+        [...rest, ...unsent].map(() => undefined),
+      );
       expect(live.calls).toHaveLength(2);
     }
+  }
+});
+
+test("leaving_during_a_reloads_ask_sends_only_the_reloads", async () => {
+  for (const mode of ["lazy", "off", "full"] as const) {
+    const live = rig(mode);
+    live.queue.wantRows([iid(639), iid(638)]);
+    callAt(live, 0).answer({
+      ok: true,
+      value: [
+        { iid: iid(639), answer: { kind: "open", discussions: [DISCUSSION] } },
+        { iid: iid(638), answer: { kind: "failed", message: "glab timed out" } },
+      ],
+    });
+    await settled();
+    const { asks, askFirst } = heldAsks();
+    live.queue.reloadRows([iid(639), iid(638), iid(637)], askFirst);
+
+    live.queue.viewLeft();
+    asks[0]?.();
+    await settled();
+    expect(entry(live, 639)).toEqual(read());
+    if (mode === "full") {
+      expect(callAt(live, 1).iids).toEqual([639, 638, 637]);
+    } else {
+      expect([entry(live, 638), entry(live, 637)]).toEqual([undefined, undefined]);
+      expect(callAt(live, 1).iids).toEqual([639]);
+    }
+    expect(live.calls).toHaveLength(2);
   }
 });
 

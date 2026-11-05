@@ -1,4 +1,4 @@
-import type { ShallowRef } from "vue";
+import { shallowRef, type ShallowRef } from "vue";
 
 import {
   log,
@@ -7,6 +7,7 @@ import {
   type MergeRequestSource,
   type RowDiscussions,
 } from "../ipc";
+import { setRow } from "./mergeRequestActions";
 import {
   answerKind,
   loadOf,
@@ -27,16 +28,35 @@ export type Queue = {
   /** Each `loading` entry's and `running` reload's iid in send order, a pressed reload's once its ask is answered;
    *  the running call's stay until answered. */
   queued: readonly MergeRequestIid[];
-  /** The running call's iids at a switch to "lazy" not hovered since: dropped unless its answer has them. */
+  /** The running call's iids at a switch to "lazy" or a Back from the person view, not wanted since: dropped unless
+   *  its answer has them. */
   unhovered: Set<MergeRequestIid>;
   running: Call | null;
   generation: number;
 };
 
-export const LOADING: DiscussionLoad = { kind: "loading" };
-export const RUNNING: Reload = { kind: "running" };
+const LOADING: DiscussionLoad = { kind: "loading" };
+const RUNNING: Reload = { kind: "running" };
 
-export function isReloading(queue: Queue, iid: MergeRequestIid): boolean {
+export function createQueue({
+  source,
+  mode,
+  counted,
+}: Pick<Queue, "source" | "mode" | "counted">): Queue {
+  return {
+    source,
+    mode,
+    counted,
+    entries: shallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>(new Map()),
+    reloads: shallowRef<ReadonlyMap<MergeRequestIid, Reload>>(new Map()),
+    queued: [],
+    unhovered: new Set(),
+    running: null,
+    generation: 0,
+  };
+}
+
+function isReloading(queue: Queue, iid: MergeRequestIid): boolean {
   return queue.reloads.value.get(iid)?.kind === "running";
 }
 
@@ -47,7 +67,7 @@ function isWaiting(queue: Queue, iid: MergeRequestIid): boolean {
 
 function settle(
   queue: Queue,
-  asked: readonly MergeRequestIid[],
+  sent: readonly MergeRequestIid[],
   outcome: Outcome<readonly RowDiscussions[]>,
   ms: number,
 ): void {
@@ -55,7 +75,7 @@ function settle(
   const reloads = new Map(queue.reloads.value);
   const answers: readonly (readonly [MergeRequestIid, Answered])[] = outcome.ok
     ? outcome.value.map(({ iid, answer }) => [iid, loadOf(answer)])
-    : asked.map((iid) => [iid, { kind: "failed", cause: outcome.cause }]);
+    : sent.map((iid) => [iid, { kind: "failed", cause: outcome.cause }]);
   for (const [iid, load] of answers) {
     if (reloads.get(iid)?.kind !== "running") {
       next.set(iid, load);
@@ -117,7 +137,7 @@ export function queuedLast(queue: Queue, iids: readonly MergeRequestIid[]): void
   void send(queue);
 }
 
-export function sentFirst(queue: Queue, iids: readonly MergeRequestIid[]): void {
+function sentFirst(queue: Queue, iids: readonly MergeRequestIid[]): void {
   const first = new Set(iids);
   queue.queued = [...first, ...queue.queued.filter((each) => !first.has(each))];
   void send(queue);
@@ -131,25 +151,85 @@ export function dropped(queue: Queue): void {
   queue.unhovered = new Set();
 }
 
-/** Every queued iid not in the running call and not reloading loses its entry and leaves the queue; returns the
- *  running call's iids. */
-export function unsentDropped(queue: Queue): ReadonlySet<MergeRequestIid> {
+export function becameFull(queue: Queue): void {
+  queue.unhovered = new Set();
+}
+
+/** Each of `waiting` not in the running call and not reloading loses its entry and leaves the queue; the running call's
+ *  iids not reloading go to `unhovered`. */
+function unsentDropped(queue: Queue, waiting: readonly MergeRequestIid[]): void {
   const { running, generation } = queue;
   const sent = new Set(running?.generation === generation ? running.iids : []);
   function kept(iid: MergeRequestIid): boolean {
     return sent.has(iid) || isReloading(queue, iid);
   }
   const next = new Map(queue.entries.value);
-  for (const iid of queue.queued.filter((each) => !kept(each))) {
+  for (const iid of waiting.filter((each) => !kept(each))) {
     next.delete(iid);
   }
   queue.entries.value = next;
   queue.queued = queue.queued.filter(kept);
-  return sent;
+  queue.unhovered = new Set([...sent].filter((iid) => !isReloading(queue, iid)));
+}
+
+export function becameLazy(queue: Queue): void {
+  unsentDropped(queue, queue.queued);
+}
+
+/** As `becameLazy`, and every `loading` entry a pending ask holds goes too. */
+export function leftView(queue: Queue): void {
+  const entries = [...queue.entries.value];
+  unsentDropped(
+    queue,
+    entries.filter(([, load]) => load.kind === "loading").map(([iid]) => iid),
+  );
+}
+
+/** A hover, only under "lazy": a row without an entry is asked first; one in `unhovered` leaves it instead. */
+export function asked(queue: Queue, iid: MergeRequestIid): void {
+  if (queue.mode() !== "lazy" || queue.unhovered.delete(iid) || queue.entries.value.has(iid)) {
+    return;
+  }
+  setRow(queue.entries, iid, LOADING);
+  sentFirst(queue, [iid]);
+}
+
+export function reload(queue: Queue, iid: MergeRequestIid, askFirst?: () => Promise<void>): void {
+  const entry = queue.entries.value.get(iid);
+  const pressedAgain = askFirst !== undefined && entry?.kind === "loading";
+  const offWithout = queue.mode() === "off" && entry === undefined;
+  if (offWithout || isReloading(queue, iid) || pressedAgain) {
+    return;
+  }
+  if (entry === undefined) {
+    setRow(queue.entries, iid, LOADING);
+  } else if (entry.kind === "loading") {
+    queue.unhovered.delete(iid);
+  } else {
+    setRow(queue.reloads, iid, RUNNING);
+  }
+  if (askFirst === undefined) {
+    sentFirst(queue, [iid]);
+  } else {
+    afterAsk(queue, [iid], askFirst);
+  }
+}
+
+/** F2's Retry: each `refused`/`failed` entry or reload is marked and sent first. */
+export function retried(queue: Queue, iids: readonly MergeRequestIid[]): void {
+  const failed = iids.filter((iid) =>
+    [queue.entries.value.get(iid)?.kind, queue.reloads.value.get(iid)?.kind].some(
+      (kind) => kind === "refused" || kind === "failed",
+    ),
+  );
+  if (failed.length > 0) {
+    marked(queue, failed);
+    sentFirst(queue, failed);
+  }
 }
 
 /** Retry's and `reloadRows`' marks: a read entry reloading, a loading one kept asked, none or a failed one `loading`. */
-export function marked(queue: Queue, iids: readonly MergeRequestIid[]): void {
+function marked(queue: Queue, iids: readonly MergeRequestIid[]): void {
   const entries = new Map(queue.entries.value);
   const reloads = new Map(queue.reloads.value);
   for (const iid of iids) {
@@ -167,8 +247,20 @@ export function marked(queue: Queue, iids: readonly MergeRequestIid[]): void {
   queue.reloads.value = reloads;
 }
 
+/** `reloadRows`: the iids not reloading are marked; once `askFirst` is answered, and only in the generation it started in,
+ *  those still waiting go first. */
+export function rowsReloaded(
+  queue: Queue,
+  iids: readonly MergeRequestIid[],
+  askFirst: () => Promise<void>,
+): void {
+  const marking = iids.filter((iid) => !isReloading(queue, iid));
+  marked(queue, marking);
+  afterAsk(queue, marking, askFirst);
+}
+
 /** Once `askFirst` is answered, and only in the generation it started in, the iids still waiting go first. */
-export function afterAsk(
+function afterAsk(
   queue: Queue,
   iids: readonly MergeRequestIid[],
   askFirst: () => Promise<void>,

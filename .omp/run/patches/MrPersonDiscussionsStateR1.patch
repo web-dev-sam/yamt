@@ -1,0 +1,654 @@
+diff --git a/frontend/src/ui/mergeRequestDiscussionQueue.ts b/frontend/src/ui/mergeRequestDiscussionQueue.ts
+index 9accabd..77c965c 100644
+--- a/frontend/src/ui/mergeRequestDiscussionQueue.ts
++++ b/frontend/src/ui/mergeRequestDiscussionQueue.ts
+@@ -1,4 +1,4 @@
+-import type { ShallowRef } from "vue";
++import { shallowRef, type ShallowRef } from "vue";
+ 
+ import {
+   log,
+@@ -7,6 +7,7 @@ import {
+   type MergeRequestSource,
+   type RowDiscussions,
+ } from "../ipc";
++import { setRow } from "./mergeRequestActions";
+ import {
+   answerKind,
+   loadOf,
+@@ -27,16 +28,35 @@ export type Queue = {
+   /** Each `loading` entry's and `running` reload's iid in send order, a pressed reload's once its ask is answered;
+    *  the running call's stay until answered. */
+   queued: readonly MergeRequestIid[];
+-  /** The running call's iids at a switch to "lazy" not hovered since: dropped unless its answer has them. */
++  /** The running call's iids at a switch to "lazy" or a Back from the person view, not wanted since: dropped unless
++   *  its answer has them. */
+   unhovered: Set<MergeRequestIid>;
+   running: Call | null;
+   generation: number;
+ };
+ 
+-export const LOADING: DiscussionLoad = { kind: "loading" };
+-export const RUNNING: Reload = { kind: "running" };
++const LOADING: DiscussionLoad = { kind: "loading" };
++const RUNNING: Reload = { kind: "running" };
+ 
+-export function isReloading(queue: Queue, iid: MergeRequestIid): boolean {
++export function createQueue({
++  source,
++  mode,
++  counted,
++}: Pick<Queue, "source" | "mode" | "counted">): Queue {
++  return {
++    source,
++    mode,
++    counted,
++    entries: shallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>(new Map()),
++    reloads: shallowRef<ReadonlyMap<MergeRequestIid, Reload>>(new Map()),
++    queued: [],
++    unhovered: new Set(),
++    running: null,
++    generation: 0,
++  };
++}
++
++function isReloading(queue: Queue, iid: MergeRequestIid): boolean {
+   return queue.reloads.value.get(iid)?.kind === "running";
+ }
+ 
+@@ -47,7 +67,7 @@ function isWaiting(queue: Queue, iid: MergeRequestIid): boolean {
+ 
+ function settle(
+   queue: Queue,
+-  asked: readonly MergeRequestIid[],
++  sent: readonly MergeRequestIid[],
+   outcome: Outcome<readonly RowDiscussions[]>,
+   ms: number,
+ ): void {
+@@ -55,7 +75,7 @@ function settle(
+   const reloads = new Map(queue.reloads.value);
+   const answers: readonly (readonly [MergeRequestIid, Answered])[] = outcome.ok
+     ? outcome.value.map(({ iid, answer }) => [iid, loadOf(answer)])
+-    : asked.map((iid) => [iid, { kind: "failed", cause: outcome.cause }]);
++    : sent.map((iid) => [iid, { kind: "failed", cause: outcome.cause }]);
+   for (const [iid, load] of answers) {
+     if (reloads.get(iid)?.kind !== "running") {
+       next.set(iid, load);
+@@ -117,7 +137,7 @@ export function queuedLast(queue: Queue, iids: readonly MergeRequestIid[]): void
+   void send(queue);
+ }
+ 
+-export function sentFirst(queue: Queue, iids: readonly MergeRequestIid[]): void {
++function sentFirst(queue: Queue, iids: readonly MergeRequestIid[]): void {
+   const first = new Set(iids);
+   queue.queued = [...first, ...queue.queued.filter((each) => !first.has(each))];
+   void send(queue);
+@@ -131,25 +151,85 @@ export function dropped(queue: Queue): void {
+   queue.unhovered = new Set();
+ }
+ 
+-/** Every queued iid not in the running call and not reloading loses its entry and leaves the queue; returns the
+- *  running call's iids. */
+-export function unsentDropped(queue: Queue): ReadonlySet<MergeRequestIid> {
++export function becameFull(queue: Queue): void {
++  queue.unhovered = new Set();
++}
++
++/** Each of `waiting` not in the running call and not reloading loses its entry and leaves the queue; the running call's
++ *  iids not reloading go to `unhovered`. */
++function unsentDropped(queue: Queue, waiting: readonly MergeRequestIid[]): void {
+   const { running, generation } = queue;
+   const sent = new Set(running?.generation === generation ? running.iids : []);
+   function kept(iid: MergeRequestIid): boolean {
+     return sent.has(iid) || isReloading(queue, iid);
+   }
+   const next = new Map(queue.entries.value);
+-  for (const iid of queue.queued.filter((each) => !kept(each))) {
++  for (const iid of waiting.filter((each) => !kept(each))) {
+     next.delete(iid);
+   }
+   queue.entries.value = next;
+   queue.queued = queue.queued.filter(kept);
+-  return sent;
++  queue.unhovered = new Set([...sent].filter((iid) => !isReloading(queue, iid)));
++}
++
++export function becameLazy(queue: Queue): void {
++  unsentDropped(queue, queue.queued);
++}
++
++/** As `becameLazy`, and every `loading` entry a pending ask holds goes too. */
++export function leftView(queue: Queue): void {
++  const entries = [...queue.entries.value];
++  unsentDropped(
++    queue,
++    entries.filter(([, load]) => load.kind === "loading").map(([iid]) => iid),
++  );
++}
++
++/** A hover, only under "lazy": a row without an entry is asked first; one in `unhovered` leaves it instead. */
++export function asked(queue: Queue, iid: MergeRequestIid): void {
++  if (queue.mode() !== "lazy" || queue.unhovered.delete(iid) || queue.entries.value.has(iid)) {
++    return;
++  }
++  setRow(queue.entries, iid, LOADING);
++  sentFirst(queue, [iid]);
++}
++
++export function reload(queue: Queue, iid: MergeRequestIid, askFirst?: () => Promise<void>): void {
++  const entry = queue.entries.value.get(iid);
++  const pressedAgain = askFirst !== undefined && entry?.kind === "loading";
++  const offWithout = queue.mode() === "off" && entry === undefined;
++  if (offWithout || isReloading(queue, iid) || pressedAgain) {
++    return;
++  }
++  if (entry === undefined) {
++    setRow(queue.entries, iid, LOADING);
++  } else if (entry.kind === "loading") {
++    queue.unhovered.delete(iid);
++  } else {
++    setRow(queue.reloads, iid, RUNNING);
++  }
++  if (askFirst === undefined) {
++    sentFirst(queue, [iid]);
++  } else {
++    afterAsk(queue, [iid], askFirst);
++  }
++}
++
++/** F2's Retry: each `refused`/`failed` entry or reload is marked and sent first. */
++export function retried(queue: Queue, iids: readonly MergeRequestIid[]): void {
++  const failed = iids.filter((iid) =>
++    [queue.entries.value.get(iid)?.kind, queue.reloads.value.get(iid)?.kind].some(
++      (kind) => kind === "refused" || kind === "failed",
++    ),
++  );
++  if (failed.length > 0) {
++    marked(queue, failed);
++    sentFirst(queue, failed);
++  }
+ }
+ 
+ /** Retry's and `reloadRows`' marks: a read entry reloading, a loading one kept asked, none or a failed one `loading`. */
+-export function marked(queue: Queue, iids: readonly MergeRequestIid[]): void {
++function marked(queue: Queue, iids: readonly MergeRequestIid[]): void {
+   const entries = new Map(queue.entries.value);
+   const reloads = new Map(queue.reloads.value);
+   for (const iid of iids) {
+@@ -167,8 +247,20 @@ export function marked(queue: Queue, iids: readonly MergeRequestIid[]): void {
+   queue.reloads.value = reloads;
+ }
+ 
++/** `reloadRows`: the iids not reloading are marked; once `askFirst` is answered, and only in the generation it started in,
++ *  those still waiting go first. */
++export function rowsReloaded(
++  queue: Queue,
++  iids: readonly MergeRequestIid[],
++  askFirst: () => Promise<void>,
++): void {
++  const marking = iids.filter((iid) => !isReloading(queue, iid));
++  marked(queue, marking);
++  afterAsk(queue, marking, askFirst);
++}
++
+ /** Once `askFirst` is answered, and only in the generation it started in, the iids still waiting go first. */
+-export function afterAsk(
++function afterAsk(
+   queue: Queue,
+   iids: readonly MergeRequestIid[],
+   askFirst: () => Promise<void>,
+diff --git a/frontend/src/ui/mergeRequestDiscussions.test.ts b/frontend/src/ui/mergeRequestDiscussions.test.ts
+index 2fdea55..a60838e 100644
+--- a/frontend/src/ui/mergeRequestDiscussions.test.ts
++++ b/frontend/src/ui/mergeRequestDiscussions.test.ts
+@@ -922,8 +922,25 @@ test("a_wanted_row_in_flight_after_a_switch_to_lazy_is_kept_not_asked_again", as
+   expect(callAt(live, 1).iids).toEqual(sent.slice(1));
+ });
+ 
++test("a_switch_back_to_full_keeps_the_running_calls_rows", async () => {
++  const live = rig();
++  live.queue.listed(ROWS.slice(0, 20));
++  const [first, ...rest] = openIids(ROWS.slice(0, 20));
++  live.mode.value = "lazy";
++  await nextTick();
++  live.mode.value = "full";
++  await nextTick();
++
++  await answered(live, 0, [first ?? iid(0)]);
++  expect(rest.map((each) => entry(live, each))).toEqual(rest.map(() => LOADING));
++  expect(callAt(live, 1).iids).toEqual(rest);
++});
++
+ test("leaving_under_lazy_or_off_sends_nothing_more", async () => {
+-  const [earlier, sent, unsent] = [[iid(639)], [iid(638), iid(637)], [iid(636), iid(635)]];
++  const earlier = [iid(639)];
++  const sent = Array.from({ length: BATCH + 2 }, (_, at) => iid(638 - at));
++  const unsent = [iid(600), iid(601)];
++  const [answeredSent, rest] = [sent.slice(0, BATCH), sent.slice(BATCH)];
+   for (const mode of ["lazy", "off", "full"] as const) {
+     const live = rig(mode);
+     live.queue.wantRows(earlier);
+@@ -933,19 +950,50 @@ test("leaving_under_lazy_or_off_sends_nothing_more", async () => {
+     expect(callAt(live, 1).iids).toEqual(sent);
+ 
+     live.queue.viewLeft();
+-    await answered(live, 1);
++    await answered(live, 1, answeredSent);
+     expect(entry(live, 639)).toEqual(read());
+-    expect(entry(live, 638)).toEqual(read());
++    expect(answeredSent.map((each) => entry(live, each))).toEqual(answeredSent.map(() => read()));
+     if (mode === "full") {
+-      expect(entry(live, 636)).toEqual(LOADING);
+-      expect(callAt(live, 2).iids).toEqual(unsent);
++      expect(entry(live, 600)).toEqual(LOADING);
++      expect(callAt(live, 2).iids).toEqual([...rest, ...unsent]);
+     } else {
+-      expect(entry(live, 636)).toBeUndefined();
++      expect([...rest, ...unsent].map((each) => entry(live, each))).toEqual(
++        [...rest, ...unsent].map(() => undefined),
++      );
+       expect(live.calls).toHaveLength(2);
+     }
+   }
+ });
+ 
++test("leaving_during_a_reloads_ask_sends_only_the_reloads", async () => {
++  for (const mode of ["lazy", "off", "full"] as const) {
++    const live = rig(mode);
++    live.queue.wantRows([iid(639), iid(638)]);
++    callAt(live, 0).answer({
++      ok: true,
++      value: [
++        { iid: iid(639), answer: { kind: "open", discussions: [DISCUSSION] } },
++        { iid: iid(638), answer: { kind: "failed", message: "glab timed out" } },
++      ],
++    });
++    await settled();
++    const { asks, askFirst } = heldAsks();
++    live.queue.reloadRows([iid(639), iid(638), iid(637)], askFirst);
++
++    live.queue.viewLeft();
++    asks[0]?.();
++    await settled();
++    expect(entry(live, 639)).toEqual(read());
++    if (mode === "full") {
++      expect(callAt(live, 1).iids).toEqual([639, 638, 637]);
++    } else {
++      expect([entry(live, 638), entry(live, 637)]).toEqual([undefined, undefined]);
++      expect(callAt(live, 1).iids).toEqual([639]);
++    }
++    expect(live.calls).toHaveLength(2);
++  }
++});
++
+ test("retry_asks_a_failed_row_again_and_reloads_a_failed_reload", async () => {
+   const live = rig();
+   live.queue.listed(ROWS.slice(0, 6));
+diff --git a/frontend/src/ui/mergeRequestDiscussions.ts b/frontend/src/ui/mergeRequestDiscussions.ts
+index 535ef05..3828ac8 100644
+--- a/frontend/src/ui/mergeRequestDiscussions.ts
++++ b/frontend/src/ui/mergeRequestDiscussions.ts
+@@ -1,4 +1,4 @@
+-import { computed, shallowRef, watch } from "vue";
++import { computed, watch } from "vue";
+ 
+ import type {
+   DiscussionDetails,
+@@ -6,26 +6,20 @@ import type {
+   MergeRequestRow,
+   MergeRequestSource,
+ } from "../ipc";
+-import { setRow } from "./mergeRequestActions";
+ import {
+-  afterAsk,
++  asked,
++  becameFull,
++  becameLazy,
++  createQueue,
+   dropped,
+-  isReloading,
+-  LOADING,
+-  marked,
++  leftView,
+   queuedLast,
+-  RUNNING,
+-  sentFirst,
+-  unsentDropped,
++  reload,
++  retried,
++  rowsReloaded,
+   type Queue,
+ } from "./mergeRequestDiscussionQueue";
+-import {
+-  boxClosed,
+-  threadRead,
+-  type DiscussionLoad,
+-  type Discussions,
+-  type Reload,
+-} from "./mergeRequestDiscussionRows";
++import { boxClosed, threadRead, type Discussions } from "./mergeRequestDiscussionRows";
+ 
+ export type {
+   DiscussionFailure,
+@@ -53,7 +47,8 @@ export type DiscussionQueue = Discussions & {
+    *  then all queued first in the given order; only in the generation it started in; an iid already reloading: nothing. */
+   reloadRows(iids: readonly MergeRequestIid[], askFirst: () => Promise<void>): void;
+   /** The person view left: unless the setting is "full", every queued iid not in the running call and not reloading loses
+-   *  its `loading` entry and leaves the queue (no call after Back); read entries stay. */
++   *  its `loading` entry and leaves the queue (no call after Back); read entries stay. So does a `loading` entry a pending
++   *  ask holds, and the running call's iids its answer lacks. */
+   viewLeft(): void;
+ };
+ 
+@@ -66,15 +61,10 @@ function listed(queue: Queue, rows: readonly MergeRequestRow[]): void {
+   }
+ }
+ 
+-function becameLazy(queue: Queue): void {
+-  const sent = unsentDropped(queue);
+-  queue.unhovered = new Set([...sent].filter((iid) => !isReloading(queue, iid)));
+-}
+-
+ function switched(queue: Queue, mode: DiscussionDetails, rows: readonly MergeRequestRow[]): void {
+   switch (mode) {
+     case "full":
+-      queue.unhovered = new Set();
++      becameFull(queue);
+       listed(queue, rows);
+       return;
+     case "lazy":
+@@ -90,54 +80,6 @@ function switched(queue: Queue, mode: DiscussionDetails, rows: readonly MergeReq
+   }
+ }
+ 
+-function asked(queue: Queue, iid: MergeRequestIid): void {
+-  if (queue.mode() !== "lazy") {
+-    return;
+-  }
+-  if (queue.unhovered.has(iid)) {
+-    queue.unhovered.delete(iid);
+-    return;
+-  }
+-  if (queue.entries.value.has(iid)) {
+-    return;
+-  }
+-  setRow(queue.entries, iid, LOADING);
+-  sentFirst(queue, [iid]);
+-}
+-
+-function reload(queue: Queue, iid: MergeRequestIid, askFirst?: () => Promise<void>): void {
+-  const entry = queue.entries.value.get(iid);
+-  const pressedAgain = askFirst !== undefined && entry?.kind === "loading";
+-  const offWithout = queue.mode() === "off" && entry === undefined;
+-  if (offWithout || isReloading(queue, iid) || pressedAgain) {
+-    return;
+-  }
+-  if (entry === undefined) {
+-    setRow(queue.entries, iid, LOADING);
+-  } else if (entry.kind === "loading") {
+-    queue.unhovered.delete(iid);
+-  } else {
+-    setRow(queue.reloads, iid, RUNNING);
+-  }
+-  if (askFirst === undefined) {
+-    sentFirst(queue, [iid]);
+-  } else {
+-    afterAsk(queue, [iid], askFirst);
+-  }
+-}
+-
+-function retried(queue: Queue, iids: readonly MergeRequestIid[]): void {
+-  const failed = iids.filter((iid) =>
+-    [queue.entries.value.get(iid)?.kind, queue.reloads.value.get(iid)?.kind].some(
+-      (kind) => kind === "refused" || kind === "failed",
+-    ),
+-  );
+-  if (failed.length > 0) {
+-    marked(queue, failed);
+-    sentFirst(queue, failed);
+-  }
+-}
+-
+ export function discussionsOf(queue: DiscussionQueue): Discussions {
+   const { discussions, discussionDetails, reloads } = queue;
+   return {
+@@ -187,13 +129,11 @@ function personViewsOf(
+       retried(queue, iids);
+     },
+     reloadRows: (iids, askFirst) => {
+-      const marking = iids.filter((iid) => !isReloading(queue, iid));
+-      marked(queue, marking);
+-      afterAsk(queue, marking, askFirst);
++      rowsReloaded(queue, iids, askFirst);
+     },
+     viewLeft: () => {
+       if (queue.mode() !== "full") {
+-        unsentDropped(queue);
++        leftView(queue);
+       }
+     },
+   };
+@@ -206,17 +146,7 @@ export function createDiscussions(deps: {
+   /** The row's open-discussions count as a reload or a box close found it (D2, C10). */
+   readonly counted: (iid: MergeRequestIid, count: number) => void;
+ }): DiscussionQueue {
+-  const queue: Queue = {
+-    source: deps.source,
+-    mode: deps.mode,
+-    counted: deps.counted,
+-    entries: shallowRef<ReadonlyMap<MergeRequestIid, DiscussionLoad>>(new Map()),
+-    reloads: shallowRef<ReadonlyMap<MergeRequestIid, Reload>>(new Map()),
+-    queued: [],
+-    unhovered: new Set(),
+-    running: null,
+-    generation: 0,
+-  };
++  const queue = createQueue(deps);
+   watch(deps.mode, (mode) => {
+     switched(queue, mode, deps.rows());
+   });
+diff --git a/frontend/src/ui/mergeRequestPersonView.test.ts b/frontend/src/ui/mergeRequestPersonView.test.ts
+index 2d8b98c..f9d6588 100644
+--- a/frontend/src/ui/mergeRequestPersonView.test.ts
++++ b/frontend/src/ui/mergeRequestPersonView.test.ts
+@@ -588,6 +588,17 @@ test("a_refresh_at_opening_asks_gitlab_before_reading_any_row", async () => {
+   expect(shown().loading).toBeNull();
+ });
+ 
++test("back_before_a_refresh_is_answered_reads_nothing", async () => {
++  await slice.refresh();
++  slice.openPersonView();
++  const asksBefore = asks;
++  slice.refreshPersonView();
++  slice.leavePersonView();
++  await vi.advanceTimersByTimeAsync(PAUSE_MS * CALLS);
++  expect([asks - asksBefore, reads.length]).toEqual([1, 0]);
++  expect(slice.discussions.value.size).toBe(0);
++});
++
+ test("a_refresh_reloads_a_row_whose_every_discussion_was_resolved_here", async () => {
+   await everyRowRead();
+   await expanded(FOLD_CASE, P6);
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index f1ba93f..31ec981 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -35,7 +35,7 @@ import { createRefreshes, type Refreshes } from "./mergeRequestsRefresh";
+ import { shownOf, type Shown } from "./mergeRequestsShown";
+ import { listFailureText } from "./mergeRequestsText";
+ import { createThreads, type Threads } from "./mergeRequestThread";
+-import type { Problem } from "./problem";
++import { attempt, type Problem } from "./problem";
+ import type { Screen } from "./screen";
+ 
+ export type {
+@@ -73,6 +73,7 @@ export type MergeRequests = RowActions &
+     readonly search: Readonly<ShallowRef<string>>;
+     readonly dueDates: ComputedRef<ReadonlyMap<MergeRequestIid, CalendarDay>>;
+     readonly openings: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>>;
++    findProject(): Promise<void>;
+     show(): void;
+     close(): void;
+     setSearch(text: string): void;
+@@ -100,6 +101,8 @@ type State = Deps &
+     readonly linkQueue: LinkQueue;
+     readonly threads: Threads;
+     readonly threadsRefreshed: (iid: MergeRequestIid | null, asked?: Promise<void>) => void;
++    /** The person view's `rowsReplaced`, set once by `createMergeRequests` after it builds the view. */
++    viewReplaced: (() => void) | null;
+   };
+ 
+ type RowPatch = Partial<Pick<MergeRequestRow, "assignees" | "reviewers" | "openDiscussions">>;
+@@ -144,6 +147,15 @@ function show(state: State): void {
+   }
+ }
+ 
++async function findProject(state: State): Promise<void> {
++  const outcome = await attempt(() => state.source.findGitLabProject());
++  if (outcome.ok) {
++    state.project.value = outcome.value;
++  } else {
++    state.report({ action: "mergeRequests", step: "find", cause: outcome.cause });
++  }
++}
++
+ function discussingOf(
+   deps: Deps,
+   rows: () => readonly MergeRequestRow[],
+@@ -155,7 +167,7 @@ function discussingOf(
+   return { discussionQueue, threads, threadsRefreshed: refreshed };
+ }
+ 
+-function createState(deps: Deps, viewReplaced: () => void): State {
++function createState(deps: Deps): State {
+   const project = shallowRef<GitLabProject>({ kind: "none" });
+   const repository = computed(() =>
+     project.value.kind === "found" ? project.value.repository : null,
+@@ -187,8 +199,9 @@ function createState(deps: Deps, viewReplaced: () => void): State {
+       state.discussionQueue.replaced(replaced);
+       state.linkQueue.dropped();
+       state.threadsRefreshed(null);
+-      viewReplaced();
++      state.viewReplaced?.();
+     },
++    viewReplaced: null,
+     shown: null,
+     running: null,
+   };
+@@ -204,15 +217,6 @@ function dueDatesOf({ dueDates }: State): Pick<MergeRequests, "dueDates" | "setD
+   };
+ }
+ 
+-/** The list's shown rows and the person view over them; `rowsReplaced` is the view's. */
+-function shownAndViewOf(
+-  state: State,
+-  people: PeopleChanges,
+-): Shown & PersonView & { readonly rowsReplaced: () => void } {
+-  const shown = shownOf({ ...state, openPeopleBoxes: people.openPeopleBoxes }, state.storage);
+-  return { ...shown, ...createPersonView({ ...state, ...shown, queue: state.discussionQueue }) };
+-}
+-
+ function screensOf(state: State, view: PersonView): Pick<MergeRequests, "show" | "close"> {
+   return {
+     show: () => {
+@@ -225,13 +229,23 @@ function screensOf(state: State, view: PersonView): Pick<MergeRequests, "show" |
+   };
+ }
+ 
+-export function createMergeRequests(deps: Deps): MergeRequests {
+-  const state = createState(deps, () => {
+-    replaced();
++/** The person view over the shown rows; a list refresh reaches it through `state.viewReplaced`. */
++function personViewOf(state: State, shown: Shown): PersonView {
++  const { rowsReplaced, ...view } = createPersonView({
++    ...state,
++    ...shown,
++    queue: state.discussionQueue,
+   });
++  state.viewReplaced = rowsReplaced;
++  return view;
++}
++
++export function createMergeRequests(deps: Deps): MergeRequests {
++  const state = createState(deps);
+   const { me, rows, search } = state;
+   const people = peopleOf(state);
+-  const { rowsReplaced: replaced, ...shown } = shownAndViewOf(state, people);
++  const shown = shownOf({ ...state, openPeopleBoxes: people.openPeopleBoxes }, state.storage);
++  const view = personViewOf(state, shown);
+   return {
+     project: state.project,
+     me,
+@@ -242,14 +256,16 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+       state.listing.value.kind === "done" ? listFailureText(state.listing.value.end) : null,
+     ),
+     ...shown,
++    ...view,
+     search,
+     setSearch: (text) => {
+       search.value = text;
+     },
+     ...dueDatesOf(state),
+     openings: state.openings,
++    findProject: () => findProject(state),
+     ...pagesOf(state),
+-    ...screensOf(state, shown),
++    ...screensOf(state, view),
+     ...createRefreshes(state),
+     ...state.rowActions,
+     ...people,
+diff --git a/frontend/src/ui/mergeRequestsPages.ts b/frontend/src/ui/mergeRequestsPages.ts
+index a39b4f7..23e2668 100644
+--- a/frontend/src/ui/mergeRequestsPages.ts
++++ b/frontend/src/ui/mergeRequestsPages.ts
+@@ -1,12 +1,6 @@
+ import type { ShallowRef } from "vue";
+ 
+-import type {
+-  GitLabProject,
+-  MergeRequestIid,
+-  MergeRequestSource,
+-  OpenReply,
+-  WebPage,
+-} from "../ipc";
++import type { MergeRequestIid, MergeRequestSource, OpenReply, WebPage } from "../ipc";
+ import { claimRow, setRow } from "./mergeRequestActions";
+ import { pageProblemText, type PageKind } from "./mergeRequestsText";
+ import { attempt, type Problem } from "./problem";
+@@ -17,7 +11,6 @@ export type Opening =
+ 
+ export type Pages = {
+   readonly pageProblem: Readonly<ShallowRef<string | null>>;
+-  findProject(): Promise<void>;
+   openChanges(iid: MergeRequestIid): Promise<void>;
+   openPage(clicked: PageKind, page: WebPage): Promise<void>;
+   dismissPageProblem(): void;
+@@ -26,20 +19,10 @@ export type Pages = {
+ type State = {
+   readonly source: MergeRequestSource;
+   readonly report: (problem: Problem) => void;
+-  readonly project: ShallowRef<GitLabProject>;
+   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
+   readonly pageProblem: ShallowRef<string | null>;
+ };
+ 
+-async function findProject(state: State): Promise<void> {
+-  const outcome = await attempt(() => state.source.findGitLabProject());
+-  if (outcome.ok) {
+-    state.project.value = outcome.value;
+-  } else {
+-    state.report({ action: "mergeRequests", step: "find", cause: outcome.cause });
+-  }
+-}
+-
+ async function openChanges(state: State, iid: MergeRequestIid): Promise<void> {
+   if (!claimRow(state.openings, iid, { kind: "fetching" })) {
+     return;
+@@ -66,7 +49,6 @@ async function openPage(state: State, clicked: PageKind, page: WebPage): Promise
+ export function pagesOf(state: State): Pages {
+   return {
+     pageProblem: state.pageProblem,
+-    findProject: () => findProject(state),
+     openChanges: (iid) => openChanges(state, iid),
+     openPage: (clicked, page) => openPage(state, clicked, page),
+     dismissPageProblem: () => {

@@ -1,0 +1,7 @@
+just mutants HEAD: 445 mutants over 4 files; 436 killed, 2 timeout, 5 survived, 2 no coverage (98.43%)
+src/ui/mergeRequestDiscussionQueue.ts:93 [] → ["Stryker was here"] — equivalent: the set is only probed with numeric iids (settle, moved verbatim)
+src/ui/mergeRequestDiscussionQueue.ts:162 [] → ["Stryker was here"] — equivalent: the string never matches an iid; in unhovered it is only deleted or probed by iid
+src/ui/mergeRequestDiscussionQueue.ts:147 generation += 1 → -= 1 — equivalent: generations are only compared for equality (dropped, unchanged)
+src/ui/mergeRequestDiscussions.ts:76 exhaustive default (no coverage) — equivalent: unreachable `never` arm
+src/ui/mergeRequests.ts:202 viewReplaced?.() → viewReplaced() — equivalent: the field is set synchronously in createMergeRequests before any list load can call rowsReplaced; `?.` only serves the null type
+src/ui/mergeRequests.ts:144 stale guard → true — not a changed line (show(), shifted); equivalent: listing.at is undefined unless done, so NaN >= n is false
