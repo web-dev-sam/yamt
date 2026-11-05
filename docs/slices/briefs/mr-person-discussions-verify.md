@@ -57,23 +57,25 @@ Start: `just app-session start-fixture --name mpd --diff --mr list --open-mr --s
 Dark and in yamt Light (set `<html data-theme="light">` live, #2495) unless noted.
 
 1. **Settings "Load lazily".** Settings → Discussion details → Load lazily → Back. Type `board` in the search, set a
-   Reviewer filter, scroll the list half-way; `read` the list's `scrollTop` and the shown iids.
+   Reviewer filter; `read` the shown iids. Then (search and filter cleared, window 1600x500 so the list scrolls) scroll the
+   list half-way and `read` its `scrollTop` for step 3's second Back (#2525).
 2. **A1 the button.** "Discussions" (tooltip) → the view in the list's place, filter row kept; the header reads "Loading
-   discussions — n of N merge requests" and counts up; `fixture_discussions` calls run one at a time, 10 iids each, only
-   for rows not read yet; entries appear as rows arrive.
+   discussions — n of N merge requests" and counts up; `fixture_discussions` calls run one at a time, each carrying every
+   row not read yet (the fixture answers the first 10, plan #179; #2524); entries appear as rows arrive.
 3. **Back.** "Back to list" → the same iids, the same search, filter and `scrollTop` (± 1 px); no `fixture_discussions`
    after Back for iids not yet sent. Clear the search and filter, then Discussions again (Load fully for the rest).
 4. **C2 Me.** Every row answered: the entries' order equals Me's pinned list; the header reads "N of M wait for you";
    the "Your turn" entries first. !615 and !629 each have a failure line with GitLab's words and Retry; Retry on !615 →
    one `fixture_discussions { iids: "615" }`.
-5. **D1–D4 an entry (p1).** Anna Berg's picture and name, "… ago" (hover: `DD.MM.YYYY, HH:MM`), "!626 <title>" muted, the
-   place; the first comment formatted (bold, code, link, image) and cut at four lines (`read` its box height: 80 px);
-   the pictures Ben, Chiara, Dmitri left to right, each tooltip naming its writer; "Anna's" turn word as Me's view says it.
+5. **D1–D4 an entry (p1, on !624).** Anna Berg's picture and name, "… ago" (hover: `DD.MM.YYYY, HH:MM`), "!624 <title>"
+   muted, the place; the first comment formatted (bold, code, link, image) and cut at four lines (`read` its box height:
+   80 px); the pictures Ben, Chiara, Dmitri left to right, each tooltip naming its writer; the turn word "Ben Okafor's turn".
    A one-comment discussion: no pictures. p6: "+N" at the left, its tooltip naming the folded writers, the newest writers
    visible; narrow the window to 900 px: N grows, the newest stay.
-6. **B2 the person menu.** "Whose discussions" → Me first, then everyone by name with pictures; type `an` → Anna Berg;
-   pick her → the order equals Anna's pinned list, words "Your turn" become "Anna Berg's turn"-style and the header
-   "… wait for Anna Berg". Escape in the menu closes the menu only; Escape again: the page stays.
+6. **B2 the person menu.** "Whose discussions" → Me first, then everyone by name with pictures (no narrowing field:
+   it shows from 8 people, design §2.8 #6; the fixture has 5, #2522); pick Anna → the order equals Anna's pinned list,
+   words "Your turn" become "Anna Berg's turn"-style and the header "… wait for Anna Berg". Escape in the menu closes the
+   menu only; Escape again: the page stays.
 7. **E1–E2 expanding.** Pointer over p2's entry, Shift → expanded: "Loading…", then the whole thread, one
    `fixture_thread`; Shift again → nothing (no new `fixture_thread`, still expanded). The chevron → collapsed; Enter on
    the chevron → expanded again, one new `fixture_thread` (fresh, E4). Focus an entry (Tab) and Shift → it expands.
@@ -88,9 +90,9 @@ Dark and in yamt Light (set `<html data-theme="light">` live, #2495) unless note
    expanded, the page stays.
 10. **C3 held.** After step 9 p3 kept its index although its last comment changed; collapse p3 → it still keeps its
     index (held since expanded). "Reload discussions" → one `fixture_discussions` for the listed rows, the expanded p1's
-    thread read again (one `fixture_thread`), p1 keeps its index, and p3 is gone (GitLab no longer lists it as open; C3's
-    hold ends with the refresh).
-11. **Back.** Back → the list; !626's count is one fewer; Discussions again → nothing expanded, no p3, p1's text "one"
+    thread read again (one `fixture_thread`), p1 keeps its index (an expanded entry stays held through a Reload; collapsed
+    ones re-sort, #2523), and p3 is gone (GitLab no longer lists it as open).
+11. **Back.** Back → the list; !624's count is one fewer; Discussions again → nothing expanded, no p3, p1's text "one"
     still in its field after expanding.
 12. **Panel text shared.** On the list, open !637's box, Shift over d01 → the panel; type "from the box"; Escape (panel
     closes); Discussions → expand d01's entry → its field reads "from the box".

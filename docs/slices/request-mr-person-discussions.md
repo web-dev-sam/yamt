@@ -52,7 +52,9 @@ discussion queue (`ui/mergeRequestDiscussions.ts`, `ui/mergeRequestDiscussionRow
   5. every other discussion.
 - **C3. Staying in place.** A discussion does not jump while the person looks at it: an entry that is expanded, or
   that was answered or resolved from the view, keeps its place until the view is refreshed or left (orchestrator;
-  the box's held-row rule, plan #189). A resolved one shows "Resolved" (threads request C10).
+  the box's held-row rule, plan #189). A refresh re-sorts the collapsed entries only: an entry still expanded keeps
+  its place through it (orchestrator, #2523: the thread being read never moves under the pointer). A resolved one
+  shows "Resolved" (threads request C10).
 - **C4. Refresh.** The view's header has the page's refresh look (Lucide `refresh-cw`, "Reload discussions"): it
   asks GitLab again for the listed merge requests' discussions; entries stay while it loads.
 
