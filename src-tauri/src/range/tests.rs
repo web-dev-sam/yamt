@@ -191,6 +191,36 @@ fn a_newer_reviewed_file_refuses_the_range_before_any_window() {
     assert_eq!(std::fs::read_to_string(&reviewed).unwrap(), newer);
 }
 
+// A refused window must not have written: pruning the unlisted mark would rewrite `reviewed.json` (plan §2 #117).
+#[test]
+fn a_broken_threads_file_leaves_reviewed_json_unwritten() {
+    let window = open_range_window();
+    invoke_on(&window.webview, "mark_reviewed", json!({ "file": 0 })).unwrap();
+    let (repo, data) = window.with_marks_copied();
+    let reviewed = reviewed_file(data.path());
+    let mut stored: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&reviewed).unwrap()).unwrap();
+    let mut gone = stored["marks"][0].clone();
+    gone["path"] = json!("gone.txt");
+    stored["marks"].as_array_mut().unwrap().push(gone);
+    let with_unlisted = serde_json::to_string(&stored).unwrap();
+    std::fs::write(&reviewed, &with_unlisted).unwrap();
+    std::fs::write(threads_path(repo.path(), data.path()), b"{").unwrap();
+    let app = range_app();
+
+    let refused = manage_range_in(
+        &app,
+        &app_folder(data.path()),
+        resolved(repo.path()),
+        Ai::Off,
+        MarksOf::SideNames,
+    );
+
+    let line = refused.unwrap_err();
+    assert!(line.starts_with("the review threads "), "{line}");
+    assert_eq!(std::fs::read_to_string(&reviewed).unwrap(), with_unlisted);
+}
+
 // Under `range/` the review's folder would be taken for a commit pair, and the AI sweep would walk it.
 #[test]
 fn the_reviewed_marks_live_in_yamt_reviewed_beside_range_and_no_pair_names_them() {

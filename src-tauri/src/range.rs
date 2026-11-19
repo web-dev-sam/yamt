@@ -63,10 +63,10 @@ fn manage_range_in<R: Runtime>(
     let lock =
         PairLock::take(&range_folder(app_folder), &resolved).map_err(|error| error.to_string())?;
     let range = resolved.list().map_err(|error| error.to_string())?;
+    let threads = ThreadStore::open(lock.folder()).map_err(|error| error.to_string())?;
     let reviewed = review_of(&range, marks)
         .and_then(|review| ReviewedStore::open(&app_folder.join(REVIEWED_FOLDER), review, &range))
         .map_err(|error| error.to_string())?;
-    let threads = ThreadStore::open(lock.folder()).map_err(|error| error.to_string())?;
     let unlisted = threads.unlisted_paths(&range);
     if !unlisted.is_empty() {
         tracing::warn!(paths = ?unlisted, "review threads kept on paths this range does not list");

@@ -12,6 +12,7 @@ use crate::range::tests::{
 const FILE: u32 = 0;
 const UNKNOWN_ID: u32 = 7;
 const PROJECT: &str = "taskboard/taskboard";
+const OTHER_PROJECT: &str = "taskboard/other";
 
 fn invoke(window: &RangeWindow, cmd: &str, file: u32) -> Result<Value, Value> {
     invoke_on(&window.webview, cmd, json!({ "file": file }))
@@ -43,8 +44,12 @@ fn after_a_mark() -> (TempDir, TempDir) {
 }
 
 fn merge_request(iid: u32) -> MarksOf {
+    merge_request_of(PROJECT, iid)
+}
+
+fn merge_request_of(project: &str, iid: u32) -> MarksOf {
     MarksOf::MergeRequest {
-        project: PROJECT.to_owned(),
+        project: project.to_owned(),
         iid,
     }
 }
@@ -97,6 +102,10 @@ fn two_merge_request_reviews_do_not_share_marks() {
 
     let first_again = open_marked_window(repo, data, merge_request(1));
     assert_eq!(listed(&first_again), reviewed(FILE));
+    let (repo, data) = first_again.with_marks_copied();
+
+    let other_project = open_marked_window(repo, data, merge_request_of(OTHER_PROJECT, 1));
+    assert_eq!(listed(&other_project), json!([]));
 }
 
 #[test]

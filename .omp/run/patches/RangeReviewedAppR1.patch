@@ -1,0 +1,844 @@
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+index 76d6ae1..c6e0e02 100644
+--- a/crates/merge-requests/AGENTS.md
++++ b/crates/merge-requests/AGENTS.md
+@@ -1,4 +1,4 @@
+-Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, #138–#143, #149, #151–#153; requests `docs/slices/request-merge-requests.md`, `docs/slices/request-mr-conflicts.md`, `docs/slices/request-local-conflict-check.md`, `docs/slices/request-mr-row-details.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `WebPage` (a string only `WebPage::job`, `WebPage::merge_request`, `WebPage::note` and `WebPage::linked` make), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed`, `ResolveRefusal` `notOpen`/`fromFork`/`noRemote`/`glabMissing`/`notLoggedIn`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC), `ResolveTarget` (`root`, `iid`, `remote`, `branch`, `target`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; every module's public types re-exported; `Glab` re-exported; ≤ 400 lines), `row.rs` (a list row's IPC types: `CiStatus` (seven, camelCase), `FailedJob`, `Pipeline`, `ChangeSize` (`additions`, `deletions`, `files`), `Readiness` `ready`/`conflicts { also }`/`needsRebase`/`checking`/`blocked { reason }`/`mergesCleanly` (only from a clean local merge of a row GitLab calls conflicting or has not checked), `CheckedRow` (`iid`, `readiness`: a row the local check changed), `BlockedReason` (GitLab's seventeen blockers and `other { status }`), `MergeRequestRow` (`createdAt` as GitLab sent it, `author` or `None`, `assignees`, `reviewers` (`Reviewer`s), `labels` (`Label`s, GitLab's order), `openDiscussions` a single number, `approvedBy` (people; the approvals count is its length), `mayRerequest` (GitLab's `userPermissions.updateMergeRequest`: re-requesting a review and adding or removing assignees and reviewers; the name stays), `page` its GitLab page or `None`, `size` or `None`, `readiness`, `fromFork`, `hasDescription` (GitLab's description holds more than white space)), `MergeRequestPage` (`me`, `rows`)), `people.rs` (the IPC types `Person` (`username`, `name`, `picture`), `PersonPicture` `uploaded`/`gravatar { address }`/`none`, `ReviewState` `requested`/`reviewed`/`approved`/`changesRequested`, `Reviewer` (`person`, `state`); the query nodes `UserNode` (`name` defaults to empty: older recorded pages name approvers by username only) and `ReviewerNode`; `People`: turns nodes into people through `avatar_source`, collecting each uploaded picture as an `OfferedPicture` and each unknown review state; the one fold of the review state (GitLab's `uncollapsed_reviewer_list.vue` order): `approved: true` → approved whatever the state, else `UNREVIEWED`/`REVIEW_STARTED`/null/missing → requested, `REVIEWED`/`UNAPPROVED` → reviewed, `APPROVED` → approved, `REQUESTED_CHANGES` → changes requested, any other text requested and warned of once per load (`warn_unknown_review_state`); `is_awaiting_review`: the fold says requested), `labels.rs` (the IPC types `Label` (`title`, `colors`) and `LabelColors` (`background`, `text`); `label`: both colours `#` then 3 or 6 hex digits, else no colours), `picture.rs` (`avatar_source(origin, avatar_url)`, the only maker of `GravatarAddress` (IPC, a string) and, beside `image_of` (a description's upload, below), of `PictureAddress` (an uploaded avatar's or upload's `https` address on the project's GitLab, never sent to the window): a path starting `/`, or an address of the project's https `origin` (same host and port), whose path is `(/segment)*/uploads/-/system/user/avatar/<digits>/<file>` (`web_page.rs`' segment rule, no `..`), an optional query of `[A-Za-z0-9=&._-]` → uploaded (none off https); `https://secure.gravatar.com` or `https://www.gravatar.com` + `/avatar/<32 or 64 hex digits>` + an optional query of `[A-Za-z0-9=&%._-]` → Gravatar; anything else (`http`, another host or port, a custom Gravatar host such as Libravatar, null) → none; `ImageKind` PNG/JPEG/GIF/WebP by the first bytes and its `mime`; `Picture` (`kind`, `bytes`); `fetch_picture`: an avatar by `glab api <address>` with stdin closed (`Glab::get`), refused above `MAX_PICTURE_BYTES` (1 MiB), an upload as the description paragraph says, refused above `MAX_UPLOAD_BYTES` (10 MiB); either refused when not one of the four kinds), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`logged_in_project`: `glab auth status` (logged out → `NoProject::NotLoggedIn`, failed → `NoProject::Failed`), then `glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https; `NoProject` turns into `ListEnd`, `OpenReply`, `ResolveRefusal`, `RerequestReply`, `JobLogReply`, `DiscussionsAnswer`, `PeopleSearchReply`, `PeopleChangeReply`, `DescriptionReply` and `LinksReply` through `From`: the one prelude of listing, opening, resolving, re-requesting, reading a log, reading discussions, searching people, changing a merge request's people, reading a description and reading its links), `query.rs` (the list query, the details query, the branches query, the reviewers query, the re-request mutation, the people search, the two people mutations and the links lookup (`links_args`, each part aliased by `part_name`), each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; the list's nodes ask `description` after `title`, `author { username name avatarUrl }`, `avatarUrl` on assignees, reviewers and approvers, approvers' `name`, reviewers' `mergeRequestInteraction { approved reviewState }`, `userPermissions { updateMergeRequest }`, labels' `color textColor`, and `detailedMergeStatus conflicts diffStats { additions deletions } diffRefs { baseSha } sourceProjectId targetProjectId targetBranch diffHeadSha` — per-file `diffStats`, never `diffStatsSummary`: beside `diffStatsSummary` in a list, gitlab.com answers `detailedMergeStatus: CONFLICT` for merge requests that merge clean (measured 2026-10-31, `docs/slices/briefs/mr-diff-stats.md`); 172 of 250 logged in on gitlab.com on 2026-11-04 (170 without `description`), the statuses unchanged by the new fields; `details_args`, `branches_args` and `reviewers_args`: `… -f fullPath=<path> -f iid=<n>`; the branches query asks `state sourceBranch targetBranch sourceProjectId targetProjectId`, the reviewers query `state reviewers { nodes { id username name avatarUrl mergeRequestInteraction { approved reviewState } } }`; `rerequest_body`: `{"query": <mergeRequestReviewerRereview mutation>, "variables": {"projectPath", "iid", "userId"}}` built by `serde_json`, the reviewer's global id a variable, sent with `GRAPHQL_BODY_ARGS` `api graphql --input -`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; `NO_PROJECT` and `NO_MERGE_REQUEST`, the answer-shape messages every reader and write shares; `FORBIDDEN` and `NOT_FOUND`, how glab's line for an HTTP 403 or 404 ends, shared by `job_log.rs` and `picture.rs`; one list answer of a `Project` → `ParsedPage` (its rows and, beside each, its `RowToCheck`: iid, `targetBranch` (non-null in GitLab's schema), `diffHeadSha` as an `Oid` or none when null or no commit id, its `GitLabMerge`; the pictures its people offered, in the order named; the unknown review states): no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; people through `People`, labels through `label`; `may_rerequest` false when `userPermissions` is missing; `has_description` from the node's `description` (more than white space; the text goes nowhere else); GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; a row's `readiness` is `GitLabMerge::readiness`; `size` from `diffStats`: the sums of the entries' `additions` and `deletions`, `files` the number of entries, whatever `diffRefs` says; no entries and `diffRefs` set → zero (an empty diff); no entries and `diffRefs` null or missing → `None` (GitLab sends `[]` both for an empty diff and one not computed yet, design `mr-row-details-design.md` §1.4); each count saturating into `u32`, below 0 → 0; `is_from_fork`: `sourceProjectId != Some(targetProjectId)`, a deleted source project a fork; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `readiness.rs` (the one fold, plan #138, #149: `GitLabMerge::read` folds GitLab's 24 `DetailedMergeStatus` values into `MergeStatus` (`MERGEABLE` mergeable, `CONFLICT` conflict, `NEED_REBASE` needs rebase, `CHECKING`/`UNCHECKED`/`PREPARING`/`APPROVALS_SYNCING`/null unchecked, the other seventeen a `BlockedReason`, an unknown one `Other { status }` with a warning) beside the `conflicts` and draft flags; `readiness`: GitLab's answer alone, conflicts first (#1998): the `conflicts` flag or a `CONFLICT` status → `Conflicts { also }`, `also` the status's blocked reason, then `Draft` for a draft; `readiness_after(MergeOutcome)`: design §2.1's table — a local conflict → `Conflicts { also }` whatever GitLab says, a clean merge → `ready` for mergeable, `mergesCleanly` for conflict or unchecked, else GitLab's status; the `conflicts` flag is not read), `check.rs` (`check_conflicts`, request rules 4–8, design §2.2: no row with a head → no git run; `Repo::version` → `MergeTreeRun::for_version` (none → stop); `remote_for` (none → stop); one `Repo::remote_refs` (`REMOTE_REFS_TIMEOUT` 20 s) of `refs/heads/<t>` for each distinct target of a row with a head (`require_branch_name` leaves a target holding `:` out) and `refs/merge-requests/*/head` (failed → stop); per row: no head, target or head ref not advertised → kept, head ref ≠ `diffHeadSha` → moving (rule 5), else the pair (target tip, head); pairs in `MergedPairs` sent at once (remembered); one `Repo::missing_commits` over the others' commits, then at most one `Repo::fetch_without_refs` (`FETCH_TIMEOUT`) of `refs/heads/<t>` for each missing tip and `refs/merge-requests/<iid>/head` for each missing head, deduplicated (failed → only the rows that needed it kept); `merged_in_finishing_order` merges the distinct pairs `MERGES_AT_ONCE` (2) at a time in scoped threads, `MERGE_TIMEOUT` 10 s each, none started after `MERGE_PHASE_LIMIT` 60 s, each outcome into `MergedPairs` and then every row of that pair sent through `on_checked` when `readiness_after` differs from `readiness`; `CheckSummary` (`rows`, `merges`, `fetched_refs`, `remembered`, `moving`, `kept` — every row counted once, the rest decided by a merge now — and `problem`, the first thing that went wrong) logged as one line, `info`, or `warn` with a problem; `ConflictCheck` (the project's `full_path`, every listed row's `RowToCheck`) made only by `list_merge_requests`; `MergedPairs` (target commit, source commit) → `MergeOutcome`, which the shell holds for the run), `list.rs` (`list_merge_requests` → `Listed { end, to_check }`: glab missing → `GlabMissing`, `logged_in_project`, then at most 5 pages, each one glab call sent to `on_page` as a `ListedPage` (`page`: what the window sees; `pictures`: the page's `OfferedPicture`s (`username`, `address`), one per username, the last named winning) as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info; each unknown review state warned of once per load; `to_check` `None` when no project was reached, else the rows of every page sent), `rerequest.rs` (`RerequestReply` `requested { reviewers }`/`notReviewer`/`notOpen`/`glabMissing`/`notLoggedIn`/`refused`/`failed`; `rerequest_review`, plan #153, its one write the Rereview mutation: glab missing → `GlabMissing`, `logged_in_project`, the reviewers query asked afresh (no merge request or not `opened` → `NotOpen`), the username not among them → `NotReviewer` (no write: nothing adds a reviewer), their fresh state requested → `Requested` with the fresh reviewers (no write: no second notification), else the Rereview mutation with their global id through `Glab::run` with the body on stdin: glab failing, timing out or exiting non-zero → `Failed` in glab's last stderr line, GitLab's top-level `errors` → `Failed { first }`, the payload's `errors` → `Refused { first }`, else `Requested` with the reviewers it answered; one `info` line per request naming the iid and the outcome's kind), `open.rs` (`prepare_open`: glab, `logged_in_project`, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target refused by `require_branch_name`, the crate's one rule for a branch name holding `:`); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `resolve.rs` (`prepare_resolve`: glab missing → `GlabMissing`, `logged_in_project`, the branches query asked afresh — no merge request or not `opened` → `NotOpen`, `is_from_fork` → `FromFork`, either branch refused by `require_branch_name` → `Failed`; `remote_for` → `NoRemote { project }`; nothing fetched or written), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments checked by `is_path_segment` (`[A-Za-z0-9._~-]`, none empty or `..`), the rule `picture.rs` reuses; `ESCAPED_SLASH`, the `%2F` a project path's "/" becomes in an API route (`job_log.rs`, `description/address.rs`); `WebPage::note`: GitLab's `url` only when it is exactly `WebPage::merge_request`'s address followed by `#note_<digits>`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); one `Mutex`, `project.rs` `Remembered` (the project glab named, kept for the app's run; last paragraph); beside it, the one memory across loads is the run's `MergedPairs`, which the shell holds and lends to `check_conflicts` (plan #149); the shell holds the offered pictures. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query/tests.rs` (each query one line with balanced braces; the branches, reviewers and people-search argv exact; the list asks `diffStats`, never `diffStatsSummary`, `diffRefs`, `targetBranch diffHeadSha` and the people's fields; the re-request body exact, the id a variable; the four people-change bodies exact), `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher; the rows to check are the rows sent; one picture per username, the last; each unknown review state new once), `picture/tests.rs` (both address kinds against every look-alike: `http`, another host or port, `..`, other paths, custom hosts, odd queries; the four image kinds by their first bytes, anything else refused; 1 MiB the largest), `rerequest.rs` (glab's failure words, a top-level error against the payload's own, the logged kind of each reply), `readiness.rs` (`readiness_after` over design §2.1's table, both `conflicts` flags, drafts), `check/tests.rs` (the summary's words with and without a problem; the merge scheduler: two at a time, finishing order, none started after the limit, a failed merge; a `:` target left out of `ls-remote`; pairing and moving rows; the fetch's refspecs; a row sent only when it changes), `page/tests.rs` (over `tests/glab/merge-requests/`'s and `tests/glab/mr-conflicts/`'s recorded pages; every merge status as a table, conflicts first, sizes summed per file, an empty diff with `diffRefs` zero, without it no size, saturating counts, forks; each row's check input; the review-state fold, `approved` first; approvers by name; label colours; a null author; the permission; offered pictures); `tests/fake_glab/mod.rs` (the one fake-glab helper the integration tests share: `Fake` on a scenario, its log and post counter, `answered_posts(n)` so the next post is `post-<n+1>`, `in_this_repository`; a test file using part of it declares `#[expect(dead_code)] mod fake_glab;`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`, `mr-row-details/`: whole rows with people, pictures, states and label colours, the offered pictures anna and sam only, no Gravatar address ever through glab; only a load that reached the project has rows to check), `tests/rerequest.rs` (`mr-row-details/`: the exact body by global id, no write for someone no longer a reviewer or still awaited, the Rereview mutation the re-request path's only write, a mutation error as `Refused`, a merged merge request `NotOpen`, glab missing or logged out), `tests/picture.rs` (`mr-row-details/`: a listed picture byte for byte through glab), `tests/local_conflicts.rs` (`scripts/local-conflicts-repo.sh`'s repository with the fake glab on `local-conflicts/`: the scenario's rows and summary, the moving row, a second load remembered with no fetch or merge, refs, status, `HEAD` and `FETCH_HEAD` byte-identical, an unreachable remote keeping every answer), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/resolve.rs` (`scripts/range-repo.sh`'s repository with the fake glab on `mr-conflicts/`: !21's branches and `origin` with the refs unchanged and the logged argv, !22 `FromFork`, !30 `NotOpen`, `NoRemote`, !33's `:` branch `Failed`, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
++Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, #138–#143, #149, #151–#153; requests `docs/slices/request-merge-requests.md`, `docs/slices/request-mr-conflicts.md`, `docs/slices/request-local-conflict-check.md`, `docs/slices/request-mr-row-details.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `WebPage` (a string only `WebPage::job`, `WebPage::merge_request`, `WebPage::note` and `WebPage::linked` make), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed`, `ResolveRefusal` `notOpen`/`fromFork`/`noRemote`/`glabMissing`/`notLoggedIn`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`, `project` the logged-in project's full path, `iid`; not IPC), `ResolveTarget` (`root`, `iid`, `remote`, `branch`, `target`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; every module's public types re-exported; `Glab` re-exported; ≤ 400 lines), `row.rs` (a list row's IPC types: `CiStatus` (seven, camelCase), `FailedJob`, `Pipeline`, `ChangeSize` (`additions`, `deletions`, `files`), `Readiness` `ready`/`conflicts { also }`/`needsRebase`/`checking`/`blocked { reason }`/`mergesCleanly` (only from a clean local merge of a row GitLab calls conflicting or has not checked), `CheckedRow` (`iid`, `readiness`: a row the local check changed), `BlockedReason` (GitLab's seventeen blockers and `other { status }`), `MergeRequestRow` (`createdAt` as GitLab sent it, `author` or `None`, `assignees`, `reviewers` (`Reviewer`s), `labels` (`Label`s, GitLab's order), `openDiscussions` a single number, `approvedBy` (people; the approvals count is its length), `mayRerequest` (GitLab's `userPermissions.updateMergeRequest`: re-requesting a review and adding or removing assignees and reviewers; the name stays), `page` its GitLab page or `None`, `size` or `None`, `readiness`, `fromFork`, `hasDescription` (GitLab's description holds more than white space)), `MergeRequestPage` (`me`, `rows`)), `people.rs` (the IPC types `Person` (`username`, `name`, `picture`), `PersonPicture` `uploaded`/`gravatar { address }`/`none`, `ReviewState` `requested`/`reviewed`/`approved`/`changesRequested`, `Reviewer` (`person`, `state`); the query nodes `UserNode` (`name` defaults to empty: older recorded pages name approvers by username only) and `ReviewerNode`; `People`: turns nodes into people through `avatar_source`, collecting each uploaded picture as an `OfferedPicture` and each unknown review state; the one fold of the review state (GitLab's `uncollapsed_reviewer_list.vue` order): `approved: true` → approved whatever the state, else `UNREVIEWED`/`REVIEW_STARTED`/null/missing → requested, `REVIEWED`/`UNAPPROVED` → reviewed, `APPROVED` → approved, `REQUESTED_CHANGES` → changes requested, any other text requested and warned of once per load (`warn_unknown_review_state`); `is_awaiting_review`: the fold says requested), `labels.rs` (the IPC types `Label` (`title`, `colors`) and `LabelColors` (`background`, `text`); `label`: both colours `#` then 3 or 6 hex digits, else no colours), `picture.rs` (`avatar_source(origin, avatar_url)`, the only maker of `GravatarAddress` (IPC, a string) and, beside `image_of` (a description's upload, below), of `PictureAddress` (an uploaded avatar's or upload's `https` address on the project's GitLab, never sent to the window): a path starting `/`, or an address of the project's https `origin` (same host and port), whose path is `(/segment)*/uploads/-/system/user/avatar/<digits>/<file>` (`web_page.rs`' segment rule, no `..`), an optional query of `[A-Za-z0-9=&._-]` → uploaded (none off https); `https://secure.gravatar.com` or `https://www.gravatar.com` + `/avatar/<32 or 64 hex digits>` + an optional query of `[A-Za-z0-9=&%._-]` → Gravatar; anything else (`http`, another host or port, a custom Gravatar host such as Libravatar, null) → none; `ImageKind` PNG/JPEG/GIF/WebP by the first bytes and its `mime`; `Picture` (`kind`, `bytes`); `fetch_picture`: an avatar by `glab api <address>` with stdin closed (`Glab::get`), refused above `MAX_PICTURE_BYTES` (1 MiB), an upload as the description paragraph says, refused above `MAX_UPLOAD_BYTES` (10 MiB); either refused when not one of the four kinds), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`logged_in_project`: `glab auth status` (logged out → `NoProject::NotLoggedIn`, failed → `NoProject::Failed`), then `glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https; `NoProject` turns into `ListEnd`, `OpenReply`, `ResolveRefusal`, `RerequestReply`, `JobLogReply`, `DiscussionsAnswer`, `PeopleSearchReply`, `PeopleChangeReply`, `DescriptionReply` and `LinksReply` through `From`: the one prelude of listing, opening, resolving, re-requesting, reading a log, reading discussions, searching people, changing a merge request's people, reading a description and reading its links), `query.rs` (the list query, the details query, the branches query, the reviewers query, the re-request mutation, the people search, the two people mutations and the links lookup (`links_args`, each part aliased by `part_name`), each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; the list's nodes ask `description` after `title`, `author { username name avatarUrl }`, `avatarUrl` on assignees, reviewers and approvers, approvers' `name`, reviewers' `mergeRequestInteraction { approved reviewState }`, `userPermissions { updateMergeRequest }`, labels' `color textColor`, and `detailedMergeStatus conflicts diffStats { additions deletions } diffRefs { baseSha } sourceProjectId targetProjectId targetBranch diffHeadSha` — per-file `diffStats`, never `diffStatsSummary`: beside `diffStatsSummary` in a list, gitlab.com answers `detailedMergeStatus: CONFLICT` for merge requests that merge clean (measured 2026-10-31, `docs/slices/briefs/mr-diff-stats.md`); 172 of 250 logged in on gitlab.com on 2026-11-04 (170 without `description`), the statuses unchanged by the new fields; `details_args`, `branches_args` and `reviewers_args`: `… -f fullPath=<path> -f iid=<n>`; the branches query asks `state sourceBranch targetBranch sourceProjectId targetProjectId`, the reviewers query `state reviewers { nodes { id username name avatarUrl mergeRequestInteraction { approved reviewState } } }`; `rerequest_body`: `{"query": <mergeRequestReviewerRereview mutation>, "variables": {"projectPath", "iid", "userId"}}` built by `serde_json`, the reviewer's global id a variable, sent with `GRAPHQL_BODY_ARGS` `api graphql --input -`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; `NO_PROJECT` and `NO_MERGE_REQUEST`, the answer-shape messages every reader and write shares; `FORBIDDEN` and `NOT_FOUND`, how glab's line for an HTTP 403 or 404 ends, shared by `job_log.rs` and `picture.rs`; one list answer of a `Project` → `ParsedPage` (its rows and, beside each, its `RowToCheck`: iid, `targetBranch` (non-null in GitLab's schema), `diffHeadSha` as an `Oid` or none when null or no commit id, its `GitLabMerge`; the pictures its people offered, in the order named; the unknown review states): no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; people through `People`, labels through `label`; `may_rerequest` false when `userPermissions` is missing; `has_description` from the node's `description` (more than white space; the text goes nowhere else); GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; a row's `readiness` is `GitLabMerge::readiness`; `size` from `diffStats`: the sums of the entries' `additions` and `deletions`, `files` the number of entries, whatever `diffRefs` says; no entries and `diffRefs` set → zero (an empty diff); no entries and `diffRefs` null or missing → `None` (GitLab sends `[]` both for an empty diff and one not computed yet, design `mr-row-details-design.md` §1.4); each count saturating into `u32`, below 0 → 0; `is_from_fork`: `sourceProjectId != Some(targetProjectId)`, a deleted source project a fork; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `readiness.rs` (the one fold, plan #138, #149: `GitLabMerge::read` folds GitLab's 24 `DetailedMergeStatus` values into `MergeStatus` (`MERGEABLE` mergeable, `CONFLICT` conflict, `NEED_REBASE` needs rebase, `CHECKING`/`UNCHECKED`/`PREPARING`/`APPROVALS_SYNCING`/null unchecked, the other seventeen a `BlockedReason`, an unknown one `Other { status }` with a warning) beside the `conflicts` and draft flags; `readiness`: GitLab's answer alone, conflicts first (#1998): the `conflicts` flag or a `CONFLICT` status → `Conflicts { also }`, `also` the status's blocked reason, then `Draft` for a draft; `readiness_after(MergeOutcome)`: design §2.1's table — a local conflict → `Conflicts { also }` whatever GitLab says, a clean merge → `ready` for mergeable, `mergesCleanly` for conflict or unchecked, else GitLab's status; the `conflicts` flag is not read), `check.rs` (`check_conflicts`, request rules 4–8, design §2.2: no row with a head → no git run; `Repo::version` → `MergeTreeRun::for_version` (none → stop); `remote_for` (none → stop); one `Repo::remote_refs` (`REMOTE_REFS_TIMEOUT` 20 s) of `refs/heads/<t>` for each distinct target of a row with a head (`require_branch_name` leaves a target holding `:` out) and `refs/merge-requests/*/head` (failed → stop); per row: no head, target or head ref not advertised → kept, head ref ≠ `diffHeadSha` → moving (rule 5), else the pair (target tip, head); pairs in `MergedPairs` sent at once (remembered); one `Repo::missing_commits` over the others' commits, then at most one `Repo::fetch_without_refs` (`FETCH_TIMEOUT`) of `refs/heads/<t>` for each missing tip and `refs/merge-requests/<iid>/head` for each missing head, deduplicated (failed → only the rows that needed it kept); `merged_in_finishing_order` merges the distinct pairs `MERGES_AT_ONCE` (2) at a time in scoped threads, `MERGE_TIMEOUT` 10 s each, none started after `MERGE_PHASE_LIMIT` 60 s, each outcome into `MergedPairs` and then every row of that pair sent through `on_checked` when `readiness_after` differs from `readiness`; `CheckSummary` (`rows`, `merges`, `fetched_refs`, `remembered`, `moving`, `kept` — every row counted once, the rest decided by a merge now — and `problem`, the first thing that went wrong) logged as one line, `info`, or `warn` with a problem; `ConflictCheck` (the project's `full_path`, every listed row's `RowToCheck`) made only by `list_merge_requests`; `MergedPairs` (target commit, source commit) → `MergeOutcome`, which the shell holds for the run), `list.rs` (`list_merge_requests` → `Listed { end, to_check }`: glab missing → `GlabMissing`, `logged_in_project`, then at most 5 pages, each one glab call sent to `on_page` as a `ListedPage` (`page`: what the window sees; `pictures`: the page's `OfferedPicture`s (`username`, `address`), one per username, the last named winning) as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info; each unknown review state warned of once per load; `to_check` `None` when no project was reached, else the rows of every page sent), `rerequest.rs` (`RerequestReply` `requested { reviewers }`/`notReviewer`/`notOpen`/`glabMissing`/`notLoggedIn`/`refused`/`failed`; `rerequest_review`, plan #153, its one write the Rereview mutation: glab missing → `GlabMissing`, `logged_in_project`, the reviewers query asked afresh (no merge request or not `opened` → `NotOpen`), the username not among them → `NotReviewer` (no write: nothing adds a reviewer), their fresh state requested → `Requested` with the fresh reviewers (no write: no second notification), else the Rereview mutation with their global id through `Glab::run` with the body on stdin: glab failing, timing out or exiting non-zero → `Failed` in glab's last stderr line, GitLab's top-level `errors` → `Failed { first }`, the payload's `errors` → `Refused { first }`, else `Requested` with the reviewers it answered; one `info` line per request naming the iid and the outcome's kind), `open.rs` (`prepare_open`: glab, `logged_in_project`, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target refused by `require_branch_name`, the crate's one rule for a branch name holding `:`); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `resolve.rs` (`prepare_resolve`: glab missing → `GlabMissing`, `logged_in_project`, the branches query asked afresh — no merge request or not `opened` → `NotOpen`, `is_from_fork` → `FromFork`, either branch refused by `require_branch_name` → `Failed`; `remote_for` → `NoRemote { project }`; nothing fetched or written), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments checked by `is_path_segment` (`[A-Za-z0-9._~-]`, none empty or `..`), the rule `picture.rs` reuses; `ESCAPED_SLASH`, the `%2F` a project path's "/" becomes in an API route (`job_log.rs`, `description/address.rs`); `WebPage::note`: GitLab's `url` only when it is exactly `WebPage::merge_request`'s address followed by `#note_<digits>`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); one `Mutex`, `project.rs` `Remembered` (the project glab named, kept for the app's run; last paragraph); beside it, the one memory across loads is the run's `MergedPairs`, which the shell holds and lends to `check_conflicts` (plan #149); the shell holds the offered pictures. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query/tests.rs` (each query one line with balanced braces; the branches, reviewers and people-search argv exact; the list asks `diffStats`, never `diffStatsSummary`, `diffRefs`, `targetBranch diffHeadSha` and the people's fields; the re-request body exact, the id a variable; the four people-change bodies exact), `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher; the rows to check are the rows sent; one picture per username, the last; each unknown review state new once), `picture/tests.rs` (both address kinds against every look-alike: `http`, another host or port, `..`, other paths, custom hosts, odd queries; the four image kinds by their first bytes, anything else refused; 1 MiB the largest), `rerequest.rs` (glab's failure words, a top-level error against the payload's own, the logged kind of each reply), `readiness.rs` (`readiness_after` over design §2.1's table, both `conflicts` flags, drafts), `check/tests.rs` (the summary's words with and without a problem; the merge scheduler: two at a time, finishing order, none started after the limit, a failed merge; a `:` target left out of `ls-remote`; pairing and moving rows; the fetch's refspecs; a row sent only when it changes), `page/tests.rs` (over `tests/glab/merge-requests/`'s and `tests/glab/mr-conflicts/`'s recorded pages; every merge status as a table, conflicts first, sizes summed per file, an empty diff with `diffRefs` zero, without it no size, saturating counts, forks; each row's check input; the review-state fold, `approved` first; approvers by name; label colours; a null author; the permission; offered pictures); `tests/fake_glab/mod.rs` (the one fake-glab helper the integration tests share: `Fake` on a scenario, its log and post counter, `answered_posts(n)` so the next post is `post-<n+1>`, `in_this_repository`; a test file using part of it declares `#[expect(dead_code)] mod fake_glab;`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`, `mr-row-details/`: whole rows with people, pictures, states and label colours, the offered pictures anna and sam only, no Gravatar address ever through glab; only a load that reached the project has rows to check), `tests/rerequest.rs` (`mr-row-details/`: the exact body by global id, no write for someone no longer a reviewer or still awaited, the Rereview mutation the re-request path's only write, a mutation error as `Refused`, a merged merge request `NotOpen`, glab missing or logged out), `tests/picture.rs` (`mr-row-details/`: a listed picture byte for byte through glab), `tests/local_conflicts.rs` (`scripts/local-conflicts-repo.sh`'s repository with the fake glab on `local-conflicts/`: the scenario's rows and summary, the moving row, a second load remembered with no fetch or merge, refs, status, `HEAD` and `FETCH_HEAD` byte-identical, an unreachable remote keeping every answer), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/resolve.rs` (`scripts/range-repo.sh`'s repository with the fake glab on `mr-conflicts/`: !21's branches and `origin` with the refs unchanged and the logged argv, !22 `FromFork`, !30 `NotOpen`, `NoRemote`, !33's `:` branch `Failed`, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
+ 
+ A failed job's log (plan §2 #158, request `docs/slices/request-ci-job-log.md`, design `docs/slices/briefs/ci-job-log-design.md` §1.1–1.3): `job_log.rs` (the IPC types `JobLog` (`text`, `cut`) and `JobLogReply` `log { log }`/`notOffered`/`noLog`/`glabMissing`/`notLoggedIn`/`failed`; `MAX_LOG_BYTES` 500 KiB, GitLab's `Stream::LIMIT_SIZE`; `read_job_log`: glab missing → `GlabMissing`, a page that is not `…/-/jobs/<digits>` (`WebPage::job_parts`, the one split `WebPage::job` shares) → `NotOffered` before any glab run, `logged_in_project`, then `trace_route` — `projects/<the page's own project path, "/" as "%2F">/jobs/<n>/trace`, the path after the project's origin and without the sub-path GitLab is installed under (`web_path` minus `/<full_path>`), so a fork's job is asked from the fork; another origin or an odd path → `NotOffered` — read whole through `Glab::get` (no `Range`, no `byte_offset`); empty → `NoLog`, glab's line ending in `(HTTP 404)` → `NoLog`, any other failure → `Failed` in glab's words; `tail`: GitLab's `Stream#limit` — over `MAX_LOG_BYTES` the last 512,000 bytes from just after their first `\n` (the line the cut lands in dropped, even a whole one; no `\n` → empty), `cut`; then lossy UTF-8; one `info` line per call naming the page, the outcome's kind, the bytes read and `cut`, never the text; nothing kept here: the shell keeps the run's logs). Tests: `job_log.rs` (the cut at, over and on a line start or break, no line break, lossy bytes, the route for the project, a fork, a sub-path with and without it in the page, look-alike origins and paths, 404 against glab's other words, each logged kind), `tests/job_log.rs` (`ci-job-log/`: 302 byte for byte, 303 cut at a line start, 310 by the fork's path, 304 and 305 `NoLog`, glab missing, logged out, a merge-request page or another GitLab's job page asking no trace).
+ 
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index 77fcee9..273d958 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1,5 +1,5 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114); the compare and range windows also over `yamt_merge_requests` for their merge-request page (plan §2 #128–#135, #137) and over `yamt_local_merge` for resolving a merge request's conflicts in this checkout, which the merge window then finishes, aborts or pushes (plan §2 #139–#143): `lib.rs` (`run`, `export_bindings`) shared by both bins, `from_start_dir` (every window's folder as given, through `appimage.rs` on Linux; the compare window's is `args.rs` `START_FOLDER`); `run` reads `YAMT_AI` (`AI_VAR`) once and hands its value to `args::parse`; `merge(repo)` keeps `Startup::Merge`'s window claim alive until `window::run` returns; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare { ai, start }`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai, start }` through `RangeSpec::parse`, whose error is the usage line; without `--repo` the repository is `START_FOLDER`, the folder yamt was started in; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, `Range` and `Compare` keep it as `Ai` = `Off` | `On`, the compare window only for the range windows its merge-request page opens, plan §2 #108, #144; `parse(args, ai_variable)` starts `ai` from `YAMT_AI`'s value — unset, empty or `0` off, any other value (non-UTF-8 too) on — and `--ai` turns it on regardless; `--mr` sets `StartScreen` = `Files` | `MergeRequests`, carried by `Compare` and `Range` only: without `--diff`/`--diff=<range>` it means `--diff` (so with `--repo` it is `--diff`'s usage error), twice is once), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative window folder is resolved against `OWD` by `repo_from_start_dir`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called through `from_start_dir` for every window; `running_appimage`: the `$APPIMAGE` file only inside the AppImage, else `None`, the program `second_window.rs` starts, since the mount the running binary lives in goes away with this process), `outcome.rs` (start-up decision, exit status 0/1/2: `MergeSession::open`'s error is exit 2; with a live record of a merge yamt started (`yamt_local_merge::find_live`) the window first takes `claim_window` — another window holding it is exit 2 "the merge of !<iid> is already open in another yamt window" (RK47), a git error exit 2 with its line — and opens even on a stop with no file; without a record and no file "nothing to merge in <root>", exit 0; `Startup::Merge { session, claim }`; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` and `Committed` 0 with `<operation> finished` (`merge finished` for `Committed`), `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing; its tests in `outcome/tests.rs`, the start-up ones on a merge yamt started with `merge/tests/merge_request.rs`'s repository helpers), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Committed { root, offer: PushOffer }` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` (also for `Committed`) outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted` (a `Committed` merge still asks whether to push); `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed, plus `merge_request`: the live record's `MergeView`, read fresh by `find_live` on every list (a git error → `Git`, through `ipc_error.rs`); every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` read the live record before they hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; the abort's worker runs git's abort and then, for a recorded merge, `LiveMerge::restore`, answering `AbortReply { leftovers }` (#140); a continue that finishes a recorded merge calls `LiveMerge::committed` and becomes `Committed`, answering `ContinueReply::ReadyToPush { branch }` (#141); `push_merged_branch` takes the offer out of `Committed` only (else `NoOperation`, RK45), pushes through `blocking_reply` while `Running(Merge)` — `Pushed` → `Finished(Merge)`, `Failed` or a panicked worker (`WorkerStopped`) → `Committed` again; `end_committed` (Keep Local): `Committed` → `Finished(Merge)`, any other state stays; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89, #140, #141; its tests in `merge/tests.rs` and, on `scripts/mr-conflict-repo.sh` with the merge started by `yamt_local_merge::start`, `merge/tests/merge_request.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage`, the merge-request page's through `merge_requests::manage` on the range's repository root with the window's `ai`, and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); `range_folder(app_folder)`, the folder pair locks live in, shared with `merge_requests.rs`; its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_in(repo, data, ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping, the private `lock` the only way to the state; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts a background thread that holds the state while `Workspace::remove_own_leftovers` removes this pair's partial and removing folders, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; the thread then releases the state and runs `yamt_agent::sweep_other_pairs` without it (`sweep_own_then_others(state, held, others)`, whose test sees the state free when `others` runs), so the looks at every other pair's kept checkout never hold up a command; `stop_agent_on_page_start(app, event)`: a page that starts loading stops the agent with `try_lock`; while a prepare, a start, a discard or the own-pair sweep holds the state, a thread waits for the lock and stops the agent then (deferred, never dropped), the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a worker command: under the lock it stops and reaps an earlier agent — up to about 3 s — and spawns the new one; a small thread forwards the agent's events into its `Channel` through `servers::forward`), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker, under the lock while the folder is removed; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`); its tests in `ai/tests.rs`), `review.rs` (the range window's threads and posting, plan §2 #117–#119, #121: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its tests in `review/tests.rs`, whose Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `merge_requests.rs` (the merge-request page of the compare and range windows, plan §2 #128–#135, #137, #139, #143, #144, #149, #150, #152, #153, #158, #162, #169, #171–#176, #180–#182, #193: `manage(app, folder, app_folder, ai)` reads `folder`'s remotes once, offline, with `gitlab_repository` and manages `MergeRequestState { gitlab, range_dir, ai, pages: Mutex<BTreeSet<WebPage>>, merged: Mutex<MergedPairs>, pictures: Pictures, job_logs: JobLogs }`, `ai` the window's own `--ai`, `merged` the run's merged pairs; no GitLab remote → every list and open answers the one line `NO_PROJECT`, a re-request, a job log, each asked discussions row, a people search, a people change, a description read, a links read, a thread read, each thread write and a preview `Failed { NO_PROJECT }`, a resolve `GitLabRefused { Failed { NO_PROJECT } }`, a continue `Ended`, `find_local_merge` `Free`, every picture 404; `offer(state, pages, pictures)` (then `Pictures::offer`) and `offer_described(state, pages, uploads)` (then `Pictures::offer_uploads`) are the two writer paths of `pages`, each taking `pages` and then the pictures' shelf, one after the other, never together; `offer` is used by `merge_requests/list.rs` `forward_page` (`row_pages`: a row's page, then its failed jobs' pages), `discussions_reply` and `merge_requests/links.rs` `links_reply`, `offer_described` by `merge_requests/description.rs` `description_reply` and `merge_requests/discussion_thread.rs` `thread_reply` and `preview_reply`; the twenty commands `find_gitlab_project`, `ask_gitlab_again` (a worker; the remembered project, last paragraph), `list_merge_requests` (a worker, `merge_requests/list.rs` `list`: every `MergeRequestPage` then one `ListEnd` as `ListMessage` on the call's `Channel`, the end on the channel too since tauri delivers a large channel message by a later fetch; each page's rows' and failed jobs' pages, and its `ListedPage.pictures`, offered through `offer` before it is sent; then, when the list reached the project, `check_conflicts` under `merged`, held for the whole check so a second load's check waits and merges nothing twice, sending each row the check changed as `ListMessage::Checked` (a send that fails is not logged: the check's one line per load); the command answers after the check), `open_merge_request` (a worker: `prepare_open` checks glab's login, asks glab for the merge request's commits, fetches them only when one is missing (plan §2 #132), tries the pair's lock, then `second_window::start_range` with the state's `ai`), `rerequest_review(iid, username)` (a worker, `rerequested`: `yamt_merge_requests::rerequest_review` on the repository, its `RerequestReply` the answer; the re-request mutation is its only write), `read_job_log(page)` (a worker, `merge_requests/job_logs.rs` `job_log_reply`: a page this window was never sent → `NotOffered` with a warning and no glab run; a `Log` kept for the page → that log without glab; no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_job_log`, and only a `Log` is kept), `read_discussions(iids)` (a worker, `merge_requests/discussions.rs` `discussions_reply`: no project → `unread_discussions(iids, NO_PROJECT)`; else `yamt_merge_requests::read_discussions`, then the read's `pages` — every answered note's page and every first comment's link page — and the authors' uploaded pictures offered through `offer`, then the first comments' uploads through `Pictures::offer_uploads`, before the rows are returned; `pages` never held while glab runs; plan §2 #162, #193, RK41, RK53, RK60), `search_people(text)` and `change_people(iid, change)` (workers, `merge_requests/people.rs` `search_reply`/`change_reply`: no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::search_people`/`change_people`, then the people found, or everyone in GitLab's answered lists, offered through `Pictures::offer` before the reply is returned; a search writes nothing, a change one `APPEND` or `REMOVE` of one username; plan §2 #169, RK53, RK54), `read_description(iid)` (a worker, in `merge_requests/description.rs`, registered as `merge_requests::description::read_description`; `description_reply`: no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_description`, then its linked pages and its uploads offered through `offer_described` before the reply is returned; nothing written; plan §2 #171–#173, RK41, RK53), `read_links(iid)` (a worker, in `merge_requests/links.rs`, registered as `merge_requests::links::read_links`; `links_reply`: no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_links`, then every line's and parent's page offered through `offer`, with no pictures, before the reply is returned; `pages` never held while glab runs; nothing written; plan §2 #176, RK41), `read_discussion_thread(iid, discussion)`, `reply_to_discussion(iid, discussion, kind, text)`, `resolve_discussion(iid, discussion, resolve)`, `submit_review(iid)` and `preview_markdown(iid, text)` (workers, in `merge_requests/discussion_thread.rs`, registered after `read_links` as `merge_requests::discussion_thread::<name>`; a `discussion` that is not 40 lowercase hex fails deserialisation (`DiscussionId`), so no glab runs; `thread_reply`: no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_discussion_thread`, then the thread's comments' and links' pages and its uploads offered through `offer_described`, then its authors' and editors' uploaded pictures through `Pictures::offer`, each lock held alone, before the reply is returned; `preview_reply`: the same for `yamt_merge_requests::preview_markdown`'s pages and uploads, with no pictures; the three writes go through `written` (no project → `Failed { NO_PROJECT }`) and offer nothing, a write answering no page; each is exactly one glab call of the crate's, a blank reply none; plan §2 #180–#182, RK41, RK53, RK54), `resolve_merge_request` (a worker, `resolved`: `prepare_resolve` → `GitLabRefused`, `yamt_local_merge::start` → `Refused`, then the window start → `Started` or `WindowFailed { started, message }`), `continue_merge_request` (a worker, `continued`: no live record or another merge request's → `Ended` (a git error logged), its window open (`window_is_open`) → `AlreadyOpen`, else the window start → `Opened { branch, target }` or `WindowFailed`; nothing in git changes), `find_local_merge` (a worker: `yamt_local_merge::local_merge` on the repository) and `open_page` (only a merge request's, failed job's or note's page, a first comment's or a description's link, a links reply's line or parent page, a thread's comment or link page or a preview's link this window was sent reaches the browser, else `NotOffered` with the warning "a GitLab page this window was never sent"); `resolved` and `continued` take the window start as a parameter, the commands pass `second_window::start_merge`; glab is `Glab::find()` at each call; `pages` is locked only to add or look; `merge_requests/job_logs.rs` (plan §2 #158, RK57): `JobLogs`, the run's logs, a `Mutex<BTreeMap<WebPage, JobLog>>` holding the latest `Log` per page, a failure never kept so the next ask reads GitLab again; never locked while glab runs nor together with `pages`; `merge_requests/pictures.rs` (plan §2 #152, #173): the `yamt-picture` URI scheme, `PICTURE_SCHEME`, which `commands.rs` `with_commands` registers with `answer_picture`: `yamt-picture://localhost/<name>` answered on a `spawn_blocking` thread by `picture_answer`, the bytes glab fetched for a username (ASCII letters, digits, `.`, `_`, `-`) a list, a discussions reply, a thread reply, a people search or a people change of this run offered, or for an upload key (`UploadKey::is_key`: `upload~` and 32 lowercase hex digits) a description, discussions (a first comment's), thread or preview reply offered (its uploads API route, then its web path on 403/404), with their `Content-Type` and `X-Content-Type-Options: nosniff`, else — not offered, no glab, no GitLab remote, a failed fetch (logged with `tracing::warn!` "a picture was not fetched") — 404 with an empty body; `Pictures` is the one gate: a shelf `Mutex` (offered addresses, each fetch, a failure too, so one glab run per picture per run) and a `Condvar` the askers wait on for a running fetch or a free one of `PICTURE_FETCHES` (4), the shelf never locked together with another `Mutex` nor held across a glab run; its tests in `merge_requests/tests.rs` (`through_glab::opens_each`: pages opened through `open_page` and logged by the fake opener in order, skipped on macOS, shared by every page-offering command's test), `merge_requests/tests/resolve.rs`, `tests/rerequest.rs`, `tests/picture_scheme.rs`, `tests/job_log.rs` (a page no list offered, before a list and after one, runs no glab; a kept log runs none; a failure is not kept), `tests/discussions.rs` (a note page offered before the reply and opened, another note `notOffered`; a first comment's link page and upload offered before the reply, opened and served; an author's picture 404 → 200; no project fails each row; the command's JSON; the read's one `info` line pinned through `frontend_log::tests::logged`, counts and score only), `tests/people.rs` (a searched person's and every changed person's picture 404 → 200 after the reply, another person's still 404; no project fails search and change; both commands' JSON), `tests/description.rs` (a described page offered before the reply and opened, an address no reply named not; an upload 404 → 200 after the reply, served from its web path after the API's 404, an unoffered key 404 without glab; another site's image never fetched; no project fails the read; the command's JSON), `tests/links.rs` (a line's page and its parent's offered before the reply and opened; a page the reply did not name — a parent on another host, a milestone, another server's issue — `notOffered`; an unseen thing's address offered; no project fails the read; the command's JSON), `tests/discussion_thread.rs` (a thread's comment and link pages `notOffered` and its upload and its editor's picture 404 before the read, opened and served after; a preview's link likewise; the whole thread through the command, with its edits and drafts; a comment, a draft, a resolve, an unresolve and a submit each one logged write with its body; GitLab's refusals and failures as their reason; a blank reply and a discussion id that is not 40 hex run no glab; no project fails all five) and `tests/csp.rs` (`tauri.conf.json`'s `img-src` admits the scheme and any https image only; scripts, frames, media and fonts the app's only), whose Unix-only `through_glab` tests run in a child test process whose PATH starts with `scripts/fake-glab` and `scripts/fake-open`, on `scripts/range-repo.sh` and the scenarios `tests/glab/merge-requests`, `mr-row-details` (`mr-row-details/crowd` for the pictures' fetches), `mr-people`, `ci-job-log`, `mr-discussions`, `mr-description`, `mr-links`, `mr-threads` and `mr-threads-refused`, or on `scripts/mr-conflict-repo.sh` and `tests/glab/mr-conflicts` with a recording or failing window start), `second_window.rs` (a second yamt started by this one, plan §2 #132, #139, #144: `start_range(range, ai)`, `yamt --diff=<spec> --repo <root>`, then `--ai` when `ai` is `On`, a failed start → `OpenReply::StartFailed`; `start_merge(root)`, `yamt --repo <root>`, never `--ai` (the merge window has no AI), `Err` with why it did not start; both through one private `spawn`: in `root`, stdin and stdout closed, stderr inherited, in a process group of its own (Unix `process_group(0)`, Windows `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`) so it outlives this one and the terminal; the program is `appimage.rs` `running_appimage` when there is one, else `current_exe`; a thread reaps it and logs its exit; RK42's tests parse both argument lists with `args::parse`, the range's with and without `--ai`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (private, as is `context()`; `open_with_data_folder` and `window_title` are `pub(crate)` for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview with the start script; `WindowKind` = `Merge` | `Compare { start }` | `Range { ai, start }`, each kind with only the start options its start script reads (`name()`: merge, compare or range); `open_with_data_folder(title, kind, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; `run_compare(folder, ai, start)`: the compare window, titled `Compare — yamt`, manages its `TabStore` and `merge_requests::manage` on `folder` with `ai` (plan §2 #94 as amended for #130, #132; its start script never gets `data-ai`, it has no threads): it reads `folder`'s remotes at start and runs glab, and a fetch if needed, only for the merge-request page, never opens a `MergeSession` or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `start_script.rs` (`start_script(theme, kind)`: sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, `<html data-ai="on">` only for a range window started with `--ai`, and `<html data-open="mergeRequests">` only for a compare or range window started with `--mr`), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped` nor while `Committed`), which ends the event loop without a close request, so the page asks nothing — `abort_operation` only when `leftovers` is empty too (the page shows them first), `push_merged_branch` after `Pushed`; `close_ended_merge` ends a `Committed` merge (Keep Local) and destroys the window when the merge has ended, also after an abort with leftovers; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler, registers the `yamt-picture` scheme (`merge_requests::PICTURE_SCHEME` → `merge_requests::answer_picture`, asynchronous) and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` with the app handle, which does nothing without a `Mutex<AiState>` (every range window manages one, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one; its tests in `commands/tests.rs`), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; `forward`: the one rule that hands a run's events to its Tauri `Channel` and, when a send fails, drops them so the run stops itself, used by `start_server` and `ai::start_agent`; the six language server commands, plan §2 #70: `servers_context`, `start_server`, `send_to_server`, `stop_server`, `find_program`, `project_files`; its Unix-only test helpers `channel_into` and `is_alive` are shared with `ai.rs`), `settings.rs` (`Places` and the ten settings commands, `set_discussion_details` among them (plan §2 #163); `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line), from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`) and from `yamt_local_merge::Error` (`Git` and `LockFailed` → `Git` with their line), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; `blocking_reply`: a worker command's work on `spawn_blocking`, a panic logged and answered `WorkerStopped`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands/tests.rs`, `merge/tests.rs`, `merge/tests/merge_request.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` and `merge_requests/tests.rs` build their own mock windows and call `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`, and, on a merge yamt started, the `WindowClaim` held by `lib.rs` `merge()` for the window's life (a file lock, never a `Mutex`); compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (its long holders: a prepare while git makes the checkout, a start while it reaps the earlier agent (up to about 3 s), a discard while it removes the folder, and the start's own-pair sweep; meanwhile the sync `send_to_agent`/`stop_agent` wait on the main thread); compare and range windows: `MergeRequestState`'s `pages`, `merged` and `job_logs` `Mutex`es and the `Pictures` shelf (`merged` held for a whole local conflict check, never together with `pages`; the shelf and `job_logs` never across a glab run). Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout or sweeps other pairs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `agent`, `merge-requests` and `local-merge` only, never on `gitio` or `merge-core` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range`, the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119) and the review's Reviewed marks in `yamt_reviewed::ReviewedStore` (plan §2 #195), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114); the compare and range windows also over `yamt_merge_requests` for their merge-request page (plan §2 #128–#135, #137) and over `yamt_local_merge` for resolving a merge request's conflicts in this checkout, which the merge window then finishes, aborts or pushes (plan §2 #139–#143): `lib.rs` (`run`, `export_bindings`) shared by both bins, `from_start_dir` (every window's folder as given, through `appimage.rs` on Linux; the compare window's is `args.rs` `START_FOLDER`); `run` reads `YAMT_AI` (`AI_VAR`) once and hands its value to `args::parse`; `merge(repo)` keeps `Startup::Merge`'s window claim alive until `window::run` returns; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare { ai, start }`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai, start, marks }` through `RangeSpec::parse`, whose error is the usage line; without `--repo` the repository is `START_FOLDER`, the folder yamt was started in; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, `Range` and `Compare` keep it as `Ai` = `Off` | `On`, the compare window only for the range windows its merge-request page opens, plan §2 #108, #144; `parse(args, ai_variable)` starts `ai` from `YAMT_AI`'s value — unset, empty or `0` off, any other value (non-UTF-8 too) on — and `--ai` turns it on regardless; `--mr` sets `StartScreen` = `Files` | `MergeRequests`, carried by `Compare` and `Range` only: without `--diff`/`--diff=<range>` it means `--diff` (so with `--repo` it is `--diff`'s usage error), twice is once; `--review-of`, last paragraph; its tests in `args/tests.rs`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative window folder is resolved against `OWD` by `repo_from_start_dir`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called through `from_start_dir` for every window; `running_appimage`: the `$APPIMAGE` file only inside the AppImage, else `None`, the program `second_window.rs` starts, since the mount the running binary lives in goes away with this process), `outcome.rs` (start-up decision, exit status 0/1/2: `MergeSession::open`'s error is exit 2; with a live record of a merge yamt started (`yamt_local_merge::find_live`) the window first takes `claim_window` — another window holding it is exit 2 "the merge of !<iid> is already open in another yamt window" (RK47), a git error exit 2 with its line — and opens even on a stop with no file; without a record and no file "nothing to merge in <root>", exit 0; `Startup::Merge { session, claim }`; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` and `Committed` 0 with `<operation> finished` (`merge finished` for `Committed`), `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing; its tests in `outcome/tests.rs`, the start-up ones on a merge yamt started with `merge/tests/merge_request.rs`'s repository helpers), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Committed { root, offer: PushOffer }` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` (also for `Committed`) outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted` (a `Committed` merge still asks whether to push); `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed, plus `merge_request`: the live record's `MergeView`, read fresh by `find_live` on every list (a git error → `Git`, through `ipc_error.rs`); every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` read the live record before they hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; the abort's worker runs git's abort and then, for a recorded merge, `LiveMerge::restore`, answering `AbortReply { leftovers }` (#140); a continue that finishes a recorded merge calls `LiveMerge::committed` and becomes `Committed`, answering `ContinueReply::ReadyToPush { branch }` (#141); `push_merged_branch` takes the offer out of `Committed` only (else `NoOperation`, RK45), pushes through `blocking_reply` while `Running(Merge)` — `Pushed` → `Finished(Merge)`, `Failed` or a panicked worker (`WorkerStopped`) → `Committed` again; `end_committed` (Keep Local): `Committed` → `Finished(Merge)`, any other state stays; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89, #140, #141; its tests in `merge/tests.rs` and, on `scripts/mr-conflict-repo.sh` with the merge started by `yamt_local_merge::start`, `merge/tests/merge_request.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117, #195: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched), then the review's marks with `ReviewedStore::open` (last paragraph), and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage`, the merge-request page's through `merge_requests::manage` on the range's repository root with the window's `ai`, and `RangeState { range, threads: Mutex<ThreadStore>, reviewed: Mutex<ReviewedStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); `range_folder(app_folder)`, the folder pair locks live in, shared with `merge_requests.rs`; its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_in(repo, data, ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping, the private `lock` the only way to the state; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts a background thread that holds the state while `Workspace::remove_own_leftovers` removes this pair's partial and removing folders, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; the thread then releases the state and runs `yamt_agent::sweep_other_pairs` without it (`sweep_own_then_others(state, held, others)`, whose test sees the state free when `others` runs), so the looks at every other pair's kept checkout never hold up a command; `stop_agent_on_page_start(app, event)`: a page that starts loading stops the agent with `try_lock`; while a prepare, a start, a discard or the own-pair sweep holds the state, a thread waits for the lock and stops the agent then (deferred, never dropped), the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a worker command: under the lock it stops and reaps an earlier agent — up to about 3 s — and spawns the new one; a small thread forwards the agent's events into its `Channel` through `servers::forward`), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker, under the lock while the folder is removed; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`); its tests in `ai/tests.rs`), `review.rs` (the range window's threads and posting, plan §2 #117–#119, #121: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its tests in `review/tests.rs`, whose Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `merge_requests.rs` (the merge-request page of the compare and range windows, plan §2 #128–#135, #137, #139, #143, #144, #149, #150, #152, #153, #158, #162, #169, #171–#176, #180–#182, #193: `manage(app, folder, app_folder, ai)` reads `folder`'s remotes once, offline, with `gitlab_repository` and manages `MergeRequestState { gitlab, range_dir, ai, pages: Mutex<BTreeSet<WebPage>>, merged: Mutex<MergedPairs>, pictures: Pictures, job_logs: JobLogs }`, `ai` the window's own `--ai`, `merged` the run's merged pairs; no GitLab remote → every list and open answers the one line `NO_PROJECT`, a re-request, a job log, each asked discussions row, a people search, a people change, a description read, a links read, a thread read, each thread write and a preview `Failed { NO_PROJECT }`, a resolve `GitLabRefused { Failed { NO_PROJECT } }`, a continue `Ended`, `find_local_merge` `Free`, every picture 404; `offer(state, pages, pictures)` (then `Pictures::offer`) and `offer_described(state, pages, uploads)` (then `Pictures::offer_uploads`) are the two writer paths of `pages`, each taking `pages` and then the pictures' shelf, one after the other, never together; `offer` is used by `merge_requests/list.rs` `forward_page` (`row_pages`: a row's page, then its failed jobs' pages), `discussions_reply` and `merge_requests/links.rs` `links_reply`, `offer_described` by `merge_requests/description.rs` `description_reply` and `merge_requests/discussion_thread.rs` `thread_reply` and `preview_reply`; the twenty commands `find_gitlab_project`, `ask_gitlab_again` (a worker; the remembered project, next paragraph), `list_merge_requests` (a worker, `merge_requests/list.rs` `list`: every `MergeRequestPage` then one `ListEnd` as `ListMessage` on the call's `Channel`, the end on the channel too since tauri delivers a large channel message by a later fetch; each page's rows' and failed jobs' pages, and its `ListedPage.pictures`, offered through `offer` before it is sent; then, when the list reached the project, `check_conflicts` under `merged`, held for the whole check so a second load's check waits and merges nothing twice, sending each row the check changed as `ListMessage::Checked` (a send that fails is not logged: the check's one line per load); the command answers after the check), `open_merge_request` (a worker: `prepare_open` checks glab's login, asks glab for the merge request's commits, fetches them only when one is missing (plan §2 #132), tries the pair's lock, then `second_window::start_range` with the state's `ai`), `rerequest_review(iid, username)` (a worker, `rerequested`: `yamt_merge_requests::rerequest_review` on the repository, its `RerequestReply` the answer; the re-request mutation is its only write), `read_job_log(page)` (a worker, `merge_requests/job_logs.rs` `job_log_reply`: a page this window was never sent → `NotOffered` with a warning and no glab run; a `Log` kept for the page → that log without glab; no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_job_log`, and only a `Log` is kept), `read_discussions(iids)` (a worker, `merge_requests/discussions.rs` `discussions_reply`: no project → `unread_discussions(iids, NO_PROJECT)`; else `yamt_merge_requests::read_discussions`, then the read's `pages` — every answered note's page and every first comment's link page — and the authors' uploaded pictures offered through `offer`, then the first comments' uploads through `Pictures::offer_uploads`, before the rows are returned; `pages` never held while glab runs; plan §2 #162, #193, RK41, RK53, RK60), `search_people(text)` and `change_people(iid, change)` (workers, `merge_requests/people.rs` `search_reply`/`change_reply`: no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::search_people`/`change_people`, then the people found, or everyone in GitLab's answered lists, offered through `Pictures::offer` before the reply is returned; a search writes nothing, a change one `APPEND` or `REMOVE` of one username; plan §2 #169, RK53, RK54), `read_description(iid)` (a worker, in `merge_requests/description.rs`, registered as `merge_requests::description::read_description`; `description_reply`: no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_description`, then its linked pages and its uploads offered through `offer_described` before the reply is returned; nothing written; plan §2 #171–#173, RK41, RK53), `read_links(iid)` (a worker, in `merge_requests/links.rs`, registered as `merge_requests::links::read_links`; `links_reply`: no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_links`, then every line's and parent's page offered through `offer`, with no pictures, before the reply is returned; `pages` never held while glab runs; nothing written; plan §2 #176, RK41), `read_discussion_thread(iid, discussion)`, `reply_to_discussion(iid, discussion, kind, text)`, `resolve_discussion(iid, discussion, resolve)`, `submit_review(iid)` and `preview_markdown(iid, text)` (workers, in `merge_requests/discussion_thread.rs`, registered after `read_links` as `merge_requests::discussion_thread::<name>`; a `discussion` that is not 40 lowercase hex fails deserialisation (`DiscussionId`), so no glab runs; `thread_reply`: no project → `Failed { NO_PROJECT }`; else `yamt_merge_requests::read_discussion_thread`, then the thread's comments' and links' pages and its uploads offered through `offer_described`, then its authors' and editors' uploaded pictures through `Pictures::offer`, each lock held alone, before the reply is returned; `preview_reply`: the same for `yamt_merge_requests::preview_markdown`'s pages and uploads, with no pictures; the three writes go through `written` (no project → `Failed { NO_PROJECT }`) and offer nothing, a write answering no page; each is exactly one glab call of the crate's, a blank reply none; plan §2 #180–#182, RK41, RK53, RK54), `resolve_merge_request` (a worker, `resolved`: `prepare_resolve` → `GitLabRefused`, `yamt_local_merge::start` → `Refused`, then the window start → `Started` or `WindowFailed { started, message }`), `continue_merge_request` (a worker, `continued`: no live record or another merge request's → `Ended` (a git error logged), its window open (`window_is_open`) → `AlreadyOpen`, else the window start → `Opened { branch, target }` or `WindowFailed`; nothing in git changes), `find_local_merge` (a worker: `yamt_local_merge::local_merge` on the repository) and `open_page` (only a merge request's, failed job's or note's page, a first comment's or a description's link, a links reply's line or parent page, a thread's comment or link page or a preview's link this window was sent reaches the browser, else `NotOffered` with the warning "a GitLab page this window was never sent"); `resolved` and `continued` take the window start as a parameter, the commands pass `second_window::start_merge`; glab is `Glab::find()` at each call; `pages` is locked only to add or look; `merge_requests/job_logs.rs` (plan §2 #158, RK57): `JobLogs`, the run's logs, a `Mutex<BTreeMap<WebPage, JobLog>>` holding the latest `Log` per page, a failure never kept so the next ask reads GitLab again; never locked while glab runs nor together with `pages`; `merge_requests/pictures.rs` (plan §2 #152, #173): the `yamt-picture` URI scheme, `PICTURE_SCHEME`, which `commands.rs` `with_commands` registers with `answer_picture`: `yamt-picture://localhost/<name>` answered on a `spawn_blocking` thread by `picture_answer`, the bytes glab fetched for a username (ASCII letters, digits, `.`, `_`, `-`) a list, a discussions reply, a thread reply, a people search or a people change of this run offered, or for an upload key (`UploadKey::is_key`: `upload~` and 32 lowercase hex digits) a description, discussions (a first comment's), thread or preview reply offered (its uploads API route, then its web path on 403/404), with their `Content-Type` and `X-Content-Type-Options: nosniff`, else — not offered, no glab, no GitLab remote, a failed fetch (logged with `tracing::warn!` "a picture was not fetched") — 404 with an empty body; `Pictures` is the one gate: a shelf `Mutex` (offered addresses, each fetch, a failure too, so one glab run per picture per run) and a `Condvar` the askers wait on for a running fetch or a free one of `PICTURE_FETCHES` (4), the shelf never locked together with another `Mutex` nor held across a glab run; its tests in `merge_requests/tests.rs` (`through_glab::opens_each`: pages opened through `open_page` and logged by the fake opener in order, skipped on macOS, shared by every page-offering command's test), `merge_requests/tests/resolve.rs`, `tests/rerequest.rs`, `tests/picture_scheme.rs`, `tests/job_log.rs` (a page no list offered, before a list and after one, runs no glab; a kept log runs none; a failure is not kept), `tests/discussions.rs` (a note page offered before the reply and opened, another note `notOffered`; a first comment's link page and upload offered before the reply, opened and served; an author's picture 404 → 200; no project fails each row; the command's JSON; the read's one `info` line pinned through `frontend_log::tests::logged`, counts and score only), `tests/people.rs` (a searched person's and every changed person's picture 404 → 200 after the reply, another person's still 404; no project fails search and change; both commands' JSON), `tests/description.rs` (a described page offered before the reply and opened, an address no reply named not; an upload 404 → 200 after the reply, served from its web path after the API's 404, an unoffered key 404 without glab; another site's image never fetched; no project fails the read; the command's JSON), `tests/links.rs` (a line's page and its parent's offered before the reply and opened; a page the reply did not name — a parent on another host, a milestone, another server's issue — `notOffered`; an unseen thing's address offered; no project fails the read; the command's JSON), `tests/discussion_thread.rs` (a thread's comment and link pages `notOffered` and its upload and its editor's picture 404 before the read, opened and served after; a preview's link likewise; the whole thread through the command, with its edits and drafts; a comment, a draft, a resolve, an unresolve and a submit each one logged write with its body; GitLab's refusals and failures as their reason; a blank reply and a discussion id that is not 40 hex run no glab; no project fails all five) and `tests/csp.rs` (`tauri.conf.json`'s `img-src` admits the scheme and any https image only; scripts, frames, media and fonts the app's only), whose Unix-only `through_glab` tests run in a child test process whose PATH starts with `scripts/fake-glab` and `scripts/fake-open`, on `scripts/range-repo.sh` and the scenarios `tests/glab/merge-requests`, `mr-row-details` (`mr-row-details/crowd` for the pictures' fetches), `mr-people`, `ci-job-log`, `mr-discussions`, `mr-description`, `mr-links`, `mr-threads` and `mr-threads-refused`, or on `scripts/mr-conflict-repo.sh` and `tests/glab/mr-conflicts` with a recording or failing window start), `second_window.rs` (a second yamt started by this one, plan §2 #132, #139, #144, #195: `start_range(range, ai)`, `yamt --diff=<spec> --repo <root> --review-of=<project>!<iid>`, then `--ai` when `ai` is `On`, a failed start → `OpenReply::StartFailed`; `start_merge(root)`, `yamt --repo <root>`, never `--ai` (the merge window has no AI), `Err` with why it did not start; both through one private `spawn`: in `root`, stdin and stdout closed, stderr inherited, in a process group of its own (Unix `process_group(0)`, Windows `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`) so it outlives this one and the terminal; the program is `appimage.rs` `running_appimage` when there is one, else `current_exe`; a thread reaps it and logs its exit; RK42's tests parse both argument lists with `args::parse`, the range's with and without `--ai`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (private, as is `context()`; `open_with_data_folder` and `window_title` are `pub(crate)` for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview with the start script; `WindowKind` = `Merge` | `Compare { start }` | `Range { ai, start }`, each kind with only the start options its start script reads (`name()`: merge, compare or range); `open_with_data_folder(title, kind, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; `run_compare(folder, ai, start)`: the compare window, titled `Compare — yamt`, manages its `TabStore` and `merge_requests::manage` on `folder` with `ai` (plan §2 #94 as amended for #130, #132; its start script never gets `data-ai`, it has no threads): it reads `folder`'s remotes at start and runs glab, and a fetch if needed, only for the merge-request page, never opens a `MergeSession` or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `start_script.rs` (`start_script(theme, kind)`: sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, `<html data-ai="on">` only for a range window started with `--ai`, and `<html data-open="mergeRequests">` only for a compare or range window started with `--mr`), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped` nor while `Committed`), which ends the event loop without a close request, so the page asks nothing — `abort_operation` only when `leftovers` is empty too (the page shows them first), `push_merged_branch` after `Pushed`; `close_ended_merge` ends a `Committed` merge (Keep Local) and destroys the window when the merge has ended, also after an abort with leftovers; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler, registers the `yamt-picture` scheme (`merge_requests::PICTURE_SCHEME` → `merge_requests::answer_picture`, asynchronous) and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` with the app handle, which does nothing without a `Mutex<AiState>` (every range window manages one, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one; its tests in `commands/tests.rs`), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; `forward`: the one rule that hands a run's events to its Tauri `Channel` and, when a send fails, drops them so the run stops itself, used by `start_server` and `ai::start_agent`; the six language server commands, plan §2 #70: `servers_context`, `start_server`, `send_to_server`, `stop_server`, `find_program`, `project_files`; its Unix-only test helpers `channel_into` and `is_alive` are shared with `ai.rs`), `settings.rs` (`Places` and the ten settings commands, `set_discussion_details` among them (plan §2 #163); `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line), from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`) and from `yamt_local_merge::Error` (`Git` and `LockFailed` → `Git` with their line), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; `blocking_reply`: a worker command's work on `spawn_blocking`, a panic logged and answered `WorkerStopped`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands/tests.rs`, `merge/tests.rs`, `merge/tests/merge_request.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` and `merge_requests/tests.rs` build their own mock windows and call `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`, and, on a merge yamt started, the `WindowClaim` held by `lib.rs` `merge()` for the window's life (a file lock, never a `Mutex`); compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, `Mutex<ReviewedStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (its long holders: a prepare while git makes the checkout, a start while it reaps the earlier agent (up to about 3 s), a discard while it removes the folder, and the start's own-pair sweep; meanwhile the sync `send_to_agent`/`stop_agent` wait on the main thread); compare and range windows: `MergeRequestState`'s `pages`, `merged` and `job_logs` `Mutex`es and the `Pictures` shelf (`merged` held for a whole local conflict check, never together with `pages`; the shelf and `job_logs` never across a glab run). Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout or sweeps other pairs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `reviewed`, `agent`, `merge-requests` and `local-merge` only, never on `gitio` or `merge-core` (arch-check).
+ 
+ The remembered GitLab login and project (plan §2 #187, RK75): `MergeRequestState.gitlab`'s `GitLabRepository`, built once per window, remembers the project glab named while logged in for the app's run (`yamt_merge_requests` `project.rs`); every GitLab action of the commands above reuses it. `ask_gitlab_again` (a worker, `blocking_reply`, so it waits for a lookup in flight) forgets it for every explicit refresh — the page's Refresh and Retry and the discussions box's reload — so the next action asks `glab auth status` and `projects/:fullpath` again; no GitLab project → `Ok(null)`, nothing to forget, no glab run (`merge_requests/tests/remembered.rs`). An action whose failure says the login or the project is lost forgets it too (the crate's `logged_out_after`). The range window's review send keeps its own check.
+ 
+-The range window's Reviewed marks (plan §2 #195; request `docs/slices/request-range-reviewed.md` rules 4–7, design `docs/slices/briefs/range-reviewed-design.md` option A): `args.rs` `--review-of=<project>!<iid>` (split at the last `!`, project non-empty, iid a `u32` > 0, else "--review-of=<text>: give <group/project>!<iid>"; with `--diff`, a merge or no flag: "--review-of goes with --diff=<range>"; `--help`/`--version` still win) → `Range { …, marks: MarksOf }`, `MarksOf` `SideNames` (no flag) | `MergeRequest { project, iid }`; `second_window.rs` `range_arguments` always adds `--review-of=<project>!<iid>` from `RangeToOpen` (the RK42 round trip covers it); `range.rs` `run_range(repo, spec, ai, start, marks)`, `manage_range_in` after listing builds `ReviewOf` (`SideNames` → `ReviewOf::Range(range.side_names())`, `MergeRequest` → `ReviewOf::MergeRequest`) and opens `ReviewedStore` under `<data_dir>/yamt/reviewed/` (`REVIEWED_FOLDER`, a sibling of `range/`, so `pair_folders` never lists it) before any window — unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched, as `threads.json`'s —, kept as `RangeState.reviewed: Mutex<ReviewedStore>`; `reviewed.rs` `list_reviewed` (sync, the store's `marks`), `mark_reviewed`, `unmark_reviewed`, `load_since_review` (through `blocking_reply`, the store locked only inside the worker); `ipc_error.rs` maps `yamt_reviewed::Error` onto existing kinds (`WriteFailed`, `UnknownFile` → `UnknownRangeFile`, `ReadFailed`/`Broken`/`NewerFormat` → `ReadFailed { path, message }`, `Range` through `yamt_range`'s mapping). Tests: `reviewed/tests.rs` through `invoke_on`; the refusal and folder tests in `range/tests.rs` (the range window's tests and shared helpers, moved out of `range.rs`); `RangeWindow::with_marks_copied` reopens on a new data folder holding a copy of `yamt/reviewed/` (a dropped mock app keeps its state, so the old pair lock stays taken).
++The range window's Reviewed marks (plan §2 #195; request `docs/slices/request-range-reviewed.md` rules 4–7, design `docs/slices/briefs/range-reviewed-design.md` option A): `args.rs` `--review-of=<project>!<iid>` (split at the last `!`, project non-empty, iid a `u32` > 0, else "--review-of=<text>: give <group/project>!<iid>"; with `--diff`, a merge or no flag: "--review-of goes with --diff=<range>"; a second `--review-of`, as a second `--diff=`: "give one --review-of=<project>!<iid>"; `--help`/`--version` still win) → `Range { …, marks: MarksOf }`, `MarksOf` `SideNames` (no flag) | `MergeRequest { project, iid }`; `second_window.rs` `range_arguments` always adds `--review-of=<project>!<iid>` from `RangeToOpen` (the RK42 round trip covers it); `range.rs` `run_range(repo, spec, ai, start, marks)`, `manage_range_in` after listing and opening `ThreadStore` (so every refusal comes before any write: opening `ReviewedStore` may rewrite `reviewed.json` without its unlisted marks) builds `ReviewOf` (`SideNames` → `ReviewOf::Range(range.side_names())`, `MergeRequest` → `ReviewOf::MergeRequest`) and opens `ReviewedStore` under `<data_dir>/yamt/reviewed/` (`REVIEWED_FOLDER`, a sibling of `range/`, so `pair_folders` never lists it) before any window — unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched, as `threads.json`'s —, kept as `RangeState.reviewed: Mutex<ReviewedStore>`; `reviewed.rs` `list_reviewed` (sync, the store's `marks`), `mark_reviewed`, `unmark_reviewed`, `load_since_review` (through `blocking_reply`, the store locked only inside the worker); `ipc_error.rs` maps `yamt_reviewed::Error` onto existing kinds (`WriteFailed`, `UnknownFile` → `UnknownRangeFile`, `ReadFailed`/`Broken`/`NewerFormat` → `ReadFailed { path, message }`, `Range` through `yamt_range`'s mapping). Tests: `reviewed/tests.rs` through `invoke_on` (two merge requests' marks apart, and the same iid under another project); the refusal and folder tests in `range/tests.rs` (the range window's tests and shared helpers, moved out of `range.rs`; a broken `threads.json` leaves `reviewed.json` byte-identical); `RangeWindow::with_marks_copied` reopens on a new data folder holding a copy of `yamt/reviewed/` (a dropped mock app keeps its state, so the old pair lock stays taken).
+diff --git a/src-tauri/src/args.rs b/src-tauri/src/args.rs
+index be6a16f..ab6ebc4 100644
+--- a/src-tauri/src/args.rs
++++ b/src-tauri/src/args.rs
+@@ -34,6 +34,7 @@ const DIFF_TWICE: &str = "give --diff or one --diff=<range>, not both";
+ const RANGE_FLAG: &str = "--diff=";
+ const REVIEW_OF_FLAG: &str = "--review-of=";
+ const REVIEW_OF_WITHOUT_RANGE: &str = "--review-of goes with --diff=<range>";
++const REVIEW_OF_TWICE: &str = "give one --review-of=<project>!<iid>";
+ /// The folder yamt was started in: a merge's or range's repository unless `--repo` names one, and where the
+ /// compare window's merge-request page looks for a repository (plan §2 #94 as amended for #128–#135).
+ pub(crate) const START_FOLDER: &str = ".";
+@@ -81,6 +82,15 @@ pub(crate) enum MarksOf {
+     MergeRequest { project: String, iid: u32 },
+ }
+ 
++impl MarksOf {
++    fn with_review_of(self, text: &str) -> Result<MarksOf, String> {
++        match self {
++            MarksOf::SideNames => merge_request_marks(text),
++            MarksOf::MergeRequest { .. } => Err(REVIEW_OF_TWICE.to_owned()),
++        }
++    }
++}
++
+ /// What the `--diff` flags seen so far ask for.
+ enum Window {
+     Merge,
+@@ -165,7 +175,7 @@ pub(crate) fn parse(
+                 window = window.and_then(|window| window.with_range(range));
+             }
+             Some(text) if let Some(review) = text.strip_prefix(REVIEW_OF_FLAG) => {
+-                marks = marks.and_then(|_| merge_request_marks(review));
++                marks = marks.and_then(|marks| marks.with_review_of(review));
+             }
+             _ => return Err(format!("unknown argument {}", arg.to_string_lossy())),
+         }
+@@ -200,341 +210,4 @@ fn invocation(
+ }
+ 
+ #[cfg(test)]
+-mod tests {
+-    use super::*;
+-
+-    fn parsed(args: &[&str]) -> Result<Invocation, String> {
+-        parsed_with_variable(args, None)
+-    }
+-
+-    fn parsed_with_variable(
+-        args: &[&str],
+-        ai_variable: Option<&str>,
+-    ) -> Result<Invocation, String> {
+-        parse(
+-            args.iter().map(OsString::from).collect(),
+-            ai_variable.map(OsStr::new),
+-        )
+-    }
+-
+-    fn compare(ai: Ai, start: StartScreen) -> Invocation {
+-        Invocation::Compare { ai, start }
+-    }
+-
+-    #[test]
+-    fn no_arguments_merge_in_the_current_directory() {
+-        assert_eq!(
+-            parsed(&[]),
+-            Ok(Invocation::Merge {
+-                repo: PathBuf::from(".")
+-            })
+-        );
+-    }
+-
+-    #[test]
+-    fn repo_option_names_the_repository() {
+-        assert_eq!(
+-            parsed(&["--repo", "/tmp/some repo"]),
+-            Ok(Invocation::Merge {
+-                repo: PathBuf::from("/tmp/some repo")
+-            })
+-        );
+-    }
+-
+-    #[test]
+-    fn repo_without_a_value_is_a_usage_error() {
+-        assert_eq!(parsed(&["--repo"]), Err("--repo needs a path".to_owned()));
+-    }
+-
+-    #[test]
+-    fn unknown_flag_is_a_usage_error() {
+-        assert_eq!(
+-            parsed(&["--repo", "p", "--force"]),
+-            Err("unknown argument --force".to_owned())
+-        );
+-    }
+-
+-    #[test]
+-    fn help_and_version_win_over_other_arguments() {
+-        assert_eq!(parsed(&["--repo", "p", "--help"]), Ok(Invocation::Help));
+-        assert_eq!(parsed(&["--version"]), Ok(Invocation::Version));
+-    }
+-
+-    #[test]
+-    fn diff_opens_the_compare_window() {
+-        assert_eq!(
+-            parsed(&["--diff"]),
+-            Ok(compare(Ai::Off, StartScreen::Files))
+-        );
+-    }
+-
+-    #[test]
+-    fn diff_with_a_repo_in_either_order_is_a_usage_error() {
+-        let refused = Err(DIFF_WITH_REPO.to_owned());
+-        assert_eq!(parsed(&["--diff", "--repo", "p"]), refused);
+-        assert_eq!(parsed(&["--repo", "p", "--diff"]), refused);
+-    }
+-
+-    #[test]
+-    fn help_wins_over_diff() {
+-        assert_eq!(parsed(&["--diff", "--help"]), Ok(Invocation::Help));
+-        assert_eq!(
+-            parsed(&["--diff", "--repo", "p", "--version"]),
+-            Ok(Invocation::Version)
+-        );
+-    }
+-
+-    #[test]
+-    fn help_wins_over_a_range_error() {
+-        assert_eq!(
+-            parsed(&["--diff", "--diff=a..b", "--help"]),
+-            Ok(Invocation::Help)
+-        );
+-        assert_eq!(
+-            parsed(&["--diff=main", "--version"]),
+-            Ok(Invocation::Version)
+-        );
+-    }
+-
+-    #[test]
+-    fn the_usage_names_diff() {
+-        assert!(USAGE.contains("       yamt --diff [--mr]\n"), "{USAGE}");
+-        assert!(USAGE.contains("  --diff  "), "{USAGE}");
+-    }
+-
+-    fn range(text: &str, repo: &str) -> Invocation {
+-        range_on(text, repo, StartScreen::Files)
+-    }
+-
+-    fn range_on(text: &str, repo: &str, start: StartScreen) -> Invocation {
+-        Invocation::Range {
+-            spec: RangeSpec::parse(text).unwrap(),
+-            repo: PathBuf::from(repo),
+-            ai: Ai::Off,
+-            start,
+-            marks: MarksOf::SideNames,
+-        }
+-    }
+-
+-    // A merge window that kept the flag would start an agent nobody can see.
+-    #[test]
+-    fn ai_is_accepted_with_every_mode_and_reaches_the_range_and_compare_windows() {
+-        let merge = Invocation::Merge {
+-            repo: PathBuf::from("p"),
+-        };
+-        assert_eq!(parsed(&["--ai", "--repo", "p"]), Ok(merge));
+-        assert_eq!(
+-            parsed(&["--diff", "--ai"]),
+-            Ok(compare(Ai::On, StartScreen::Files))
+-        );
+-        assert_eq!(
+-            parsed(&["--ai", "--diff"]),
+-            Ok(compare(Ai::On, StartScreen::Files))
+-        );
+-        assert_eq!(parsed(&["--ai", "--help"]), Ok(Invocation::Help));
+-        assert_eq!(parsed(&["--ai", "--version"]), Ok(Invocation::Version));
+-        let with_ai = Invocation::Range {
+-            spec: RangeSpec::parse("a...b").unwrap(),
+-            repo: PathBuf::from("."),
+-            ai: Ai::On,
+-            start: StartScreen::Files,
+-            marks: MarksOf::SideNames,
+-        };
+-        assert_eq!(parsed(&["--diff=a...b", "--ai"]), Ok(with_ai));
+-        assert_eq!(parsed(&["--diff=a...b"]), Ok(range("a...b", ".")));
+-        assert!(USAGE.contains("  --ai              "), "{USAGE}");
+-    }
+-
+-    #[test]
+-    fn a_range_takes_the_current_directory_or_a_repo_in_either_order() {
+-        assert_eq!(
+-            parsed(&["--diff=main...feature"]),
+-            Ok(range("main...feature", "."))
+-        );
+-        assert_eq!(
+-            parsed(&["--diff=a..b", "--repo", "p"]),
+-            Ok(range("a..b", "p"))
+-        );
+-        assert_eq!(
+-            parsed(&["--repo", "p", "--diff=a..b"]),
+-            Ok(range("a..b", "p"))
+-        );
+-    }
+-
+-    #[test]
+-    fn each_malformed_range_is_its_usage_line() {
+-        let refusals = [
+-            ("--diff=", "--diff= needs a range, such as main...dev"),
+-            (
+-                "--diff=main",
+-                "--diff=main: a range needs two dots (a..b) or three (a...b); yamt does not compare the working tree",
+-            ),
+-            (
+-                "--diff=a....b",
+-                r#"--diff=a....b: a range holds one ".." or "...""#,
+-            ),
+-            (
+-                "--diff=a..b..c",
+-                r#"--diff=a..b..c: a range holds one ".." or "...""#,
+-            ),
+-            (
+-                "--diff=-x..b",
+-                r#"--diff=-x..b: a side may not start with "-""#,
+-            ),
+-        ];
+-        for (arg, line) in refusals {
+-            assert_eq!(parsed(&[arg]), Err(line.to_owned()), "{arg}");
+-        }
+-    }
+-
+-    #[test]
+-    fn diff_and_a_range_or_two_ranges_are_a_usage_error() {
+-        let refused = Err("give --diff or one --diff=<range>, not both".to_owned());
+-        assert_eq!(parsed(&["--diff", "--diff=a..b"]), refused);
+-        assert_eq!(parsed(&["--diff=a..b", "--diff"]), refused);
+-        assert_eq!(parsed(&["--diff=a..b", "--diff=a..b"]), refused);
+-    }
+-
+-    #[test]
+-    fn the_usage_names_the_range_forms() {
+-        assert!(
+-            USAGE.contains("       yamt --diff=<a>..<b> [--repo <path>] [--mr]\n"),
+-            "{USAGE}"
+-        );
+-        assert!(
+-            USAGE.contains("       yamt --diff=<a>...<b> [--repo <path>] [--mr]\n"),
+-            "{USAGE}"
+-        );
+-        assert!(USAGE.contains("  --diff=<range>    "), "{USAGE}");
+-    }
+-
+-    #[test]
+-    fn mr_alone_or_with_diff_in_either_order_opens_the_compare_window_on_its_page() {
+-        let on_the_page = Ok(compare(Ai::Off, StartScreen::MergeRequests));
+-        assert_eq!(parsed(&["--mr"]), on_the_page);
+-        assert_eq!(parsed(&["--diff", "--mr"]), on_the_page);
+-        assert_eq!(parsed(&["--mr", "--diff"]), on_the_page);
+-        assert_eq!(parsed(&["--mr", "--mr"]), on_the_page);
+-    }
+-
+-    #[test]
+-    fn mr_with_a_range_opens_the_range_window_on_its_page() {
+-        assert_eq!(
+-            parsed(&["--diff=a..b", "--mr"]),
+-            Ok(range_on("a..b", ".", StartScreen::MergeRequests))
+-        );
+-        assert_eq!(
+-            parsed(&["--mr", "--diff=a..b", "--repo", "p"]),
+-            Ok(range_on("a..b", "p", StartScreen::MergeRequests))
+-        );
+-    }
+-
+-    #[test]
+-    fn mr_with_a_repo_and_no_range_is_refused_as_diff_with_a_repo() {
+-        let refused = Err(DIFF_WITH_REPO.to_owned());
+-        assert_eq!(parsed(&["--mr", "--repo", "p"]), refused);
+-        assert_eq!(parsed(&["--repo", "p", "--mr"]), refused);
+-    }
+-
+-    #[test]
+-    fn help_and_version_win_over_mr() {
+-        assert_eq!(parsed(&["--mr", "--help"]), Ok(Invocation::Help));
+-        assert_eq!(parsed(&["--mr", "--version"]), Ok(Invocation::Version));
+-    }
+-
+-    #[test]
+-    fn the_usage_names_mr() {
+-        assert!(USAGE.contains("       yamt --mr\n"), "{USAGE}");
+-        assert!(USAGE.contains("  --mr              "), "{USAGE}");
+-    }
+-
+-    #[test]
+-    fn review_of_with_a_range_names_the_merge_request_s_marks() {
+-        let marked = |project: &str, iid| Invocation::Range {
+-            spec: RangeSpec::parse("a..b").unwrap(),
+-            repo: PathBuf::from("."),
+-            ai: Ai::Off,
+-            start: StartScreen::Files,
+-            marks: MarksOf::MergeRequest {
+-                project: project.to_owned(),
+-                iid,
+-            },
+-        };
+-        assert_eq!(
+-            parsed(&["--diff=a..b", "--review-of=group/sub/project!12"]),
+-            Ok(marked("group/sub/project", 12))
+-        );
+-        assert_eq!(
+-            parsed(&["--review-of=g/p!7", "--diff=a..b"]),
+-            Ok(marked("g/p", 7))
+-        );
+-        assert_eq!(
+-            parsed(&["--diff=a..b", "--review-of=g!p!3"]),
+-            Ok(marked("g!p", 3))
+-        );
+-    }
+-
+-    #[test]
+-    fn review_of_without_a_range_or_malformed_is_refused() {
+-        let without_range = Err(REVIEW_OF_WITHOUT_RANGE.to_owned());
+-        assert_eq!(parsed(&["--review-of=g/p!1"]), without_range);
+-        assert_eq!(parsed(&["--diff", "--review-of=g/p!1"]), without_range);
+-        assert_eq!(parsed(&["--review-of=g/p!1", "--mr"]), without_range);
+-        assert_eq!(parsed(&["--review-of=g/p!1", "--repo", "p"]), without_range);
+-        for text in ["g/p", "!3", "g/p!0", "g/p!x", "g/p!"] {
+-            let flag = format!("--review-of={text}");
+-            let refused = Err(format!("{flag}: give <group/project>!<iid>"));
+-            assert_eq!(parsed(&["--diff=a..b", &flag]), refused, "{text}");
+-        }
+-        assert_eq!(
+-            parsed(&["--diff=a..b", "--review-of=g/p", "--help"]),
+-            Ok(Invocation::Help)
+-        );
+-    }
+-
+-    #[test]
+-    fn the_usage_names_review_of() {
+-        assert!(
+-            USAGE.contains("  --review-of=<project>!<iid>  with --diff=<range>: "),
+-            "{USAGE}"
+-        );
+-    }
+-
+-    #[test]
+-    fn yamt_ai_unset_empty_or_zero_is_off_and_any_other_value_on() {
+-        let cases = [
+-            (None, Ai::Off),
+-            (Some(""), Ai::Off),
+-            (Some("0"), Ai::Off),
+-            (Some("1"), Ai::On),
+-            (Some("yes"), Ai::On),
+-        ];
+-        for (variable, ai) in cases {
+-            assert_eq!(
+-                parsed_with_variable(&["--diff"], variable),
+-                Ok(compare(ai, StartScreen::Files)),
+-                "{variable:?}"
+-            );
+-        }
+-        assert!(USAGE.contains("  YAMT_AI=1         "), "{USAGE}");
+-    }
+-
+-    #[test]
+-    fn ai_flag_wins_over_yamt_ai_zero() {
+-        assert_eq!(
+-            parsed_with_variable(&["--diff", "--ai"], Some("0")),
+-            Ok(compare(Ai::On, StartScreen::Files))
+-        );
+-    }
+-
+-    #[cfg(unix)]
+-    #[test]
+-    fn yamt_ai_that_is_not_utf8_is_on() {
+-        use std::os::unix::ffi::OsStrExt;
+-        let variable = OsStr::from_bytes(&[0xff]);
+-        assert_eq!(
+-            parse(vec![OsString::from("--diff")], Some(variable)),
+-            Ok(compare(Ai::On, StartScreen::Files))
+-        );
+-    }
+-}
++mod tests;
+diff --git a/src-tauri/src/args/tests.rs b/src-tauri/src/args/tests.rs
+new file mode 100644
+index 0000000..75cc735
+--- /dev/null
++++ b/src-tauri/src/args/tests.rs
+@@ -0,0 +1,342 @@
++use super::*;
++
++fn parsed(args: &[&str]) -> Result<Invocation, String> {
++    parsed_with_variable(args, None)
++}
++
++fn parsed_with_variable(args: &[&str], ai_variable: Option<&str>) -> Result<Invocation, String> {
++    parse(
++        args.iter().map(OsString::from).collect(),
++        ai_variable.map(OsStr::new),
++    )
++}
++
++fn compare(ai: Ai, start: StartScreen) -> Invocation {
++    Invocation::Compare { ai, start }
++}
++
++#[test]
++fn no_arguments_merge_in_the_current_directory() {
++    assert_eq!(
++        parsed(&[]),
++        Ok(Invocation::Merge {
++            repo: PathBuf::from(".")
++        })
++    );
++}
++
++#[test]
++fn repo_option_names_the_repository() {
++    assert_eq!(
++        parsed(&["--repo", "/tmp/some repo"]),
++        Ok(Invocation::Merge {
++            repo: PathBuf::from("/tmp/some repo")
++        })
++    );
++}
++
++#[test]
++fn repo_without_a_value_is_a_usage_error() {
++    assert_eq!(parsed(&["--repo"]), Err("--repo needs a path".to_owned()));
++}
++
++#[test]
++fn unknown_flag_is_a_usage_error() {
++    assert_eq!(
++        parsed(&["--repo", "p", "--force"]),
++        Err("unknown argument --force".to_owned())
++    );
++}
++
++#[test]
++fn help_and_version_win_over_other_arguments() {
++    assert_eq!(parsed(&["--repo", "p", "--help"]), Ok(Invocation::Help));
++    assert_eq!(parsed(&["--version"]), Ok(Invocation::Version));
++}
++
++#[test]
++fn diff_opens_the_compare_window() {
++    assert_eq!(
++        parsed(&["--diff"]),
++        Ok(compare(Ai::Off, StartScreen::Files))
++    );
++}
++
++#[test]
++fn diff_with_a_repo_in_either_order_is_a_usage_error() {
++    let refused = Err(DIFF_WITH_REPO.to_owned());
++    assert_eq!(parsed(&["--diff", "--repo", "p"]), refused);
++    assert_eq!(parsed(&["--repo", "p", "--diff"]), refused);
++}
++
++#[test]
++fn help_wins_over_diff() {
++    assert_eq!(parsed(&["--diff", "--help"]), Ok(Invocation::Help));
++    assert_eq!(
++        parsed(&["--diff", "--repo", "p", "--version"]),
++        Ok(Invocation::Version)
++    );
++}
++
++#[test]
++fn help_wins_over_a_range_error() {
++    assert_eq!(
++        parsed(&["--diff", "--diff=a..b", "--help"]),
++        Ok(Invocation::Help)
++    );
++    assert_eq!(
++        parsed(&["--diff=main", "--version"]),
++        Ok(Invocation::Version)
++    );
++}
++
++#[test]
++fn the_usage_names_diff() {
++    assert!(USAGE.contains("       yamt --diff [--mr]\n"), "{USAGE}");
++    assert!(USAGE.contains("  --diff  "), "{USAGE}");
++}
++
++fn range(text: &str, repo: &str) -> Invocation {
++    range_on(text, repo, StartScreen::Files)
++}
++
++fn range_on(text: &str, repo: &str, start: StartScreen) -> Invocation {
++    Invocation::Range {
++        spec: RangeSpec::parse(text).unwrap(),
++        repo: PathBuf::from(repo),
++        ai: Ai::Off,
++        start,
++        marks: MarksOf::SideNames,
++    }
++}
++
++// A merge window that kept the flag would start an agent nobody can see.
++#[test]
++fn ai_is_accepted_with_every_mode_and_reaches_the_range_and_compare_windows() {
++    let merge = Invocation::Merge {
++        repo: PathBuf::from("p"),
++    };
++    assert_eq!(parsed(&["--ai", "--repo", "p"]), Ok(merge));
++    assert_eq!(
++        parsed(&["--diff", "--ai"]),
++        Ok(compare(Ai::On, StartScreen::Files))
++    );
++    assert_eq!(
++        parsed(&["--ai", "--diff"]),
++        Ok(compare(Ai::On, StartScreen::Files))
++    );
++    assert_eq!(parsed(&["--ai", "--help"]), Ok(Invocation::Help));
++    assert_eq!(parsed(&["--ai", "--version"]), Ok(Invocation::Version));
++    let with_ai = Invocation::Range {
++        spec: RangeSpec::parse("a...b").unwrap(),
++        repo: PathBuf::from("."),
++        ai: Ai::On,
++        start: StartScreen::Files,
++        marks: MarksOf::SideNames,
++    };
++    assert_eq!(parsed(&["--diff=a...b", "--ai"]), Ok(with_ai));
++    assert_eq!(parsed(&["--diff=a...b"]), Ok(range("a...b", ".")));
++    assert!(USAGE.contains("  --ai              "), "{USAGE}");
++}
++
++#[test]
++fn a_range_takes_the_current_directory_or_a_repo_in_either_order() {
++    assert_eq!(
++        parsed(&["--diff=main...feature"]),
++        Ok(range("main...feature", "."))
++    );
++    assert_eq!(
++        parsed(&["--diff=a..b", "--repo", "p"]),
++        Ok(range("a..b", "p"))
++    );
++    assert_eq!(
++        parsed(&["--repo", "p", "--diff=a..b"]),
++        Ok(range("a..b", "p"))
++    );
++}
++
++#[test]
++fn each_malformed_range_is_its_usage_line() {
++    let refusals = [
++        ("--diff=", "--diff= needs a range, such as main...dev"),
++        (
++            "--diff=main",
++            "--diff=main: a range needs two dots (a..b) or three (a...b); yamt does not compare the working tree",
++        ),
++        (
++            "--diff=a....b",
++            r#"--diff=a....b: a range holds one ".." or "...""#,
++        ),
++        (
++            "--diff=a..b..c",
++            r#"--diff=a..b..c: a range holds one ".." or "...""#,
++        ),
++        (
++            "--diff=-x..b",
++            r#"--diff=-x..b: a side may not start with "-""#,
++        ),
++    ];
++    for (arg, line) in refusals {
++        assert_eq!(parsed(&[arg]), Err(line.to_owned()), "{arg}");
++    }
++}
++
++#[test]
++fn diff_and_a_range_or_two_ranges_are_a_usage_error() {
++    let refused = Err("give --diff or one --diff=<range>, not both".to_owned());
++    assert_eq!(parsed(&["--diff", "--diff=a..b"]), refused);
++    assert_eq!(parsed(&["--diff=a..b", "--diff"]), refused);
++    assert_eq!(parsed(&["--diff=a..b", "--diff=a..b"]), refused);
++}
++
++#[test]
++fn the_usage_names_the_range_forms() {
++    assert!(
++        USAGE.contains("       yamt --diff=<a>..<b> [--repo <path>] [--mr]\n"),
++        "{USAGE}"
++    );
++    assert!(
++        USAGE.contains("       yamt --diff=<a>...<b> [--repo <path>] [--mr]\n"),
++        "{USAGE}"
++    );
++    assert!(USAGE.contains("  --diff=<range>    "), "{USAGE}");
++}
++
++#[test]
++fn mr_alone_or_with_diff_in_either_order_opens_the_compare_window_on_its_page() {
++    let on_the_page = Ok(compare(Ai::Off, StartScreen::MergeRequests));
++    assert_eq!(parsed(&["--mr"]), on_the_page);
++    assert_eq!(parsed(&["--diff", "--mr"]), on_the_page);
++    assert_eq!(parsed(&["--mr", "--diff"]), on_the_page);
++    assert_eq!(parsed(&["--mr", "--mr"]), on_the_page);
++}
++
++#[test]
++fn mr_with_a_range_opens_the_range_window_on_its_page() {
++    assert_eq!(
++        parsed(&["--diff=a..b", "--mr"]),
++        Ok(range_on("a..b", ".", StartScreen::MergeRequests))
++    );
++    assert_eq!(
++        parsed(&["--mr", "--diff=a..b", "--repo", "p"]),
++        Ok(range_on("a..b", "p", StartScreen::MergeRequests))
++    );
++}
++
++#[test]
++fn mr_with_a_repo_and_no_range_is_refused_as_diff_with_a_repo() {
++    let refused = Err(DIFF_WITH_REPO.to_owned());
++    assert_eq!(parsed(&["--mr", "--repo", "p"]), refused);
++    assert_eq!(parsed(&["--repo", "p", "--mr"]), refused);
++}
++
++#[test]
++fn help_and_version_win_over_mr() {
++    assert_eq!(parsed(&["--mr", "--help"]), Ok(Invocation::Help));
++    assert_eq!(parsed(&["--mr", "--version"]), Ok(Invocation::Version));
++}
++
++#[test]
++fn the_usage_names_mr() {
++    assert!(USAGE.contains("       yamt --mr\n"), "{USAGE}");
++    assert!(USAGE.contains("  --mr              "), "{USAGE}");
++}
++
++#[test]
++fn review_of_with_a_range_names_the_merge_request_s_marks() {
++    let marked = |project: &str, iid| Invocation::Range {
++        spec: RangeSpec::parse("a..b").unwrap(),
++        repo: PathBuf::from("."),
++        ai: Ai::Off,
++        start: StartScreen::Files,
++        marks: MarksOf::MergeRequest {
++            project: project.to_owned(),
++            iid,
++        },
++    };
++    assert_eq!(
++        parsed(&["--diff=a..b", "--review-of=group/sub/project!12"]),
++        Ok(marked("group/sub/project", 12))
++    );
++    assert_eq!(
++        parsed(&["--review-of=g/p!7", "--diff=a..b"]),
++        Ok(marked("g/p", 7))
++    );
++    assert_eq!(
++        parsed(&["--diff=a..b", "--review-of=g!p!3"]),
++        Ok(marked("g!p", 3))
++    );
++}
++
++#[test]
++fn review_of_without_a_range_or_malformed_is_refused() {
++    let without_range = Err(REVIEW_OF_WITHOUT_RANGE.to_owned());
++    assert_eq!(parsed(&["--review-of=g/p!1"]), without_range);
++    assert_eq!(parsed(&["--diff", "--review-of=g/p!1"]), without_range);
++    assert_eq!(parsed(&["--review-of=g/p!1", "--mr"]), without_range);
++    assert_eq!(parsed(&["--review-of=g/p!1", "--repo", "p"]), without_range);
++    for text in ["g/p", "!3", "g/p!0", "g/p!x", "g/p!"] {
++        let flag = format!("--review-of={text}");
++        let refused = Err(format!("{flag}: give <group/project>!<iid>"));
++        assert_eq!(parsed(&["--diff=a..b", &flag]), refused, "{text}");
++    }
++    assert_eq!(
++        parsed(&["--diff=a..b", "--review-of=g/p", "--help"]),
++        Ok(Invocation::Help)
++    );
++}
++
++#[test]
++fn a_second_review_of_is_refused_as_a_second_range_is() {
++    let refused = Err("give one --review-of=<project>!<iid>".to_owned());
++    for second in ["--review-of=g/p!2", "--review-of=g/p!1"] {
++        let args = ["--diff=a..b", "--review-of=g/p!1", second];
++        assert_eq!(parsed(&args), refused, "{second}");
++    }
++}
++
++#[test]
++fn the_usage_names_review_of() {
++    assert!(
++        USAGE.contains("  --review-of=<project>!<iid>  with --diff=<range>: "),
++        "{USAGE}"
++    );
++}
++
++#[test]
++fn yamt_ai_unset_empty_or_zero_is_off_and_any_other_value_on() {
++    let cases = [
++        (None, Ai::Off),
++        (Some(""), Ai::Off),
++        (Some("0"), Ai::Off),
++        (Some("1"), Ai::On),
++        (Some("yes"), Ai::On),
++    ];
++    for (variable, ai) in cases {
++        assert_eq!(
++            parsed_with_variable(&["--diff"], variable),
++            Ok(compare(ai, StartScreen::Files)),
++            "{variable:?}"
++        );
++    }
++    assert!(USAGE.contains("  YAMT_AI=1         "), "{USAGE}");
++}
++
++#[test]
++fn ai_flag_wins_over_yamt_ai_zero() {
++    assert_eq!(
++        parsed_with_variable(&["--diff", "--ai"], Some("0")),
++        Ok(compare(Ai::On, StartScreen::Files))
++    );
++}
++
++#[cfg(unix)]
++#[test]
++fn yamt_ai_that_is_not_utf8_is_on() {
++    use std::os::unix::ffi::OsStrExt;
++    let variable = OsStr::from_bytes(&[0xff]);
++    assert_eq!(
++        parse(vec![OsString::from("--diff")], Some(variable)),
++        Ok(compare(Ai::On, StartScreen::Files))
++    );
++}
+diff --git a/src-tauri/src/range.rs b/src-tauri/src/range.rs
+index 34decef..8779201 100644
+--- a/src-tauri/src/range.rs
++++ b/src-tauri/src/range.rs
+@@ -63,10 +63,10 @@ fn manage_range_in<R: Runtime>(
+     let lock =
+         PairLock::take(&range_folder(app_folder), &resolved).map_err(|error| error.to_string())?;
+     let range = resolved.list().map_err(|error| error.to_string())?;
++    let threads = ThreadStore::open(lock.folder()).map_err(|error| error.to_string())?;
+     let reviewed = review_of(&range, marks)
+         .and_then(|review| ReviewedStore::open(&app_folder.join(REVIEWED_FOLDER), review, &range))
+         .map_err(|error| error.to_string())?;
+-    let threads = ThreadStore::open(lock.folder()).map_err(|error| error.to_string())?;
+     let unlisted = threads.unlisted_paths(&range);
+     if !unlisted.is_empty() {
+         tracing::warn!(paths = ?unlisted, "review threads kept on paths this range does not list");
+diff --git a/src-tauri/src/range/tests.rs b/src-tauri/src/range/tests.rs
+index 6890cca..ba0841a 100644
+--- a/src-tauri/src/range/tests.rs
++++ b/src-tauri/src/range/tests.rs
+@@ -191,6 +191,36 @@ fn a_newer_reviewed_file_refuses_the_range_before_any_window() {
+     assert_eq!(std::fs::read_to_string(&reviewed).unwrap(), newer);
+ }
+ 
++// A refused window must not have written: pruning the unlisted mark would rewrite `reviewed.json` (plan §2 #117).
++#[test]
++fn a_broken_threads_file_leaves_reviewed_json_unwritten() {
++    let window = open_range_window();
++    invoke_on(&window.webview, "mark_reviewed", json!({ "file": 0 })).unwrap();
++    let (repo, data) = window.with_marks_copied();
++    let reviewed = reviewed_file(data.path());
++    let mut stored: serde_json::Value =
++        serde_json::from_slice(&std::fs::read(&reviewed).unwrap()).unwrap();
++    let mut gone = stored["marks"][0].clone();
++    gone["path"] = json!("gone.txt");
++    stored["marks"].as_array_mut().unwrap().push(gone);
++    let with_unlisted = serde_json::to_string(&stored).unwrap();
++    std::fs::write(&reviewed, &with_unlisted).unwrap();
++    std::fs::write(threads_path(repo.path(), data.path()), b"{").unwrap();
++    let app = range_app();
++
++    let refused = manage_range_in(
++        &app,
++        &app_folder(data.path()),
++        resolved(repo.path()),
++        Ai::Off,
++        MarksOf::SideNames,
++    );
++
++    let line = refused.unwrap_err();
++    assert!(line.starts_with("the review threads "), "{line}");
++    assert_eq!(std::fs::read_to_string(&reviewed).unwrap(), with_unlisted);
++}
++
+ // Under `range/` the review's folder would be taken for a commit pair, and the AI sweep would walk it.
+ #[test]
+ fn the_reviewed_marks_live_in_yamt_reviewed_beside_range_and_no_pair_names_them() {
+diff --git a/src-tauri/src/reviewed/tests.rs b/src-tauri/src/reviewed/tests.rs
+index cf1fa62..37f1ce4 100644
+--- a/src-tauri/src/reviewed/tests.rs
++++ b/src-tauri/src/reviewed/tests.rs
+@@ -12,6 +12,7 @@ use crate::range::tests::{
+ const FILE: u32 = 0;
+ const UNKNOWN_ID: u32 = 7;
+ const PROJECT: &str = "taskboard/taskboard";
++const OTHER_PROJECT: &str = "taskboard/other";
+ 
+ fn invoke(window: &RangeWindow, cmd: &str, file: u32) -> Result<Value, Value> {
+     invoke_on(&window.webview, cmd, json!({ "file": file }))
+@@ -43,8 +44,12 @@ fn after_a_mark() -> (TempDir, TempDir) {
+ }
+ 
+ fn merge_request(iid: u32) -> MarksOf {
++    merge_request_of(PROJECT, iid)
++}
++
++fn merge_request_of(project: &str, iid: u32) -> MarksOf {
+     MarksOf::MergeRequest {
+-        project: PROJECT.to_owned(),
++        project: project.to_owned(),
+         iid,
+     }
+ }
+@@ -97,6 +102,10 @@ fn two_merge_request_reviews_do_not_share_marks() {
+ 
+     let first_again = open_marked_window(repo, data, merge_request(1));
+     assert_eq!(listed(&first_again), reviewed(FILE));
++    let (repo, data) = first_again.with_marks_copied();
++
++    let other_project = open_marked_window(repo, data, merge_request_of(OTHER_PROJECT, 1));
++    assert_eq!(listed(&other_project), json!([]));
+ }
+ 
+ #[test]
