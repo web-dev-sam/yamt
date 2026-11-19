@@ -10,7 +10,13 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 
 Request `docs/slices/request-range-reviewed.md` (rules 1–7, acceptance, non-goals); base `b42a6c6b`. Rules 2–7's
 details by the orchestrator (OR13; owner may veto). Owner's answer 1: a changed-again file shows only the changes
-since the review, plus "Review from start" (rules 5–6). Order: design, then its slices.
+since the review, plus "Review from start" (rules 5–6). Design `briefs/range-reviewed-design.md` option A (new crate
+`yamt-reviewed`, marks + the reviewed right text in `<data_dir>/yamt/reviewed/`, `--review-of` for merge requests;
+proposed plan #195/#196, RK79). Design questions decided by the orchestrator (OR13, boring option): a broken/newer
+marks file refuses the window by name as `threads.json` does (#117); two windows on one review each see their own
+clicks until reopened; a search hit on the old side of a since-review file opens the file without moving. Only the
+right side's text is kept (no view shows the reviewed left). Root `Cargo.toml` member + workspace dep added at
+core's collect. Order (strict): core, app (+ `just bindings`), store, view (wires the window; smoke), docs ∥ final.
 
 | row | slice  | owner    | status  | evidence |
 | --- | ------ | -------- | ------- | -------- |
