@@ -14,14 +14,5 @@
       "frontend/src/ui/AGENTS.md",
       "frontend/src/ipc/index.ts"
     ]
-  },
-  "RangeReviewedStoreR1": {
-    "owned": [
-      "frontend/src/ui/rangeReviewed.ts",
-      "frontend/src/ui/rangeReviewed.test.ts",
-      "frontend/src/ui/rangeVisited.ts",
-      "frontend/src/ui/rangeStore.ts",
-      "frontend/src/ui/rangeStore.test.ts"
-    ]
   }
 }
