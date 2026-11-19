@@ -1,6 +1,6 @@
 just mutants HEAD: 1181 killed, 102 survived, 5 no cov; most survivors sit on unchanged lines of whole-file-mutated files
 frontend/src/ui/rangeReviewed.ts:90:52 `?? []` → `?? ["Stryker was here"]` — equivalent: with start null, nextOpen finds the string, whose `.path` is undefined, so `?? null` still answers null and nothing is shown
-frontend/src/ipc/fixtureReviewed.ts:10-13 SEEDED_MARKS literal/values — wiring: a module-level const is evaluated once under the vitest runner (#732). The values are asserted exactly by fixtureReviewed.test's seeded-marks test
-frontend/src/ipc/fixtureReviewed.ts:16 SINCE_PATH → "" — wiring: a module-level const, as above. Asserted by the board.ts since test, whose expected differences only board.ts gets
-frontend/src/ipc/fixtureReviewed.ts:20-22 NO_WORDS object/arrays (7 mutants) — wiring: a module-level const, as above. Asserted by the board.ts since test's `words` (toEqual)
+frontend/src/ipc/fixtureReviewed.ts:10-13 SEEDED_MARKS literal/values — harness: module-level constant (#732, --ignoreStatic). The values are asserted exactly by fixtureReviewed.test's seeded-marks test
+frontend/src/ipc/fixtureReviewed.ts:16 SINCE_PATH → "" — harness: module-level constant (#732, --ignoreStatic). Asserted by the board.ts since test, whose expected differences only board.ts gets
+frontend/src/ipc/fixtureReviewed.ts:20-22 NO_WORDS object/arrays (7 mutants) — harness: module-level constant (#732, --ignoreStatic). Asserted by the board.ts since test's `words` (toEqual)
 frontend/src/ui/nextFile.ts:9:47 slice(0, at+1) → files — equivalent (and the line's text is unchanged): duplicates after the wrap never come before the first match

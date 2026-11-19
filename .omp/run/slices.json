@@ -11,7 +11,17 @@
       "frontend/src/ui/RangeFileRow.vue",
       "frontend/src/ui/rangeText.ts",
       "frontend/src/ui/rangeText.test.ts",
-      "frontend/src/ui/AGENTS.md"
+      "frontend/src/ui/AGENTS.md",
+      "frontend/src/ipc/index.ts"
+    ]
+  },
+  "RangeReviewedStoreR1": {
+    "owned": [
+      "frontend/src/ui/rangeReviewed.ts",
+      "frontend/src/ui/rangeReviewed.test.ts",
+      "frontend/src/ui/rangeVisited.ts",
+      "frontend/src/ui/rangeStore.ts",
+      "frontend/src/ui/rangeStore.test.ts"
     ]
   }
 }
