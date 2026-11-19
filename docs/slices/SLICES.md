@@ -6,6 +6,17 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Release 0.7.1 (session 56, owner: "make a patch release")
+
+0.7.1 = 0.7.0 plus the Reviewed marks in the diff window (section below; GitLab playground check still open). The
+owner pushes `main`, waits for green ci, then tags.
+
+| row | slice                                                                                                        | owner        | status  | evidence                                                                 |
+| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ------- | ------------------------------------------------------------------------ |
+| 1   | release commit 0.7.1: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done    | `c3fa489e` (README gains the Reviewed paragraph; `readmer check` exit 0) |
+| 2   | final run 0.7.1 before tagging (`briefs/release-0.7.1-verify.md`)                                            | verifier     | running |                                                                          |
+| 3   | push `main`, ci green on all four jobs, tag `v0.7.1`, publish                                                | human        | todo    |                                                                          |
+
 ## Reviewed marks in the diff window (session 56; owner: "in diff mode add a "reviewed" button in place of "resolve" …")
 
 Request `docs/slices/request-range-reviewed.md` (rules 1–7, acceptance, non-goals); base `b42a6c6b`. Rules 2–7's
