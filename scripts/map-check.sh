@@ -29,7 +29,7 @@ done < <(awk '/#\[tauri::command/ { pending = 1 } pending && match($0, /fn [a-z_
 
 # Every window data-source method must be named in architecture (the merge, compare and range windows', and the
 # merge-request page's, which the compare and range sources extend).
-for source in ChunkSource CompareSource RangeSource ReviewSource MergeRequestSource; do
+for source in ChunkSource CompareSource RangeSource ReviewSource ReviewedSource MergeRequestSource; do
     while IFS= read -r method; do
         grep -qw -- "$method" "$ARCH" || missing+=("$source.$method (not in $ARCH)")
     done < <(sed -n 's/^  \([a-zA-Z]*\)(.*/\1/p' "frontend/src/ipc/$source.ts")

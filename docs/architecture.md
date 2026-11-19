@@ -51,7 +51,7 @@ yamt/
 │  ├─ settings/               the per-user settings file (theme — ten names, plan §2 #102 —, changed keys, its location). NO tauri, NO git
 │  ├─ lsp-host/               starts language servers and frames their messages (plan §2 #70). NO yamt-*, NO tauri
 │  └─ compare/                the `yamt --diff` window's stored tabs (plan §2 #97). Depends on merge-core only; NO tauri, NO git
-├─ src-tauri/                 Tauri shell: commands + DTO export + DMABUF guard. Depends on session, settings, lsp-host, compare, range, review, agent, merge-requests, local-merge
+├─ src-tauri/                 Tauri shell: commands + DTO export + DMABUF guard. Depends on session, settings, lsp-host, compare, range, review, reviewed, agent, merge-requests, local-merge
 ├─ frontend/
 │  ├─ package.json            pnpm; Vite + Vue 3 + TS strict
 │  ├─ src/
@@ -67,6 +67,7 @@ yamt/
 ├─ tests/compare/<case>/      left.txt right.txt: the compare window's fixture pairs (`yamt-cli compare`, plan §2 #95)
 ├─ crates/range/              yamt-range: the `--diff=<a>..<b>` range, its changed files and texts, the pair lock (§3.8)
 ├─ crates/review/             yamt-review: the range window's threads (`threads.json`) and posting to GitLab through glab (§3.8)
+├─ crates/reviewed/           yamt-reviewed: the range window's Reviewed marks per review and their kept texts (§3.8)
 ├─ crates/pipe/               yamt-pipe: the process core language servers and the AI share (§3.8)
 ├─ crates/agent/              yamt-agent: the AI's temporary checkout and its `omp acp` process (§3.8)
 ├─ crates/merge-requests/     yamt-merge-requests: the GitLab project's open merge requests through glab (people, labels, pictures' addresses), opening one's changes, job pages, resolving one, re-requesting a review, searching, adding and removing its people, reading its description (§3.9)
@@ -108,7 +109,8 @@ graph LR
   end
 ```
 
-The range window adds (plan §2 #104, #109, #110, #117): `gitio, merge-core ◄── range ◄── review ◄── src-tauri`;
+The range window adds (plan §2 #104, #109, #110, #117, #195): `gitio, merge-core ◄── range ◄── review ◄── src-tauri`;
+`gitio, merge-core, range ◄── reviewed ◄── src-tauri`;
 `pipe ◄── lsp-host`; `gitio, pipe, range ◄── agent ◄── src-tauri`; `settings` gains the `agent` entry. The
 merge-request page adds (plan §2 #129): `gitio, range ◄── merge-requests ◄── src-tauri` (`review` only as its
 dev-dependency); resolving a merge request's conflicts adds `gitio ◄── local-merge ◄── src-tauri` (§3.10). In the window:
@@ -124,7 +126,7 @@ Rules (each one is enforced, not advised — §8 says by what):
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | `merge-core` has no `std::process`, `std::fs`, `tokio`, `tauri`, `serde_json`                                                                                | clippy `disallowed_methods`/`disallowed_types` + no such deps in `Cargo.toml` (cargo-deny `bans` wildcard check per crate)      |
 | `gitio` contains no diff logic (never depends on `merge-core`)                                                                                               | workspace `Cargo.toml` graph; `cargo tree -e normal -p gitio` must not list merge-core (just recipe)                            |
-| `src-tauri` depends only on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `agent`, `merge-requests`, `local-merge` + tauri crates; command bodies ≤ 15 lines (thin); `settings` and `lsp-host` depend on no `yamt-*` crate and not on tauri; `compare` depends on `merge-core` only among `yamt-*` and not on tauri; `merge-requests` depends on `range`, `gitio` and `merge-core` only among `yamt-*` and not on tauri; `local-merge` depends on `gitio` only among `yamt-*` and not on tauri | `scripts/arch-check.sh` (yamt-app's, yamt-settings', yamt-lsp-host's, yamt-compare's, yamt-merge-requests' and yamt-local-merge's direct deps); reviewer rule |
+| `src-tauri` depends only on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `reviewed`, `agent`, `merge-requests`, `local-merge` + tauri crates; command bodies ≤ 15 lines (thin); `settings` and `lsp-host` depend on no `yamt-*` crate and not on tauri; `compare` depends on `merge-core` only among `yamt-*` and not on tauri; `merge-requests` depends on `range`, `gitio` and `merge-core` only among `yamt-*` and not on tauri; `reviewed` depends on `range`, `gitio` and `merge-core` only among `yamt-*` and not on tauri; `local-merge` depends on `gitio` only among `yamt-*` and not on tauri | `scripts/arch-check.sh` (yamt-app's, yamt-settings', yamt-lsp-host's, yamt-compare's, yamt-merge-requests', yamt-reviewed's and yamt-local-merge's direct deps); reviewer rule |
 | `ui/**` never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal/**`, `model/**` directly (only `ipc/` talks to the app)                             | oxlint `no-restricted-imports` in a per-directory `overrides` block (`/**` globs); `frontend/scripts/fences.test.ts`            |
 | `model/**` and `connectors/**` import nothing from `vue`, `@vueuse/*`, `editor/`, `ui/`, `@tauri-apps/*`; `editor/**` imports nothing from `vue`/`@vueuse/*` | oxlint `no-restricted-imports` overrides; `import/no-cycle` globally                                                            |
 | The compare window's root (`ui/Compare*.vue`, `ui/compare*.ts`, `ui/useCompare*.ts`: every compare-only file carries the prefix) never imports `ui/store.ts`, `ui/App.vue` or `lsp/` (plan §2 #94) | `frontend/scripts/windowFence.ts` PM7 (called by `fences.ts`) + its failing-path test |
@@ -613,8 +615,9 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   http://yamt-picture.localhost https:` (Gravatar's two hosts inside `https:`); scripts, frames, media, fonts and
   `connect-src` stay the app's only (pinned by `merge_requests/tests/csp.rs`).
 - **A second process** (`second_window.rs`, plan §2 #132, #138; amends "one process, one window": opening a merge
-  request's changes or resolving its conflicts starts another yamt): `start_range(range)` runs `yamt --diff=<base_sha>..<head_sha>
-  --repo <root>` (`range_arguments`, no `--ai`; a spawn failure → `OpenReply::StartFailed`), `start_merge(root)` runs
+  request's changes or resolving its conflicts starts another yamt): `start_range(range, ai)` runs `yamt --diff=<base_sha>..<head_sha>
+  --repo <root> --review-of=<project>!<iid>` (`range_arguments`, with `--ai` when this window's AI is on, #195: the
+  marks belong to the merge request; a spawn failure → `OpenReply::StartFailed`), `start_merge(root)` runs
   `yamt --repo <root>` (`merge_arguments`: the merge window, yamt's default mode; `Err` is why it did not start); both
   through one `spawn` with cwd `root`, stdin and stdout null, stderr inherited; the program is `$APPIMAGE` when this one runs from
   an AppImage (`appimage.rs` `running_appimage`: the mount goes away with this process), else `current_exe`; in a
@@ -694,7 +697,7 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
 
 ---
 
-### 3.8 The range window, its threads and the AI (plan §2 #103–#127, #145–#148)
+### 3.8 The range window, its threads, its Reviewed marks and the AI (plan §2 #103–#127, #145–#148, #195, #196)
 
 - **`range` (yamt-range).** `spec` keeps `a..b` / `a...b` as typed; `open` resolves both sides (the merge base on the
   left for three dots) into `Compared` with git's `%h` short ids; `entries` reads one `diff-tree -r -z --raw --numstat
@@ -704,7 +707,13 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   read per page, the files left out by the same `decide`/`read_sides`/`decoded` rule `load` uses; `merge-core`
   `line_changes`, which `compare` builds on, #127); `lock` takes `PairLock` on
   `<data_dir>/yamt/range/<repo key>/<left>-<right>/lock` (one window per repository and commit pair, #107;
-  `PAIR_SEPARATOR`, `pair_right_commit`).
+  `PAIR_SEPARATOR`, `pair_right_commit`; `Range::repo_key()` the repository folder name it uses, the FNV-1a 64 in
+  `fnv1a_64`). For the Reviewed marks (#195): `side_names` answers `Range::side_names()` → `SideNames { left, dots,
+  right }`, each typed side a `SideName::Ref { full_name }` when git's `symbolic_full_name` starts with `refs/` (`HEAD`
+  on a branch is that branch), else `SideName::Commit { id }` — the commit it names now (an id, a detached `HEAD`,
+  `HEAD~2`); the left is the typed left, never the merge base. `Range::sides(file)` → `FileSides { left, right }` of
+  `SideObject { id, kind: RangeEntryKind }` (git's object id, `None` for a missing side); `Range::right_text(file)` the
+  right column's text exactly as `load` shows it (`""` for a deleted file), `None` when `load` answers anything but texts.
 - **`review` (yamt-review).** `ThreadStore` owns `threads.json` format 2 in the pair folder (#117, #146): threads on a
   `ThreadPlace { start: DiffLine, end: ThreadLine }` (#145: the lines from `start` to `end` in GitLab's one-column
   order, both included; `DiffLine` = `Removed { left } | Added { right } | Unchanged { left, right }` carries no column,
@@ -736,6 +745,27 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   in this diff any more" (RK48: yamt's differences are `merge_core::compare`'s, GitLab's git's). Drafts read back
   (`gitlab/drafts.rs`) parse `line_range` (`null` or missing: none); `same_draft` also compares both range ends by
   `type`, `old_line`, `new_line`, so a one-line draft never stands in for a range nor a range draft for one line.
+- **`reviewed` (yamt-reviewed).** The user's Reviewed marks per review (#195, RK79; request
+  `docs/slices/request-range-reviewed.md`). The folder is `<data_dir>/yamt/reviewed/<repo key>/<16 hex>/` — a sibling of
+  `range/`, so `pair_folders` never lists it — holding `lock`, `reviewed.json` format 1 and `texts/<blob id>`; the 16 hex
+  are the FNV-1a 64 of the review's `ReviewOf::key_text()`: `ReviewOf::Range(SideNames)` →
+  `range ref:refs/heads/dev...ref:refs/heads/x` (or `commit:<hex>` for a side), `ReviewOf::MergeRequest { project, iid }`
+  (from `--review-of`) → `merge-request group/project!12`; the file names its `review`, and another one there is
+  `Broken`. A stored mark is the path, both sides' `{ id, kind }` (`Range::sides`) and `keptText`: when the right side
+  has a text (`Range::right_text`), it is kept as `texts/<right id>`; no other text is copied. `ReviewedStore::open(reviewed_dir,
+  review, range)`: no folder → no marks, nothing written; else under the lock it reads `reviewed.json` — format > 1
+  `NewerFormat`; serde's error with line and column, a mark missing `left` or `right`, marks out of path order, an id
+  that is not git's, another review → `Broken`; the file untouched —, drops the marks on paths the range does not list
+  (written only then), sweeps the texts no mark keeps, and classifies each listed file: `ReviewMark::Reviewed` while
+  its right side's id and kind are the marked ones, else `ChangedSinceReview`. `marks()` answers `FileReview { file,
+  mark }` in list order. `mark(range, file)` and `unmark(range, file)` (no mark: nothing written) each take `lock`,
+  re-read `reviewed.json`, write the text first, apply their one change by path and write temp + rename, so two
+  windows on one review keep both clicks; a window's own list is classified at its open and changed only by its own
+  clicks until it is reopened (#196). A failed write changes nothing in memory. `since_review(range, file)` →
+  `SinceReview::Texts { reviewed, current, differences }` (`merge_core::compare` of the kept text — `""` for a
+  deleted right side — against today's `right_text`) or `NoText` (the mark kept no text, today's file is not text,
+  the file has no mark, or another window's open swept the kept text). `Error`: `ReadFailed`, `Broken`, `NewerFormat`,
+  `WriteFailed`, `UnknownFile`, `Range`. Depends on range, gitio, merge-core; no tauri (arch-check).
 - **`pipe` (yamt-pipe).** `Running::start`/`start_without(removed env)`: one supervisor, a stdin writer, a stdout
   reader per `Framing { ContentLength, Lines }`, stderr as 8 KiB log lines; `Exited` once and last; a stop is a grace,
   then a kill. `lsp-host` and `agent` both use it (#109).
@@ -745,12 +775,24 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   Unreadable` (ignored-only new files are clean, #115; the AI's branches and stash are changes, #122); `discard` and
   `end` stop the agent before any removal by construction; a partial-clone source is refused by name; other pairs'
   leftovers are swept outside the window's AI lock.
-- **`src-tauri`.** `args`: `Invocation::Range { spec, repo, ai, start }` (`--ai` or `YAMT_AI` accepted with every
-  mode, kept for a range and by the compare window's merge-request page; `--mr` → `start`, §2 the compare window).
+- **`src-tauri`.** `args`: `Invocation::Range { spec, repo, ai, start, marks }` (`--ai` or `YAMT_AI` accepted with every
+  mode, kept for a range and by the compare window's merge-request page; `--mr` → `start`, §2 the compare window;
+  `marks: MarksOf { SideNames | MergeRequest { project, iid } }`, `MergeRequest` from `--review-of=<project>!<iid>` —
+  only with `--diff=<range>` (else "--review-of goes with --diff=<range>"), split at the last `!`, a non-empty project
+  and an iid > 0; a second one is refused, "give one --review-of=<project>!<iid>", #195; tests in `args/tests.rs`).
   `start_script` writes `data-window="range"`, `data-ai="on"` for `WindowKind::Range { ai: On, .. }` and
   `data-open="mergeRequests"` with `start: MergeRequests`. `range.rs`: `RangeState` with
-  `Mutex<ThreadStore>` and the send guard (the guard `try_lock`ed for a whole send, the store locked only between glab
-  calls), commands `open_range`, async `load_range_file` and async `search_range_texts(from) -> SearchTexts` (#127).
+  `Mutex<ThreadStore>`, `Mutex<ReviewedStore>` and the send guard (the guard `try_lock`ed for a whole send, the thread store locked only between glab
+  calls), commands `open_range`, async `load_range_file` and async `search_range_texts(from) -> SearchTexts` (#127);
+  `manage_range_in` takes the pair lock, lists the range, opens `ThreadStore`, then `ReviewedStore` in
+  `<app_folder>/reviewed/` on `ReviewOf::Range(range.side_names())` or the merge request `--review-of` named: every
+  refusal (a broken or newer `threads.json` or `reviewed.json`, named, exit 2) comes before any write and before any
+  window (tests in `range/tests.rs`). `second_window.rs` `start_range` passes `--review-of=<project>!<iid>` from
+  `RangeToOpen { root, spec, project, iid }` (`prepare_open` fills the logged-in project's full path). `reviewed.rs`:
+  `list_reviewed`, async `mark_reviewed(file)`, `unmark_reviewed(file)` and `load_since_review(file)` on the blocking
+  pool (`blocking_reply`), each one `ReviewedStore` call; `From<yamt_reviewed::Error> for IpcError` uses existing kinds
+  only: `WriteFailed` → `WriteFailed`, `ReadFailed`/`Broken`/`NewerFormat` → `ReadFailed { path, message }`,
+  `UnknownFile` → `UnknownRangeFile`, `Range` as the range's.
   `review.rs`: `list_threads`, `add_thread`, `add_note`,
   `queue_message`, `unqueue_message`, `edit_note`, `delete_message` (both refused with `SendRunning` while a send
   runs, #123), `set_thread_session`, `add_ai_answer`, `check_gitlab`, async `send_queue` (a
@@ -760,8 +802,9 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   the agent (deferred while the lock is held), the exit ends the workspace. `settings.rs` gains `set_agent`.
   `IpcError` gains `AiOff`, `RemoveFailed`, `UnknownThread`, `UnknownMessage`, `EmptyMessage`, `MessagePending`,
   `NotANote`, `SendRunning`.
-- **Window.** `RangeSource` extends `SettingsSource, ReviewSource, MergeRequestSource` (§4) with `openRange(): RangeStart`,
-  `loadRangeFile(file)` and `searchTexts(from)` (#127); `ReviewSource`: `listThreads`, `addThread(file, place, text)`, `addNote(thread, text)`,
+- **Window.** `RangeSource` extends `SettingsSource, ReviewSource, ReviewedSource, MergeRequestSource` (§4) with `openRange(): RangeStart`,
+  `loadRangeFile(file)` and `searchTexts(from)` (#127); `ReviewedSource`: `listReviewed`, `markReviewed(file)`,
+  `unmarkReviewed(file)`, `loadSinceReview(file)` (#195); `ReviewSource`: `listThreads`, `addThread(file, place, text)`, `addNote(thread, text)`,
   `queueMessage(message, text)`, `unqueueMessage(message)`, `editNote(message, text)`, `deleteMessage(message)`,
   `setThreadSession(thread, session)`,
   `addAiAnswer(thread, session)`, `checkGitLab()`, `sendQueue(onProgress)`; `SettingsSource`/`ChunkSource` gain
@@ -771,8 +814,9 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   `ThreadPlace`/`DiffLine` (`toThreadPlace` brands every number of both ends, `diffLineOf`, `onePlace`, `sameDiffLine`,
   `isOneLine`); `editor/range.ts` `RangeController`
   shows two read-only columns with the threads' block rows and collapses unchanged lines behind the merge window's
-  wave (`options { preferences, collapsed, threads }`, `setCollapsed`; a thread's unchanged lines are never hidden,
-  #126, #145), starts a thread from a drag over the line numbers (`events.startThread(place)` on release, #145, #148),
+  wave (`options { preferences, collapsed, threads, startsThreads }`, `setCollapsed`; a thread's unchanged lines are never hidden,
+  #126, #145), starts a thread from a drag over the line numbers (`events.startThread(place)` on release, #145, #148;
+  with `startsThreads: false`, the since-review view's, a press on a number starts no drag),
   tints the drag's, every draft's and the hovered thread's lines (§5.2) and goes to
   a search finding (`goTo({ pane, match })`, #127);
   `editor/markdown.ts` `MarkdownView` renders Markdown as DOM nodes only (`show(text)`, #112) and one code block in
@@ -808,6 +852,28 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   counts by the folder path a row carries (through `fileTree.ts` `folderPaths`, so a joined chain finds its deepest
   folder's sum), built once per list by `RangeApp`, which fills the tree's optional `folder` slot (after the label;
   the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair of file and folder rows.
+  The Reviewed marks (#195, #196): `rangeReviewed.ts` `createRangeReviewed(source, window)` is the window's one mirror
+  of the marks — `marks` (`ReadonlyMap<RangeFileId, ReviewMark>`) written only after Rust answered ok (`load` from
+  `listReviewed`, a mark, an unmark), `counted` ("N of M reviewed": only `reviewed` marks over `start.files`), `busy`
+  (true until the first list answers ok and while a write runs: one write at a time, a click while busy is ignored);
+  `toggle(entry)` (a `reviewed` file is unmarked and stays; any other is marked, then the next file in `start.files`
+  order — also in the tree view — whose mark is not `reviewed` shows, wrapping, never itself, through `nextFile.ts`
+  `nextOpen`, the rule `nextUnresolved` uses too), `reviewFromStart(entry)` (unmarks), `loadSince(entry)`; failures
+  reach the problem bar as `{ action: "reviewed", step: list | mark | unmark | since, path }`. `rangeVisited.ts` holds
+  the mounted views (`visited` ≤ `MOUNTED_FILES` 16, `markShown`) and the one view-load rule `loadView(state, entry,
+  call, problem)`: a failure unmounts the file's view and reports, a success clears the problem about its path —
+  `rangeStore.ts` `loadFile` and `loadSince` both load through it. At start-up `openRange` answers, the threads'
+  list starts, `listReviewed` answers (ok or failed) before the first file shows, then GitLab is checked.
+  `useRangeController.ts` `viewKind(mark)`: a `changedSinceReview` file opens the since view, any other the whole
+  change; `viewParts` for the since view loads `loadSinceReview` (never `loadFile`), shows no threads and builds with
+  `startsThreads: false`; `sinceShown` puts the kept text left and today's right (`noText` → `SINCE_NO_TEXT`);
+  `takesSearchMove(view, pane)`: in the since view a search hit on the left pane opens the file without moving.
+  `RangeApp` keys each `RangeView` by file and view kind, so a mark change remounts it. `RangeView`'s header starts with
+  the Reviewed button (`aria-pressed`, the filled Mark-resolved look when reviewed, disabled while `busy`), then the
+  file's heading, in the since view the note "Changed since you reviewed it" and "Review from start", and after the
+  collapse toggle the count (`role="status"`); the since view's left heading is "As you reviewed it". `RangeFileRow`
+  ends a marked row with Lucide `check` (the name muted) or `refresh-ccw-dot` in the warning colour. Every word is in
+  `rangeText.ts`.
 
 ### 3.9 `merge-requests` — the GitLab project's open merge requests (plan §2 #128–#139, #149, #151–#153, #158, #162, #169, #171–#173, #176, #179–#184, #187, #193)
 
@@ -864,7 +930,8 @@ reply, one resolve or unresolve, or one `bulk_publish` (RK54).
   `glabMissing` | `notLoggedIn { detail }` | `failed { message }`, `OpenReply` `opened` | `alreadyOpen` | `preparing` |
   `notOpen` | `noRemote` | `fetchFailed` | `missingCommit` | `startFailed` | `glabMissing` | `notLoggedIn` | `failed`,
   `PageOpened` `opened` | `notOffered` | `failed`, `ResolveRefusal` `notOpen` | `fromFork` | `noRemote { project }` |
-  `glabMissing` | `notLoggedIn { detail }` | `failed { message }`; `RangeToOpen { root, spec }` and `ResolveTarget {
+  `glabMissing` | `notLoggedIn { detail }` | `failed { message }`; `RangeToOpen { root, spec, project, iid }` (`project`
+  the logged-in project's full path, for `--review-of`, #195) and `ResolveTarget {
   root, iid, remote, branch, target }` (not IPC). `PAGE_SIZE` 100,
   `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50.
 - **Detection** (`detect.rs`, #130): `gitlab_repository(folder)`: `Repo::discover`, `Repo::remote_urls`,
@@ -1321,6 +1388,9 @@ export type CheckedRow = { iid: MergeRequestIid; readiness: Readiness }; // sent
 export type ResolveReply = { kind: "started"; started: Started } | { kind: "windowFailed"; started: Started; message: string } | { kind: "refused"; refusal: Refusal } | { kind: "gitLabRefused"; refusal: ResolveRefusal }; // Started = { branch; target; conflicts }
 export type ContinueMergeReply = { kind: "opened"; branch: string; target: string } | { kind: "alreadyOpen" } | { kind: "ended" } | { kind: "windowFailed"; message: string };
 export type LocalMerge = { kind: "free" } | { kind: "merging"; iid: number; windowOpen: boolean };
+// the range window's Reviewed marks (plan §2 #195, crate yamt-reviewed): list_reviewed, mark_reviewed(file), unmark_reviewed(file), load_since_review(file)
+export type ReviewMark = "reviewed" | "changedSinceReview"; export type FileReview = { file: RangeFileId; mark: ReviewMark }; // listReviewed: the marked files in list order; a file not in it is unreviewed
+export type SinceReview = { kind: "texts"; reviewed: string; current: string; differences: Difference[] } | { kind: "noText" }; // reviewed: the right side's text kept at the mark ("" for a deleted right side); noText: no text kept, today's file not text, no mark, or the kept text swept by another window's open
 ```
 
 Brands: specta emits the Rust newtypes as plain `number`, so the generated DTOs are
@@ -1438,6 +1508,28 @@ alias the generated unions. `createTauriCompareSource` (`ipc/tauriCompare.ts`) m
 puts `frontend/fixtures/compare/<case>.json` (written by `just fixtures` from `tests/compare/<case>/`) into tab 1, mirrors
 `yamt-compare`'s tab rules, and answers a column with a case's differences only when both texts equal that case's, else
 none and an `info` log `compare.fixture_miss`; both fixture sources parse through one `parsedFixture` (`ipc/fixture.ts`).
+
+The range window's Reviewed marks (plan §2 #195) talk to `frontend/src/ipc/ReviewedSource.ts`, which `RangeSource`
+extends:
+
+```ts
+export interface ReviewedSource {
+  listReviewed(): Promise<SourceResult<ReviewMarks>>; // ReviewMarks = ReadonlyMap<RangeFileId, ReviewMark>, as classified at the window's open
+  markReviewed(file: RangeFileId): Promise<SourceResult<null>>; // records both sides and keeps the right side's text
+  unmarkReviewed(file: RangeFileId): Promise<SourceResult<null>>; // "Unmark" and "Review from start"; no mark writes nothing
+  loadSinceReview(file: RangeFileId): Promise<SourceResult<SinceReview>>;
+}
+```
+
+`ipc/reviewedDomain.ts` holds `ReviewMark` (the generated alias), `ReviewMarks`, `SinceReview` (readonly, its
+`differences` branded through `compareDomain.ts` `toDifferences`) and the conversions `toReviewMarks` (each `file`
+branded `RangeFileId`; a negative id or a file listed twice throws with its index) and `toSinceReview`.
+`createTauriReviewed` (`ipc/tauriReviewed.ts`) maps the four commands, spread into `createTauriRangeSource`;
+`createFixtureReviewed(log, search, shown)` (`ipc/fixtureReviewed.ts`, spread into `createFixtureRangeSource`) keeps the
+marks in memory: `?reviewed=seeded` marks `docs/keys.md` reviewed and `src/board/board.ts`, `public/logo.png` changed
+since review (another value logs `range.fixture_reviewed_miss`); the since reply of `board.ts` is its text without
+lines 41–43 and one difference, any other text file its own text with none, a file that is not text `noText`; a file
+past the list answers `UnknownRangeFile`; every call logs `range.fixture_reviewed { kind, file }` (the list no file).
 
 The merge-request page (plan §2 #128–#143, #151–#153, #158, #162, #169, #171–#173) talks to `frontend/src/ipc/MergeRequestSource.ts`, which `CompareSource` and
 `RangeSource` extend:
@@ -1641,6 +1733,14 @@ The compare window (`yamt --diff`, plan §2 #93–#97) has its own rows:
 | the differences shown                                                           | each column's `differenceField` (`editor/internal/compareFields.ts`): set by a reply, mapped through edits until the next                                                                                                                                   | built once per reply, never per key (plan §2 #96)    |
 | Auto's finding per tab                                                          | the controller (`compareLanguage.ts`), reported through `detected` to `compareStore.detected` (names only)                                                                                                                                                  | the toolbar's "Auto · JSON"                          |
 | the compare window's notices, problem, question, screen, tab panel shown        | `ui/compareStore.ts` + `ui/compareNotices.ts` (notices), `fileListKey` the one writer of `fileListShown`; settings through the seam `ui/settingsStore.ts`, which the merge store registers too; the screen also by the merge-request slice's `show`/`close` | one store per root (plan §2 #94)                     |
+
+The range window (`yamt --diff=<a>..<b>`, plan §2 #103–#127, #195) has its own rows:
+
+| state                                                              | owner                                                                                                                                                                                                                                                                                                                                                                                                                                                | why                                                                                    |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| the Reviewed marks: the stored marks and their kept texts          | Rust `yamt-reviewed` `ReviewedStore` (`<data_dir>/yamt/reviewed/<repo key>/<review>/`: `reviewed.json` format 1, `texts/<blob id>`, `lock`), one per range window as `RangeState.reviewed: Mutex<ReviewedStore>`; the file written only by `open` (unlisted marks dropped, unkept texts swept), `mark` and `unmark`, each under the lock after a re-read                                                                                             | survives a restart; two windows on one review keep both clicks (plan §2 #195, RK79)    |
+| each listed file's mark in the window, the count, busy             | `ui/rangeReviewed.ts` `createRangeReviewed`, held by `rangeStore.ts` as `reviewed`: `marks` written only after Rust answered ok — `load` (`listReviewed` at start-up), `toggle` and `reviewFromStart` (`markReviewed`/`unmarkReviewed`) —; `counted` computed from it; `busy` true until the first list answers ok and while a write runs; read by `RangeApp` (the view kind), `RangeView` (the button, the count) and `RangeFileRow` (the row mark) | Rust's classification at open, changed only by this window's own clicks (plan §2 #196) |
+| the mounted views (`shown`, `visited`, `recent`) and a view's load | `ui/rangeVisited.ts` over the range store's refs: `markShown` (at most `MOUNTED_FILES` 16, the least recently shown unmounted first) and `loadView`, the one view-load rule — a failure unmounts the file and reports, a success clears the problem about its path —, called by `rangeStore.ts` `loadFile` and `reviewed.loadSince`                                                                                                                  | one rule for the whole and the since-review view (plan §2 #195)                        |
 
 The merge-request page (plan §2 #128–#143, #149, #151–#157; the compare and range windows) has its own rows:
 

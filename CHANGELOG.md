@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A "Reviewed" button in each file's header of the diff window (`yamt --diff=<a>..<b>`) marks the file reviewed and
+  shows the next file not yet reviewed; the file list marks reviewed files with a check, and the header counts
+  "N of M reviewed". The marks are remembered per review — the two branches or commits by name, or the merge request
+  when it was opened from the merge-request page — in yamt's data folder, so they survive a restart, a new commit
+  that leaves the file alone and a rebase.
+- A reviewed file that changed since its review is marked with a refresh icon and opens showing only what changed
+  since: the version you reviewed on the left, today's on the right, no threads. "Review from start" forgets the mark
+  and shows the whole change again.
+
 ## [0.7.0] - 2026-11-05
 
 ### Added
