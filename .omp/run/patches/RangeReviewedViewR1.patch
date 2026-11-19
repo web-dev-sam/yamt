@@ -1,0 +1,220 @@
+diff --git a/frontend/src/ui/RangeFileRow.vue b/frontend/src/ui/RangeFileRow.vue
+index e26e53e..92d4786 100644
+--- a/frontend/src/ui/RangeFileRow.vue
++++ b/frontend/src/ui/RangeFileRow.vue
+@@ -9,7 +9,11 @@ import RangeCounts from "./RangeCounts.vue";
+ import { changeMark, REVIEW_MARK_WORDS } from "./rangeText";
+ import { threadCountText } from "./rangeThreadText";
+ 
+-type ReviewLook = { readonly icon: Component; readonly colour: string };
++type ReviewLook = {
++  readonly icon: Component;
++  readonly colour: string;
++  readonly mutesName: boolean;
++};
+ 
+ type ReviewShown = ReviewLook & { readonly word: string };
+ 
+@@ -28,8 +32,8 @@ const LETTER_COLOURS: Readonly<Record<RangeChange["kind"], string>> = {
+ };
+ 
+ const REVIEW_LOOKS: Readonly<Record<ReviewMark, ReviewLook>> = {
+-  reviewed: { icon: Check, colour: "text-fg-muted" },
+-  changedSinceReview: { icon: RefreshCcwDot, colour: "text-problem-warning" },
++  reviewed: { icon: Check, colour: "text-fg-muted", mutesName: true },
++  changedSinceReview: { icon: RefreshCcwDot, colour: "text-problem-warning", mutesName: false },
+ };
+ 
+ const mark = computed(() => changeMark(props.file.change));
+@@ -55,7 +59,9 @@ const reviewShown = computed((): ReviewShown | null =>
+   >
+     {{ mark.letter }}
+   </span>
+-  <span class="truncate" :class="{ 'text-fg-muted': review === 'reviewed' }">{{ label }}</span>
++  <span class="truncate" :class="{ 'text-fg-muted': reviewShown?.mutesName === true }">{{
++    label
++  }}</span>
+   <span v-if="oldPath !== null" class="min-w-0 truncate text-fg-muted">{{ oldPath }}</span>
+   <span
+     v-if="threads > 0"
+diff --git a/frontend/src/ui/RangeView.vue b/frontend/src/ui/RangeView.vue
+index f581dc2..29f5a9b 100644
+--- a/frontend/src/ui/RangeView.vue
++++ b/frontend/src/ui/RangeView.vue
+@@ -24,7 +24,7 @@ import {
+ } from "./rangeText";
+ import RangeThreadLayer from "./RangeThreadLayer.vue";
+ import SettingsButton from "./SettingsButton.vue";
+-import { useRangeController, type RangeViewKind } from "./useRangeController";
++import { takesSearchMove, useRangeController, type RangeViewKind } from "./useRangeController";
+ import { useSearchGoTo } from "./useSearchGoTo";
+ 
+ const props = defineProps<{
+@@ -85,10 +85,9 @@ watch(
+ );
+ 
+ function searchGoTo(target: Parameters<typeof goTo>[0]): void {
+-  if (since.value && target.pane === "left") {
+-    return;
++  if (takesSearchMove(props.view, target.pane)) {
++    goTo(target);
+   }
+-  goTo(target);
+ }
+ 
+ function toggleReviewed(): void {
+diff --git a/frontend/src/ui/rangeStore.test.ts b/frontend/src/ui/rangeStore.test.ts
+index b8ded08..46059f9 100644
+--- a/frontend/src/ui/rangeStore.test.ts
++++ b/frontend/src/ui/rangeStore.test.ts
+@@ -242,7 +242,7 @@ test("a failed openRange reports the range and shows nothing", async () => {
+   ]);
+ });
+ 
+-test("at start the list shows first, then the threads and the Reviewed marks load and GitLab is checked once", async () => {
++test("at start the Reviewed marks answer before the first file shows, then GitLab is checked once (catches a since file mounting whole first)", async () => {
+   const calls: string[] = [];
+   const store = await started(2, (fixture) => ({
+     openRange: async () => {
+@@ -254,8 +254,9 @@ test("at start the list shows first, then the threads and the Reviewed marks loa
+       return fixture.listThreads();
+     },
+     listReviewed: async () => {
+-      calls.push("listReviewed");
+-      return fixture.listReviewed();
++      const marks = await fixture.listReviewed();
++      calls.push(`listReviewed answered, shown ${String(useRangeStore().shown.value)}`);
++      return marks;
+     },
+     checkGitLab: async () => {
+       calls.push(`checkGitLab shown ${String(useRangeStore().shown.value)}`);
+@@ -266,15 +267,31 @@ test("at start the list shows first, then the threads and the Reviewed marks loa
+   expect(calls).toEqual([
+     "openRange",
+     "listThreads",
+-    "listReviewed",
++    "listReviewed answered, shown null",
+     `checkGitLab shown ${fileAt(store, 0).id}`,
+   ]);
++  expect(store.shown.value).toBe(fileAt(store, 0).id);
+   expect(store.gitlab.check.value?.kind).toBe("linedUp");
+   expect(store.gitlab.checking.value).toBe(false);
+   expect(store.threads.list.value).toEqual({ threads: [] });
+   expect(store.reviewed.busy.value).toBe(false);
+ });
+ 
++test("a failed Reviewed list at start still shows the first file, after it failed, and reports it", async () => {
++  quiet();
++  const calls: string[] = [];
++  const store = await started(2, () => ({
++    listReviewed: async () => {
++      calls.push(`listReviewed failed, shown ${String(useRangeStore().shown.value)}`);
++      return failed(UNKNOWN);
++    },
++  }));
++
++  expect(calls).toEqual(["listReviewed failed, shown null"]);
++  expect(store.shown.value).toBe(fileAt(store, 0).id);
++  expect(store.problem.value).toMatchObject({ action: "reviewed", step: "list" });
++});
++
+ test("a failed openRange loads no threads or marks and checks nothing", async () => {
+   quiet();
+   const calls: string[] = [];
+diff --git a/frontend/src/ui/rangeStore.ts b/frontend/src/ui/rangeStore.ts
+index 3348c23..5b3ea58 100644
+--- a/frontend/src/ui/rangeStore.ts
++++ b/frontend/src/ui/rangeStore.ts
+@@ -266,11 +266,13 @@ async function startUp(state: State, besides: readonly Promise<void>[]): Promise
+     return;
+   }
+   state.start.value = outcome.value;
++  const threads = state.threads.load();
++  await state.reviewed.load();
+   const [first] = outcome.value.files;
+   if (first !== undefined) {
+     markShown(state, first);
+   }
+-  await Promise.all([state.threads.load(), state.reviewed.load(), state.gitlab.checkNow()]);
++  await Promise.all([threads, state.gitlab.checkNow()]);
+ }
+ 
+ function loadFile(state: State, entry: RangeEntry): Promise<RangeFile | null> {
+diff --git a/frontend/src/ui/useRangeController.test.ts b/frontend/src/ui/useRangeController.test.ts
+index 102f9f2..c56b4f8 100644
+--- a/frontend/src/ui/useRangeController.test.ts
++++ b/frontend/src/ui/useRangeController.test.ts
+@@ -23,6 +23,7 @@ import {
+   rangeThreadParts,
+   shownHosts,
+   sinceShown,
++  takesSearchMove,
+   viewKind,
+   viewParts,
+   wholeShown,
+@@ -577,8 +578,15 @@ async function viewWindow(search: string, edit: Partial<RangeSource> = {}): Prom
+     reviewed: createRangeReviewed(source, {
+       start,
+       show: () => {},
+-      forget: () => {},
+       problems: report,
++      loadView: async (_view, call, problem) => {
++        const result = await call();
++        if (result.ok) {
++          return result.value;
++        }
++        report(problem(result.failure));
++        return null;
++      },
+     }),
+   };
+   function entry(path: string): RangeEntry {
+@@ -734,3 +742,12 @@ test("only a changed-since-review mark opens the since view", () => {
+     "sinceReview",
+   ]);
+ });
++
++test("a search hit in the since view moves only on the right; the whole view takes both panes", () => {
++  expect([
++    takesSearchMove("sinceReview", "left"),
++    takesSearchMove("sinceReview", "right"),
++    takesSearchMove("whole", "left"),
++    takesSearchMove("whole", "right"),
++  ]).toEqual([false, true, true, true]);
++});
+diff --git a/frontend/src/ui/useRangeController.ts b/frontend/src/ui/useRangeController.ts
+index 5820437..7d2563a 100644
+--- a/frontend/src/ui/useRangeController.ts
++++ b/frontend/src/ui/useRangeController.ts
+@@ -95,6 +95,10 @@ export function viewKind(mark: ReviewMark | undefined): RangeViewKind {
+   return mark === "changedSinceReview" ? "sinceReview" : "whole";
+ }
+ 
++export function takesSearchMove(view: RangeViewKind, pane: RangeGoTo["pane"]): boolean {
++  return view === "whole" || pane === "right";
++}
++
+ export function wholeShown(file: RangeFile): RangeShown {
+   if (file.kind !== "texts") {
+     return { kind: "sentence", text: fileSentence(file) };
+@@ -104,15 +108,11 @@ export function wholeShown(file: RangeFile): RangeShown {
+ }
+ 
+ export function sinceShown(since: SinceReview): RangeShown {
+-  return since.kind === "texts"
+-    ? {
+-        kind: "texts",
+-        left: since.reviewed,
+-        right: since.current,
+-        differences: since.differences,
+-        note: null,
+-      }
+-    : { kind: "sentence", text: SINCE_NO_TEXT };
++  if (since.kind !== "texts") {
++    return { kind: "sentence", text: SINCE_NO_TEXT };
++  }
++  const { reviewed, current, differences } = since;
++  return { kind: "texts", left: reviewed, right: current, differences, note: null };
+ }
+ 
+ function land(live: Live, path: string, shown: RangeShown | null): void {

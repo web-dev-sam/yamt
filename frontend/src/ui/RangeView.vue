@@ -24,7 +24,7 @@ import {
 } from "./rangeText";
 import RangeThreadLayer from "./RangeThreadLayer.vue";
 import SettingsButton from "./SettingsButton.vue";
-import { useRangeController, type RangeViewKind } from "./useRangeController";
+import { takesSearchMove, useRangeController, type RangeViewKind } from "./useRangeController";
 import { useSearchGoTo } from "./useSearchGoTo";
 
 const props = defineProps<{
@@ -85,10 +85,9 @@ watch(
 );
 
 function searchGoTo(target: Parameters<typeof goTo>[0]): void {
-  if (since.value && target.pane === "left") {
-    return;
+  if (takesSearchMove(props.view, target.pane)) {
+    goTo(target);
   }
-  goTo(target);
 }
 
 function toggleReviewed(): void {

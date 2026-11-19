@@ -242,7 +242,7 @@ test("a failed openRange reports the range and shows nothing", async () => {
   ]);
 });
 
-test("at start the list shows first, then the threads and the Reviewed marks load and GitLab is checked once", async () => {
+test("at start the Reviewed marks answer before the first file shows, then GitLab is checked once (catches a since file mounting whole first)", async () => {
   const calls: string[] = [];
   const store = await started(2, (fixture) => ({
     openRange: async () => {
@@ -254,8 +254,9 @@ test("at start the list shows first, then the threads and the Reviewed marks loa
       return fixture.listThreads();
     },
     listReviewed: async () => {
-      calls.push("listReviewed");
-      return fixture.listReviewed();
+      const marks = await fixture.listReviewed();
+      calls.push(`listReviewed answered, shown ${String(useRangeStore().shown.value)}`);
+      return marks;
     },
     checkGitLab: async () => {
       calls.push(`checkGitLab shown ${String(useRangeStore().shown.value)}`);
@@ -266,13 +267,29 @@ test("at start the list shows first, then the threads and the Reviewed marks loa
   expect(calls).toEqual([
     "openRange",
     "listThreads",
-    "listReviewed",
+    "listReviewed answered, shown null",
     `checkGitLab shown ${fileAt(store, 0).id}`,
   ]);
+  expect(store.shown.value).toBe(fileAt(store, 0).id);
   expect(store.gitlab.check.value?.kind).toBe("linedUp");
   expect(store.gitlab.checking.value).toBe(false);
   expect(store.threads.list.value).toEqual({ threads: [] });
   expect(store.reviewed.busy.value).toBe(false);
+});
+
+test("a failed Reviewed list at start still shows the first file, after it failed, and reports it", async () => {
+  quiet();
+  const calls: string[] = [];
+  const store = await started(2, () => ({
+    listReviewed: async () => {
+      calls.push(`listReviewed failed, shown ${String(useRangeStore().shown.value)}`);
+      return failed(UNKNOWN);
+    },
+  }));
+
+  expect(calls).toEqual(["listReviewed failed, shown null"]);
+  expect(store.shown.value).toBe(fileAt(store, 0).id);
+  expect(store.problem.value).toMatchObject({ action: "reviewed", step: "list" });
 });
 
 test("a failed openRange loads no threads or marks and checks nothing", async () => {

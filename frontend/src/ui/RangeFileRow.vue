@@ -9,7 +9,11 @@ import RangeCounts from "./RangeCounts.vue";
 import { changeMark, REVIEW_MARK_WORDS } from "./rangeText";
 import { threadCountText } from "./rangeThreadText";
 
-type ReviewLook = { readonly icon: Component; readonly colour: string };
+type ReviewLook = {
+  readonly icon: Component;
+  readonly colour: string;
+  readonly mutesName: boolean;
+};
 
 type ReviewShown = ReviewLook & { readonly word: string };
 
@@ -28,8 +32,8 @@ const LETTER_COLOURS: Readonly<Record<RangeChange["kind"], string>> = {
 };
 
 const REVIEW_LOOKS: Readonly<Record<ReviewMark, ReviewLook>> = {
-  reviewed: { icon: Check, colour: "text-fg-muted" },
-  changedSinceReview: { icon: RefreshCcwDot, colour: "text-problem-warning" },
+  reviewed: { icon: Check, colour: "text-fg-muted", mutesName: true },
+  changedSinceReview: { icon: RefreshCcwDot, colour: "text-problem-warning", mutesName: false },
 };
 
 const mark = computed(() => changeMark(props.file.change));
@@ -55,7 +59,9 @@ const reviewShown = computed((): ReviewShown | null =>
   >
     {{ mark.letter }}
   </span>
-  <span class="truncate" :class="{ 'text-fg-muted': review === 'reviewed' }">{{ label }}</span>
+  <span class="truncate" :class="{ 'text-fg-muted': reviewShown?.mutesName === true }">{{
+    label
+  }}</span>
   <span v-if="oldPath !== null" class="min-w-0 truncate text-fg-muted">{{ oldPath }}</span>
   <span
     v-if="threads > 0"

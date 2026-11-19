@@ -1,0 +1,2 @@
+just mutants HEAD: rangeStore.ts + useRangeController.ts; 273 killed, 8 survived, 4 no coverage, 1 error; score 95.79%
+

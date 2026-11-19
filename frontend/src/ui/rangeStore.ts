@@ -266,11 +266,13 @@ async function startUp(state: State, besides: readonly Promise<void>[]): Promise
     return;
   }
   state.start.value = outcome.value;
+  const threads = state.threads.load();
+  await state.reviewed.load();
   const [first] = outcome.value.files;
   if (first !== undefined) {
     markShown(state, first);
   }
-  await Promise.all([state.threads.load(), state.reviewed.load(), state.gitlab.checkNow()]);
+  await Promise.all([threads, state.gitlab.checkNow()]);
 }
 
 function loadFile(state: State, entry: RangeEntry): Promise<RangeFile | null> {

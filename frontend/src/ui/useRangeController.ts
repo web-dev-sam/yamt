@@ -95,6 +95,10 @@ export function viewKind(mark: ReviewMark | undefined): RangeViewKind {
   return mark === "changedSinceReview" ? "sinceReview" : "whole";
 }
 
+export function takesSearchMove(view: RangeViewKind, pane: RangeGoTo["pane"]): boolean {
+  return view === "whole" || pane === "right";
+}
+
 export function wholeShown(file: RangeFile): RangeShown {
   if (file.kind !== "texts") {
     return { kind: "sentence", text: fileSentence(file) };
@@ -104,15 +108,11 @@ export function wholeShown(file: RangeFile): RangeShown {
 }
 
 export function sinceShown(since: SinceReview): RangeShown {
-  return since.kind === "texts"
-    ? {
-        kind: "texts",
-        left: since.reviewed,
-        right: since.current,
-        differences: since.differences,
-        note: null,
-      }
-    : { kind: "sentence", text: SINCE_NO_TEXT };
+  if (since.kind !== "texts") {
+    return { kind: "sentence", text: SINCE_NO_TEXT };
+  }
+  const { reviewed, current, differences } = since;
+  return { kind: "texts", left: reviewed, right: current, differences, note: null };
 }
 
 function land(live: Live, path: string, shown: RangeShown | null): void {

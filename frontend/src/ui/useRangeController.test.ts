@@ -23,6 +23,7 @@ import {
   rangeThreadParts,
   shownHosts,
   sinceShown,
+  takesSearchMove,
   viewKind,
   viewParts,
   wholeShown,
@@ -577,8 +578,15 @@ async function viewWindow(search: string, edit: Partial<RangeSource> = {}): Prom
     reviewed: createRangeReviewed(source, {
       start,
       show: () => {},
-      forget: () => {},
       problems: report,
+      loadView: async (_view, call, problem) => {
+        const result = await call();
+        if (result.ok) {
+          return result.value;
+        }
+        report(problem(result.failure));
+        return null;
+      },
     }),
   };
   function entry(path: string): RangeEntry {
@@ -733,4 +741,13 @@ test("only a changed-since-review mark opens the since view", () => {
     "whole",
     "sinceReview",
   ]);
+});
+
+test("a search hit in the since view moves only on the right; the whole view takes both panes", () => {
+  expect([
+    takesSearchMove("sinceReview", "left"),
+    takesSearchMove("sinceReview", "right"),
+    takesSearchMove("whole", "left"),
+    takesSearchMove("whole", "right"),
+  ]).toEqual([false, true, true, true]);
 });
