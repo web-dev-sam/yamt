@@ -18,9 +18,14 @@ clicks until reopened; a search hit on the old side of a since-review file opens
 right side's text is kept (no view shows the reviewed left). Root `Cargo.toml` member + workspace dep added at
 core's collect. Order (strict): core, app (+ `just bindings`), store, view (wires the window; smoke), docs ∥ final.
 
-| row | slice  | owner    | status  | evidence |
-| --- | ------ | -------- | ------- | -------- |
-| 1   | design | designer | running |          |
+| row | slice                                                                                    | owner                 | status  | evidence                                                                              |
+| --- | ---------------------------------------------------------------------------------------- | --------------------- | ------- | ------------------------------------------------------------------------------------- |
+| 1   | design                                                                                   | designer              | done    | `RangeReviewedDesign`: option A, four briefs + verify. Notes `RangeReviewedDesign.md` |
+| 2   | core (`briefs/range-reviewed-core.md`): crate `yamt-reviewed`, range accessors           | rust-impl             | running |                                                                                       |
+| 3   | app (`briefs/range-reviewed-app.md`): four commands, `--review-of`; then `just bindings` | rust-impl             | todo    |                                                                                       |
+| 4   | store (`briefs/range-reviewed-store.md`): source, marks, toggle, next file               | web-impl              | todo    |                                                                                       |
+| 5   | view (`briefs/range-reviewed-view.md`): button, list marks, count, since view; wires it  | web-impl              | todo    |                                                                                       |
+| 6   | docs keeper; verify (`briefs/range-reviewed-verify.md`): smoke after 5, final            | docs-keeper, verifier | todo    |                                                                                       |
 
 ## Release 0.7.0 (session 55, owner: "release 0.7.0")
 

@@ -1,5 +1,10 @@
 {
-  "RangeReviewedDesign": {
-    "owned": ["docs/slices/briefs/range-reviewed-*.md"]
+  "RangeReviewedCore": {
+    "owned": [
+      "crates/range/**",
+      "crates/reviewed/**",
+      "src-tauri/Cargo.toml",
+      "scripts/arch-check.sh"
+    ]
   }
 }
