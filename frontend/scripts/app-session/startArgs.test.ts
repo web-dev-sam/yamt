@@ -119,3 +119,57 @@ test("start-fixture --open-mr opens the merge-request page at start, only with a
     /--mr only with --diff, --diff-case or --range-case/,
   );
 });
+
+test("start-fixture --reviewed seeded adds &reviewed=seeded to a range fixture page, only with --range-case", () => {
+  const fixture = ["start-fixture", "--name", "fx"];
+  expect(
+    parseCommand([...fixture, "--range-case", "review", "--reviewed", "seeded"]),
+  ).toMatchObject({ search: "?range=review&reviewed=seeded" });
+  expect(
+    parseCommand([
+      ...fixture,
+      "--range-case",
+      "review",
+      "--threads",
+      "seeded",
+      "--reviewed",
+      "seeded",
+    ]),
+  ).toMatchObject({ search: "?range=review&threads=seeded&reviewed=seeded" });
+  const onlyRange =
+    "start-fixture takes --threads, --gitlab, --reviewed and --ai only with --range-case";
+  expect(() => parseCommand([...fixture, "--reviewed", "seeded"])).toThrow(onlyRange);
+  expect(() => parseCommand([...fixture, "--diff", "--reviewed", "seeded"])).toThrow(onlyRange);
+  expect(() =>
+    parseCommand(["start-app", "--name", "a", "--diff", "--reviewed", "seeded"]),
+  ).toThrow(/unknown option --reviewed/);
+});
+
+test("start-app --review-of passes --review-of=<project!iid> after the range, only with --range", () => {
+  const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
+  const command = parseCommand([...range, "--review-of", "group/app!12", "--mr"]);
+  expect(command).toMatchObject({
+    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr", reviewOf: "group/app!12" },
+  });
+  if (command.kind !== "start-app") {
+    throw new Error("not a start-app command");
+  }
+  expect(appArgs(command.opens, "/tmp/rr", command)).toEqual([
+    "--diff=main...feature",
+    "--review-of=group/app!12",
+    "--repo",
+    "/tmp/rr",
+    "--mr",
+  ]);
+  const onlyRange =
+    "start-app --review-of <project!iid> goes with --range: the range window's marks";
+  expect(() =>
+    parseCommand(["start-app", "--name", "c", "--diff", "--review-of", "group/app!12"]),
+  ).toThrow(onlyRange);
+  expect(() =>
+    parseCommand(["start-app", "--name", "c", "--repo", "/r", "--review-of", "group/app!12"]),
+  ).toThrow(onlyRange);
+  expect(() =>
+    parseCommand(["start-fixture", "--name", "fx", "--range-case", "review", "--review-of", "a!1"]),
+  ).toThrow(/unknown option --review-of/);
+});

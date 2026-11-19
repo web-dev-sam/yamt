@@ -9,6 +9,7 @@ const commands = vi.hoisted(() => ({
   loadRangeFile: vi.fn(),
   searchRangeTexts: vi.fn(),
   listThreads: vi.fn(),
+  listReviewed: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -116,6 +117,16 @@ test("the range source answers listThreads through the app's command", async () 
     value: { threads: [] },
   });
   expect(commands.listThreads).toHaveBeenCalledOnce();
+});
+
+test("the range source answers listReviewed through the app's command", async () => {
+  commands.listReviewed.mockResolvedValue({ status: "ok", data: [{ file: 2, mark: "reviewed" }] });
+
+  expect(await createTauriRangeSource().listReviewed()).toEqual({
+    ok: true,
+    value: new Map([[2, "reviewed"]]),
+  });
+  expect(commands.listReviewed).toHaveBeenCalledOnce();
 });
 
 const PAGE: Generated.SearchTexts = {

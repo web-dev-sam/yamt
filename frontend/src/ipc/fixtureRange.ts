@@ -4,6 +4,7 @@ import type * as Generated from "./bindings";
 import { DIFFERENCE, memberOf, parsedCases } from "./fixture";
 import { createFixtureMergeRequests } from "./fixtureMergeRequests";
 import { createFixtureReview } from "./fixtureReview";
+import { createFixtureReviewed } from "./fixtureReviewed";
 import { createFixtureSettings } from "./fixtureSettings";
 import type { Log } from "./log";
 import {
@@ -165,6 +166,7 @@ export function createFixtureRangeSource(
       return { ok: true, value: { files, next: null } };
     },
     ...createFixtureReview(log, search, shown.start),
+    ...createFixtureReviewed(log, search, shown),
     ...createFixtureSettings(),
     ...createFixtureMergeRequests(log, search),
   };

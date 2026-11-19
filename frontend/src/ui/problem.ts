@@ -34,6 +34,8 @@ export type ThreadStep =
   | "session"
   | "answer";
 
+export type ReviewedStep = "list" | "mark" | "unmark" | "since";
+
 export type AiAttempt = "ask" | "diff" | "discard";
 
 export type MergeRequestStep =
@@ -90,6 +92,12 @@ export type Problem =
   | { readonly action: "tabs" | "openRange" | "search"; readonly cause: ProblemCause }
   | { readonly action: "loadTab"; readonly name: string; readonly cause: ProblemCause }
   | { readonly action: "threads"; readonly step: ThreadStep; readonly cause: ProblemCause }
+  | {
+      readonly action: "reviewed";
+      readonly step: ReviewedStep;
+      readonly path: string | null;
+      readonly cause: ProblemCause;
+    }
   | { readonly action: "ai"; readonly step: AiAttempt; readonly cause: ProblemCause }
   | {
       readonly action: "mergeRequests";
@@ -168,6 +176,12 @@ function failureFields(
     case "ai":
     case "mergeRequests":
       return { step: problem.step, ...problem.cause };
+    case "reviewed":
+      return {
+        step: problem.step,
+        ...(problem.path === null ? {} : { path: problem.path }),
+        ...problem.cause,
+      };
   }
 }
 

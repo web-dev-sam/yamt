@@ -1,0 +1,1901 @@
+diff --git a/frontend/scripts/app-session/args.test.ts b/frontend/scripts/app-session/args.test.ts
+index d407875..9862fad 100644
+--- a/frontend/scripts/app-session/args.test.ts
++++ b/frontend/scripts/app-session/args.test.ts
+@@ -80,7 +80,7 @@ test("start-app --range opens the range window on the --repo folder", () => {
+     parseCommand(["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"]),
+   ).toMatchObject({
+     kind: "start-app",
+-    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr" },
++    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr", reviewOf: null },
+   });
+ });
+ 
+@@ -95,11 +95,8 @@ test("start-app --range needs --repo and takes neither --fresh-repo nor --diff",
+ 
+ test("the app opens the range window with --diff=<range> and --repo, the compare window with --diff alone, a folder with --repo", () => {
+   const off = { ai: false, mr: false };
+-  expect(appArgs({ kind: "range", range: "main...feature", dir: "rr" }, "/tmp/rr", off)).toEqual([
+-    "--diff=main...feature",
+-    "--repo",
+-    "/tmp/rr",
+-  ]);
++  const range = { kind: "range", range: "main...feature", dir: "rr", reviewOf: null } as const;
++  expect(appArgs(range, "/tmp/rr", off)).toEqual(["--diff=main...feature", "--repo", "/tmp/rr"]);
+   expect(appArgs({ kind: "diff", startDir: "rr" }, null, off)).toEqual(["--diff"]);
+   expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r", off)).toEqual(["--repo", "/tmp/r"]);
+   expect(appArgs({ kind: "fresh" }, "/tmp/s/repo", off)).toEqual(["--repo", "/tmp/s/repo"]);
+@@ -110,12 +107,8 @@ test("start-app --ai reaches the app as its own --ai after the repository", () =
+   expect(parseCommand([...range, "--ai"])).toMatchObject({ ai: true });
+   expect(parseCommand(range)).toMatchObject({ ai: false });
+   const on = { ai: true, mr: false };
+-  expect(appArgs({ kind: "range", range: "a...b", dir: "rr" }, "/tmp/rr", on)).toEqual([
+-    "--diff=a...b",
+-    "--repo",
+-    "/tmp/rr",
+-    "--ai",
+-  ]);
++  const opens = { kind: "range", range: "a...b", dir: "rr", reviewOf: null } as const;
++  expect(appArgs(opens, "/tmp/rr", on)).toEqual(["--diff=a...b", "--repo", "/tmp/rr", "--ai"]);
+   expect(appArgs({ kind: "diff", startDir: null }, null, on)).toEqual(["--diff", "--ai"]);
+   expect(() => parseCommand([...range, "--ai-case", "crash"])).toThrow(/unknown option --ai-case/);
+ });
+@@ -133,7 +126,8 @@ test("start-app --mr reaches the app as its own --mr, only for the compare and r
+     needsWindow,
+   );
+   const both = { ai: true, mr: true };
+-  expect(appArgs({ kind: "range", range: "a...b", dir: "rr" }, "/tmp/rr", both)).toEqual([
++  const opens = { kind: "range", range: "a...b", dir: "rr", reviewOf: null } as const;
++  expect(appArgs(opens, "/tmp/rr", both)).toEqual([
+     "--diff=a...b",
+     "--repo",
+     "/tmp/rr",
+@@ -239,7 +233,7 @@ test("start-fixture --threads and --gitlab pick the review scripts of a range fi
+   expect(parseCommand([...ranged, "--threads", "seeded"])).toMatchObject({
+     search: "?range=review&threads=seeded",
+   });
+-  const onlyRange = /--threads, --gitlab and --ai only with --range-case/;
++  const onlyRange = /--threads, --gitlab, --reviewed and --ai only with --range-case/;
+   expect(() => parseCommand(["start-fixture", "--name", "fx", "--gitlab", "moved"])).toThrow(
+     onlyRange,
+   );
+@@ -260,7 +254,7 @@ test("start-fixture --ai turns the range fixture's AI on, --ai-case picks its ag
+   expect(() => parseCommand([...ranged, "--ai-case", "crash"])).toThrow(needsAi);
+   expect(() => parseCommand([...ranged, "--ai-changes"])).toThrow(needsAi);
+   expect(() => parseCommand(["start-fixture", "--name", "fx", "--ai"])).toThrow(
+-    /--threads, --gitlab and --ai only with --range-case/,
++    /--threads, --gitlab, --reviewed and --ai only with --range-case/,
+   );
+ });
+ 
+diff --git a/frontend/scripts/app-session/args.ts b/frontend/scripts/app-session/args.ts
+index 8e93a4b..f078229 100644
+--- a/frontend/scripts/app-session/args.ts
++++ b/frontend/scripts/app-session/args.ts
+@@ -17,7 +17,8 @@ import { startCommand, type StartCommand } from "./startArgs";
+ const USAGE = `usage: app-session <command> …   (relative paths are taken from the repository root)
+   start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo
+                 | --diff [--dir <start folder>] [--glab <tests/glab scenario>]
+-                | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]] [--ai]
++                | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]
++                  [--review-of <project!iid>]] [--ai]
+                 [--mr]   (with --diff or --range: the window opens on its merge-request page)
+                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
+                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
+@@ -25,7 +26,7 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
+                 --glab: scripts/fake-glab and scripts/fake-open first on PATH; the scenario is the link
+                 <folder>/glab/scenario, opened addresses go to <folder>/glab/opened.log
+   start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>
+-                | --range-case <range fixture> [--threads seeded] [--gitlab <script>]
++                | --range-case <range fixture> [--threads seeded] [--gitlab <script>] [--reviewed seeded]
+                   [--ai [--ai-case <agent fixture: crash, checkout-fails, cancelled, …>] [--ai-changes]]]
+                 [--mr <merge-request script: list, slow, many, …> [--open-mr]]
+                   (with --diff, --diff-case or --range-case; --open-mr: on the merge-request page)
+@@ -98,11 +99,22 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
+       "record-seconds",
+       "home",
+       "glab",
++      "review-of",
+     ],
+     flags: ["fresh-repo", "diff", "ai", "mr"],
+   },
+   "start-fixture": {
+-    values: ["name", "size", "diff-case", "range-case", "threads", "gitlab", "ai-case", "mr"],
++    values: [
++      "name",
++      "size",
++      "diff-case",
++      "range-case",
++      "threads",
++      "gitlab",
++      "reviewed",
++      "ai-case",
++      "mr",
++    ],
+     flags: ["diff", "ai", "ai-changes", "open-mr"],
+   },
+   click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },
+diff --git a/frontend/scripts/app-session/startArgs.test.ts b/frontend/scripts/app-session/startArgs.test.ts
+index 7690d82..a9e5b8a 100644
+--- a/frontend/scripts/app-session/startArgs.test.ts
++++ b/frontend/scripts/app-session/startArgs.test.ts
+@@ -119,3 +119,57 @@ test("start-fixture --open-mr opens the merge-request page at start, only with a
+     /--mr only with --diff, --diff-case or --range-case/,
+   );
+ });
++
++test("start-fixture --reviewed seeded adds &reviewed=seeded to a range fixture page, only with --range-case", () => {
++  const fixture = ["start-fixture", "--name", "fx"];
++  expect(
++    parseCommand([...fixture, "--range-case", "review", "--reviewed", "seeded"]),
++  ).toMatchObject({ search: "?range=review&reviewed=seeded" });
++  expect(
++    parseCommand([
++      ...fixture,
++      "--range-case",
++      "review",
++      "--threads",
++      "seeded",
++      "--reviewed",
++      "seeded",
++    ]),
++  ).toMatchObject({ search: "?range=review&threads=seeded&reviewed=seeded" });
++  const onlyRange =
++    "start-fixture takes --threads, --gitlab, --reviewed and --ai only with --range-case";
++  expect(() => parseCommand([...fixture, "--reviewed", "seeded"])).toThrow(onlyRange);
++  expect(() => parseCommand([...fixture, "--diff", "--reviewed", "seeded"])).toThrow(onlyRange);
++  expect(() =>
++    parseCommand(["start-app", "--name", "a", "--diff", "--reviewed", "seeded"]),
++  ).toThrow(/unknown option --reviewed/);
++});
++
++test("start-app --review-of passes --review-of=<project!iid> after the range, only with --range", () => {
++  const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
++  const command = parseCommand([...range, "--review-of", "group/app!12", "--mr"]);
++  expect(command).toMatchObject({
++    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr", reviewOf: "group/app!12" },
++  });
++  if (command.kind !== "start-app") {
++    throw new Error("not a start-app command");
++  }
++  expect(appArgs(command.opens, "/tmp/rr", command)).toEqual([
++    "--diff=main...feature",
++    "--review-of=group/app!12",
++    "--repo",
++    "/tmp/rr",
++    "--mr",
++  ]);
++  const onlyRange =
++    "start-app --review-of <project!iid> goes with --range: the range window's marks";
++  expect(() =>
++    parseCommand(["start-app", "--name", "c", "--diff", "--review-of", "group/app!12"]),
++  ).toThrow(onlyRange);
++  expect(() =>
++    parseCommand(["start-app", "--name", "c", "--repo", "/r", "--review-of", "group/app!12"]),
++  ).toThrow(onlyRange);
++  expect(() =>
++    parseCommand(["start-fixture", "--name", "fx", "--range-case", "review", "--review-of", "a!1"]),
++  ).toThrow(/unknown option --review-of/);
++});
+diff --git a/frontend/scripts/app-session/startArgs.ts b/frontend/scripts/app-session/startArgs.ts
+index 51acdd3..f62cf9a 100644
+--- a/frontend/scripts/app-session/startArgs.ts
++++ b/frontend/scripts/app-session/startArgs.ts
+@@ -6,7 +6,12 @@ import type { Size } from "./state";
+ 
+ type Opening =
+   | { readonly kind: "dir"; readonly dir: string }
+-  | { readonly kind: "range"; readonly range: string; readonly dir: string }
++  | {
++      readonly kind: "range";
++      readonly range: string;
++      readonly dir: string;
++      readonly reviewOf: string | null;
++    }
+   | { readonly kind: "diff"; readonly startDir: string | null }
+   | { readonly kind: "fresh" };
+ 
+@@ -57,14 +62,20 @@ function opening(parsed: Parsed): Opening {
+   const startDir = parsed.values.get("dir");
+   const diff = parsed.flags.has("diff");
+   const fresh = parsed.flags.has("fresh-repo");
++  const reviewOf = parsed.values.get("review-of");
+   if (startDir !== undefined && !diff) {
+     throw new Error("start-app --dir <folder> goes with --diff: the compare window's start folder");
+   }
++  if (reviewOf !== undefined && range === undefined) {
++    throw new Error(
++      "start-app --review-of <project!iid> goes with --range: the range window's marks",
++    );
++  }
+   if (range !== undefined) {
+     if (dir === undefined || diff || fresh) {
+       throw new Error("start-app --range needs --repo <dir>, and neither --fresh-repo nor --diff");
+     }
+-    return { kind: "range", range, dir };
++    return { kind: "range", range, dir, reviewOf: reviewOf ?? null };
+   }
+   if ([dir !== undefined, fresh, diff].filter(Boolean).length !== 1) {
+     throw new Error("start-app needs one of --repo <dir>, --fresh-repo and --diff");
+@@ -92,7 +103,7 @@ function addAiSearch(parsed: Parsed, review: URLSearchParams): void {
+ 
+ function reviewSearch(parsed: Parsed): string {
+   const review = new URLSearchParams();
+-  for (const name of ["threads", "gitlab"]) {
++  for (const name of ["threads", "gitlab", "reviewed"]) {
+     const value = parsed.values.get(name);
+     if (value !== undefined) {
+       review.set(name, value);
+@@ -115,7 +126,9 @@ function windowSearch(parsed: Parsed): string {
+     return `?range=${encodeURIComponent(range)}${review}`;
+   }
+   if (review !== "") {
+-    throw new Error("start-fixture takes --threads, --gitlab and --ai only with --range-case");
++    throw new Error(
++      "start-fixture takes --threads, --gitlab, --reviewed and --ai only with --range-case",
++    );
+   }
+   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
+ }
+@@ -236,7 +249,11 @@ export function appArgs(
+     case "diff":
+       return ["--diff", ...options];
+     case "range":
+-      return [`--diff=${opens.range}`, ...options];
++      return [
++        `--diff=${opens.range}`,
++        ...(opens.reviewOf === null ? [] : [`--review-of=${opens.reviewOf}`]),
++        ...options,
++      ];
+     case "dir":
+     case "fresh":
+       return options;
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index fea5477..181f8be 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -8,6 +8,8 @@ The range window's threads and GitLab (plan §2 #116–#120) come through `Revie
+ 
+ Your own notes until they are on GitLab (plan §2 #123): `editNote(message, text)` and `deleteMessage(message)` answer the new `ThreadList`. `fixtureReview.ts` mirrors Rust's order: `SendRunning` while its send runs, then `UnknownMessage`, `NotANote` (an AI answer), `MessagePending`, and for an edit `EmptyMessage`; an edit of a queued or refused note leaves it `queued` with the new text; a delete drops the note and a thread left empty; ids are never reused.
+ 
++The range window's Reviewed marks (request `docs/slices/request-range-reviewed.md`, plan §2 proposed #195/#196) come through `ReviewedSource` (`ReviewedSource.ts`: `listReviewed` → `ReviewMarks`, `markReviewed`/`unmarkReviewed` → `null`, `loadSinceReview` → `SinceReview`), which `RangeSource` extends: shapes and conversions in `reviewedDomain.ts` (`toReviewMarks`: a `ReadonlyMap` keyed by `isRangeFileId`, a file not in it unreviewed, a repeated file throws; `toSinceReview`: the reviewed right-side text, today's, and their differences through `toDifferences`, or `noText` when either is no text, a kept text another window swept included), the app's in `tauriReviewed.ts`, fixture mode's in memory in `fixtureReviewed.ts`: `?range…` alone has no marks, `&reviewed=seeded` marks `docs/keys.md` reviewed and `src/board/board.ts`, `public/logo.png` changed since review (another value logs `range.fixture_reviewed_miss { value }`); board.ts's since reply is its right text without right lines 40–42 against the whole, one difference at line 40; a non-text file answers `noText`, any other its right text twice; an id past the list `UnknownRangeFile`; every call logs `range.fixture_reviewed { kind, file }` (`list` has no file).
++
+ The GitLab merge-request overview (compare and range windows) comes through `MergeRequestSource` (`MergeRequestSource.ts`: `findGitLabProject`, `askGitLabAgain`, `listMergeRequests` with a page callback, `openMergeRequest`, `openPage`), which `CompareSource` and `RangeSource` extend: the `MergeRequestIid`/`WebPage` brands in `domain.ts` (a `WebPage` is a failed job's, a merge request's, a note's or a links line's https page, minted by `isWebPage`/`toWebPage`, plan §2 #137, #162, or a description's link, http or https, minted by `isLinkedPage`, plan §2 #172), the shapes and their conversions in `mergeRequestDomain.ts` (`createdAt` to ms since 1970, a missing commit's `short_id` as `shortId`), the app's in `tauriMergeRequests.ts`: one `Channel<ListMessage>` per load carries every page, then exactly one end, and the load ends on that end message (or the command's IPC failure), never on the command's own answer, since Tauri may deliver a page after it; an unreadable page fails the load; no page reaches the callback after the load ended. `askGitLabAgain()` (plan §2 #187, owner #2423: called by every explicit refresh button) is `ask_gitlab_again` through `toResult`: the next GitLab action asks glab for the login and the project again. Both project calls sit together in each source: `tauriMergeRequests.ts` `projectCalls()`, the fixture's `projectScript(log, script)`. Fixture mode's is `fixtureMergeRequests.ts` over `fixtureMergeRequestData.ts`: `?mr=<script>` (`list`, `local`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`, `refused`, `pageFails`; `MergeRequestScript` is the keys of its `SCRIPTS` table) scripts GitLab's answers, every row with its page `<origin>/-/merge_requests/<iid>`, an opened page logs `mergeRequests.fixture_page`, and an ask again logs `mergeRequests.fixture_ask_again {}` and answers `null` at once; without `mr` the project is `none`, and an unknown script logs `mergeRequests.fixture_miss` and is `none` too.
+ 
+ yamt's local conflict check (request `docs/slices/request-local-conflict-check.md`): `listMergeRequests`'s second callback `onChecked` gets a `CheckedRow` (`toCheckedRow`, iid branded) for each `checked` message, which Rust sends after the load's `end` on the same channel, so `tauriMergeRequests.ts` passes it on after the load settled while a late `page` still reaches nobody; the fixture script `?mr=local` is `list`'s rows and end, then, 1,000 ms after the end, !640 and !635 `mergesCleanly` and !638 `conflicts` (every other script sends none).
+diff --git a/frontend/src/ipc/RangeSource.ts b/frontend/src/ipc/RangeSource.ts
+index b2873d1..061c16d 100644
+--- a/frontend/src/ipc/RangeSource.ts
++++ b/frontend/src/ipc/RangeSource.ts
+@@ -2,9 +2,11 @@ import type { SettingsSource } from "./ChunkSource";
+ import type { RangeFileId, SourceResult } from "./domain";
+ import type { MergeRequestSource } from "./MergeRequestSource";
+ import type { RangeFile, RangeStart, SearchTexts } from "./rangeDomain";
++import type { ReviewedSource } from "./ReviewedSource";
+ import type { ReviewSource } from "./ReviewSource";
+ 
+-export interface RangeSource extends SettingsSource, ReviewSource, MergeRequestSource {
++export interface RangeSource
++  extends SettingsSource, ReviewSource, ReviewedSource, MergeRequestSource {
+   openRange(): Promise<SourceResult<RangeStart>>;
+   loadRangeFile(file: RangeFileId): Promise<SourceResult<RangeFile>>;
+   searchTexts(from: RangeFileId): Promise<SourceResult<SearchTexts>>;
+diff --git a/frontend/src/ipc/ReviewedSource.ts b/frontend/src/ipc/ReviewedSource.ts
+new file mode 100644
+index 0000000..939dfa8
+--- /dev/null
++++ b/frontend/src/ipc/ReviewedSource.ts
+@@ -0,0 +1,9 @@
++import type { RangeFileId, SourceResult } from "./domain";
++import type { ReviewMarks, SinceReview } from "./reviewedDomain";
++
++export interface ReviewedSource {
++  listReviewed(): Promise<SourceResult<ReviewMarks>>;
++  markReviewed(file: RangeFileId): Promise<SourceResult<null>>;
++  unmarkReviewed(file: RangeFileId): Promise<SourceResult<null>>;
++  loadSinceReview(file: RangeFileId): Promise<SourceResult<SinceReview>>;
++}
+diff --git a/frontend/src/ipc/fixtureRange.ts b/frontend/src/ipc/fixtureRange.ts
+index 5628e35..f268127 100644
+--- a/frontend/src/ipc/fixtureRange.ts
++++ b/frontend/src/ipc/fixtureRange.ts
+@@ -4,6 +4,7 @@ import type * as Generated from "./bindings";
+ import { DIFFERENCE, memberOf, parsedCases } from "./fixture";
+ import { createFixtureMergeRequests } from "./fixtureMergeRequests";
+ import { createFixtureReview } from "./fixtureReview";
++import { createFixtureReviewed } from "./fixtureReviewed";
+ import { createFixtureSettings } from "./fixtureSettings";
+ import type { Log } from "./log";
+ import {
+@@ -165,6 +166,7 @@ export function createFixtureRangeSource(
+       return { ok: true, value: { files, next: null } };
+     },
+     ...createFixtureReview(log, search, shown.start),
++    ...createFixtureReviewed(log, search, shown),
+     ...createFixtureSettings(),
+     ...createFixtureMergeRequests(log, search),
+   };
+diff --git a/frontend/src/ipc/fixtureReviewed.test.ts b/frontend/src/ipc/fixtureReviewed.test.ts
+new file mode 100644
+index 0000000..0a4ef83
+--- /dev/null
++++ b/frontend/src/ipc/fixtureReviewed.test.ts
+@@ -0,0 +1,177 @@
++import { afterEach, expect, test, vi } from "vitest";
++
++import { isRangeFileId, type RangeFileId, type SourceResult } from "./domain";
++import { createFixtureRangeSource } from "./fixtureRange";
++import { createLog, type Log, type LogEntry } from "./log";
++
++const KEYS = fileId(3);
++const LOGO = fileId(5);
++const BOARD = fileId(7);
++const NO_WORDS = { left: { changed: [], removals: [] }, right: { changed: [], removals: [] } };
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function fileId(n: number): RangeFileId {
++  if (!isRangeFileId(n)) {
++    throw new Error(`${n} is no file id`);
++  }
++  return n;
++}
++
++function quietLog(): { log: Log; entries: LogEntry[] } {
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++  const entries: LogEntry[] = [];
++  const log = createLog((entry) => {
++    entries.push(entry);
++  });
++  return { log, entries };
++}
++
++function valueOf<T>(result: SourceResult<T>): T {
++  if (!result.ok) {
++    throw new Error(`expected a value, got ${JSON.stringify(result.failure)}`);
++  }
++  return result.value;
++}
++
++function events(entries: readonly LogEntry[]): unknown[] {
++  return entries.map(({ event, fields }) => [event, fields]);
++}
++
++test("&reviewed=seeded marks keys.md reviewed and board.ts and logo.png changed since review", async () => {
++  const source = createFixtureRangeSource(quietLog().log, "?range=review&reviewed=seeded");
++  const files = valueOf(await source.openRange()).files;
++
++  expect([KEYS, LOGO, BOARD].map((id) => files[id]?.path)).toEqual([
++    "docs/keys.md",
++    "public/logo.png",
++    "src/board/board.ts",
++  ]);
++  expect([...valueOf(await source.listReviewed())]).toEqual([
++    [KEYS, "reviewed"],
++    [LOGO, "changedSinceReview"],
++    [BOARD, "changedSinceReview"],
++  ]);
++});
++
++test("?range alone has no marks and logs no miss", async () => {
++  const { log, entries } = quietLog();
++  const source = createFixtureRangeSource(log, "?range=review");
++
++  expect(valueOf(await source.listReviewed()).size).toBe(0);
++  expect(events(entries)).toEqual([["range.fixture_reviewed", { kind: "list" }]]);
++});
++
++test("another reviewed= value logs range.fixture_reviewed_miss and seeds nothing", async () => {
++  const { log, entries } = quietLog();
++  const source = createFixtureRangeSource(log, "?range=review&reviewed=all");
++
++  expect(valueOf(await source.listReviewed()).size).toBe(0);
++  expect(events(entries)).toEqual([
++    ["range.fixture_reviewed_miss", { value: "all" }],
++    ["range.fixture_reviewed", { kind: "list" }],
++  ]);
++});
++
++test("board.ts's since reply is its right text without right lines 40 to 42, one difference at line 40", async () => {
++  const source = createFixtureRangeSource(quietLog().log, "?range=review&reviewed=seeded");
++  const board = valueOf(await source.loadRangeFile(BOARD));
++  if (board.kind !== "texts") {
++    throw new Error("board.ts is not texts");
++  }
++  const lines = board.right.split("\n");
++  const reviewed = [...lines.slice(0, 40), ...lines.slice(43)].join("\n");
++
++  expect(valueOf(await source.loadSinceReview(BOARD))).toEqual({
++    kind: "texts",
++    reviewed,
++    current: board.right,
++    differences: [{ left: { start: 40, len: 0 }, right: { start: 40, len: 3 }, words: NO_WORDS }],
++  });
++  expect(reviewed.split("\n")).toHaveLength(lines.length - 3);
++});
++
++test("logo.png and any other file that is no text answer noText; a text file its right text twice", async () => {
++  const source = createFixtureRangeSource(quietLog().log, "?range=review");
++  const keys = valueOf(await source.loadRangeFile(KEYS));
++  if (keys.kind !== "texts") {
++    throw new Error("keys.md is not texts");
++  }
++
++  expect(valueOf(await source.loadSinceReview(LOGO))).toEqual({ kind: "noText" });
++  expect(valueOf(await source.loadSinceReview(fileId(1)))).toEqual({ kind: "noText" });
++  expect(valueOf(await source.loadSinceReview(KEYS))).toEqual({
++    kind: "texts",
++    reviewed: keys.right,
++    current: keys.right,
++    differences: [],
++  });
++});
++
++test("a mark sets reviewed, an unmark deletes it; a list taken before keeps its marks; each call logs", async () => {
++  const { log, entries } = quietLog();
++  const source = createFixtureRangeSource(log, "?range=review&reviewed=seeded");
++  const before = valueOf(await source.listReviewed());
++
++  expect(valueOf(await source.markReviewed(BOARD))).toBeNull();
++  expect(valueOf(await source.markReviewed(fileId(0)))).toBeNull();
++  expect(valueOf(await source.unmarkReviewed(KEYS))).toBeNull();
++  expect(valueOf(await source.loadSinceReview(LOGO))).toEqual({ kind: "noText" });
++
++  expect([...valueOf(await source.listReviewed())]).toEqual([
++    [LOGO, "changedSinceReview"],
++    [BOARD, "reviewed"],
++    [fileId(0), "reviewed"],
++  ]);
++  expect(before.get(BOARD)).toBe("changedSinceReview");
++  expect(before.has(KEYS)).toBe(true);
++  expect(events(entries)).toEqual([
++    ["range.fixture_reviewed", { kind: "list" }],
++    ["range.fixture_reviewed", { kind: "mark", file: BOARD }],
++    ["range.fixture_reviewed", { kind: "mark", file: 0 }],
++    ["range.fixture_reviewed", { kind: "unmark", file: KEYS }],
++    ["range.fixture_reviewed", { kind: "since", file: LOGO }],
++    ["range.fixture_reviewed", { kind: "list" }],
++  ]);
++});
++
++test("an id past the list answers UnknownRangeFile and changes no mark", async () => {
++  const source = createFixtureRangeSource(quietLog().log, "?range=review&reviewed=seeded");
++  const past = fileId(13);
++  const failure = { kind: "UnknownRangeFile", file: past };
++
++  expect(await source.markReviewed(past)).toEqual({ ok: false, failure });
++  expect(await source.unmarkReviewed(past)).toEqual({ ok: false, failure });
++  expect(await source.loadSinceReview(past)).toEqual({ ok: false, failure });
++  expect(valueOf(await source.listReviewed()).size).toBe(3);
++});
++
++test("?range=empty with &reviewed=seeded has no marks", async () => {
++  const source = createFixtureRangeSource(quietLog().log, "?range=empty&reviewed=seeded");
++
++  expect(valueOf(await source.listReviewed()).size).toBe(0);
++});
++
++test("a listed file the case has no reply for answers noText", async () => {
++  const side = { label: { kind: "named", name: "main" }, short_id: "1b2cfed", subject: "Start" };
++  const lines = { kind: "counted", added: 1, removed: 0 };
++  const listed = {
++    start: {
++      range: "main...feature",
++      left: side,
++      right: side,
++      files: [
++        { id: 0, path: "a.ts", change: { kind: "added" }, lines },
++        { id: 1, path: "b.ts", change: { kind: "added" }, lines },
++      ],
++    },
++    files: [{ kind: "binary" }],
++  };
++  const source = createFixtureRangeSource(quietLog().log, "?range=review", {
++    "../../fixtures/range/review.json": listed,
++  });
++
++  expect(valueOf(await source.loadSinceReview(fileId(1)))).toEqual({ kind: "noText" });
++});
+diff --git a/frontend/src/ipc/fixtureReviewed.ts b/frontend/src/ipc/fixtureReviewed.ts
+new file mode 100644
+index 0000000..f54bd08
+--- /dev/null
++++ b/frontend/src/ipc/fixtureReviewed.ts
+@@ -0,0 +1,98 @@
++import type * as Generated from "./bindings";
++import type { RangeFileId, SourceResult } from "./domain";
++import type { Log } from "./log";
++import type { RangeEntry, RangeFile, RangeStart } from "./rangeDomain";
++import { toSinceReview, type ReviewMark, type SinceReview } from "./reviewedDomain";
++import type { ReviewedSource } from "./ReviewedSource";
++
++type Shown = { readonly start: RangeStart; readonly files: readonly RangeFile[] };
++
++const SEEDED_MARKS: Readonly<Record<string, ReviewMark>> = {
++  "docs/keys.md": "reviewed",
++  "src/board/board.ts": "changedSinceReview",
++  "public/logo.png": "changedSinceReview",
++};
++
++const SINCE_PATH = "src/board/board.ts";
++const SINCE_START = 40;
++const SINCE_LINES = 3;
++
++const NO_WORDS: Generated.DifferenceWords = {
++  left: { changed: [], removals: [] },
++  right: { changed: [], removals: [] },
++};
++
++function seeded(log: Log, search: string, start: RangeStart): Map<RangeFileId, ReviewMark> {
++  const asked = new URLSearchParams(search).get("reviewed");
++  if (asked === null) {
++    return new Map();
++  }
++  if (asked !== "seeded") {
++    log.info("range.fixture_reviewed_miss", { value: asked });
++    return new Map();
++  }
++  return new Map(
++    start.files.flatMap(({ id, path }): [RangeFileId, ReviewMark][] => {
++      const mark = SEEDED_MARKS[path];
++      return mark === undefined ? [] : [[id, mark]];
++    }),
++  );
++}
++
++function withoutSinceLines(text: string): string {
++  const lines = text.split("\n");
++  return [...lines.slice(0, SINCE_START), ...lines.slice(SINCE_START + SINCE_LINES)].join("\n");
++}
++
++function sinceOf(entry: RangeEntry, loaded: RangeFile | undefined): SinceReview {
++  if (loaded?.kind !== "texts") {
++    return { kind: "noText" };
++  }
++  const current = loaded.right;
++  if (entry.path !== SINCE_PATH) {
++    return { kind: "texts", reviewed: current, current, differences: [] };
++  }
++  const difference: Generated.Difference = {
++    left: { start: SINCE_START, len: 0 },
++    right: { start: SINCE_START, len: SINCE_LINES },
++    words: NO_WORDS,
++  };
++  const reviewed = withoutSinceLines(current);
++  return toSinceReview({ kind: "texts", reviewed, current, differences: [difference] });
++}
++
++export function createFixtureReviewed(log: Log, search: string, shown: Shown): ReviewedSource {
++  const marks = seeded(log, search, shown.start);
++  function answerFor<T>(
++    kind: string,
++    file: RangeFileId,
++    answer: (entry: RangeEntry) => T,
++  ): SourceResult<T> {
++    log.info("range.fixture_reviewed", { kind, file });
++    const entry = shown.start.files.find(({ id }) => id === file);
++    return entry === undefined
++      ? { ok: false, failure: { kind: "UnknownRangeFile", file } }
++      : { ok: true, value: answer(entry) };
++  }
++  return {
++    async listReviewed() {
++      log.info("range.fixture_reviewed", { kind: "list" });
++      return { ok: true, value: new Map(marks) };
++    },
++    async markReviewed(file) {
++      return answerFor("mark", file, () => {
++        marks.set(file, "reviewed");
++        return null;
++      });
++    },
++    async unmarkReviewed(file) {
++      return answerFor("unmark", file, () => {
++        marks.delete(file);
++        return null;
++      });
++    },
++    async loadSinceReview(file) {
++      return answerFor("since", file, (entry) => sinceOf(entry, shown.files[file]));
++    },
++  };
++}
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 369738d..f26e808 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -149,6 +149,8 @@ export type {
+   ThreadList,
+ } from "./reviewDomain";
+ export type { ReviewSource } from "./ReviewSource";
++export type { ReviewMarks, SinceReview } from "./reviewedDomain";
++export type { ReviewedSource } from "./ReviewedSource";
+ export { createFixtureSource, loadFixture } from "./fixture";
+ export { createFixtureCompareSource, loadCompareFixture } from "./fixtureCompare";
+ export { createFixtureRangeSource } from "./fixtureRange";
+diff --git a/frontend/src/ipc/reviewedDomain.test.ts b/frontend/src/ipc/reviewedDomain.test.ts
+new file mode 100644
+index 0000000..782d1f0
+--- /dev/null
++++ b/frontend/src/ipc/reviewedDomain.test.ts
+@@ -0,0 +1,59 @@
++import { expect, test } from "vitest";
++
++import type * as Generated from "./bindings";
++import { toReviewMarks, toSinceReview } from "./reviewedDomain";
++
++const DIFFERENCE: Generated.Difference = {
++  left: { start: 2, len: 0 },
++  right: { start: 2, len: 1 },
++  words: {
++    left: { changed: [], removals: [] },
++    right: { changed: [{ line: 2, start: 0, len: 3 }], removals: [] },
++  },
++};
++
++test("each listed file keeps its mark, by its id", () => {
++  const marks = toReviewMarks([
++    { file: 4, mark: "reviewed" },
++    { file: 0, mark: "changedSinceReview" },
++  ]);
++
++  expect([...marks]).toEqual([
++    [4, "reviewed"],
++    [0, "changedSinceReview"],
++  ]);
++  expect(toReviewMarks([]).size).toBe(0);
++});
++
++test("a negative file id is refused, naming its place", () => {
++  expect(() =>
++    toReviewMarks([
++      { file: 1, mark: "reviewed" },
++      { file: -1, mark: "reviewed" },
++    ]),
++  ).toThrow("[1].file must be a non-negative safe integer, got -1");
++});
++
++test("a file listed twice is refused, naming the repeat", () => {
++  expect(() =>
++    toReviewMarks([
++      { file: 2, mark: "reviewed" },
++      { file: 2, mark: "changedSinceReview" },
++    ]),
++  ).toThrow("[1].file 2 is marked twice");
++});
++
++test("a texts reply keeps both texts and brands its differences; noText passes as is", () => {
++  expect(
++    toSinceReview({ kind: "texts", reviewed: "a\n", current: "a\nb\n", differences: [DIFFERENCE] }),
++  ).toEqual({ kind: "texts", reviewed: "a\n", current: "a\nb\n", differences: [DIFFERENCE] });
++  expect(toSinceReview({ kind: "noText" })).toEqual({ kind: "noText" });
++});
++
++test("a texts reply with a negative difference line is refused, naming the field", () => {
++  const bad = { ...DIFFERENCE, right: { start: -2, len: 1 } };
++
++  expect(() =>
++    toSinceReview({ kind: "texts", reviewed: "", current: "", differences: [bad] }),
++  ).toThrow("differences[0].right.start must be a non-negative safe integer, got -2");
++});
+diff --git a/frontend/src/ipc/reviewedDomain.ts b/frontend/src/ipc/reviewedDomain.ts
+new file mode 100644
+index 0000000..7e7e297
+--- /dev/null
++++ b/frontend/src/ipc/reviewedDomain.ts
+@@ -0,0 +1,41 @@
++import type * as Generated from "./bindings";
++import { toDifferences, type Difference } from "./compareDomain";
++import { isRangeFileId, type RangeFileId } from "./domain";
++import { branded } from "./validate";
++
++export type ReviewMark = Generated.ReviewMark;
++export type ReviewMarks = ReadonlyMap<RangeFileId, ReviewMark>;
++export type SinceReview =
++  | {
++      readonly kind: "texts";
++      readonly reviewed: string;
++      readonly current: string;
++      readonly differences: readonly Difference[];
++    }
++  | { readonly kind: "noText" };
++
++export function toReviewMarks(raw: readonly Generated.FileReview[]): ReviewMarks {
++  const marks = new Map<RangeFileId, ReviewMark>();
++  raw.forEach(({ file, mark }, index) => {
++    const id = branded(file, isRangeFileId, `[${index}].file`);
++    if (marks.has(id)) {
++      throw new Error(`[${index}].file ${id} is marked twice`);
++    }
++    marks.set(id, mark);
++  });
++  return marks;
++}
++
++export function toSinceReview(raw: Generated.SinceReview): SinceReview {
++  switch (raw.kind) {
++    case "texts":
++      return {
++        kind: "texts",
++        reviewed: raw.reviewed,
++        current: raw.current,
++        differences: toDifferences(raw.differences),
++      };
++    case "noText":
++      return raw;
++  }
++}
+diff --git a/frontend/src/ipc/tauriRange.test.ts b/frontend/src/ipc/tauriRange.test.ts
+index f400635..9e6aaf4 100644
+--- a/frontend/src/ipc/tauriRange.test.ts
++++ b/frontend/src/ipc/tauriRange.test.ts
+@@ -9,6 +9,7 @@ const commands = vi.hoisted(() => ({
+   loadRangeFile: vi.fn(),
+   searchRangeTexts: vi.fn(),
+   listThreads: vi.fn(),
++  listReviewed: vi.fn(),
+ }));
+ 
+ vi.mock("./bindings", () => ({ commands }));
+@@ -118,6 +119,16 @@ test("the range source answers listThreads through the app's command", async ()
+   expect(commands.listThreads).toHaveBeenCalledOnce();
+ });
+ 
++test("the range source answers listReviewed through the app's command", async () => {
++  commands.listReviewed.mockResolvedValue({ status: "ok", data: [{ file: 2, mark: "reviewed" }] });
++
++  expect(await createTauriRangeSource().listReviewed()).toEqual({
++    ok: true,
++    value: new Map([[2, "reviewed"]]),
++  });
++  expect(commands.listReviewed).toHaveBeenCalledOnce();
++});
++
+ const PAGE: Generated.SearchTexts = {
+   files: [
+     {
+diff --git a/frontend/src/ipc/tauriRange.ts b/frontend/src/ipc/tauriRange.ts
+index 0615b5c..af532fd 100644
+--- a/frontend/src/ipc/tauriRange.ts
++++ b/frontend/src/ipc/tauriRange.ts
+@@ -4,6 +4,7 @@ import type { RangeSource } from "./RangeSource";
+ import { converted, createTauriSettings, toResult } from "./tauri";
+ import { createTauriMergeRequests } from "./tauriMergeRequests";
+ import { createTauriReview } from "./tauriReview";
++import { createTauriReviewed } from "./tauriReviewed";
+ 
+ export function createTauriRangeSource(): RangeSource {
+   return {
+@@ -17,6 +18,7 @@ export function createTauriRangeSource(): RangeSource {
+       return converted(toResult(await commands.searchRangeTexts(from)), toSearchTexts);
+     },
+     ...createTauriReview(),
++    ...createTauriReviewed(),
+     ...createTauriSettings(),
+     ...createTauriMergeRequests(),
+   };
+diff --git a/frontend/src/ipc/tauriReviewed.test.ts b/frontend/src/ipc/tauriReviewed.test.ts
+new file mode 100644
+index 0000000..3c16b9f
+--- /dev/null
++++ b/frontend/src/ipc/tauriReviewed.test.ts
+@@ -0,0 +1,112 @@
++import { beforeEach, expect, test, vi } from "vitest";
++
++import type * as Generated from "./bindings";
++import { isRangeFileId, type RangeFileId } from "./domain";
++import { createTauriReviewed } from "./tauriReviewed";
++
++const commands = vi.hoisted(() => ({
++  listReviewed: vi.fn(),
++  markReviewed: vi.fn(),
++  unmarkReviewed: vi.fn(),
++  loadSinceReview: vi.fn(),
++}));
++
++vi.mock("./bindings", () => ({ commands }));
++
++const FAILURE: Generated.IpcError = {
++  kind: "WriteFailed",
++  path: "/data/reviewed.json",
++  message: "full",
++};
++
++function fileId(n: number): RangeFileId {
++  if (!isRangeFileId(n)) {
++    throw new Error(`${n} is no file id`);
++  }
++  return n;
++}
++
++beforeEach(() => {
++  vi.resetAllMocks();
++});
++
++test("listReviewed asks list_reviewed and turns its list into marks by file", async () => {
++  commands.listReviewed.mockResolvedValue({
++    status: "ok",
++    data: [
++      { file: 3, mark: "reviewed" },
++      { file: 7, mark: "changedSinceReview" },
++    ],
++  });
++
++  const listed = await createTauriReviewed().listReviewed();
++
++  expect(listed).toEqual({
++    ok: true,
++    value: new Map([
++      [3, "reviewed"],
++      [7, "changedSinceReview"],
++    ]),
++  });
++  expect(commands.listReviewed).toHaveBeenCalledWith();
++});
++
++test("markReviewed and unmarkReviewed send the file's id and answer null", async () => {
++  commands.markReviewed.mockResolvedValue({ status: "ok", data: null });
++  commands.unmarkReviewed.mockResolvedValue({ status: "ok", data: null });
++  const source = createTauriReviewed();
++
++  expect(await source.markReviewed(fileId(4))).toEqual({ ok: true, value: null });
++  expect(await source.unmarkReviewed(fileId(5))).toEqual({ ok: true, value: null });
++  expect(commands.markReviewed).toHaveBeenCalledWith(4);
++  expect(commands.unmarkReviewed).toHaveBeenCalledWith(5);
++});
++
++test("loadSinceReview sends the file's id and converts the texts reply", async () => {
++  const difference: Generated.Difference = {
++    left: { start: 1, len: 0 },
++    right: { start: 1, len: 1 },
++    words: { left: { changed: [], removals: [] }, right: { changed: [], removals: [] } },
++  };
++  const texts = { kind: "texts", reviewed: "a\n", current: "a\nb\n", differences: [difference] };
++  commands.loadSinceReview.mockResolvedValue({ status: "ok", data: texts });
++
++  expect(await createTauriReviewed().loadSinceReview(fileId(6))).toEqual({
++    ok: true,
++    value: texts,
++  });
++  expect(commands.loadSinceReview).toHaveBeenCalledWith(6);
++
++  commands.loadSinceReview.mockResolvedValue({
++    status: "ok",
++    data: { ...texts, differences: [{ ...difference, left: { start: -1, len: 0 } }] },
++  });
++  await expect(createTauriReviewed().loadSinceReview(fileId(6))).rejects.toThrow(
++    "differences[0].left.start must be a non-negative safe integer, got -1",
++  );
++});
++
++test("each command's failure comes back unchanged", async () => {
++  for (const command of Object.values(commands)) {
++    command.mockResolvedValue({ status: "error", error: FAILURE });
++  }
++  const source = createTauriReviewed();
++  const failed = { ok: false, failure: FAILURE };
++
++  expect(await source.listReviewed()).toEqual(failed);
++  expect(await source.markReviewed(fileId(1))).toEqual(failed);
++  expect(await source.unmarkReviewed(fileId(1))).toEqual(failed);
++  expect(await source.loadSinceReview(fileId(1))).toEqual(failed);
++});
++
++test("a list naming a file twice is refused", async () => {
++  commands.listReviewed.mockResolvedValue({
++    status: "ok",
++    data: [
++      { file: 3, mark: "reviewed" },
++      { file: 3, mark: "reviewed" },
++    ],
++  });
++
++  await expect(createTauriReviewed().listReviewed()).rejects.toThrow("[1].file 3 is marked twice");
++});
+diff --git a/frontend/src/ipc/tauriReviewed.ts b/frontend/src/ipc/tauriReviewed.ts
+new file mode 100644
+index 0000000..778079d
+--- /dev/null
++++ b/frontend/src/ipc/tauriReviewed.ts
+@@ -0,0 +1,21 @@
++import { commands } from "./bindings";
++import { toReviewMarks, toSinceReview } from "./reviewedDomain";
++import type { ReviewedSource } from "./ReviewedSource";
++import { converted, toResult } from "./tauri";
++
++export function createTauriReviewed(): ReviewedSource {
++  return {
++    async listReviewed() {
++      return converted(toResult(await commands.listReviewed()), toReviewMarks);
++    },
++    async markReviewed(file) {
++      return toResult(await commands.markReviewed(file));
++    },
++    async unmarkReviewed(file) {
++      return toResult(await commands.unmarkReviewed(file));
++    },
++    async loadSinceReview(file) {
++      return converted(toResult(await commands.loadSinceReview(file)), toSinceReview);
++    },
++  };
++}
+diff --git a/frontend/src/ui/nextFile.test.ts b/frontend/src/ui/nextFile.test.ts
+index 9ca977f..45b0b67 100644
+--- a/frontend/src/ui/nextFile.test.ts
++++ b/frontend/src/ui/nextFile.test.ts
+@@ -1,7 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+ import type { FileEntry } from "../ipc";
+-import { nextUnresolved } from "./nextFile";
++import { nextOpen, nextUnresolved } from "./nextFile";
+ 
+ function file(path: string, status: FileEntry["status"]): FileEntry {
+   return { path, status, unsupported: null };
+@@ -49,3 +49,20 @@ test("a file git rerere filled in is not resolved yet: Next file goes there", ()
+   expect(nextUnresolved(files, "a.ts")).toBe("c.ts");
+   expect(nextUnresolved(files, "c.ts")).toBe("a.ts");
+ });
++
++test("next_open_wraps_skips_done_and_never_answers_the_active_file", () => {
++  const files = [
++    { path: "a", done: false },
++    { path: "b", done: true },
++    { path: "c", done: false },
++    { path: "d", done: true },
++  ];
++
++  expect(nextOpen(files, "a", (file) => file.done)).toBe("c");
++  expect(nextOpen(files, "c", (file) => file.done)).toBe("a");
++  expect(nextOpen(files, "d", (file) => file.done)).toBe("a");
++  expect(nextOpen(files, null, (file) => file.done)).toBe("a");
++  expect(nextOpen(files.slice(0, 2), "a", (file) => file.done)).toBeNull();
++  expect(nextOpen(files, "a", () => false)).toBe("b");
++  expect(nextOpen(files, "b", () => true)).toBeNull();
++});
+diff --git a/frontend/src/ui/nextFile.ts b/frontend/src/ui/nextFile.ts
+index a68e10f..6aa40a0 100644
+--- a/frontend/src/ui/nextFile.ts
++++ b/frontend/src/ui/nextFile.ts
+@@ -1,8 +1,16 @@
+ import type { FileEntry } from "../ipc";
+ 
+-export function nextUnresolved(files: readonly FileEntry[], active: string | null): string | null {
++export function nextOpen<F extends { readonly path: string }>(
++  files: readonly F[],
++  active: string | null,
++  done: (file: F) => boolean,
++): string | null {
+   const at = files.findIndex((file) => file.path === active);
+   const wrapped = [...files.slice(at + 1), ...files.slice(0, at + 1)];
+-  const next = wrapped.find((file) => file.status !== "Resolved" && file.path !== active);
++  const next = wrapped.find((file) => !done(file) && file.path !== active);
+   return next?.path ?? null;
+ }
++
++export function nextUnresolved(files: readonly FileEntry[], active: string | null): string | null {
++  return nextOpen(files, active, (file) => file.status === "Resolved");
++}
+diff --git a/frontend/src/ui/problem.test.ts b/frontend/src/ui/problem.test.ts
+index 9b81df9..5448cd9 100644
+--- a/frontend/src/ui/problem.test.ts
++++ b/frontend/src/ui/problem.test.ts
+@@ -79,6 +79,16 @@ test("a failed thread call logs its step and cause (catches a log line without t
+   ]);
+ });
+ 
++test("a failed Reviewed call logs its step, its file when it has one, and its cause", () => {
++  const cause = { kind: "WorkerStopped" } as const;
++  expect(logged({ action: "reviewed", step: "mark", path: "src/a.ts", cause })).toEqual([
++    '[error] store.reviewed_failed {step: "mark", path: "src/a.ts", kind: "WorkerStopped"}',
++  ]);
++  expect(logged({ action: "reviewed", step: "list", path: null, cause })).toEqual([
++    '[error] store.reviewed_failed {step: "list", kind: "WorkerStopped"}',
++  ]);
++});
++
+ test("a failed AI call logs its step and cause (catches a log line without the step)", () => {
+   expect(logged({ action: "ai", step: "discard", cause: { kind: "AiOff" } })).toEqual([
+     '[error] store.ai_failed {step: "discard", kind: "AiOff"}',
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 1e8feb4..4bd540a 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -34,6 +34,8 @@ export type ThreadStep =
+   | "session"
+   | "answer";
+ 
++export type ReviewedStep = "list" | "mark" | "unmark" | "since";
++
+ export type AiAttempt = "ask" | "diff" | "discard";
+ 
+ export type MergeRequestStep =
+@@ -90,6 +92,12 @@ export type Problem =
+   | { readonly action: "tabs" | "openRange" | "search"; readonly cause: ProblemCause }
+   | { readonly action: "loadTab"; readonly name: string; readonly cause: ProblemCause }
+   | { readonly action: "threads"; readonly step: ThreadStep; readonly cause: ProblemCause }
++  | {
++      readonly action: "reviewed";
++      readonly step: ReviewedStep;
++      readonly path: string | null;
++      readonly cause: ProblemCause;
++    }
+   | { readonly action: "ai"; readonly step: AiAttempt; readonly cause: ProblemCause }
+   | {
+       readonly action: "mergeRequests";
+@@ -168,6 +176,12 @@ function failureFields(
+     case "ai":
+     case "mergeRequests":
+       return { step: problem.step, ...problem.cause };
++    case "reviewed":
++      return {
++        step: problem.step,
++        ...(problem.path === null ? {} : { path: problem.path }),
++        ...problem.cause,
++      };
+   }
+ }
+ 
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index fddef22..b254f0c 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -303,6 +303,17 @@ test.each([
+   );
+ });
+ 
++test.each([
++  ["list", null, "Could not read the Reviewed marks: boom"],
++  ["mark", PATH, "Could not mark src/a.ts reviewed: boom"],
++  ["unmark", PATH, "Could not unmark src/a.ts: boom"],
++  ["since", PATH, "Could not show what changed in src/a.ts since the review: boom"],
++  ["mark", null, "Could not mark the file reviewed: boom"],
++] as const)("a failed Reviewed call at %s says what failed", (step, path, words) => {
++  const cause = { kind: "Unexpected", message: "boom" } as const;
++  expect(text({ action: "reviewed", step, path, cause })).toBe(words);
++});
++
+ test.each([
+   ["ask", "The AI could not answer: the AI is off; start yamt with --ai to use it."],
+   ["diff", "Could not show the diff: the AI is off; start yamt with --ai to use it."],
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index e5fcd13..f8e15e4 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -2,10 +2,22 @@ import { keyLabel, type KeyProblem, type MergeView } from "../ipc";
+ import { columnLimitText } from "./compareText";
+ import { ACTION_NAMES } from "./keyText";
+ import { continueAction, mergeOfText, operationName } from "./operationText";
+-import type { AiAttempt, MergeRequestStep, Problem, ProblemCause, ThreadStep } from "./problem";
++import type {
++  AiAttempt,
++  MergeRequestStep,
++  Problem,
++  ProblemCause,
++  ReviewedStep,
++  ThreadStep,
++} from "./problem";
+ 
+ type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
+ 
++type SteppedProblem = Extract<
++  CausedProblem,
++  { action: "threads" | "ai" | "mergeRequests" | "reviewed" }
++>;
++
+ type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
+ 
+ type Cause = CausedProblem["cause"];
+@@ -111,6 +123,33 @@ function closeMergeText(merge: MergeView | null): string {
+   return merge === null ? "Could not close the merge" : `Could not close the ${mergeOfText(merge)}`;
+ }
+ 
++function reviewedText(step: ReviewedStep, path: string | null): string {
++  const file = path ?? "the file";
++  switch (step) {
++    case "list":
++      return "Could not read the Reviewed marks";
++    case "mark":
++      return `Could not mark ${file} reviewed`;
++    case "unmark":
++      return `Could not unmark ${file}`;
++    case "since":
++      return `Could not show what changed in ${file} since the review`;
++  }
++}
++
++function steppedText(problem: SteppedProblem): string {
++  switch (problem.action) {
++    case "threads":
++      return THREAD_STEP_WORDS[problem.step];
++    case "ai":
++      return AI_ATTEMPT_WORDS[problem.step];
++    case "mergeRequests":
++      return MERGE_REQUEST_STEP_WORDS[problem.step];
++    case "reviewed":
++      return reviewedText(problem.step, problem.path);
++  }
++}
++
+ function attempted(problem: CausedProblem): string {
+   switch (problem.action) {
+     case "open":
+@@ -144,11 +183,10 @@ function attempted(problem: CausedProblem): string {
+     case "saveTab":
+       return `Could not save ${problem.name}`;
+     case "threads":
+-      return THREAD_STEP_WORDS[problem.step];
+     case "ai":
+-      return AI_ATTEMPT_WORDS[problem.step];
+     case "mergeRequests":
+-      return MERGE_REQUEST_STEP_WORDS[problem.step];
++    case "reviewed":
++      return steppedText(problem);
+   }
+ }
+ 
+diff --git a/frontend/src/ui/rangeReviewed.test.ts b/frontend/src/ui/rangeReviewed.test.ts
+new file mode 100644
+index 0000000..6d58272
+--- /dev/null
++++ b/frontend/src/ui/rangeReviewed.test.ts
+@@ -0,0 +1,313 @@
++import { afterEach, expect, test, vi } from "vitest";
++import { shallowRef, type ShallowRef } from "vue";
++
++import {
++  createFixtureRangeSource,
++  log,
++  type RangeEntry,
++  type RangeFileId,
++  type RangeSource,
++  type RangeStart,
++  type ReviewMarks,
++  type SourceFailure,
++  type SourceResult,
++} from "../ipc";
++import type { Problem } from "./problem";
++import { createRangeReviewed, type RangeReviewed } from "./rangeReviewed";
++
++type Edit = (fixture: RangeSource) => Partial<RangeSource>;
++
++type Opened = {
++  readonly reviewed: RangeReviewed;
++  readonly source: RangeSource;
++  readonly files: readonly RangeEntry[];
++  readonly shown: string[];
++  readonly forgotten: RangeFileId[];
++  readonly problems: Problem[];
++};
++
++const SEEDED = "?range=review&reviewed=seeded";
++const FULL: SourceFailure = { kind: "WriteFailed", path: "/data/reviewed.json", message: "full" };
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function valueOf<T>(result: SourceResult<T>): T {
++  if (!result.ok) {
++    throw new Error(`expected a value, got ${JSON.stringify(result.failure)}`);
++  }
++  return result.value;
++}
++
++function created(
++  search: string,
++  edit: Edit = () => ({}),
++): Omit<Opened, "files"> & { readonly start: ShallowRef<RangeStart | null> } {
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++  const fixture = createFixtureRangeSource(log, search);
++  const source = { ...fixture, ...edit(fixture) };
++  const start = shallowRef<RangeStart | null>(null);
++  const shown: string[] = [];
++  const forgotten: RangeFileId[] = [];
++  const problems: Problem[] = [];
++  const reviewed = createRangeReviewed(source, {
++    start,
++    show: (path) => shown.push(path),
++    forget: (file) => forgotten.push(file),
++    problems: (problem) => problems.push(problem),
++  });
++  return { reviewed, source, start, shown, forgotten, problems };
++}
++
++async function opened(search: string = SEEDED, edit: Edit = () => ({})): Promise<Opened> {
++  const made = created(search, edit);
++  made.start.value = valueOf(await made.source.openRange());
++  await made.reviewed.load();
++  return { ...made, files: made.start.value.files };
++}
++
++function entry({ files }: Opened, path: string): RangeEntry {
++  const found = files.find((each) => each.path === path);
++  if (found === undefined) {
++    throw new Error(`no file ${path}`);
++  }
++  return found;
++}
++
++function marked(window: Opened): [string, string][] {
++  return [...window.reviewed.marks.value].map(([id, mark]) => [
++    window.files[id]?.path ?? String(id),
++    mark,
++  ]);
++}
++
++async function stored(window: Opened): Promise<ReviewMarks> {
++  return valueOf(await window.source.listReviewed());
++}
++
++test("marking_an_unreviewed_file_opens_the_next_not_reviewed_file_in_list_order", async () => {
++  const window = await opened();
++
++  await window.reviewed.toggle(entry(window, "docs/current.md"));
++
++  expect(window.reviewed.marks.value.get(entry(window, "docs/current.md").id)).toBe("reviewed");
++  expect(window.shown).toEqual(["docs/legacy.txt"]);
++  expect((await stored(window)).get(entry(window, "docs/current.md").id)).toBe("reviewed");
++  expect(window.problems).toEqual([]);
++});
++
++test("marking_an_unreviewed_file_opens_the_next_not_reviewed_file_in_list_order_wraps_to_the_top", async () => {
++  const window = await opened();
++
++  await window.reviewed.toggle(entry(window, "vendor/ui"));
++
++  expect(window.shown).toEqual(["config"]);
++});
++
++test("marking_the_last_unreviewed_file_stays", async () => {
++  const window = await opened(SEEDED, (fixture) => ({
++    listReviewed: async () => {
++      const { files } = valueOf(await fixture.openRange());
++      return {
++        ok: true,
++        value: new Map(
++          files.flatMap(({ id }): [RangeFileId, "reviewed"][] =>
++            id === 6 ? [] : [[id, "reviewed"]],
++          ),
++        ),
++      };
++    },
++  }));
++  const last = entry(window, "src/api/mockBoards.ts");
++
++  await window.reviewed.toggle(last);
++
++  expect(window.reviewed.marks.value.get(last.id)).toBe("reviewed");
++  expect(window.reviewed.counted.value).toEqual({ reviewed: 13, of: 13 });
++  expect(window.shown).toEqual([]);
++});
++
++test("a mark before the window knows its files is stored and shows nothing next", async () => {
++  const window = await opened();
++  const early = created(SEEDED);
++  await early.reviewed.load();
++
++  await early.reviewed.toggle(entry(window, "config"));
++
++  expect(early.reviewed.marks.value.get(entry(window, "config").id)).toBe("reviewed");
++  expect(early.shown).toEqual([]);
++  expect(early.problems).toEqual([]);
++});
++
++test("a_changed_since_review_file_counts_as_not_reviewed_for_the_next_file", async () => {
++  const window = await opened();
++
++  await window.reviewed.toggle(entry(window, "docs/legacy.txt"));
++  await window.reviewed.toggle(entry(window, "src/board/board.ts"));
++
++  expect(window.shown).toEqual(["public/logo.png", "src/board/reminders.ts"]);
++  expect(marked(window)).toEqual([
++    ["docs/keys.md", "reviewed"],
++    ["public/logo.png", "changedSinceReview"],
++    ["src/board/board.ts", "reviewed"],
++    ["docs/legacy.txt", "reviewed"],
++  ]);
++});
++
++test("unmarking_a_reviewed_file_stays_and_forgets_it", async () => {
++  const window = await opened();
++  const keys = entry(window, "docs/keys.md");
++
++  await window.reviewed.toggle(keys);
++
++  expect(window.reviewed.marks.value.has(keys.id)).toBe(false);
++  expect((await stored(window)).has(keys.id)).toBe(false);
++  expect(window.shown).toEqual([]);
++  expect(window.reviewed.busy.value).toBe(false);
++});
++
++test("review_from_start_forgets_a_changed_mark", async () => {
++  const window = await opened();
++  const board = entry(window, "src/board/board.ts");
++
++  await window.reviewed.reviewFromStart(board);
++
++  expect(marked(window)).toEqual([
++    ["docs/keys.md", "reviewed"],
++    ["public/logo.png", "changedSinceReview"],
++  ]);
++  expect((await stored(window)).has(board.id)).toBe(false);
++  expect(window.shown).toEqual([]);
++});
++
++test("the_count_counts_only_reviewed_marks_of_every_listed_file", async () => {
++  const before = created(SEEDED);
++  expect(before.reviewed.counted.value).toEqual({ reviewed: 0, of: 0 });
++
++  const seeded = await opened();
++  expect(seeded.reviewed.counted.value).toEqual({ reviewed: 1, of: 13 });
++  await seeded.reviewed.toggle(entry(seeded, "config"));
++  expect(seeded.reviewed.counted.value).toEqual({ reviewed: 2, of: 13 });
++
++  const board = entry(seeded, "src/board/board.ts").id;
++  const fewer = created(SEEDED, (fixture) => ({
++    listReviewed: async () => {
++      await fixture.markReviewed(board);
++      return fixture.listReviewed();
++    },
++  }));
++  const whole = valueOf(await fewer.source.openRange());
++  fewer.start.value = { ...whole, files: whole.files.slice(0, 5) };
++  await fewer.reviewed.load();
++  expect(fewer.reviewed.marks.value.get(board)).toBe("reviewed");
++  expect(fewer.reviewed.counted.value).toEqual({ reviewed: 1, of: 5 });
++});
++
++test("a_failed_mark_keeps_the_marks_and_reports_with_the_path", async () => {
++  const window = await opened(SEEDED, () => ({
++    markReviewed: async () => ({ ok: false, failure: FULL }),
++    unmarkReviewed: async () => ({ ok: false, failure: FULL }),
++  }));
++  const marks = window.reviewed.marks.value;
++
++  await window.reviewed.toggle(entry(window, "config"));
++  await window.reviewed.toggle(entry(window, "docs/keys.md"));
++  await window.reviewed.reviewFromStart(entry(window, "src/board/board.ts"));
++
++  expect(window.reviewed.marks.value).toBe(marks);
++  expect(window.shown).toEqual([]);
++  expect(window.reviewed.busy.value).toBe(false);
++  expect(window.problems).toEqual([
++    { action: "reviewed", step: "mark", path: "config", cause: FULL },
++    { action: "reviewed", step: "unmark", path: "docs/keys.md", cause: FULL },
++    { action: "reviewed", step: "unmark", path: "src/board/board.ts", cause: FULL },
++  ]);
++});
++
++test("a_second_toggle_while_one_runs_is_ignored", async () => {
++  const calls: string[] = [];
++  const opens: (() => void)[] = [];
++  // Promise.withResolvers is ES2024; tsconfig.app.json's lib stops at ES2023.
++  const gate = new Promise<void>((resolve) => {
++    opens.push(resolve);
++  });
++  const window = await opened(SEEDED, (fixture) => ({
++    markReviewed: async (file) => {
++      calls.push(`mark ${file}`);
++      await gate;
++      return fixture.markReviewed(file);
++    },
++    unmarkReviewed: (file) => {
++      calls.push(`unmark ${file}`);
++      return fixture.unmarkReviewed(file);
++    },
++  }));
++  const config = entry(window, "config");
++
++  const first = window.reviewed.toggle(config);
++  expect(window.reviewed.busy.value).toBe(true);
++  await window.reviewed.toggle(entry(window, "docs/current.md"));
++  await window.reviewed.toggle(entry(window, "docs/keys.md"));
++  await window.reviewed.reviewFromStart(entry(window, "src/board/board.ts"));
++  expect(window.reviewed.marks.value.has(config.id)).toBe(false);
++  opens.forEach((open) => {
++    open();
++  });
++  await first;
++
++  expect(calls).toEqual([`mark ${config.id}`]);
++  expect(window.reviewed.busy.value).toBe(false);
++  expect(window.reviewed.marks.value.get(config.id)).toBe("reviewed");
++  expect(window.shown).toEqual(["data/big.txt"]);
++});
++
++test("busy_until_the_list_answers", async () => {
++  const calls: string[] = [];
++  let listed: SourceResult<ReviewMarks> = { ok: false, failure: { kind: "WorkerStopped" } };
++  const made = created(SEEDED, (fixture) => ({
++    listReviewed: async () => listed,
++    markReviewed: (file) => {
++      calls.push(`mark ${file}`);
++      return fixture.markReviewed(file);
++    },
++  }));
++  made.start.value = valueOf(await made.source.openRange());
++  const window: Opened = { ...made, files: made.start.value.files };
++  expect(window.reviewed.busy.value).toBe(true);
++
++  await window.reviewed.load();
++  await window.reviewed.toggle(entry(window, "config"));
++
++  expect(window.reviewed.busy.value).toBe(true);
++  expect(calls).toEqual([]);
++  expect(window.problems).toEqual([
++    { action: "reviewed", step: "list", path: null, cause: { kind: "WorkerStopped" } },
++  ]);
++
++  listed = { ok: true, value: new Map([[entry(window, "docs/keys.md").id, "reviewed"]]) };
++  await window.reviewed.load();
++
++  expect(window.reviewed.busy.value).toBe(false);
++  expect(marked(window)).toEqual([["docs/keys.md", "reviewed"]]);
++});
++
++test("a_failed_since_load_forgets_the_view_and_reports", async () => {
++  const window = await opened(SEEDED, (fixture) => ({
++    loadSinceReview: async (file) =>
++      file === 7 ? { ok: false, failure: FULL } : fixture.loadSinceReview(file),
++  }));
++  const board = entry(window, "src/board/board.ts");
++
++  expect(await window.reviewed.loadSince(board)).toBeNull();
++  expect(window.forgotten).toEqual([board.id]);
++  expect(window.problems).toEqual([
++    { action: "reviewed", step: "since", path: "src/board/board.ts", cause: FULL },
++  ]);
++
++  expect(await window.reviewed.loadSince(entry(window, "public/logo.png"))).toEqual({
++    kind: "noText",
++  });
++  expect(window.forgotten).toEqual([board.id]);
++  expect(window.problems).toHaveLength(1);
++});
+diff --git a/frontend/src/ui/rangeReviewed.ts b/frontend/src/ui/rangeReviewed.ts
+new file mode 100644
+index 0000000..6eb7032
+--- /dev/null
++++ b/frontend/src/ui/rangeReviewed.ts
+@@ -0,0 +1,134 @@
++import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
++
++import type {
++  RangeEntry,
++  RangeFileId,
++  RangeStart,
++  ReviewedSource,
++  ReviewMarks,
++  SinceReview,
++  SourceResult,
++} from "../ipc";
++import { nextOpen } from "./nextFile";
++import { attempt, type Problem, type ReviewedStep } from "./problem";
++
++export type RangeReviewed = {
++  readonly marks: Readonly<ShallowRef<ReviewMarks>>;
++  /** Rule 3's "N of M reviewed": `reviewed` counts only "reviewed" marks; `of` is the list's length. */
++  readonly counted: ComputedRef<{ readonly reviewed: number; readonly of: number }>;
++  /** True until the first list answers ok, and while a mark/unmark runs (one write at a time). */
++  readonly busy: Readonly<ShallowRef<boolean>>;
++  load(): Promise<void>;
++  /** Rule 2: "reviewed" → unmark, stay; otherwise → mark, then show the next file in `start.files` order whose mark is
++   *  not "reviewed" (wrapping, never itself; none → stay). Ignored while busy. */
++  toggle(entry: RangeEntry): Promise<void>;
++  /** Rule 6: forgets a mark; the file shows its whole change (the view derives it from `marks`). Ignored while busy. */
++  reviewFromStart(entry: RangeEntry): Promise<void>;
++  /** The since view's reply; a failure drops the file's view (as `loadFile`) and reports, answering null. */
++  loadSince(entry: RangeEntry): Promise<SinceReview | null>;
++};
++
++type ReviewedWindow = {
++  readonly start: Readonly<ShallowRef<RangeStart | null>>;
++  show(path: string): void;
++  forget(file: RangeFileId): void;
++  problems(problem: Problem): void;
++};
++
++type State = {
++  readonly source: ReviewedSource;
++  readonly window: ReviewedWindow;
++  readonly marks: ShallowRef<ReviewMarks>;
++  readonly busy: ShallowRef<boolean>;
++};
++
++function isReviewed(marks: ReviewMarks, file: RangeFileId): boolean {
++  return marks.get(file) === "reviewed";
++}
++
++async function load(state: State): Promise<void> {
++  const outcome = await attempt(() => state.source.listReviewed());
++  if (!outcome.ok) {
++    state.window.problems({ action: "reviewed", step: "list", path: null, cause: outcome.cause });
++    return;
++  }
++  state.marks.value = outcome.value;
++  state.busy.value = false;
++}
++
++async function written(
++  state: State,
++  step: Extract<ReviewedStep, "mark" | "unmark">,
++  entry: RangeEntry,
++  call: () => Promise<SourceResult<null>>,
++): Promise<boolean> {
++  if (state.busy.value) {
++    return false;
++  }
++  state.busy.value = true;
++  const outcome = await attempt(call);
++  state.busy.value = false;
++  if (!outcome.ok) {
++    state.window.problems({ action: "reviewed", step, path: entry.path, cause: outcome.cause });
++  }
++  return outcome.ok;
++}
++
++async function unmark(state: State, entry: RangeEntry): Promise<void> {
++  if (await written(state, "unmark", entry, () => state.source.unmarkReviewed(entry.id))) {
++    const marks = new Map(state.marks.value);
++    marks.delete(entry.id);
++    state.marks.value = marks;
++  }
++}
++
++async function mark(state: State, entry: RangeEntry): Promise<void> {
++  if (!(await written(state, "mark", entry, () => state.source.markReviewed(entry.id)))) {
++    return;
++  }
++  state.marks.value = new Map(state.marks.value).set(entry.id, "reviewed");
++  const files = state.window.start.value?.files ?? [];
++  const next = nextOpen(files, entry.path, (file) => isReviewed(state.marks.value, file.id));
++  if (next !== null) {
++    state.window.show(next);
++  }
++}
++
++async function loadSince(state: State, entry: RangeEntry): Promise<SinceReview | null> {
++  const outcome = await attempt(() => state.source.loadSinceReview(entry.id));
++  if (!outcome.ok) {
++    state.window.forget(entry.id);
++    state.window.problems({
++      action: "reviewed",
++      step: "since",
++      path: entry.path,
++      cause: outcome.cause,
++    });
++    return null;
++  }
++  return outcome.value;
++}
++
++export function createRangeReviewed(source: ReviewedSource, window: ReviewedWindow): RangeReviewed {
++  const state: State = {
++    source,
++    window,
++    marks: shallowRef<ReviewMarks>(new Map()),
++    busy: shallowRef(true),
++  };
++  const counted = computed(() => {
++    const files = window.start.value?.files ?? [];
++    const reviewed = files.filter(({ id }) => isReviewed(state.marks.value, id)).length;
++    return { reviewed, of: files.length };
++  });
++  return {
++    marks: state.marks,
++    counted,
++    busy: state.busy,
++    load: () => load(state),
++    toggle: (entry) =>
++      isReviewed(state.marks.value, entry.id) ? unmark(state, entry) : mark(state, entry),
++    reviewFromStart: (entry) => unmark(state, entry),
++    loadSince: (entry) => loadSince(state, entry),
++  };
++}
+diff --git a/frontend/src/ui/rangeStore.test.ts b/frontend/src/ui/rangeStore.test.ts
+index da79e2f..0c1c1e9 100644
+--- a/frontend/src/ui/rangeStore.test.ts
++++ b/frontend/src/ui/rangeStore.test.ts
+@@ -20,13 +20,8 @@ import { COLLAPSE_LABEL, createCollapsing } from "./collapsing";
+ import type { KeyPress } from "./fileListKey";
+ import { useMergeRequests } from "./mergeRequestsStore";
+ import { problemText } from "./problemText";
+-import {
+-  askContext,
+-  createRangeStore,
+-  MOUNTED_FILES,
+-  useRangeStore,
+-  type RangeStore,
+-} from "./rangeStore";
++import { askContext, createRangeStore, useRangeStore, type RangeStore } from "./rangeStore";
++import { MOUNTED_FILES } from "./rangeVisited";
+ import { useSettingsStore } from "./settingsStore";
+ import type { WindowStart } from "./startScreen";
+ import { listedButtons } from "./toolbarButtons";
+@@ -247,7 +242,7 @@ test("a failed openRange reports the range and shows nothing", async () => {
+   ]);
+ });
+ 
+-test("at start the list shows first, then the threads load and GitLab is checked once", async () => {
++test("at start the list shows first, then the threads and the Reviewed marks load and GitLab is checked once", async () => {
+   const calls: string[] = [];
+   const store = await started(2, (fixture) => ({
+     openRange: async () => {
+@@ -258,19 +253,29 @@ test("at start the list shows first, then the threads load and GitLab is checked
+       calls.push("listThreads");
+       return fixture.listThreads();
+     },
++    listReviewed: async () => {
++      calls.push("listReviewed");
++      return fixture.listReviewed();
++    },
+     checkGitLab: async () => {
+       calls.push(`checkGitLab shown ${String(useRangeStore().shown.value)}`);
+       return fixture.checkGitLab();
+     },
+   }));
+ 
+-  expect(calls).toEqual(["openRange", "listThreads", `checkGitLab shown ${fileAt(store, 0).id}`]);
++  expect(calls).toEqual([
++    "openRange",
++    "listThreads",
++    "listReviewed",
++    `checkGitLab shown ${fileAt(store, 0).id}`,
++  ]);
+   expect(store.gitlab.check.value?.kind).toBe("linedUp");
+   expect(store.gitlab.checking.value).toBe(false);
+   expect(store.threads.list.value).toEqual({ threads: [] });
++  expect(store.reviewed.busy.value).toBe(false);
+ });
+ 
+-test("a failed openRange loads no threads and checks nothing", async () => {
++test("a failed openRange loads no threads or marks and checks nothing", async () => {
+   quiet();
+   const calls: string[] = [];
+   const store = await started(2, () => ({
+@@ -279,6 +284,10 @@ test("a failed openRange loads no threads and checks nothing", async () => {
+       calls.push("listThreads");
+       return { ok: true, value: { threads: [] } };
+     },
++    listReviewed: async () => {
++      calls.push("listReviewed");
++      return { ok: true, value: new Map() };
++    },
+     checkGitLab: async () => {
+       calls.push("checkGitLab");
+       return { ok: false, failure: UNKNOWN };
+@@ -289,6 +298,31 @@ test("a failed openRange loads no threads and checks nothing", async () => {
+   expect(store.gitlab.check.value).toBeNull();
+ });
+ 
++test("a Reviewed click shows the next file in the window; a failed since load drops its view and reports", async () => {
++  const errors = quiet();
++  const store = await started(3, () => ({
++    loadSinceReview: () => failed({ kind: "WorkerStopped" }),
++  }));
++
++  await store.reviewed.toggle(fileAt(store, 0));
++
++  expect(store.shown.value).toBe(fileAt(store, 1).id);
++  expect(visitedIndexes(store)).toEqual([0, 1]);
++
++  expect(await store.reviewed.loadSince(fileAt(store, 1))).toBeNull();
++
++  expect(visitedIndexes(store)).toEqual([0]);
++  expect(store.problem.value).toEqual({
++    action: "reviewed",
++    step: "since",
++    path: fileAt(store, 1).path,
++    cause: { kind: "WorkerStopped" },
++  });
++  expect(errors).toEqual([
++    `[error] store.reviewed_failed {step: "since", path: "${fileAt(store, 1).path}", kind: "WorkerStopped"}`,
++  ]);
++});
++
+ test("a failed thread list is the window's problem", async () => {
+   const errors = quiet();
+   const store = await started(2, () => ({
+diff --git a/frontend/src/ui/rangeStore.ts b/frontend/src/ui/rangeStore.ts
+index 13ace8e..91b5418 100644
+--- a/frontend/src/ui/rangeStore.ts
++++ b/frontend/src/ui/rangeStore.ts
+@@ -26,9 +26,11 @@ import type { Question } from "./question";
+ import { createRangeAi, type RangeAi } from "./rangeAi";
+ import type { AskContext } from "./rangeAiRules";
+ import { createGitLabCheck, type GitLabState } from "./rangeGitLab";
++import { createRangeReviewed, type RangeReviewed } from "./rangeReviewed";
+ import { createRangeSearch } from "./rangeSearch";
+ import { createRangeThreads, type RangeThreads } from "./rangeThreads";
+ import { threadPlaceText } from "./rangeThreadText";
++import { forget, markShown } from "./rangeVisited";
+ import { settingsScreen, type Screen } from "./screen";
+ import type { Searching } from "./searching";
+ import { preferencesOf, settingsActions, startSettings } from "./settings";
+@@ -54,6 +56,7 @@ export type RangeStore = SettingsStore &
+     readonly fileListShown: ShallowRef<boolean>;
+     readonly preferences: ComputedRef<Preferences>;
+     readonly threads: RangeThreads;
++    readonly reviewed: RangeReviewed;
+     readonly gitlab: GitLabState;
+     readonly ai: RangeStoreAi | null;
+     readonly search: Searching<Column>;
+@@ -85,14 +88,13 @@ type State = Refs & {
+   readonly source: RangeSource;
+   readonly asking: Asking;
+   readonly threads: RangeThreads;
++  readonly reviewed: RangeReviewed;
+   readonly gitlab: GitLabState;
+   readonly agent: RangeAgent | null;
+   recent: readonly RangeFileId[];
+   latestSettings: number;
+ };
+ 
+-export const MOUNTED_FILES = 16;
+-
+ let store: RangeStore | null = null;
+ 
+ function createRefs(startTheme: Theme): Refs {
+@@ -157,16 +159,27 @@ function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null):
+     report(refs, problem);
+   }
+   const threads = createRangeThreads(source, problems);
+-  return {
++  const state: State = {
+     ...refs,
+     source,
+     asking: createAsking(),
+     threads,
+     gitlab: createGitLabCheck(source, threads, problems, refs.start),
++    reviewed: createRangeReviewed(source, {
++      start: refs.start,
++      show: (path) => {
++        showPath(state, path);
++      },
++      forget: (file) => {
++        forget(state, file);
++      },
++      problems,
++    }),
+     agent,
+     recent: [],
+     latestSettings: 0,
+   };
++  return state;
+ }
+ 
+ export function createRangeStore(
+@@ -186,6 +199,7 @@ export function createRangeStore(
+     question: state.asking.question,
+     preferences: computed(() => preferencesOf(refs.settings.value)),
+     threads: state.threads,
++    reviewed: state.reviewed,
+     gitlab: state.gitlab,
+     ai: storeAi(state),
+     search: createRangeSearch(state, {
+@@ -197,9 +211,6 @@ export function createRangeStore(
+     mergeRequests,
+     ...settings,
+     startUp: () => startUp(state, [settings.loadSettings(), openAtStart(mergeRequests, screen)]),
+-    showFile: (path) => {
+-      showPath(state, path);
+-    },
+     loadFile: (entry) => loadFile(state, entry),
+     mayClose: () => mayClose(state),
+     deleteNote: (message) => deleteNote(state, message),
+@@ -214,9 +225,18 @@ function chromeActions(
+   state: State,
+ ): Pick<
+   RangeStore,
+-  "fileListKey" | "dismissProblem" | "answer" | "dismissQuestion" | "openSettings" | "closeSettings"
++  | "showFile"
++  | "fileListKey"
++  | "dismissProblem"
++  | "answer"
++  | "dismissQuestion"
++  | "openSettings"
++  | "closeSettings"
+ > {
+   return {
++    showFile: (path) => {
++      showPath(state, path);
++    },
+     fileListKey: (event, platform) => {
+       fileListKey(state, event, platform);
+     },
+@@ -241,28 +261,6 @@ function showPath(state: State, path: string): void {
+   }
+ }
+ 
+-function markShown(state: State, entry: RangeEntry): void {
+-  const { id } = entry;
+-  state.shown.value = id;
+-  state.recent = [...state.recent.filter((each) => each !== id), id];
+-  if (state.visited.value.some((each) => each.id === id)) {
+-    return;
+-  }
+-  const [oldest, ...kept] = state.recent;
+-  const visited = [...state.visited.value, entry];
+-  if (visited.length > MOUNTED_FILES) {
+-    state.recent = kept;
+-    state.visited.value = visited.filter((each) => each.id !== oldest);
+-  } else {
+-    state.visited.value = visited;
+-  }
+-}
+-
+-function forget(state: State, file: RangeFileId): void {
+-  state.recent = state.recent.filter((each) => each !== file);
+-  state.visited.value = state.visited.value.filter((each) => each.id !== file);
+-}
+-
+ async function startUp(state: State, besides: readonly Promise<void>[]): Promise<void> {
+   const [outcome] = await Promise.all([attempt(() => state.source.openRange()), ...besides]);
+   if (!outcome.ok) {
+@@ -274,7 +272,7 @@ async function startUp(state: State, besides: readonly Promise<void>[]): Promise
+   if (first !== undefined) {
+     markShown(state, first);
+   }
+-  await Promise.all([state.threads.load(), state.gitlab.checkNow()]);
++  await Promise.all([state.threads.load(), state.reviewed.load(), state.gitlab.checkNow()]);
+ }
+ 
+ async function loadFile(state: State, entry: RangeEntry): Promise<RangeFile | null> {
+diff --git a/frontend/src/ui/rangeThreads.test.ts b/frontend/src/ui/rangeThreads.test.ts
+index 23c615c..b3d2e9c 100644
+--- a/frontend/src/ui/rangeThreads.test.ts
++++ b/frontend/src/ui/rangeThreads.test.ts
+@@ -16,8 +16,9 @@ import {
+ } from "../ipc";
+ import type { Problem } from "./problem";
+ import { isChangeable } from "./rangeNoteChange";
+-import { createRangeStore, MOUNTED_FILES } from "./rangeStore";
++import { createRangeStore } from "./rangeStore";
+ import { createRangeThreads, isQueued, type RangeThreads } from "./rangeThreads";
++import { MOUNTED_FILES } from "./rangeVisited";
+ 
+ type Edit = (fixture: RangeSource) => Partial<RangeSource>;
+ 
+diff --git a/frontend/src/ui/rangeVisited.ts b/frontend/src/ui/rangeVisited.ts
+new file mode 100644
+index 0000000..5b0fd29
+--- /dev/null
++++ b/frontend/src/ui/rangeVisited.ts
+@@ -0,0 +1,34 @@
++import type { ShallowRef } from "vue";
++
++import type { RangeEntry, RangeFileId } from "../ipc";
++
++/** The mounted views: `visited` in first-shown order, `recent` the same files least recently shown first. */
++export type Visited = {
++  readonly shown: ShallowRef<RangeFileId | null>;
++  readonly visited: ShallowRef<readonly RangeEntry[]>;
++  recent: readonly RangeFileId[];
++};
++
++export const MOUNTED_FILES = 16;
++
++export function markShown(state: Visited, entry: RangeEntry): void {
++  const { id } = entry;
++  state.shown.value = id;
++  state.recent = [...state.recent.filter((each) => each !== id), id];
++  if (state.visited.value.some((each) => each.id === id)) {
++    return;
++  }
++  const [oldest, ...kept] = state.recent;
++  const visited = [...state.visited.value, entry];
++  if (visited.length > MOUNTED_FILES) {
++    state.recent = kept;
++    state.visited.value = visited.filter((each) => each.id !== oldest);
++  } else {
++    state.visited.value = visited;
++  }
++}
++
++export function forget(state: Visited, file: RangeFileId): void {
++  state.recent = state.recent.filter((each) => each !== file);
++  state.visited.value = state.visited.value.filter((each) => each.id !== file);
++}

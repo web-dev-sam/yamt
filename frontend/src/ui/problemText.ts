@@ -2,9 +2,21 @@ import { keyLabel, type KeyProblem, type MergeView } from "../ipc";
 import { columnLimitText } from "./compareText";
 import { ACTION_NAMES } from "./keyText";
 import { continueAction, mergeOfText, operationName } from "./operationText";
-import type { AiAttempt, MergeRequestStep, Problem, ProblemCause, ThreadStep } from "./problem";
+import type {
+  AiAttempt,
+  MergeRequestStep,
+  Problem,
+  ProblemCause,
+  ReviewedStep,
+  ThreadStep,
+} from "./problem";
 
 type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
+
+type SteppedProblem = Extract<
+  CausedProblem,
+  { action: "threads" | "ai" | "mergeRequests" | "reviewed" }
+>;
 
 type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
 
@@ -111,6 +123,33 @@ function closeMergeText(merge: MergeView | null): string {
   return merge === null ? "Could not close the merge" : `Could not close the ${mergeOfText(merge)}`;
 }
 
+function reviewedText(step: ReviewedStep, path: string | null): string {
+  const file = path ?? "the file";
+  switch (step) {
+    case "list":
+      return "Could not read the Reviewed marks";
+    case "mark":
+      return `Could not mark ${file} reviewed`;
+    case "unmark":
+      return `Could not unmark ${file}`;
+    case "since":
+      return `Could not show what changed in ${file} since the review`;
+  }
+}
+
+function steppedText(problem: SteppedProblem): string {
+  switch (problem.action) {
+    case "threads":
+      return THREAD_STEP_WORDS[problem.step];
+    case "ai":
+      return AI_ATTEMPT_WORDS[problem.step];
+    case "mergeRequests":
+      return MERGE_REQUEST_STEP_WORDS[problem.step];
+    case "reviewed":
+      return reviewedText(problem.step, problem.path);
+  }
+}
+
 function attempted(problem: CausedProblem): string {
   switch (problem.action) {
     case "open":
@@ -144,11 +183,10 @@ function attempted(problem: CausedProblem): string {
     case "saveTab":
       return `Could not save ${problem.name}`;
     case "threads":
-      return THREAD_STEP_WORDS[problem.step];
     case "ai":
-      return AI_ATTEMPT_WORDS[problem.step];
     case "mergeRequests":
-      return MERGE_REQUEST_STEP_WORDS[problem.step];
+    case "reviewed":
+      return steppedText(problem);
   }
 }
 

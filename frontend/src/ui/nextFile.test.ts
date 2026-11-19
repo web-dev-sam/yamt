@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { FileEntry } from "../ipc";
-import { nextUnresolved } from "./nextFile";
+import { nextOpen, nextUnresolved } from "./nextFile";
 
 function file(path: string, status: FileEntry["status"]): FileEntry {
   return { path, status, unsupported: null };
@@ -48,4 +48,21 @@ test("a file git rerere filled in is not resolved yet: Next file goes there", ()
 
   expect(nextUnresolved(files, "a.ts")).toBe("c.ts");
   expect(nextUnresolved(files, "c.ts")).toBe("a.ts");
+});
+
+test("next_open_wraps_skips_done_and_never_answers_the_active_file", () => {
+  const files = [
+    { path: "a", done: false },
+    { path: "b", done: true },
+    { path: "c", done: false },
+    { path: "d", done: true },
+  ];
+
+  expect(nextOpen(files, "a", (file) => file.done)).toBe("c");
+  expect(nextOpen(files, "c", (file) => file.done)).toBe("a");
+  expect(nextOpen(files, "d", (file) => file.done)).toBe("a");
+  expect(nextOpen(files, null, (file) => file.done)).toBe("a");
+  expect(nextOpen(files.slice(0, 2), "a", (file) => file.done)).toBeNull();
+  expect(nextOpen(files, "a", () => false)).toBe("b");
+  expect(nextOpen(files, "b", () => true)).toBeNull();
 });

@@ -20,13 +20,8 @@ import { COLLAPSE_LABEL, createCollapsing } from "./collapsing";
 import type { KeyPress } from "./fileListKey";
 import { useMergeRequests } from "./mergeRequestsStore";
 import { problemText } from "./problemText";
-import {
-  askContext,
-  createRangeStore,
-  MOUNTED_FILES,
-  useRangeStore,
-  type RangeStore,
-} from "./rangeStore";
+import { askContext, createRangeStore, useRangeStore, type RangeStore } from "./rangeStore";
+import { MOUNTED_FILES } from "./rangeVisited";
 import { useSettingsStore } from "./settingsStore";
 import type { WindowStart } from "./startScreen";
 import { listedButtons } from "./toolbarButtons";
@@ -247,7 +242,7 @@ test("a failed openRange reports the range and shows nothing", async () => {
   ]);
 });
 
-test("at start the list shows first, then the threads load and GitLab is checked once", async () => {
+test("at start the list shows first, then the threads and the Reviewed marks load and GitLab is checked once", async () => {
   const calls: string[] = [];
   const store = await started(2, (fixture) => ({
     openRange: async () => {
@@ -258,19 +253,29 @@ test("at start the list shows first, then the threads load and GitLab is checked
       calls.push("listThreads");
       return fixture.listThreads();
     },
+    listReviewed: async () => {
+      calls.push("listReviewed");
+      return fixture.listReviewed();
+    },
     checkGitLab: async () => {
       calls.push(`checkGitLab shown ${String(useRangeStore().shown.value)}`);
       return fixture.checkGitLab();
     },
   }));
 
-  expect(calls).toEqual(["openRange", "listThreads", `checkGitLab shown ${fileAt(store, 0).id}`]);
+  expect(calls).toEqual([
+    "openRange",
+    "listThreads",
+    "listReviewed",
+    `checkGitLab shown ${fileAt(store, 0).id}`,
+  ]);
   expect(store.gitlab.check.value?.kind).toBe("linedUp");
   expect(store.gitlab.checking.value).toBe(false);
   expect(store.threads.list.value).toEqual({ threads: [] });
+  expect(store.reviewed.busy.value).toBe(false);
 });
 
-test("a failed openRange loads no threads and checks nothing", async () => {
+test("a failed openRange loads no threads or marks and checks nothing", async () => {
   quiet();
   const calls: string[] = [];
   const store = await started(2, () => ({
@@ -278,6 +283,10 @@ test("a failed openRange loads no threads and checks nothing", async () => {
     listThreads: async () => {
       calls.push("listThreads");
       return { ok: true, value: { threads: [] } };
+    },
+    listReviewed: async () => {
+      calls.push("listReviewed");
+      return { ok: true, value: new Map() };
     },
     checkGitLab: async () => {
       calls.push("checkGitLab");
@@ -287,6 +296,31 @@ test("a failed openRange loads no threads and checks nothing", async () => {
 
   expect(calls).toEqual([]);
   expect(store.gitlab.check.value).toBeNull();
+});
+
+test("a Reviewed click shows the next file in the window; a failed since load drops its view and reports", async () => {
+  const errors = quiet();
+  const store = await started(3, () => ({
+    loadSinceReview: () => failed({ kind: "WorkerStopped" }),
+  }));
+
+  await store.reviewed.toggle(fileAt(store, 0));
+
+  expect(store.shown.value).toBe(fileAt(store, 1).id);
+  expect(visitedIndexes(store)).toEqual([0, 1]);
+
+  expect(await store.reviewed.loadSince(fileAt(store, 1))).toBeNull();
+
+  expect(visitedIndexes(store)).toEqual([0]);
+  expect(store.problem.value).toEqual({
+    action: "reviewed",
+    step: "since",
+    path: fileAt(store, 1).path,
+    cause: { kind: "WorkerStopped" },
+  });
+  expect(errors).toEqual([
+    `[error] store.reviewed_failed {step: "since", path: "${fileAt(store, 1).path}", kind: "WorkerStopped"}`,
+  ]);
 });
 
 test("a failed thread list is the window's problem", async () => {

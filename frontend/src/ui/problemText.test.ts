@@ -304,6 +304,17 @@ test.each([
 });
 
 test.each([
+  ["list", null, "Could not read the Reviewed marks: boom"],
+  ["mark", PATH, "Could not mark src/a.ts reviewed: boom"],
+  ["unmark", PATH, "Could not unmark src/a.ts: boom"],
+  ["since", PATH, "Could not show what changed in src/a.ts since the review: boom"],
+  ["mark", null, "Could not mark the file reviewed: boom"],
+] as const)("a failed Reviewed call at %s says what failed", (step, path, words) => {
+  const cause = { kind: "Unexpected", message: "boom" } as const;
+  expect(text({ action: "reviewed", step, path, cause })).toBe(words);
+});
+
+test.each([
   ["ask", "The AI could not answer: the AI is off; start yamt with --ai to use it."],
   ["diff", "Could not show the diff: the AI is off; start yamt with --ai to use it."],
   [

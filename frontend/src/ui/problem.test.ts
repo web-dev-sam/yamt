@@ -79,6 +79,16 @@ test("a failed thread call logs its step and cause (catches a log line without t
   ]);
 });
 
+test("a failed Reviewed call logs its step, its file when it has one, and its cause", () => {
+  const cause = { kind: "WorkerStopped" } as const;
+  expect(logged({ action: "reviewed", step: "mark", path: "src/a.ts", cause })).toEqual([
+    '[error] store.reviewed_failed {step: "mark", path: "src/a.ts", kind: "WorkerStopped"}',
+  ]);
+  expect(logged({ action: "reviewed", step: "list", path: null, cause })).toEqual([
+    '[error] store.reviewed_failed {step: "list", kind: "WorkerStopped"}',
+  ]);
+});
+
 test("a failed AI call logs its step and cause (catches a log line without the step)", () => {
   expect(logged({ action: "ai", step: "discard", cause: { kind: "AiOff" } })).toEqual([
     '[error] store.ai_failed {step: "discard", kind: "AiOff"}',

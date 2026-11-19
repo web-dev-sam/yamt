@@ -6,7 +6,12 @@ import type { Size } from "./state";
 
 type Opening =
   | { readonly kind: "dir"; readonly dir: string }
-  | { readonly kind: "range"; readonly range: string; readonly dir: string }
+  | {
+      readonly kind: "range";
+      readonly range: string;
+      readonly dir: string;
+      readonly reviewOf: string | null;
+    }
   | { readonly kind: "diff"; readonly startDir: string | null }
   | { readonly kind: "fresh" };
 
@@ -57,14 +62,20 @@ function opening(parsed: Parsed): Opening {
   const startDir = parsed.values.get("dir");
   const diff = parsed.flags.has("diff");
   const fresh = parsed.flags.has("fresh-repo");
+  const reviewOf = parsed.values.get("review-of");
   if (startDir !== undefined && !diff) {
     throw new Error("start-app --dir <folder> goes with --diff: the compare window's start folder");
+  }
+  if (reviewOf !== undefined && range === undefined) {
+    throw new Error(
+      "start-app --review-of <project!iid> goes with --range: the range window's marks",
+    );
   }
   if (range !== undefined) {
     if (dir === undefined || diff || fresh) {
       throw new Error("start-app --range needs --repo <dir>, and neither --fresh-repo nor --diff");
     }
-    return { kind: "range", range, dir };
+    return { kind: "range", range, dir, reviewOf: reviewOf ?? null };
   }
   if ([dir !== undefined, fresh, diff].filter(Boolean).length !== 1) {
     throw new Error("start-app needs one of --repo <dir>, --fresh-repo and --diff");
@@ -92,7 +103,7 @@ function addAiSearch(parsed: Parsed, review: URLSearchParams): void {
 
 function reviewSearch(parsed: Parsed): string {
   const review = new URLSearchParams();
-  for (const name of ["threads", "gitlab"]) {
+  for (const name of ["threads", "gitlab", "reviewed"]) {
     const value = parsed.values.get(name);
     if (value !== undefined) {
       review.set(name, value);
@@ -115,7 +126,9 @@ function windowSearch(parsed: Parsed): string {
     return `?range=${encodeURIComponent(range)}${review}`;
   }
   if (review !== "") {
-    throw new Error("start-fixture takes --threads, --gitlab and --ai only with --range-case");
+    throw new Error(
+      "start-fixture takes --threads, --gitlab, --reviewed and --ai only with --range-case",
+    );
   }
   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
 }
@@ -236,7 +249,11 @@ export function appArgs(
     case "diff":
       return ["--diff", ...options];
     case "range":
-      return [`--diff=${opens.range}`, ...options];
+      return [
+        `--diff=${opens.range}`,
+        ...(opens.reviewOf === null ? [] : [`--review-of=${opens.reviewOf}`]),
+        ...options,
+      ];
     case "dir":
     case "fresh":
       return options;

@@ -17,7 +17,8 @@ import { startCommand, type StartCommand } from "./startArgs";
 const USAGE = `usage: app-session <command> …   (relative paths are taken from the repository root)
   start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo
                 | --diff [--dir <start folder>] [--glab <tests/glab scenario>]
-                | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]] [--ai]
+                | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]
+                  [--review-of <project!iid>]] [--ai]
                 [--mr]   (with --diff or --range: the window opens on its merge-request page)
                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
@@ -25,7 +26,7 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
                 --glab: scripts/fake-glab and scripts/fake-open first on PATH; the scenario is the link
                 <folder>/glab/scenario, opened addresses go to <folder>/glab/opened.log
   start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>
-                | --range-case <range fixture> [--threads seeded] [--gitlab <script>]
+                | --range-case <range fixture> [--threads seeded] [--gitlab <script>] [--reviewed seeded]
                   [--ai [--ai-case <agent fixture: crash, checkout-fails, cancelled, …>] [--ai-changes]]]
                 [--mr <merge-request script: list, slow, many, …> [--open-mr]]
                   (with --diff, --diff-case or --range-case; --open-mr: on the merge-request page)
@@ -98,11 +99,22 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
       "record-seconds",
       "home",
       "glab",
+      "review-of",
     ],
     flags: ["fresh-repo", "diff", "ai", "mr"],
   },
   "start-fixture": {
-    values: ["name", "size", "diff-case", "range-case", "threads", "gitlab", "ai-case", "mr"],
+    values: [
+      "name",
+      "size",
+      "diff-case",
+      "range-case",
+      "threads",
+      "gitlab",
+      "reviewed",
+      "ai-case",
+      "mr",
+    ],
     flags: ["diff", "ai", "ai-changes", "open-mr"],
   },
   click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },

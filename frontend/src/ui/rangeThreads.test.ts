@@ -16,8 +16,9 @@ import {
 } from "../ipc";
 import type { Problem } from "./problem";
 import { isChangeable } from "./rangeNoteChange";
-import { createRangeStore, MOUNTED_FILES } from "./rangeStore";
+import { createRangeStore } from "./rangeStore";
 import { createRangeThreads, isQueued, type RangeThreads } from "./rangeThreads";
+import { MOUNTED_FILES } from "./rangeVisited";
 
 type Edit = (fixture: RangeSource) => Partial<RangeSource>;
 

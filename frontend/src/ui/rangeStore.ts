@@ -26,9 +26,11 @@ import type { Question } from "./question";
 import { createRangeAi, type RangeAi } from "./rangeAi";
 import type { AskContext } from "./rangeAiRules";
 import { createGitLabCheck, type GitLabState } from "./rangeGitLab";
+import { createRangeReviewed, type RangeReviewed } from "./rangeReviewed";
 import { createRangeSearch } from "./rangeSearch";
 import { createRangeThreads, type RangeThreads } from "./rangeThreads";
 import { threadPlaceText } from "./rangeThreadText";
+import { forget, markShown } from "./rangeVisited";
 import { settingsScreen, type Screen } from "./screen";
 import type { Searching } from "./searching";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
@@ -54,6 +56,7 @@ export type RangeStore = SettingsStore &
     readonly fileListShown: ShallowRef<boolean>;
     readonly preferences: ComputedRef<Preferences>;
     readonly threads: RangeThreads;
+    readonly reviewed: RangeReviewed;
     readonly gitlab: GitLabState;
     readonly ai: RangeStoreAi | null;
     readonly search: Searching<Column>;
@@ -85,13 +88,12 @@ type State = Refs & {
   readonly source: RangeSource;
   readonly asking: Asking;
   readonly threads: RangeThreads;
+  readonly reviewed: RangeReviewed;
   readonly gitlab: GitLabState;
   readonly agent: RangeAgent | null;
   recent: readonly RangeFileId[];
   latestSettings: number;
 };
-
-export const MOUNTED_FILES = 16;
 
 let store: RangeStore | null = null;
 
@@ -157,16 +159,27 @@ function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null):
     report(refs, problem);
   }
   const threads = createRangeThreads(source, problems);
-  return {
+  const state: State = {
     ...refs,
     source,
     asking: createAsking(),
     threads,
     gitlab: createGitLabCheck(source, threads, problems, refs.start),
+    reviewed: createRangeReviewed(source, {
+      start: refs.start,
+      show: (path) => {
+        showPath(state, path);
+      },
+      forget: (file) => {
+        forget(state, file);
+      },
+      problems,
+    }),
     agent,
     recent: [],
     latestSettings: 0,
   };
+  return state;
 }
 
 export function createRangeStore(
@@ -186,6 +199,7 @@ export function createRangeStore(
     question: state.asking.question,
     preferences: computed(() => preferencesOf(refs.settings.value)),
     threads: state.threads,
+    reviewed: state.reviewed,
     gitlab: state.gitlab,
     ai: storeAi(state),
     search: createRangeSearch(state, {
@@ -197,9 +211,6 @@ export function createRangeStore(
     mergeRequests,
     ...settings,
     startUp: () => startUp(state, [settings.loadSettings(), openAtStart(mergeRequests, screen)]),
-    showFile: (path) => {
-      showPath(state, path);
-    },
     loadFile: (entry) => loadFile(state, entry),
     mayClose: () => mayClose(state),
     deleteNote: (message) => deleteNote(state, message),
@@ -214,9 +225,18 @@ function chromeActions(
   state: State,
 ): Pick<
   RangeStore,
-  "fileListKey" | "dismissProblem" | "answer" | "dismissQuestion" | "openSettings" | "closeSettings"
+  | "showFile"
+  | "fileListKey"
+  | "dismissProblem"
+  | "answer"
+  | "dismissQuestion"
+  | "openSettings"
+  | "closeSettings"
 > {
   return {
+    showFile: (path) => {
+      showPath(state, path);
+    },
     fileListKey: (event, platform) => {
       fileListKey(state, event, platform);
     },
@@ -241,28 +261,6 @@ function showPath(state: State, path: string): void {
   }
 }
 
-function markShown(state: State, entry: RangeEntry): void {
-  const { id } = entry;
-  state.shown.value = id;
-  state.recent = [...state.recent.filter((each) => each !== id), id];
-  if (state.visited.value.some((each) => each.id === id)) {
-    return;
-  }
-  const [oldest, ...kept] = state.recent;
-  const visited = [...state.visited.value, entry];
-  if (visited.length > MOUNTED_FILES) {
-    state.recent = kept;
-    state.visited.value = visited.filter((each) => each.id !== oldest);
-  } else {
-    state.visited.value = visited;
-  }
-}
-
-function forget(state: State, file: RangeFileId): void {
-  state.recent = state.recent.filter((each) => each !== file);
-  state.visited.value = state.visited.value.filter((each) => each.id !== file);
-}
-
 async function startUp(state: State, besides: readonly Promise<void>[]): Promise<void> {
   const [outcome] = await Promise.all([attempt(() => state.source.openRange()), ...besides]);
   if (!outcome.ok) {
@@ -274,7 +272,7 @@ async function startUp(state: State, besides: readonly Promise<void>[]): Promise
   if (first !== undefined) {
     markShown(state, first);
   }
-  await Promise.all([state.threads.load(), state.gitlab.checkNow()]);
+  await Promise.all([state.threads.load(), state.reviewed.load(), state.gitlab.checkNow()]);
 }
 
 async function loadFile(state: State, entry: RangeEntry): Promise<RangeFile | null> {

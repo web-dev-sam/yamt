@@ -4,6 +4,7 @@ import type { RangeSource } from "./RangeSource";
 import { converted, createTauriSettings, toResult } from "./tauri";
 import { createTauriMergeRequests } from "./tauriMergeRequests";
 import { createTauriReview } from "./tauriReview";
+import { createTauriReviewed } from "./tauriReviewed";
 
 export function createTauriRangeSource(): RangeSource {
   return {
@@ -17,6 +18,7 @@ export function createTauriRangeSource(): RangeSource {
       return converted(toResult(await commands.searchRangeTexts(from)), toSearchTexts);
     },
     ...createTauriReview(),
+    ...createTauriReviewed(),
     ...createTauriSettings(),
     ...createTauriMergeRequests(),
   };
