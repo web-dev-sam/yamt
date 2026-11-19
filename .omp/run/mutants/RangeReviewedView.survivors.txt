@@ -1,0 +1,3 @@
+just mutants HEAD → 208 killed, 6 survived, 7 no coverage, 1 error (ipc/index.ts, ui/rangeText.ts, ui/useRangeController.ts)
+src/ui/useRangeController.ts:287-295 useRangeController body/hosts/build NoCoverage — wiring: needs the store singleton and a CodeMirror RangeController (DOM); viewParts holds its logic and is tested; smoke covers the wiring
+src/ui/useRangeController.ts:198 flush "post" survivors and src/ipc/index.ts:214/218 IN_APP survivors — not on changed lines (unchanged code in a touched file)

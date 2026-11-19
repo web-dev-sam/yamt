@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { effectScope, nextTick, shallowRef, type ShallowRef } from "vue";
 
 import type { Preferences, RangeEvents, RangeTexts, ShownThread } from "../editor";
@@ -8,16 +8,27 @@ import {
   diffLineOf,
   log,
   onePlace,
+  type RangeEntry,
   type RangeFile,
   type RangeSource,
+  type RangeStart,
 } from "../ipc";
+import type { Problem } from "./problem";
+import { createRangeReviewed } from "./rangeReviewed";
+import { SINCE_NO_TEXT } from "./rangeText";
 import { createRangeThreads } from "./rangeThreads";
 import { preferencesOf, startSettings } from "./settings";
 import {
   followRange,
   rangeThreadParts,
   shownHosts,
+  sinceShown,
+  viewKind,
+  viewParts,
+  wholeShown,
   type RangeHandle,
+  type RangeParts,
+  type RangeShown,
   type ShownRange,
 } from "./useRangeController";
 
@@ -85,8 +96,8 @@ function run(from: RunFrom = {}): Run {
   const threads = shallowRef<readonly ShownThread[]>([]);
   const listed = shallowRef(from.listed ?? true);
   const given: RangeEvents[] = [];
-  const answers: ((file: RangeFile | null) => void)[] = [];
-  const loaded = new Promise<RangeFile | null>((resolve) => {
+  const answers: ((shown: RangeShown | null) => void)[] = [];
+  const loaded = new Promise<RangeShown | null>((resolve) => {
     answers.push(resolve);
   });
   const scope = effectScope();
@@ -112,6 +123,7 @@ function run(from: RunFrom = {}): Run {
         startThread: (place) => calls.push(`start ${place.end.kind}`),
         toggleThreads: (keys) => calls.push(`toggle ${keys.join(",")}`),
       },
+      startsThreads: true,
       build: (texts, at, options, events) => {
         const { preferences: chosen, collapsed: on } = options;
         const threadKeys = keysOf(options.threads);
@@ -142,7 +154,7 @@ function run(from: RunFrom = {}): Run {
     },
     answer: async (file) => {
       for (const answer of answers) {
-        answer(file);
+        answer(file === null ? null : wholeShown(file));
       }
       await loaded;
       await nextTick();
@@ -504,11 +516,12 @@ test.each([
     scope.run(() =>
       followRange({
         path: board.path,
-        load: async () => TEXTS,
+        load: async () => wholeShown(TEXTS),
         hosts: () => "hosts",
         preferences: DARK,
         collapsed: true,
         ...rangeThreadParts(threads, board),
+        startsThreads: true,
         build: (_texts, _hosts, options) => {
           built.push(options.threads.length);
           return IDLE;
@@ -526,3 +539,198 @@ test.each([
     expect(built).toEqual(expected);
   },
 );
+
+type ViewWindow = {
+  readonly store: Parameters<typeof viewParts>[0];
+  readonly source: RangeSource;
+  readonly loads: string[];
+  readonly problems: Problem[];
+  readonly entry: (path: string) => RangeEntry;
+};
+
+type Followed = {
+  readonly handle: RangeHandle;
+  readonly texts: RangeTexts[];
+  readonly startsThreads: boolean[];
+  readonly threads: string[][];
+};
+
+async function viewWindow(search: string, edit: Partial<RangeSource> = {}): Promise<ViewWindow> {
+  const source = { ...createFixtureRangeSource(log, search), ...edit };
+  const opened = await source.openRange();
+  if (!opened.ok) {
+    throw new Error("the fixture did not open");
+  }
+  const start = shallowRef<RangeStart | null>(opened.value);
+  const loads: string[] = [];
+  const problems: Problem[] = [];
+  function report(problem: Problem): void {
+    problems.push(problem);
+  }
+  const store = {
+    loadFile: async (entry: RangeEntry): Promise<RangeFile | null> => {
+      loads.push(entry.path);
+      const loaded = await source.loadRangeFile(entry.id);
+      return loaded.ok ? loaded.value : null;
+    },
+    threads: createRangeThreads(source, report),
+    reviewed: createRangeReviewed(source, {
+      start,
+      show: () => {},
+      forget: () => {},
+      problems: report,
+    }),
+  };
+  function entry(path: string): RangeEntry {
+    const found = opened.ok ? opened.value.files.find((each) => each.path === path) : undefined;
+    if (found === undefined) {
+      throw new Error(`no file ${path}`);
+    }
+    return found;
+  }
+  return { store, source, loads, problems, entry };
+}
+
+async function followed(
+  path: string,
+  parts: Pick<RangeParts<string>, "load" | "threads" | "listed" | "events" | "startsThreads">,
+): Promise<Followed> {
+  const texts: RangeTexts[] = [];
+  const startsThreads: boolean[] = [];
+  const threads: string[][] = [];
+  const handle = effectScope().run(() =>
+    followRange({
+      path,
+      hosts: () => "hosts",
+      preferences: DARK,
+      collapsed: true,
+      ...parts,
+      build: (built, _hosts, options) => {
+        texts.push(built);
+        startsThreads.push(options.startsThreads);
+        threads.push(keysOf(options.threads));
+        return IDLE;
+      },
+    }),
+  );
+  if (handle === undefined) {
+    throw new Error("the scope did not run");
+  }
+  await vi.waitFor(() => {
+    expect(handle.content.value.kind).not.toBe("loading");
+  });
+  await nextTick();
+  return { handle, texts, startsThreads, threads };
+}
+
+const SINCE_SEEDED = "?range=review&reviewed=seeded&threads=seeded";
+const BOARD = "src/board/board.ts";
+
+test("a_since_review_view_loads_load_since_review_and_shows_reviewed_left_current_right", async () => {
+  const window = await viewWindow(SINCE_SEEDED);
+  const board = window.entry(BOARD);
+  const since = await window.source.loadSinceReview(board.id);
+  if (!since.ok || since.value.kind !== "texts") {
+    throw new Error("the fixture's board.ts has no since texts");
+  }
+
+  const view = await followed(board.path, viewParts(window.store, board, "sinceReview"));
+
+  expect(view.handle.content.value).toEqual({ kind: "columns", note: null });
+  expect(view.texts).toEqual([
+    {
+      path: BOARD,
+      left: since.value.reviewed,
+      right: since.value.current,
+      differences: since.value.differences,
+    },
+  ]);
+  expect(since.value.reviewed).not.toBe(since.value.current);
+  expect(window.loads).toEqual([]);
+});
+
+test("a_since_review_view_shows_no_threads_and_builds_with_starts_threads_false", async () => {
+  const window = await viewWindow(SINCE_SEEDED);
+  const board = window.entry(BOARD);
+  const since = viewParts(window.store, board, "sinceReview");
+
+  const view = await followed(board.path, since);
+  await window.store.threads.load();
+  const whole = viewParts(window.store, board, "whole");
+
+  expect([view.texts.length, view.startsThreads, view.threads]).toEqual([1, [false], [[]]]);
+  expect(whole.threads().length).toBeGreaterThan(0);
+  expect([since.threads(), since.listed(), whole.startsThreads]).toEqual([[], true, true]);
+});
+
+test("a_no_text_since_reply_is_the_since_sentence", async () => {
+  const window = await viewWindow(SINCE_SEEDED);
+  const logo = window.entry("public/logo.png");
+
+  const view = await followed(logo.path, viewParts(window.store, logo, "sinceReview"));
+
+  expect(view.handle.content.value).toEqual({ kind: "sentence", text: SINCE_NO_TEXT });
+  expect(view.texts).toEqual([]);
+  expect(sinceShown({ kind: "noText" })).toEqual({ kind: "sentence", text: SINCE_NO_TEXT });
+  expect(
+    sinceShown({ kind: "texts", reviewed: "old\n", current: "new\n", differences: [] }),
+  ).toEqual({ kind: "texts", left: "old\n", right: "new\n", differences: [], note: null });
+});
+
+test("a failed since load answers null and reports it; a failed whole load answers null", async () => {
+  const window = await viewWindow(SINCE_SEEDED, {
+    loadSinceReview: async () => ({ ok: false, failure: { kind: "WorkerStopped" } }),
+    loadRangeFile: async () => ({ ok: false, failure: { kind: "WorkerStopped" } }),
+  });
+  const board = window.entry(BOARD);
+
+  const since = await viewParts(window.store, board, "sinceReview").load();
+  const whole = await viewParts(window.store, board, "whole").load();
+
+  expect([since, whole]).toEqual([null, null]);
+  expect(window.problems.map((problem) => problem.action)).toEqual(["reviewed"]);
+});
+
+test("the_whole_view_is_unchanged", async () => {
+  const window = await viewWindow(SINCE_SEEDED);
+  const board = window.entry(BOARD);
+  const loaded = await window.source.loadRangeFile(board.id);
+  if (!loaded.ok || loaded.value.kind !== "texts") {
+    throw new Error("the fixture's board.ts has no texts");
+  }
+  const { left, right, differences } = loaded.value;
+  await window.store.threads.load();
+  const parts = viewParts(window.store, board, "whole");
+  const threadParts = rangeThreadParts(window.store.threads, board);
+
+  const view = await followed(board.path, parts);
+
+  expect(window.loads).toEqual([BOARD]);
+  expect(view.handle.content.value).toEqual({ kind: "columns", note: null });
+  expect(view.texts).toEqual([{ path: BOARD, left, right, differences }]);
+  expect(view.startsThreads).toEqual([true]);
+  expect(view.threads).toEqual([keysOf(threadParts.threads())]);
+  expect(view.threads[0]?.length).toBeGreaterThan(0);
+});
+
+test("a texts file shows both texts with its mode note; any other file its sentence", () => {
+  expect(wholeShown(TEXTS)).toEqual({
+    kind: "texts",
+    left: "a\n",
+    right: "b\n",
+    differences: [],
+    note: "Mode changed: file → executable file",
+  });
+  expect(wholeShown({ kind: "binary" })).toEqual({
+    kind: "sentence",
+    text: "Binary file: not shown.",
+  });
+});
+
+test("only a changed-since-review mark opens the since view", () => {
+  expect([viewKind(undefined), viewKind("reviewed"), viewKind("changedSinceReview")]).toEqual([
+    "whole",
+    "whole",
+    "sinceReview",
+  ]);
+});

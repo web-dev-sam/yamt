@@ -2,7 +2,7 @@
 import { useEventListener, useWindowFocus } from "@vueuse/core";
 import { computed, onMounted, watch } from "vue";
 
-import { log, onWindowClose, type RangeLineCounts } from "../ipc";
+import { log, onWindowClose, type RangeEntry, type RangeLineCounts } from "../ipc";
 import AgentSettings from "./AgentSettings.vue";
 import FileList from "./FileList.vue";
 import MergeRequestDiscussionSetting from "./MergeRequestDiscussionSetting.vue";
@@ -25,6 +25,7 @@ import SettingsButton from "./SettingsButton.vue";
 import { useThemeAttribute } from "./settingsStore";
 import SettingsView from "./SettingsView.vue";
 import SideColumn from "./SideColumn.vue";
+import { viewKind, type RangeViewKind } from "./useRangeController";
 
 const {
   start,
@@ -46,8 +47,10 @@ const {
   ai,
   mayClose,
   search,
+  reviewed,
 } = useRangeStore();
 const { counts } = threads;
+const { marks } = reviewed;
 
 const focused = useWindowFocus();
 useThemeAttribute();
@@ -90,6 +93,10 @@ async function guardClose(): Promise<void> {
 function folderLines(path: string): RangeLineCounts {
   return sums.value.get(path) ?? { kind: "notCounted" };
 }
+
+function viewOf(file: RangeEntry): RangeViewKind {
+  return viewKind(marks.value.get(file.id));
+}
 </script>
 
 <template>
@@ -110,7 +117,12 @@ function folderLines(path: string): RangeLineCounts {
         @select="showFile"
       >
         <template #file="{ file, label }">
-          <RangeFileRow :file="file" :label="label" :threads="counts.get(file.id) ?? 0" />
+          <RangeFileRow
+            :file="file"
+            :label="label"
+            :threads="counts.get(file.id) ?? 0"
+            :review="marks.get(file.id) ?? null"
+          />
         </template>
         <template #folder="{ path }">
           <RangeCounts :lines="folderLines(path)" class="ml-auto" />
@@ -126,11 +138,12 @@ function folderLines(path: string): RangeLineCounts {
         <template v-if="start !== null">
           <RangeView
             v-for="file in visited"
-            :key="file.id"
+            :key="`${file.id}:${viewOf(file)}`"
             :file="file"
             :left-side="start.left"
             :right-side="start.right"
             :shown="file.id === shown && screen.kind === 'files'"
+            :view="viewOf(file)"
           />
         </template>
         <div

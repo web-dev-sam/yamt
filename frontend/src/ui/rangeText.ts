@@ -8,6 +8,7 @@ import type {
   RangeSide,
   RangeSides,
   RangeStart,
+  ReviewMark,
 } from "../ipc";
 
 export type SentenceFile = Exclude<RangeFile, { readonly kind: "texts" }>;
@@ -19,6 +20,18 @@ export type LineCounts = { readonly added: string; readonly removed: string };
 const BYTES_PER_MIB = 1_048_576;
 
 export const RANGE_LIST_LABEL = "Changed files";
+
+export const REVIEWED_LABEL = "Reviewed";
+export const REVIEW_FROM_START_LABEL = "Review from start";
+export const SINCE_REVIEW_NOTE = "Changed since you reviewed it";
+export const SINCE_REVIEW_HEADING = "As you reviewed it";
+export const SINCE_NO_TEXT =
+  "This file changed since you reviewed it, and one of the two versions is not text. Review from start shows the whole change.";
+
+export const REVIEW_MARK_WORDS: Readonly<Record<ReviewMark, string>> = {
+  reviewed: "reviewed",
+  changedSinceReview: "changed since reviewed",
+};
 
 const CHANGE_MARKS: Readonly<Record<RangeChange["kind"], ChangeMark>> = {
   added: { letter: "A", word: "added" },
@@ -42,6 +55,10 @@ const NOT_UTF8: Readonly<Record<RangeSides, string>> = {
 
 export function changeMark(change: RangeChange): ChangeMark {
   return CHANGE_MARKS[change.kind];
+}
+
+export function reviewedCount({ reviewed, of }: { reviewed: number; of: number }): string {
+  return `${reviewed} of ${of} reviewed`;
 }
 
 export function sideLabel({ label }: RangeSide): string {

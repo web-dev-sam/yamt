@@ -193,7 +193,10 @@ async function measured(host: HTMLElement): Promise<EditorView> {
 
 const controllers: RangeController[] = [];
 
-async function opened(probe: ProbeCase = MODIFIED, collapsed = false): Promise<Opened> {
+async function opened(
+  probe: ProbeCase = MODIFIED,
+  { collapsed = false, startsThreads = true } = {},
+): Promise<Opened> {
   const hosts = mount();
   const differences = probe.differences.map((difference) => ({
     ...difference,
@@ -219,7 +222,7 @@ async function opened(probe: ProbeCase = MODIFIED, collapsed = false): Promise<O
       differences: comparison.differences,
     },
     hosts,
-    { preferences: { theme: "dark", keys: DEFAULT_KEYS }, collapsed, threads: [] },
+    { preferences: { theme: "dark", keys: DEFAULT_KEYS }, collapsed, threads: [], startsThreads },
     events,
   );
   controllers.push(controller);
@@ -627,7 +630,7 @@ test("a drag selects no text in either column", async () => {
 });
 
 test("a drag stops at a collapsed run's wave", async () => {
-  const probe = await opened(DRAG, true);
+  const probe = await opened(DRAG, { collapsed: true });
   const view = await measured(probe.hosts.right);
   const from = lineNumber(probe.hosts.right, "22");
   const wave = view.lineBlockAt(view.state.doc.line(LAST_SHOWN_RIGHT + 2).from);
@@ -789,4 +792,18 @@ test("two scrolls in one frame during a drag move the end once, in the next fram
   await nextFrames();
 
   expect([atOnce, tintDispatches(dispatch.mock.calls)]).toEqual([0, 1]);
+});
+
+test("a_number_drag_starts_no_thread_when_starts_threads_is_false", async () => {
+  const probe = await opened(DRAG, { startsThreads: false });
+  const { left, right } = probe.hosts;
+  const to = lineNumber(right, "12");
+
+  heldDrag(lineNumber(right, "9"), to);
+  await nextFrames();
+  release(to);
+  await nextFrames();
+
+  expect(probe.started).toEqual([]);
+  expect([...tinted(left), ...tinted(right)]).toEqual([]);
 });

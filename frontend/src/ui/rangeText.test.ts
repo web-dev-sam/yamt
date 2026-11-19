@@ -8,6 +8,8 @@ import {
   fileSentence,
   lineCounts,
   modeNote,
+  REVIEW_MARK_WORDS,
+  reviewedCount,
   sideHeading,
   sideLabel,
   type SentenceFile,
@@ -113,4 +115,16 @@ test.each<[SentenceFile, string]>([
   [{ kind: "submodule", old: "1a2b3c", new: null }, "Submodule: 1a2b3c → none"],
 ])("the %o sentence is %s", (file, sentence) => {
   expect(fileSentence(file)).toBe(sentence);
+});
+
+test("the reviewed count reads N of M reviewed", () => {
+  expect(reviewedCount({ reviewed: 0, of: 13 })).toBe("0 of 13 reviewed");
+  expect(reviewedCount({ reviewed: 13, of: 13 })).toBe("13 of 13 reviewed");
+});
+
+test("each review mark has its word", () => {
+  expect(REVIEW_MARK_WORDS).toEqual({
+    reviewed: "reviewed",
+    changedSinceReview: "changed since reviewed",
+  });
 });

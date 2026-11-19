@@ -1,0 +1,963 @@
+diff --git a/frontend/src/editor/range.browser.test.ts b/frontend/src/editor/range.browser.test.ts
+index cf46186..b44af36 100644
+--- a/frontend/src/editor/range.browser.test.ts
++++ b/frontend/src/editor/range.browser.test.ts
+@@ -25,6 +25,7 @@ const OPTIONS: RangeOptions = {
+   preferences: { theme: "dark", keys: DEFAULT_KEYS },
+   collapsed: false,
+   threads: [],
++  startsThreads: true,
+ };
+ const EVENTS: RangeEvents = { startThread: () => {}, toggleThreads: () => {}, hosts: () => {} };
+ const LEFT = [
+diff --git a/frontend/src/editor/range.ts b/frontend/src/editor/range.ts
+index 1a9dc55..b08400f 100644
+--- a/frontend/src/editor/range.ts
++++ b/frontend/src/editor/range.ts
+@@ -41,6 +41,8 @@ export type RangeOptions = {
+   readonly preferences: Preferences;
+   readonly collapsed: boolean;
+   readonly threads: readonly ShownThread[];
++  /** False in the since-review view: a press on a line number starts no drag and no thread (rule 7). */
++  readonly startsThreads: boolean;
+ };
+ 
+ export type RangeEvents = {
+@@ -64,12 +66,14 @@ export class RangeController {
+   #dragged: ThreadPlace | null = null;
+   #hovered: string | null = null;
+   #settings: PaneSettings;
++  readonly #startsThreads: boolean;
+   #destroyed = false;
+ 
+   constructor(texts: RangeTexts, hosts: CompareHosts, options: RangeOptions, events: RangeEvents) {
+     this.#differences = texts.differences;
+     this.#events = events;
+     this.#threads = options.threads;
++    this.#startsThreads = options.startsThreads;
+     this.#settings = { preferences: options.preferences, platform: navigator.platform };
+     this.#folds = new RangeFolds(hosts, () => this.#views);
+     this.#views = createReadOnlyColumnViews(texts, hosts, {
+@@ -154,10 +158,10 @@ export class RangeController {
+     const column = view === this.#views.left ? "left" : "right";
+     const counts = view.state.field(threadField)?.counts ?? [];
+     const press = numberPress({ differences: this.#differences, column, line, onBadge, counts });
+-    if (press.kind === "drag") {
+-      this.#drag.start(press.line, event);
+-    } else {
++    if (press.kind === "toggle") {
+       this.#events.toggleThreads(press.keys);
++    } else if (this.#startsThreads) {
++      this.#drag.start(press.line, event);
+     }
+   }
+ 
+diff --git a/frontend/src/editor/rangeThreads.browser.test.ts b/frontend/src/editor/rangeThreads.browser.test.ts
+index d4de687..cfcba5a 100644
+--- a/frontend/src/editor/rangeThreads.browser.test.ts
++++ b/frontend/src/editor/rangeThreads.browser.test.ts
+@@ -193,7 +193,10 @@ async function measured(host: HTMLElement): Promise<EditorView> {
+ 
+ const controllers: RangeController[] = [];
+ 
+-async function opened(probe: ProbeCase = MODIFIED, collapsed = false): Promise<Opened> {
++async function opened(
++  probe: ProbeCase = MODIFIED,
++  { collapsed = false, startsThreads = true } = {},
++): Promise<Opened> {
+   const hosts = mount();
+   const differences = probe.differences.map((difference) => ({
+     ...difference,
+@@ -219,7 +222,7 @@ async function opened(probe: ProbeCase = MODIFIED, collapsed = false): Promise<O
+       differences: comparison.differences,
+     },
+     hosts,
+-    { preferences: { theme: "dark", keys: DEFAULT_KEYS }, collapsed, threads: [] },
++    { preferences: { theme: "dark", keys: DEFAULT_KEYS }, collapsed, threads: [], startsThreads },
+     events,
+   );
+   controllers.push(controller);
+@@ -627,7 +630,7 @@ test("a drag selects no text in either column", async () => {
+ });
+ 
+ test("a drag stops at a collapsed run's wave", async () => {
+-  const probe = await opened(DRAG, true);
++  const probe = await opened(DRAG, { collapsed: true });
+   const view = await measured(probe.hosts.right);
+   const from = lineNumber(probe.hosts.right, "22");
+   const wave = view.lineBlockAt(view.state.doc.line(LAST_SHOWN_RIGHT + 2).from);
+@@ -790,3 +793,17 @@ test("two scrolls in one frame during a drag move the end once, in the next fram
+ 
+   expect([atOnce, tintDispatches(dispatch.mock.calls)]).toEqual([0, 1]);
+ });
++
++test("a_number_drag_starts_no_thread_when_starts_threads_is_false", async () => {
++  const probe = await opened(DRAG, { startsThreads: false });
++  const { left, right } = probe.hosts;
++  const to = lineNumber(right, "12");
++
++  heldDrag(lineNumber(right, "9"), to);
++  await nextFrames();
++  release(to);
++  await nextFrames();
++
++  expect(probe.started).toEqual([]);
++  expect([...tinted(left), ...tinted(right)]).toEqual([]);
++});
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index f26e808..c97357c 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -149,7 +149,7 @@ export type {
+   ThreadList,
+ } from "./reviewDomain";
+ export type { ReviewSource } from "./ReviewSource";
+-export type { ReviewMarks, SinceReview } from "./reviewedDomain";
++export type { ReviewMark, ReviewMarks, SinceReview } from "./reviewedDomain";
+ export type { ReviewedSource } from "./ReviewedSource";
+ export { createFixtureSource, loadFixture } from "./fixture";
+ export { createFixtureCompareSource, loadCompareFixture } from "./fixtureCompare";
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 783fb9c..022935b 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -8,6 +8,8 @@ Folder sums (plan §2 #125): `rangeFolderSums.ts` `folderSums` (once per file li
+ 
+ Collapse toggle (plan §2 #126): `RangeView.vue`'s header button after Previous/Next reads and writes the merge window's stored choice through `createCollapsing` in the range store; its words are `collapsing.ts` `COLLAPSE_LABEL`, which the merge toolbar's `LABELS` uses too.
+ 
++Reviewed marks (request `docs/slices/request-range-reviewed.md`, design `docs/slices/briefs/range-reviewed-design.md` option A, plan §2 #196): `rangeReviewed.ts` owns `marks` (written only after Rust answered), `counted`, `busy`, `toggle` (next file via `nextFile.ts` `nextOpen`), `reviewFromStart`, `loadSince` (a failure forgets the view). The mounted list (`MOUNTED_FILES`, `markShown`, `forget`) is in `rangeVisited.ts`. `RangeView.vue`'s header starts with the Reviewed button (Mark resolved's look: filled and `aria-pressed` when the file is reviewed, disabled while `busy` — also while the first list failed, which the problem bar names) and shows `reviewedCount` after the collapse toggle. `RangeApp.vue` keys each view by file and `useRangeController.ts` `viewKind` (a `changedSinceReview` mark → `"sinceReview"`, else `"whole"`), so a mark change remounts the view; `viewParts` gives the since view `loadSince` → `sinceShown` (reviewed text left under `SINCE_REVIEW_HEADING`, current right), no threads, `startsThreads: false` (a number press starts no drag), and the header note with Review from start. A search hit on the since view's left column opens the file without moving. `RangeFileRow.vue` ends with the mark: lucide `check` and a muted name, or `refresh-ccw-dot` in warning colour; every word is in `rangeText.ts`.
++
+ Range threads (plan §2 #116–#120): `rangeThreads.ts` (list, open set, drafts through `rangeDrafts.ts`, counts, `boxOf`) and `rangeGitLab.ts` (the check, Send, `postButton`/`sendButton`, the send result) are held by `rangeStore`; every thread word is in `rangeThreadText.ts` (labels, prompts, `threadCountText`, `sendNoticeRow`; Copy/Copied are `serverText.ts`'s). `RangeView` renders `RangeThreadLayer.vue`, which teleports one `RangeThreadBox.vue` per key of `useRangeController`'s `threadHosts` into the host the editor keeps for that thread, so a box keeps its DOM, focus and typed text across CodeMirror redraws. A box is a draft (place, text, Comment/Cancel) or an open thread (place, collapse, one `RangeMessage.vue` per message, the reply field); a collapsed thread has no host and so no box. A thread's place is a `ThreadPlace` (plan §2 #145–#148): a drag over the line numbers reaches `startThread(file, place)` through `rangeThreadParts`' `events`; it focuses the open draft of the same file whose place has the same `start` (`sameDiffLine`) and an `end` in the same column on the same line (`rangeDrafts.ts` `samePlace`), and any other place is a new draft, even one ending on the same line. `threadPlaceText(entry, place)` is the box header, its `aria-label` and the AI's `RELATIVE_FILE_PATH_WITH_LINE`: each end is a removed line's old path (renamed) and old number, or any other line's path and new number; one line reads `path:204`, both ends removed or neither `path:201-204`, one of each `path:-200 to +204`, and one of each in a renamed file `old.md:-3 to new.md:+4`. `RangeMessage` shows a note's text or the one `aiAnswer` line (an exhaustive switch C replaces), or in its place the message's open `RangeMessageEditor.vue`; the `postButton` (disabled ones keep their sentence as title on a wrapper), the posting label, and for a pending message the link as selectable text with Copy (a failed clipboard write selects the link). `postButton` returns the label, the title and the press action (`write` | `unqueue` | null); `write` opens `RangeMessageEditor.vue` (`box="post"`, label "Text to post", Queue) in the message's place by writing a `post` draft (`rangeDrafts.ts`, keyed by `MessageId`: `postDraft`/`writePost`/`dropPost`), so a half-edited Post text survives a collapse and the 16-view eviction; a queue that lands drops it, and focus moves to the message's Post/Unqueue button after a queue or a Cancel. `RangeMessageEditor.vue` is the one in-place message editor for Post and Edit: it reads and writes the draft its `box` names, focuses its field on mount, keeps its submit off while the text is blank or `offTitle` is set (shown as the title), keeps focus in the field on a submit press (`@mousedown.prevent`) and emits `submit`/`cancel`. A failed clipboard write selects the link (`copyOrSelect.ts`, shared with `ServerMenu`). Keys in every box field (the range boxes and the merge-request reply field `MergeRequestReplyField.vue`) go through the window-neutral `boxKeys.ts` `boxKeydown`: `Mod-Enter` submits and `Escape` cancels (built with `keys.ts` `keyList`, matched by `pressesKey`; only the composing check is its own) (a draft is dropped, a reply cleared), both `preventDefault` and `stopPropagation`; every other key stays the field's. `RangeApp` calls `fileListKey(event, navigator.platform)` as the other roots do; the reply's Comment keeps focus in the reply field (`@mousedown.prevent`). `RangeSendButton.vue` sits left of the gear in each `RangeView` header; `RangeApp` shows the last send's result (`sendNoticeRow`) as a closable `NoticeBar` row and passes each file's thread count to `RangeFileRow` (a muted speech bubble, none at 0).
+ 
+ Edit and Delete (plan §2 #123): `rangeNoteChange.ts` holds both rules — `isChangeable` (a note not pending) decides whether `RangeMessage.vue` shows them, and `noteChangeBlock(sending, aiTurn)` (a send running first, then the thread's AI turn) turns them and Save off, with `noteChangeTitle`'s hover text. Edit writes an `edit` draft (`rangeDrafts.ts` `editDraft`/`writeEdit`/`dropEdit`), shown in the message's place by `RangeMessageEditor.vue` (`box="edit"`, label "Comment text", Save; its `offTitle` is the block's title); writing an `edit` draft drops the message's `post` draft and the reverse, so the two boxes are never open at once. `editNote` sends only a non-blank text and drops the draft when stored; focus returns to Edit after Save or Cancel. Delete goes through `rangeStore`'s `deleteNote`, which asks `{ kind: "deleteNote" }` first. Every list a reply brings (`setList`) drops the open state and the reply, Post and Edit drafts of threads and messages it no longer holds, and the Edit draft of a note no longer changeable (a Send that made it pending closes its box), so a thread removed with its last note leaves nothing behind.
+diff --git a/frontend/src/ui/RangeApp.vue b/frontend/src/ui/RangeApp.vue
+index a925690..57ad1a6 100644
+--- a/frontend/src/ui/RangeApp.vue
++++ b/frontend/src/ui/RangeApp.vue
+@@ -2,7 +2,7 @@
+ import { useEventListener, useWindowFocus } from "@vueuse/core";
+ import { computed, onMounted, watch } from "vue";
+ 
+-import { log, onWindowClose, type RangeLineCounts } from "../ipc";
++import { log, onWindowClose, type RangeEntry, type RangeLineCounts } from "../ipc";
+ import AgentSettings from "./AgentSettings.vue";
+ import FileList from "./FileList.vue";
+ import MergeRequestDiscussionSetting from "./MergeRequestDiscussionSetting.vue";
+@@ -25,6 +25,7 @@ import SettingsButton from "./SettingsButton.vue";
+ import { useThemeAttribute } from "./settingsStore";
+ import SettingsView from "./SettingsView.vue";
+ import SideColumn from "./SideColumn.vue";
++import { viewKind, type RangeViewKind } from "./useRangeController";
+ 
+ const {
+   start,
+@@ -46,8 +47,10 @@ const {
+   ai,
+   mayClose,
+   search,
++  reviewed,
+ } = useRangeStore();
+ const { counts } = threads;
++const { marks } = reviewed;
+ 
+ const focused = useWindowFocus();
+ useThemeAttribute();
+@@ -90,6 +93,10 @@ async function guardClose(): Promise<void> {
+ function folderLines(path: string): RangeLineCounts {
+   return sums.value.get(path) ?? { kind: "notCounted" };
+ }
++
++function viewOf(file: RangeEntry): RangeViewKind {
++  return viewKind(marks.value.get(file.id));
++}
+ </script>
+ 
+ <template>
+@@ -110,7 +117,12 @@ function folderLines(path: string): RangeLineCounts {
+         @select="showFile"
+       >
+         <template #file="{ file, label }">
+-          <RangeFileRow :file="file" :label="label" :threads="counts.get(file.id) ?? 0" />
++          <RangeFileRow
++            :file="file"
++            :label="label"
++            :threads="counts.get(file.id) ?? 0"
++            :review="marks.get(file.id) ?? null"
++          />
+         </template>
+         <template #folder="{ path }">
+           <RangeCounts :lines="folderLines(path)" class="ml-auto" />
+@@ -126,11 +138,12 @@ function folderLines(path: string): RangeLineCounts {
+         <template v-if="start !== null">
+           <RangeView
+             v-for="file in visited"
+-            :key="file.id"
++            :key="`${file.id}:${viewOf(file)}`"
+             :file="file"
+             :left-side="start.left"
+             :right-side="start.right"
+             :shown="file.id === shown && screen.kind === 'files'"
++            :view="viewOf(file)"
+           />
+         </template>
+         <div
+diff --git a/frontend/src/ui/RangeFileRow.vue b/frontend/src/ui/RangeFileRow.vue
+index bf56d64..e26e53e 100644
+--- a/frontend/src/ui/RangeFileRow.vue
++++ b/frontend/src/ui/RangeFileRow.vue
+@@ -1,13 +1,24 @@
+ <script setup lang="ts">
+-import { computed } from "vue";
++import { computed, type Component } from "vue";
++import Check from "~icons/lucide/check";
+ import MessageSquare from "~icons/lucide/message-square";
++import RefreshCcwDot from "~icons/lucide/refresh-ccw-dot";
+ 
+-import type { RangeChange, RangeEntry } from "../ipc";
++import type { RangeChange, RangeEntry, ReviewMark } from "../ipc";
+ import RangeCounts from "./RangeCounts.vue";
+-import { changeMark } from "./rangeText";
++import { changeMark, REVIEW_MARK_WORDS } from "./rangeText";
+ import { threadCountText } from "./rangeThreadText";
+ 
+-const props = defineProps<{ file: RangeEntry; label: string; threads: number }>();
++type ReviewLook = { readonly icon: Component; readonly colour: string };
++
++type ReviewShown = ReviewLook & { readonly word: string };
++
++const props = defineProps<{
++  file: RangeEntry;
++  label: string;
++  threads: number;
++  review: ReviewMark | null;
++}>();
+ 
+ const LETTER_COLOURS: Readonly<Record<RangeChange["kind"], string>> = {
+   added: "text-success-signal",
+@@ -16,12 +27,22 @@ const LETTER_COLOURS: Readonly<Record<RangeChange["kind"], string>> = {
+   renamed: "text-problem-warning",
+ };
+ 
++const REVIEW_LOOKS: Readonly<Record<ReviewMark, ReviewLook>> = {
++  reviewed: { icon: Check, colour: "text-fg-muted" },
++  changedSinceReview: { icon: RefreshCcwDot, colour: "text-problem-warning" },
++};
++
+ const mark = computed(() => changeMark(props.file.change));
+ const letterColour = computed(() => LETTER_COLOURS[props.file.change.kind]);
+ const oldPath = computed(() =>
+   props.file.change.kind === "renamed" ? props.file.change.oldPath : null,
+ );
+ const threadsTitle = computed(() => threadCountText(props.threads));
++const reviewShown = computed((): ReviewShown | null =>
++  props.review === null
++    ? null
++    : { ...REVIEW_LOOKS[props.review], word: REVIEW_MARK_WORDS[props.review] },
++);
+ </script>
+ 
+ <template>
+@@ -34,7 +55,7 @@ const threadsTitle = computed(() => threadCountText(props.threads));
+   >
+     {{ mark.letter }}
+   </span>
+-  <span class="truncate">{{ label }}</span>
++  <span class="truncate" :class="{ 'text-fg-muted': review === 'reviewed' }">{{ label }}</span>
+   <span v-if="oldPath !== null" class="min-w-0 truncate text-fg-muted">{{ oldPath }}</span>
+   <span
+     v-if="threads > 0"
+@@ -47,4 +68,14 @@ const threadsTitle = computed(() => threadCountText(props.threads));
+     {{ threads }}
+   </span>
+   <RangeCounts :lines="file.lines" :class="{ 'ml-auto': threads === 0 }" />
++  <span
++    v-if="reviewShown !== null"
++    role="img"
++    :title="reviewShown.word"
++    :aria-label="reviewShown.word"
++    class="flex shrink-0"
++    :class="reviewShown.colour"
++  >
++    <component :is="reviewShown.icon" class="size-3.5" aria-hidden="true" />
++  </span>
+ </template>
+diff --git a/frontend/src/ui/RangeView.vue b/frontend/src/ui/RangeView.vue
+index 2cf7c16..f581dc2 100644
+--- a/frontend/src/ui/RangeView.vue
++++ b/frontend/src/ui/RangeView.vue
+@@ -13,10 +13,18 @@ import PaneFrame from "./PaneFrame.vue";
+ import { compareColumns } from "./paneSplit";
+ import RangeSendButton from "./RangeSendButton.vue";
+ import { useRangeStore } from "./rangeStore";
+-import { fileHeading, sideHeading } from "./rangeText";
++import {
++  fileHeading,
++  REVIEW_FROM_START_LABEL,
++  REVIEWED_LABEL,
++  reviewedCount,
++  SINCE_REVIEW_HEADING,
++  SINCE_REVIEW_NOTE,
++  sideHeading,
++} from "./rangeText";
+ import RangeThreadLayer from "./RangeThreadLayer.vue";
+ import SettingsButton from "./SettingsButton.vue";
+-import { useRangeController } from "./useRangeController";
++import { useRangeController, type RangeViewKind } from "./useRangeController";
+ import { useSearchGoTo } from "./useSearchGoTo";
+ 
+ const props = defineProps<{
+@@ -24,6 +32,7 @@ const props = defineProps<{
+   leftSide: RangeSide;
+   rightSide: RangeSide;
+   shown: boolean;
++  view: RangeViewKind;
+ }>();
+ 
+ const GRID_TEMPLATE_COLUMNS = compareColumns();
+@@ -34,26 +43,38 @@ const left = useTemplateRef<HTMLDivElement>("left");
+ const right = useTemplateRef<HTMLDivElement>("right");
+ const strip = useTemplateRef<SVGSVGElement>("strip");
+ const sentenceBox = useTemplateRef<HTMLParagraphElement>("sentenceBox");
+-const { preferences, question, collapsing, toggleCollapsing, search } = useRangeStore();
++const { preferences, question, collapsing, toggleCollapsing, search, reviewed } = useRangeStore();
++const { marks, counted, busy } = reviewed;
+ const { content, threadHosts, sentenceFocusAsks, moveToChange, goTo } = useRangeController(
+   props.file,
+   { left, right, strip },
+-  { preferences },
++  { preferences, view: props.view },
+ );
+ useSearchGoTo(
+   search,
+   () => props.shown,
+   () => props.file.path,
+-  goTo,
++  searchGoTo,
+ );
+ 
+ const icon = computed(() => fileIcon(props.file.path));
+ const heading = computed(() => fileHeading(props.file));
+-const leftHeading = computed(() => sideHeading(props.leftSide));
++const since = computed(() => props.view === "sinceReview");
++const leftHeading = computed(() =>
++  since.value ? SINCE_REVIEW_HEADING : sideHeading(props.leftSide),
++);
++const leftTitle = computed(() => (since.value ? undefined : props.leftSide.subject));
+ const rightHeading = computed(() => sideHeading(props.rightSide));
+ const columns = computed(() => content.value.kind === "columns");
+ const note = computed(() => (content.value.kind === "columns" ? content.value.note : null));
+ const sentence = computed(() => (content.value.kind === "sentence" ? content.value.text : null));
++const isReviewed = computed(() => marks.value.get(props.file.id) === "reviewed");
++const reviewedLook = computed(() =>
++  isReviewed.value
++    ? "border-primary bg-primary text-on-primary hover:brightness-110"
++    : "border-control-border hover:bg-hover",
++);
++const count = computed(() => reviewedCount(counted.value));
+ 
+ watch(
+   sentenceFocusAsks,
+@@ -62,14 +83,52 @@ watch(
+   },
+   { flush: "post" },
+ );
++
++function searchGoTo(target: Parameters<typeof goTo>[0]): void {
++  if (since.value && target.pane === "left") {
++    return;
++  }
++  goTo(target);
++}
++
++function toggleReviewed(): void {
++  void reviewed.toggle(props.file);
++}
++
++function reviewFromStart(): void {
++  void reviewed.reviewFromStart(props.file);
++}
+ </script>
+ 
+ <template>
+   <PaneFrame :shown="shown" :asking="question !== null" :columns="GRID_TEMPLATE_COLUMNS">
+     <template #header>
+       <header class="flex h-10 shrink-0 items-center gap-1 px-2">
++        <button
++          type="button"
++          :aria-pressed="isReviewed"
++          :disabled="busy"
++          class="mr-2 rounded border px-3.5 py-1 disabled:pointer-events-none disabled:border-control-border disabled:bg-transparent disabled:text-fg-muted"
++          :class="reviewedLook"
++          @mousedown.prevent
++          @click="toggleReviewed"
++        >
++          {{ REVIEWED_LABEL }}
++        </button>
+         <component :is="icon" class="ml-1 size-4 shrink-0" aria-hidden="true" />
+         <h2 class="mr-2 ml-1 truncate font-semibold">{{ heading }}</h2>
++        <template v-if="since">
++          <span class="mr-2 shrink-0 text-fg-muted">{{ SINCE_REVIEW_NOTE }}</span>
++          <button
++            type="button"
++            :disabled="busy"
++            class="mr-2 shrink-0 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
++            @mousedown.prevent
++            @click="reviewFromStart"
++          >
++            {{ REVIEW_FROM_START_LABEL }}
++          </button>
++        </template>
+         <span v-if="note !== null" class="mr-2 shrink-0 text-fg-muted">{{ note }}</span>
+         <button
+           type="button"
+@@ -105,6 +164,7 @@ watch(
+         >
+           <ChevronsDownUp class="size-4" aria-hidden="true" />
+         </button>
++        <span class="ml-3 shrink-0 text-fg-muted" role="status">{{ count }}</span>
+         <RangeSendButton class="ml-auto" />
+         <MergeRequestsButton />
+         <SettingsButton />
+@@ -113,7 +173,7 @@ watch(
+     <template #default="{ stripLayer }">
+       <h3
+         class="col-start-1 row-start-1 truncate border-b border-separator px-3 py-1.5 text-fg-muted"
+-        :title="leftSide.subject"
++        :title="leftTitle"
+       >
+         {{ leftHeading }}
+       </h3>
+@@ -130,7 +190,7 @@ watch(
+           <svg ref="strip" aria-hidden="true" class="block h-full w-full" />
+         </div>
+         <div ref="right" class="col-start-3 row-start-2 min-h-0 min-w-0" />
+-        <RangeThreadLayer :file="file" :hosts="threadHosts" />
++        <RangeThreadLayer v-if="!since" :file="file" :hosts="threadHosts" />
+       </template>
+       <p
+         v-else-if="sentence !== null"
+diff --git a/frontend/src/ui/rangeText.test.ts b/frontend/src/ui/rangeText.test.ts
+index 701229d..902e731 100644
+--- a/frontend/src/ui/rangeText.test.ts
++++ b/frontend/src/ui/rangeText.test.ts
+@@ -8,6 +8,8 @@ import {
+   fileSentence,
+   lineCounts,
+   modeNote,
++  REVIEW_MARK_WORDS,
++  reviewedCount,
+   sideHeading,
+   sideLabel,
+   type SentenceFile,
+@@ -114,3 +116,15 @@ test.each<[SentenceFile, string]>([
+ ])("the %o sentence is %s", (file, sentence) => {
+   expect(fileSentence(file)).toBe(sentence);
+ });
++
++test("the reviewed count reads N of M reviewed", () => {
++  expect(reviewedCount({ reviewed: 0, of: 13 })).toBe("0 of 13 reviewed");
++  expect(reviewedCount({ reviewed: 13, of: 13 })).toBe("13 of 13 reviewed");
++});
++
++test("each review mark has its word", () => {
++  expect(REVIEW_MARK_WORDS).toEqual({
++    reviewed: "reviewed",
++    changedSinceReview: "changed since reviewed",
++  });
++});
+diff --git a/frontend/src/ui/rangeText.ts b/frontend/src/ui/rangeText.ts
+index ef7ac42..6548afb 100644
+--- a/frontend/src/ui/rangeText.ts
++++ b/frontend/src/ui/rangeText.ts
+@@ -8,6 +8,7 @@ import type {
+   RangeSide,
+   RangeSides,
+   RangeStart,
++  ReviewMark,
+ } from "../ipc";
+ 
+ export type SentenceFile = Exclude<RangeFile, { readonly kind: "texts" }>;
+@@ -20,6 +21,18 @@ const BYTES_PER_MIB = 1_048_576;
+ 
+ export const RANGE_LIST_LABEL = "Changed files";
+ 
++export const REVIEWED_LABEL = "Reviewed";
++export const REVIEW_FROM_START_LABEL = "Review from start";
++export const SINCE_REVIEW_NOTE = "Changed since you reviewed it";
++export const SINCE_REVIEW_HEADING = "As you reviewed it";
++export const SINCE_NO_TEXT =
++  "This file changed since you reviewed it, and one of the two versions is not text. Review from start shows the whole change.";
++
++export const REVIEW_MARK_WORDS: Readonly<Record<ReviewMark, string>> = {
++  reviewed: "reviewed",
++  changedSinceReview: "changed since reviewed",
++};
++
+ const CHANGE_MARKS: Readonly<Record<RangeChange["kind"], ChangeMark>> = {
+   added: { letter: "A", word: "added" },
+   modified: { letter: "M", word: "modified" },
+@@ -44,6 +57,10 @@ export function changeMark(change: RangeChange): ChangeMark {
+   return CHANGE_MARKS[change.kind];
+ }
+ 
++export function reviewedCount({ reviewed, of }: { reviewed: number; of: number }): string {
++  return `${reviewed} of ${of} reviewed`;
++}
++
+ export function sideLabel({ label }: RangeSide): string {
+   return label.kind === "named" ? label.name : `merge base of ${label.left} and ${label.right}`;
+ }
+diff --git a/frontend/src/ui/useRangeController.test.ts b/frontend/src/ui/useRangeController.test.ts
+index 25f0fc0..102f9f2 100644
+--- a/frontend/src/ui/useRangeController.test.ts
++++ b/frontend/src/ui/useRangeController.test.ts
+@@ -1,4 +1,4 @@
+-import { expect, test } from "vitest";
++import { expect, test, vi } from "vitest";
+ import { effectScope, nextTick, shallowRef, type ShallowRef } from "vue";
+ 
+ import type { Preferences, RangeEvents, RangeTexts, ShownThread } from "../editor";
+@@ -8,16 +8,27 @@ import {
+   diffLineOf,
+   log,
+   onePlace,
++  type RangeEntry,
+   type RangeFile,
+   type RangeSource,
++  type RangeStart,
+ } from "../ipc";
++import type { Problem } from "./problem";
++import { createRangeReviewed } from "./rangeReviewed";
++import { SINCE_NO_TEXT } from "./rangeText";
+ import { createRangeThreads } from "./rangeThreads";
+ import { preferencesOf, startSettings } from "./settings";
+ import {
+   followRange,
+   rangeThreadParts,
+   shownHosts,
++  sinceShown,
++  viewKind,
++  viewParts,
++  wholeShown,
+   type RangeHandle,
++  type RangeParts,
++  type RangeShown,
+   type ShownRange,
+ } from "./useRangeController";
+ 
+@@ -85,8 +96,8 @@ function run(from: RunFrom = {}): Run {
+   const threads = shallowRef<readonly ShownThread[]>([]);
+   const listed = shallowRef(from.listed ?? true);
+   const given: RangeEvents[] = [];
+-  const answers: ((file: RangeFile | null) => void)[] = [];
+-  const loaded = new Promise<RangeFile | null>((resolve) => {
++  const answers: ((shown: RangeShown | null) => void)[] = [];
++  const loaded = new Promise<RangeShown | null>((resolve) => {
+     answers.push(resolve);
+   });
+   const scope = effectScope();
+@@ -112,6 +123,7 @@ function run(from: RunFrom = {}): Run {
+         startThread: (place) => calls.push(`start ${place.end.kind}`),
+         toggleThreads: (keys) => calls.push(`toggle ${keys.join(",")}`),
+       },
++      startsThreads: true,
+       build: (texts, at, options, events) => {
+         const { preferences: chosen, collapsed: on } = options;
+         const threadKeys = keysOf(options.threads);
+@@ -142,7 +154,7 @@ function run(from: RunFrom = {}): Run {
+     },
+     answer: async (file) => {
+       for (const answer of answers) {
+-        answer(file);
++        answer(file === null ? null : wholeShown(file));
+       }
+       await loaded;
+       await nextTick();
+@@ -504,11 +516,12 @@ test.each([
+     scope.run(() =>
+       followRange({
+         path: board.path,
+-        load: async () => TEXTS,
++        load: async () => wholeShown(TEXTS),
+         hosts: () => "hosts",
+         preferences: DARK,
+         collapsed: true,
+         ...rangeThreadParts(threads, board),
++        startsThreads: true,
+         build: (_texts, _hosts, options) => {
+           built.push(options.threads.length);
+           return IDLE;
+@@ -526,3 +539,198 @@ test.each([
+     expect(built).toEqual(expected);
+   },
+ );
++
++type ViewWindow = {
++  readonly store: Parameters<typeof viewParts>[0];
++  readonly source: RangeSource;
++  readonly loads: string[];
++  readonly problems: Problem[];
++  readonly entry: (path: string) => RangeEntry;
++};
++
++type Followed = {
++  readonly handle: RangeHandle;
++  readonly texts: RangeTexts[];
++  readonly startsThreads: boolean[];
++  readonly threads: string[][];
++};
++
++async function viewWindow(search: string, edit: Partial<RangeSource> = {}): Promise<ViewWindow> {
++  const source = { ...createFixtureRangeSource(log, search), ...edit };
++  const opened = await source.openRange();
++  if (!opened.ok) {
++    throw new Error("the fixture did not open");
++  }
++  const start = shallowRef<RangeStart | null>(opened.value);
++  const loads: string[] = [];
++  const problems: Problem[] = [];
++  function report(problem: Problem): void {
++    problems.push(problem);
++  }
++  const store = {
++    loadFile: async (entry: RangeEntry): Promise<RangeFile | null> => {
++      loads.push(entry.path);
++      const loaded = await source.loadRangeFile(entry.id);
++      return loaded.ok ? loaded.value : null;
++    },
++    threads: createRangeThreads(source, report),
++    reviewed: createRangeReviewed(source, {
++      start,
++      show: () => {},
++      forget: () => {},
++      problems: report,
++    }),
++  };
++  function entry(path: string): RangeEntry {
++    const found = opened.ok ? opened.value.files.find((each) => each.path === path) : undefined;
++    if (found === undefined) {
++      throw new Error(`no file ${path}`);
++    }
++    return found;
++  }
++  return { store, source, loads, problems, entry };
++}
++
++async function followed(
++  path: string,
++  parts: Pick<RangeParts<string>, "load" | "threads" | "listed" | "events" | "startsThreads">,
++): Promise<Followed> {
++  const texts: RangeTexts[] = [];
++  const startsThreads: boolean[] = [];
++  const threads: string[][] = [];
++  const handle = effectScope().run(() =>
++    followRange({
++      path,
++      hosts: () => "hosts",
++      preferences: DARK,
++      collapsed: true,
++      ...parts,
++      build: (built, _hosts, options) => {
++        texts.push(built);
++        startsThreads.push(options.startsThreads);
++        threads.push(keysOf(options.threads));
++        return IDLE;
++      },
++    }),
++  );
++  if (handle === undefined) {
++    throw new Error("the scope did not run");
++  }
++  await vi.waitFor(() => {
++    expect(handle.content.value.kind).not.toBe("loading");
++  });
++  await nextTick();
++  return { handle, texts, startsThreads, threads };
++}
++
++const SINCE_SEEDED = "?range=review&reviewed=seeded&threads=seeded";
++const BOARD = "src/board/board.ts";
++
++test("a_since_review_view_loads_load_since_review_and_shows_reviewed_left_current_right", async () => {
++  const window = await viewWindow(SINCE_SEEDED);
++  const board = window.entry(BOARD);
++  const since = await window.source.loadSinceReview(board.id);
++  if (!since.ok || since.value.kind !== "texts") {
++    throw new Error("the fixture's board.ts has no since texts");
++  }
++
++  const view = await followed(board.path, viewParts(window.store, board, "sinceReview"));
++
++  expect(view.handle.content.value).toEqual({ kind: "columns", note: null });
++  expect(view.texts).toEqual([
++    {
++      path: BOARD,
++      left: since.value.reviewed,
++      right: since.value.current,
++      differences: since.value.differences,
++    },
++  ]);
++  expect(since.value.reviewed).not.toBe(since.value.current);
++  expect(window.loads).toEqual([]);
++});
++
++test("a_since_review_view_shows_no_threads_and_builds_with_starts_threads_false", async () => {
++  const window = await viewWindow(SINCE_SEEDED);
++  const board = window.entry(BOARD);
++  const since = viewParts(window.store, board, "sinceReview");
++
++  const view = await followed(board.path, since);
++  await window.store.threads.load();
++  const whole = viewParts(window.store, board, "whole");
++
++  expect([view.texts.length, view.startsThreads, view.threads]).toEqual([1, [false], [[]]]);
++  expect(whole.threads().length).toBeGreaterThan(0);
++  expect([since.threads(), since.listed(), whole.startsThreads]).toEqual([[], true, true]);
++});
++
++test("a_no_text_since_reply_is_the_since_sentence", async () => {
++  const window = await viewWindow(SINCE_SEEDED);
++  const logo = window.entry("public/logo.png");
++
++  const view = await followed(logo.path, viewParts(window.store, logo, "sinceReview"));
++
++  expect(view.handle.content.value).toEqual({ kind: "sentence", text: SINCE_NO_TEXT });
++  expect(view.texts).toEqual([]);
++  expect(sinceShown({ kind: "noText" })).toEqual({ kind: "sentence", text: SINCE_NO_TEXT });
++  expect(
++    sinceShown({ kind: "texts", reviewed: "old\n", current: "new\n", differences: [] }),
++  ).toEqual({ kind: "texts", left: "old\n", right: "new\n", differences: [], note: null });
++});
++
++test("a failed since load answers null and reports it; a failed whole load answers null", async () => {
++  const window = await viewWindow(SINCE_SEEDED, {
++    loadSinceReview: async () => ({ ok: false, failure: { kind: "WorkerStopped" } }),
++    loadRangeFile: async () => ({ ok: false, failure: { kind: "WorkerStopped" } }),
++  });
++  const board = window.entry(BOARD);
++
++  const since = await viewParts(window.store, board, "sinceReview").load();
++  const whole = await viewParts(window.store, board, "whole").load();
++
++  expect([since, whole]).toEqual([null, null]);
++  expect(window.problems.map((problem) => problem.action)).toEqual(["reviewed"]);
++});
++
++test("the_whole_view_is_unchanged", async () => {
++  const window = await viewWindow(SINCE_SEEDED);
++  const board = window.entry(BOARD);
++  const loaded = await window.source.loadRangeFile(board.id);
++  if (!loaded.ok || loaded.value.kind !== "texts") {
++    throw new Error("the fixture's board.ts has no texts");
++  }
++  const { left, right, differences } = loaded.value;
++  await window.store.threads.load();
++  const parts = viewParts(window.store, board, "whole");
++  const threadParts = rangeThreadParts(window.store.threads, board);
++
++  const view = await followed(board.path, parts);
++
++  expect(window.loads).toEqual([BOARD]);
++  expect(view.handle.content.value).toEqual({ kind: "columns", note: null });
++  expect(view.texts).toEqual([{ path: BOARD, left, right, differences }]);
++  expect(view.startsThreads).toEqual([true]);
++  expect(view.threads).toEqual([keysOf(threadParts.threads())]);
++  expect(view.threads[0]?.length).toBeGreaterThan(0);
++});
++
++test("a texts file shows both texts with its mode note; any other file its sentence", () => {
++  expect(wholeShown(TEXTS)).toEqual({
++    kind: "texts",
++    left: "a\n",
++    right: "b\n",
++    differences: [],
++    note: "Mode changed: file → executable file",
++  });
++  expect(wholeShown({ kind: "binary" })).toEqual({
++    kind: "sentence",
++    text: "Binary file: not shown.",
++  });
++});
++
++test("only a changed-since-review mark opens the since view", () => {
++  expect([viewKind(undefined), viewKind("reviewed"), viewKind("changedSinceReview")]).toEqual([
++    "whole",
++    "whole",
++    "sinceReview",
++  ]);
++});
+diff --git a/frontend/src/ui/useRangeController.ts b/frontend/src/ui/useRangeController.ts
+index e60da52..5820437 100644
+--- a/frontend/src/ui/useRangeController.ts
++++ b/frontend/src/ui/useRangeController.ts
+@@ -18,9 +18,9 @@ import {
+   type RangeTexts,
+   type ShownThread,
+ } from "../editor";
+-import type { RangeEntry, RangeFile } from "../ipc";
+-import { useRangeStore } from "./rangeStore";
+-import { fileSentence, modeNote } from "./rangeText";
++import type { Difference, RangeEntry, RangeFile, ReviewMark, SinceReview } from "../ipc";
++import { useRangeStore, type RangeStore } from "./rangeStore";
++import { fileSentence, modeNote, SINCE_NO_TEXT } from "./rangeText";
+ import type { RangeThreads } from "./rangeThreads";
+ 
+ type Host<T> = Readonly<ShallowRef<T | null>>;
+@@ -31,6 +31,18 @@ type HostRefs<D, S> = {
+   readonly strip: Host<S>;
+ };
+ 
++export type RangeViewKind = "whole" | "sinceReview";
++
++export type RangeShown =
++  | {
++      readonly kind: "texts";
++      readonly left: string;
++      readonly right: string;
++      readonly differences: readonly Difference[];
++      readonly note: string | null;
++    }
++  | { readonly kind: "sentence"; readonly text: string };
++
+ type RangeContent =
+   | { readonly kind: "loading" }
+   | { readonly kind: "columns"; readonly note: string | null }
+@@ -53,13 +65,14 @@ export type RangeHandle = {
+ 
+ export type RangeParts<H> = {
+   readonly path: string;
+-  readonly load: () => Promise<RangeFile | null>;
++  readonly load: () => Promise<RangeShown | null>;
+   readonly hosts: () => H | null;
+   readonly preferences: MaybeRefOrGetter<Preferences>;
+   readonly collapsed: MaybeRefOrGetter<boolean>;
+   readonly threads: () => readonly ShownThread[];
+   readonly listed: () => boolean;
+   readonly events: Pick<RangeEvents, "startThread" | "toggleThreads">;
++  readonly startsThreads: boolean;
+   readonly build: (
+     texts: RangeTexts,
+     hosts: H,
+@@ -78,21 +91,45 @@ type Live = {
+   disposed: boolean;
+ };
+ 
+-function land(live: Live, path: string, file: RangeFile | null): void {
+-  if (live.disposed || file === null) {
++export function viewKind(mark: ReviewMark | undefined): RangeViewKind {
++  return mark === "changedSinceReview" ? "sinceReview" : "whole";
++}
++
++export function wholeShown(file: RangeFile): RangeShown {
++  if (file.kind !== "texts") {
++    return { kind: "sentence", text: fileSentence(file) };
++  }
++  const { left, right, differences, mode } = file;
++  return { kind: "texts", left, right, differences, note: modeNote(mode) };
++}
++
++export function sinceShown(since: SinceReview): RangeShown {
++  return since.kind === "texts"
++    ? {
++        kind: "texts",
++        left: since.reviewed,
++        right: since.current,
++        differences: since.differences,
++        note: null,
++      }
++    : { kind: "sentence", text: SINCE_NO_TEXT };
++}
++
++function land(live: Live, path: string, shown: RangeShown | null): void {
++  if (live.disposed || shown === null) {
+     return;
+   }
+-  if (file.kind !== "texts") {
+-    live.content.value = { kind: "sentence", text: fileSentence(file) };
++  if (shown.kind === "sentence") {
++    live.content.value = shown;
+     if (live.goTo !== null) {
+       live.goTo = null;
+       live.sentenceFocusAsks.value += 1;
+     }
+     return;
+   }
+-  const { left, right, differences, mode } = file;
++  const { left, right, differences, note } = shown;
+   live.waiting = { path, left, right, differences };
+-  live.content.value = { kind: "columns", note: modeNote(mode) };
++  live.content.value = { kind: "columns", note };
+ }
+ 
+ function build<H>(live: Live, parts: RangeParts<H>): void {
+@@ -110,6 +147,7 @@ function build<H>(live: Live, parts: RangeParts<H>): void {
+     preferences: toValue(parts.preferences),
+     collapsed: toValue(parts.collapsed),
+     threads: parts.threads(),
++    startsThreads: parts.startsThreads,
+   };
+   live.controller = parts.build(live.waiting, hosts, options, events);
+   live.waiting = null;
+@@ -160,8 +198,8 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
+     { flush: "post" },
+   );
+   followLive(live, parts);
+-  void parts.load().then((file) => {
+-    land(live, parts.path, file);
++  void parts.load().then((shown) => {
++    land(live, parts.path, shown);
+   });
+ 
+   onScopeDispose(() => {
+@@ -212,19 +250,48 @@ export function rangeThreadParts(
+   };
+ }
+ 
++export function viewParts(
++  store: Pick<RangeStore, "loadFile" | "threads" | "reviewed">,
++  file: RangeEntry,
++  view: RangeViewKind,
++): Pick<RangeParts<unknown>, "load" | "threads" | "listed" | "events" | "startsThreads"> {
++  const threadParts = rangeThreadParts(store.threads, file);
++  switch (view) {
++    case "whole":
++      return {
++        ...threadParts,
++        load: async () => {
++          const loaded = await store.loadFile(file);
++          return loaded === null ? null : wholeShown(loaded);
++        },
++        startsThreads: true,
++      };
++    case "sinceReview":
++      return {
++        events: threadParts.events,
++        threads: () => [],
++        listed: () => true,
++        load: async () => {
++          const since = await store.reviewed.loadSince(file);
++          return since === null ? null : sinceShown(since);
++        },
++        startsThreads: false,
++      };
++  }
++}
++
+ export function useRangeController(
+   file: RangeEntry,
+   hosts: HostRefs<HTMLDivElement, SVGSVGElement>,
+-  options: { readonly preferences: MaybeRefOrGetter<Preferences> },
++  options: { readonly preferences: MaybeRefOrGetter<Preferences>; readonly view: RangeViewKind },
+ ): RangeHandle {
+   const store = useRangeStore();
+   return followRange({
+     path: file.path,
+-    load: () => store.loadFile(file),
+     hosts: () => shownHosts(hosts),
+     preferences: options.preferences,
+     collapsed: store.collapsing,
+-    ...rangeThreadParts(store.threads, file),
++    ...viewParts(store, file, options.view),
+     build: (texts, shown, chosen, events) => new RangeController(texts, shown, chosen, events),
+   });
+ }

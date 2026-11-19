@@ -149,7 +149,7 @@ export type {
   ThreadList,
 } from "./reviewDomain";
 export type { ReviewSource } from "./ReviewSource";
-export type { ReviewMarks, SinceReview } from "./reviewedDomain";
+export type { ReviewMark, ReviewMarks, SinceReview } from "./reviewedDomain";
 export type { ReviewedSource } from "./ReviewedSource";
 export { createFixtureSource, loadFixture } from "./fixture";
 export { createFixtureCompareSource, loadCompareFixture } from "./fixtureCompare";

@@ -18,9 +18,9 @@ import {
   type RangeTexts,
   type ShownThread,
 } from "../editor";
-import type { RangeEntry, RangeFile } from "../ipc";
-import { useRangeStore } from "./rangeStore";
-import { fileSentence, modeNote } from "./rangeText";
+import type { Difference, RangeEntry, RangeFile, ReviewMark, SinceReview } from "../ipc";
+import { useRangeStore, type RangeStore } from "./rangeStore";
+import { fileSentence, modeNote, SINCE_NO_TEXT } from "./rangeText";
 import type { RangeThreads } from "./rangeThreads";
 
 type Host<T> = Readonly<ShallowRef<T | null>>;
@@ -30,6 +30,18 @@ type HostRefs<D, S> = {
   readonly right: Host<D>;
   readonly strip: Host<S>;
 };
+
+export type RangeViewKind = "whole" | "sinceReview";
+
+export type RangeShown =
+  | {
+      readonly kind: "texts";
+      readonly left: string;
+      readonly right: string;
+      readonly differences: readonly Difference[];
+      readonly note: string | null;
+    }
+  | { readonly kind: "sentence"; readonly text: string };
 
 type RangeContent =
   | { readonly kind: "loading" }
@@ -53,13 +65,14 @@ export type RangeHandle = {
 
 export type RangeParts<H> = {
   readonly path: string;
-  readonly load: () => Promise<RangeFile | null>;
+  readonly load: () => Promise<RangeShown | null>;
   readonly hosts: () => H | null;
   readonly preferences: MaybeRefOrGetter<Preferences>;
   readonly collapsed: MaybeRefOrGetter<boolean>;
   readonly threads: () => readonly ShownThread[];
   readonly listed: () => boolean;
   readonly events: Pick<RangeEvents, "startThread" | "toggleThreads">;
+  readonly startsThreads: boolean;
   readonly build: (
     texts: RangeTexts,
     hosts: H,
@@ -78,21 +91,45 @@ type Live = {
   disposed: boolean;
 };
 
-function land(live: Live, path: string, file: RangeFile | null): void {
-  if (live.disposed || file === null) {
+export function viewKind(mark: ReviewMark | undefined): RangeViewKind {
+  return mark === "changedSinceReview" ? "sinceReview" : "whole";
+}
+
+export function wholeShown(file: RangeFile): RangeShown {
+  if (file.kind !== "texts") {
+    return { kind: "sentence", text: fileSentence(file) };
+  }
+  const { left, right, differences, mode } = file;
+  return { kind: "texts", left, right, differences, note: modeNote(mode) };
+}
+
+export function sinceShown(since: SinceReview): RangeShown {
+  return since.kind === "texts"
+    ? {
+        kind: "texts",
+        left: since.reviewed,
+        right: since.current,
+        differences: since.differences,
+        note: null,
+      }
+    : { kind: "sentence", text: SINCE_NO_TEXT };
+}
+
+function land(live: Live, path: string, shown: RangeShown | null): void {
+  if (live.disposed || shown === null) {
     return;
   }
-  if (file.kind !== "texts") {
-    live.content.value = { kind: "sentence", text: fileSentence(file) };
+  if (shown.kind === "sentence") {
+    live.content.value = shown;
     if (live.goTo !== null) {
       live.goTo = null;
       live.sentenceFocusAsks.value += 1;
     }
     return;
   }
-  const { left, right, differences, mode } = file;
+  const { left, right, differences, note } = shown;
   live.waiting = { path, left, right, differences };
-  live.content.value = { kind: "columns", note: modeNote(mode) };
+  live.content.value = { kind: "columns", note };
 }
 
 function build<H>(live: Live, parts: RangeParts<H>): void {
@@ -110,6 +147,7 @@ function build<H>(live: Live, parts: RangeParts<H>): void {
     preferences: toValue(parts.preferences),
     collapsed: toValue(parts.collapsed),
     threads: parts.threads(),
+    startsThreads: parts.startsThreads,
   };
   live.controller = parts.build(live.waiting, hosts, options, events);
   live.waiting = null;
@@ -160,8 +198,8 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
     { flush: "post" },
   );
   followLive(live, parts);
-  void parts.load().then((file) => {
-    land(live, parts.path, file);
+  void parts.load().then((shown) => {
+    land(live, parts.path, shown);
   });
 
   onScopeDispose(() => {
@@ -212,19 +250,48 @@ export function rangeThreadParts(
   };
 }
 
+export function viewParts(
+  store: Pick<RangeStore, "loadFile" | "threads" | "reviewed">,
+  file: RangeEntry,
+  view: RangeViewKind,
+): Pick<RangeParts<unknown>, "load" | "threads" | "listed" | "events" | "startsThreads"> {
+  const threadParts = rangeThreadParts(store.threads, file);
+  switch (view) {
+    case "whole":
+      return {
+        ...threadParts,
+        load: async () => {
+          const loaded = await store.loadFile(file);
+          return loaded === null ? null : wholeShown(loaded);
+        },
+        startsThreads: true,
+      };
+    case "sinceReview":
+      return {
+        events: threadParts.events,
+        threads: () => [],
+        listed: () => true,
+        load: async () => {
+          const since = await store.reviewed.loadSince(file);
+          return since === null ? null : sinceShown(since);
+        },
+        startsThreads: false,
+      };
+  }
+}
+
 export function useRangeController(
   file: RangeEntry,
   hosts: HostRefs<HTMLDivElement, SVGSVGElement>,
-  options: { readonly preferences: MaybeRefOrGetter<Preferences> },
+  options: { readonly preferences: MaybeRefOrGetter<Preferences>; readonly view: RangeViewKind },
 ): RangeHandle {
   const store = useRangeStore();
   return followRange({
     path: file.path,
-    load: () => store.loadFile(file),
     hosts: () => shownHosts(hosts),
     preferences: options.preferences,
     collapsed: store.collapsing,
-    ...rangeThreadParts(store.threads, file),
+    ...viewParts(store, file, options.view),
     build: (texts, shown, chosen, events) => new RangeController(texts, shown, chosen, events),
   });
 }

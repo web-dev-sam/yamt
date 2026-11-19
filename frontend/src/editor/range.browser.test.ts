@@ -25,6 +25,7 @@ const OPTIONS: RangeOptions = {
   preferences: { theme: "dark", keys: DEFAULT_KEYS },
   collapsed: false,
   threads: [],
+  startsThreads: true,
 };
 const EVENTS: RangeEvents = { startThread: () => {}, toggleThreads: () => {}, hosts: () => {} };
 const LEFT = [

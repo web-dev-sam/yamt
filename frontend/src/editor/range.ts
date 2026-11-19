@@ -41,6 +41,8 @@ export type RangeOptions = {
   readonly preferences: Preferences;
   readonly collapsed: boolean;
   readonly threads: readonly ShownThread[];
+  /** False in the since-review view: a press on a line number starts no drag and no thread (rule 7). */
+  readonly startsThreads: boolean;
 };
 
 export type RangeEvents = {
@@ -64,12 +66,14 @@ export class RangeController {
   #dragged: ThreadPlace | null = null;
   #hovered: string | null = null;
   #settings: PaneSettings;
+  readonly #startsThreads: boolean;
   #destroyed = false;
 
   constructor(texts: RangeTexts, hosts: CompareHosts, options: RangeOptions, events: RangeEvents) {
     this.#differences = texts.differences;
     this.#events = events;
     this.#threads = options.threads;
+    this.#startsThreads = options.startsThreads;
     this.#settings = { preferences: options.preferences, platform: navigator.platform };
     this.#folds = new RangeFolds(hosts, () => this.#views);
     this.#views = createReadOnlyColumnViews(texts, hosts, {
@@ -154,10 +158,10 @@ export class RangeController {
     const column = view === this.#views.left ? "left" : "right";
     const counts = view.state.field(threadField)?.counts ?? [];
     const press = numberPress({ differences: this.#differences, column, line, onBadge, counts });
-    if (press.kind === "drag") {
-      this.#drag.start(press.line, event);
-    } else {
+    if (press.kind === "toggle") {
       this.#events.toggleThreads(press.keys);
+    } else if (this.#startsThreads) {
+      this.#drag.start(press.line, event);
     }
   }
 

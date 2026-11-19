@@ -13,10 +13,18 @@ import PaneFrame from "./PaneFrame.vue";
 import { compareColumns } from "./paneSplit";
 import RangeSendButton from "./RangeSendButton.vue";
 import { useRangeStore } from "./rangeStore";
-import { fileHeading, sideHeading } from "./rangeText";
+import {
+  fileHeading,
+  REVIEW_FROM_START_LABEL,
+  REVIEWED_LABEL,
+  reviewedCount,
+  SINCE_REVIEW_HEADING,
+  SINCE_REVIEW_NOTE,
+  sideHeading,
+} from "./rangeText";
 import RangeThreadLayer from "./RangeThreadLayer.vue";
 import SettingsButton from "./SettingsButton.vue";
-import { useRangeController } from "./useRangeController";
+import { useRangeController, type RangeViewKind } from "./useRangeController";
 import { useSearchGoTo } from "./useSearchGoTo";
 
 const props = defineProps<{
@@ -24,6 +32,7 @@ const props = defineProps<{
   leftSide: RangeSide;
   rightSide: RangeSide;
   shown: boolean;
+  view: RangeViewKind;
 }>();
 
 const GRID_TEMPLATE_COLUMNS = compareColumns();
@@ -34,26 +43,38 @@ const left = useTemplateRef<HTMLDivElement>("left");
 const right = useTemplateRef<HTMLDivElement>("right");
 const strip = useTemplateRef<SVGSVGElement>("strip");
 const sentenceBox = useTemplateRef<HTMLParagraphElement>("sentenceBox");
-const { preferences, question, collapsing, toggleCollapsing, search } = useRangeStore();
+const { preferences, question, collapsing, toggleCollapsing, search, reviewed } = useRangeStore();
+const { marks, counted, busy } = reviewed;
 const { content, threadHosts, sentenceFocusAsks, moveToChange, goTo } = useRangeController(
   props.file,
   { left, right, strip },
-  { preferences },
+  { preferences, view: props.view },
 );
 useSearchGoTo(
   search,
   () => props.shown,
   () => props.file.path,
-  goTo,
+  searchGoTo,
 );
 
 const icon = computed(() => fileIcon(props.file.path));
 const heading = computed(() => fileHeading(props.file));
-const leftHeading = computed(() => sideHeading(props.leftSide));
+const since = computed(() => props.view === "sinceReview");
+const leftHeading = computed(() =>
+  since.value ? SINCE_REVIEW_HEADING : sideHeading(props.leftSide),
+);
+const leftTitle = computed(() => (since.value ? undefined : props.leftSide.subject));
 const rightHeading = computed(() => sideHeading(props.rightSide));
 const columns = computed(() => content.value.kind === "columns");
 const note = computed(() => (content.value.kind === "columns" ? content.value.note : null));
 const sentence = computed(() => (content.value.kind === "sentence" ? content.value.text : null));
+const isReviewed = computed(() => marks.value.get(props.file.id) === "reviewed");
+const reviewedLook = computed(() =>
+  isReviewed.value
+    ? "border-primary bg-primary text-on-primary hover:brightness-110"
+    : "border-control-border hover:bg-hover",
+);
+const count = computed(() => reviewedCount(counted.value));
 
 watch(
   sentenceFocusAsks,
@@ -62,14 +83,52 @@ watch(
   },
   { flush: "post" },
 );
+
+function searchGoTo(target: Parameters<typeof goTo>[0]): void {
+  if (since.value && target.pane === "left") {
+    return;
+  }
+  goTo(target);
+}
+
+function toggleReviewed(): void {
+  void reviewed.toggle(props.file);
+}
+
+function reviewFromStart(): void {
+  void reviewed.reviewFromStart(props.file);
+}
 </script>
 
 <template>
   <PaneFrame :shown="shown" :asking="question !== null" :columns="GRID_TEMPLATE_COLUMNS">
     <template #header>
       <header class="flex h-10 shrink-0 items-center gap-1 px-2">
+        <button
+          type="button"
+          :aria-pressed="isReviewed"
+          :disabled="busy"
+          class="mr-2 rounded border px-3.5 py-1 disabled:pointer-events-none disabled:border-control-border disabled:bg-transparent disabled:text-fg-muted"
+          :class="reviewedLook"
+          @mousedown.prevent
+          @click="toggleReviewed"
+        >
+          {{ REVIEWED_LABEL }}
+        </button>
         <component :is="icon" class="ml-1 size-4 shrink-0" aria-hidden="true" />
         <h2 class="mr-2 ml-1 truncate font-semibold">{{ heading }}</h2>
+        <template v-if="since">
+          <span class="mr-2 shrink-0 text-fg-muted">{{ SINCE_REVIEW_NOTE }}</span>
+          <button
+            type="button"
+            :disabled="busy"
+            class="mr-2 shrink-0 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
+            @mousedown.prevent
+            @click="reviewFromStart"
+          >
+            {{ REVIEW_FROM_START_LABEL }}
+          </button>
+        </template>
         <span v-if="note !== null" class="mr-2 shrink-0 text-fg-muted">{{ note }}</span>
         <button
           type="button"
@@ -105,6 +164,7 @@ watch(
         >
           <ChevronsDownUp class="size-4" aria-hidden="true" />
         </button>
+        <span class="ml-3 shrink-0 text-fg-muted" role="status">{{ count }}</span>
         <RangeSendButton class="ml-auto" />
         <MergeRequestsButton />
         <SettingsButton />
@@ -113,7 +173,7 @@ watch(
     <template #default="{ stripLayer }">
       <h3
         class="col-start-1 row-start-1 truncate border-b border-separator px-3 py-1.5 text-fg-muted"
-        :title="leftSide.subject"
+        :title="leftTitle"
       >
         {{ leftHeading }}
       </h3>
@@ -130,7 +190,7 @@ watch(
           <svg ref="strip" aria-hidden="true" class="block h-full w-full" />
         </div>
         <div ref="right" class="col-start-3 row-start-2 min-h-0 min-w-0" />
-        <RangeThreadLayer :file="file" :hosts="threadHosts" />
+        <RangeThreadLayer v-if="!since" :file="file" :hosts="threadHosts" />
       </template>
       <p
         v-else-if="sentence !== null"
