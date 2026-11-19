@@ -323,6 +323,32 @@ test("a Reviewed click shows the next file in the window; a failed since load dr
   ]);
 });
 
+test("a since load that failed and later succeeds for the same file clears its problem", async () => {
+  const errors = quiet();
+  let refusing = true;
+  const store = await started(3, (fixture) => ({
+    loadSinceReview: (file: RangeFileId) =>
+      refusing ? failed(UNKNOWN) : fixture.loadSinceReview(file),
+  }));
+  const second = fileAt(store, 1);
+  store.showFile(second.path);
+
+  expect(await store.reviewed.loadSince(second)).toBeNull();
+  expect(visitedIndexes(store)).toEqual([0]);
+  const problem = { action: "reviewed", step: "since", path: second.path, cause: UNKNOWN };
+  expect(store.problem.value).toEqual(problem);
+
+  refusing = false;
+  expect(await store.reviewed.loadSince(fileAt(store, 0))).toMatchObject({ kind: "texts" });
+  expect(store.problem.value).toEqual(problem);
+
+  store.showFile(second.path);
+  expect(await store.reviewed.loadSince(second)).toMatchObject({ kind: "texts" });
+  expect(store.problem.value).toBeNull();
+  expect(visitedIndexes(store)).toEqual([0, 1]);
+  expect(errors).toHaveLength(1);
+});
+
 test("a failed thread list is the window's problem", async () => {
   const errors = quiet();
   const store = await started(2, () => ({

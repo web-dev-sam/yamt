@@ -1,0 +1,220 @@
+diff --git a/frontend/src/ui/rangeReviewed.test.ts b/frontend/src/ui/rangeReviewed.test.ts
+index 6d58272..314c59a 100644
+--- a/frontend/src/ui/rangeReviewed.test.ts
++++ b/frontend/src/ui/rangeReviewed.test.ts
+@@ -54,8 +54,16 @@ function created(
+   const reviewed = createRangeReviewed(source, {
+     start,
+     show: (path) => shown.push(path),
+-    forget: (file) => forgotten.push(file),
+     problems: (problem) => problems.push(problem),
++    loadView: async (view, call, problem) => {
++      const result = await call();
++      if (result.ok) {
++        return result.value;
++      }
++      forgotten.push(view.id);
++      problems.push(problem(result.failure));
++      return null;
++    },
+   });
+   return { reviewed, source, start, shown, forgotten, problems };
+ }
+diff --git a/frontend/src/ui/rangeReviewed.ts b/frontend/src/ui/rangeReviewed.ts
+index 6eb7032..98c683a 100644
+--- a/frontend/src/ui/rangeReviewed.ts
++++ b/frontend/src/ui/rangeReviewed.ts
+@@ -10,7 +10,7 @@ import type {
+   SourceResult,
+ } from "../ipc";
+ import { nextOpen } from "./nextFile";
+-import { attempt, type Problem, type ReviewedStep } from "./problem";
++import { attempt, type Problem, type ProblemCause, type ReviewedStep } from "./problem";
+ 
+ export type RangeReviewed = {
+   readonly marks: Readonly<ShallowRef<ReviewMarks>>;
+@@ -24,15 +24,19 @@ export type RangeReviewed = {
+   toggle(entry: RangeEntry): Promise<void>;
+   /** Rule 6: forgets a mark; the file shows its whole change (the view derives it from `marks`). Ignored while busy. */
+   reviewFromStart(entry: RangeEntry): Promise<void>;
+-  /** The since view's reply; a failure drops the file's view (as `loadFile`) and reports, answering null. */
++  /** The since view's reply, loaded under the window's `loadView` rule (as `loadFile`); a failure answers null. */
+   loadSince(entry: RangeEntry): Promise<SinceReview | null>;
+ };
+ 
+ type ReviewedWindow = {
+   readonly start: Readonly<ShallowRef<RangeStart | null>>;
+   show(path: string): void;
+-  forget(file: RangeFileId): void;
+   problems(problem: Problem): void;
++  loadView<T>(
++    entry: RangeEntry,
++    call: () => Promise<SourceResult<T>>,
++    problem: (cause: ProblemCause) => Problem,
++  ): Promise<T | null>;
+ };
+ 
+ type State = {
+@@ -94,19 +98,12 @@ async function mark(state: State, entry: RangeEntry): Promise<void> {
+   }
+ }
+ 
+-async function loadSince(state: State, entry: RangeEntry): Promise<SinceReview | null> {
+-  const outcome = await attempt(() => state.source.loadSinceReview(entry.id));
+-  if (!outcome.ok) {
+-    state.window.forget(entry.id);
+-    state.window.problems({
+-      action: "reviewed",
+-      step: "since",
+-      path: entry.path,
+-      cause: outcome.cause,
+-    });
+-    return null;
+-  }
+-  return outcome.value;
++function loadSince(state: State, entry: RangeEntry): Promise<SinceReview | null> {
++  return state.window.loadView(
++    entry,
++    () => state.source.loadSinceReview(entry.id),
++    (cause) => ({ action: "reviewed", step: "since", path: entry.path, cause }),
++  );
+ }
+ 
+ export function createRangeReviewed(source: ReviewedSource, window: ReviewedWindow): RangeReviewed {
+diff --git a/frontend/src/ui/rangeStore.test.ts b/frontend/src/ui/rangeStore.test.ts
+index 0c1c1e9..b8ded08 100644
+--- a/frontend/src/ui/rangeStore.test.ts
++++ b/frontend/src/ui/rangeStore.test.ts
+@@ -323,6 +323,32 @@ test("a Reviewed click shows the next file in the window; a failed since load dr
+   ]);
+ });
+ 
++test("a since load that failed and later succeeds for the same file clears its problem", async () => {
++  const errors = quiet();
++  let refusing = true;
++  const store = await started(3, (fixture) => ({
++    loadSinceReview: (file: RangeFileId) =>
++      refusing ? failed(UNKNOWN) : fixture.loadSinceReview(file),
++  }));
++  const second = fileAt(store, 1);
++  store.showFile(second.path);
++
++  expect(await store.reviewed.loadSince(second)).toBeNull();
++  expect(visitedIndexes(store)).toEqual([0]);
++  const problem = { action: "reviewed", step: "since", path: second.path, cause: UNKNOWN };
++  expect(store.problem.value).toEqual(problem);
++
++  refusing = false;
++  expect(await store.reviewed.loadSince(fileAt(store, 0))).toMatchObject({ kind: "texts" });
++  expect(store.problem.value).toEqual(problem);
++
++  store.showFile(second.path);
++  expect(await store.reviewed.loadSince(second)).toMatchObject({ kind: "texts" });
++  expect(store.problem.value).toBeNull();
++  expect(visitedIndexes(store)).toEqual([0, 1]);
++  expect(errors).toHaveLength(1);
++});
++
+ test("a failed thread list is the window's problem", async () => {
+   const errors = quiet();
+   const store = await started(2, () => ({
+diff --git a/frontend/src/ui/rangeStore.ts b/frontend/src/ui/rangeStore.ts
+index 91b5418..3348c23 100644
+--- a/frontend/src/ui/rangeStore.ts
++++ b/frontend/src/ui/rangeStore.ts
+@@ -21,7 +21,7 @@ import { createCollapsing, type Collapsing } from "./collapsing";
+ import { fileListKey, type KeyPress } from "./fileListKey";
+ import type { MergeRequests } from "./mergeRequests";
+ import { windowMergeRequests } from "./mergeRequestsStore";
+-import { attempt, clearProblemAbout, report, type Problem } from "./problem";
++import { attempt, report, type Problem } from "./problem";
+ import type { Question } from "./question";
+ import { createRangeAi, type RangeAi } from "./rangeAi";
+ import type { AskContext } from "./rangeAiRules";
+@@ -30,7 +30,7 @@ import { createRangeReviewed, type RangeReviewed } from "./rangeReviewed";
+ import { createRangeSearch } from "./rangeSearch";
+ import { createRangeThreads, type RangeThreads } from "./rangeThreads";
+ import { threadPlaceText } from "./rangeThreadText";
+-import { forget, markShown } from "./rangeVisited";
++import { loadView, markShown } from "./rangeVisited";
+ import { settingsScreen, type Screen } from "./screen";
+ import type { Searching } from "./searching";
+ import { preferencesOf, settingsActions, startSettings } from "./settings";
+@@ -170,10 +170,8 @@ function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null):
+       show: (path) => {
+         showPath(state, path);
+       },
+-      forget: (file) => {
+-        forget(state, file);
+-      },
+       problems,
++      loadView: (entry, call, problem) => loadView(state, entry, call, problem),
+     }),
+     agent,
+     recent: [],
+@@ -275,16 +273,13 @@ async function startUp(state: State, besides: readonly Promise<void>[]): Promise
+   await Promise.all([state.threads.load(), state.reviewed.load(), state.gitlab.checkNow()]);
+ }
+ 
+-async function loadFile(state: State, entry: RangeEntry): Promise<RangeFile | null> {
+-  const { id, path } = entry;
+-  const outcome = await attempt(() => state.source.loadRangeFile(id));
+-  if (!outcome.ok) {
+-    forget(state, id);
+-    report(state, { action: "open", path, cause: outcome.cause });
+-    return null;
+-  }
+-  clearProblemAbout(state, path);
+-  return outcome.value;
++function loadFile(state: State, entry: RangeEntry): Promise<RangeFile | null> {
++  return loadView(
++    state,
++    entry,
++    () => state.source.loadRangeFile(entry.id),
++    (cause) => ({ action: "open", path: entry.path, cause }),
++  );
+ }
+ 
+ export function useRangeStore(): RangeStore {
+diff --git a/frontend/src/ui/rangeVisited.ts b/frontend/src/ui/rangeVisited.ts
+index 5b0fd29..d7cab5f 100644
+--- a/frontend/src/ui/rangeVisited.ts
++++ b/frontend/src/ui/rangeVisited.ts
+@@ -1,9 +1,10 @@
+ import type { ShallowRef } from "vue";
+ 
+-import type { RangeEntry, RangeFileId } from "../ipc";
++import type { RangeEntry, RangeFileId, SourceResult } from "../ipc";
++import { attempt, clearProblemAbout, report, type Problem, type ProblemCause } from "./problem";
+ 
+ /** The mounted views: `visited` in first-shown order, `recent` the same files least recently shown first. */
+-export type Visited = {
++type Visited = {
+   readonly shown: ShallowRef<RangeFileId | null>;
+   readonly visited: ShallowRef<readonly RangeEntry[]>;
+   recent: readonly RangeFileId[];
+@@ -28,7 +29,23 @@ export function markShown(state: Visited, entry: RangeEntry): void {
+   }
+ }
+ 
+-export function forget(state: Visited, file: RangeFileId): void {
++function forget(state: Visited, file: RangeFileId): void {
+   state.recent = state.recent.filter((each) => each !== file);
+   state.visited.value = state.visited.value.filter((each) => each.id !== file);
+ }
++
++export async function loadView<T>(
++  state: Visited & { readonly problem: ShallowRef<Problem | null> },
++  entry: RangeEntry,
++  call: () => Promise<SourceResult<T>>,
++  problem: (cause: ProblemCause) => Problem,
++): Promise<T | null> {
++  const outcome = await attempt(call);
++  if (!outcome.ok) {
++    forget(state, entry.id);
++    report(state, problem(outcome.cause));
++    return null;
++  }
++  clearProblemAbout(state, entry.path);
++  return outcome.value;
++}

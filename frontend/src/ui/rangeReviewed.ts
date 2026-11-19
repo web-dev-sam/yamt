@@ -10,7 +10,7 @@ import type {
   SourceResult,
 } from "../ipc";
 import { nextOpen } from "./nextFile";
-import { attempt, type Problem, type ReviewedStep } from "./problem";
+import { attempt, type Problem, type ProblemCause, type ReviewedStep } from "./problem";
 
 export type RangeReviewed = {
   readonly marks: Readonly<ShallowRef<ReviewMarks>>;
@@ -24,15 +24,19 @@ export type RangeReviewed = {
   toggle(entry: RangeEntry): Promise<void>;
   /** Rule 6: forgets a mark; the file shows its whole change (the view derives it from `marks`). Ignored while busy. */
   reviewFromStart(entry: RangeEntry): Promise<void>;
-  /** The since view's reply; a failure drops the file's view (as `loadFile`) and reports, answering null. */
+  /** The since view's reply, loaded under the window's `loadView` rule (as `loadFile`); a failure answers null. */
   loadSince(entry: RangeEntry): Promise<SinceReview | null>;
 };
 
 type ReviewedWindow = {
   readonly start: Readonly<ShallowRef<RangeStart | null>>;
   show(path: string): void;
-  forget(file: RangeFileId): void;
   problems(problem: Problem): void;
+  loadView<T>(
+    entry: RangeEntry,
+    call: () => Promise<SourceResult<T>>,
+    problem: (cause: ProblemCause) => Problem,
+  ): Promise<T | null>;
 };
 
 type State = {
@@ -94,19 +98,12 @@ async function mark(state: State, entry: RangeEntry): Promise<void> {
   }
 }
 
-async function loadSince(state: State, entry: RangeEntry): Promise<SinceReview | null> {
-  const outcome = await attempt(() => state.source.loadSinceReview(entry.id));
-  if (!outcome.ok) {
-    state.window.forget(entry.id);
-    state.window.problems({
-      action: "reviewed",
-      step: "since",
-      path: entry.path,
-      cause: outcome.cause,
-    });
-    return null;
-  }
-  return outcome.value;
+function loadSince(state: State, entry: RangeEntry): Promise<SinceReview | null> {
+  return state.window.loadView(
+    entry,
+    () => state.source.loadSinceReview(entry.id),
+    (cause) => ({ action: "reviewed", step: "since", path: entry.path, cause }),
+  );
 }
 
 export function createRangeReviewed(source: ReviewedSource, window: ReviewedWindow): RangeReviewed {

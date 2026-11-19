@@ -54,8 +54,16 @@ function created(
   const reviewed = createRangeReviewed(source, {
     start,
     show: (path) => shown.push(path),
-    forget: (file) => forgotten.push(file),
     problems: (problem) => problems.push(problem),
+    loadView: async (view, call, problem) => {
+      const result = await call();
+      if (result.ok) {
+        return result.value;
+      }
+      forgotten.push(view.id);
+      problems.push(problem(result.failure));
+      return null;
+    },
   });
   return { reviewed, source, start, shown, forgotten, problems };
 }

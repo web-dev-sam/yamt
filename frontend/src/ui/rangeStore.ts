@@ -21,7 +21,7 @@ import { createCollapsing, type Collapsing } from "./collapsing";
 import { fileListKey, type KeyPress } from "./fileListKey";
 import type { MergeRequests } from "./mergeRequests";
 import { windowMergeRequests } from "./mergeRequestsStore";
-import { attempt, clearProblemAbout, report, type Problem } from "./problem";
+import { attempt, report, type Problem } from "./problem";
 import type { Question } from "./question";
 import { createRangeAi, type RangeAi } from "./rangeAi";
 import type { AskContext } from "./rangeAiRules";
@@ -30,7 +30,7 @@ import { createRangeReviewed, type RangeReviewed } from "./rangeReviewed";
 import { createRangeSearch } from "./rangeSearch";
 import { createRangeThreads, type RangeThreads } from "./rangeThreads";
 import { threadPlaceText } from "./rangeThreadText";
-import { forget, markShown } from "./rangeVisited";
+import { loadView, markShown } from "./rangeVisited";
 import { settingsScreen, type Screen } from "./screen";
 import type { Searching } from "./searching";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
@@ -170,10 +170,8 @@ function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null):
       show: (path) => {
         showPath(state, path);
       },
-      forget: (file) => {
-        forget(state, file);
-      },
       problems,
+      loadView: (entry, call, problem) => loadView(state, entry, call, problem),
     }),
     agent,
     recent: [],
@@ -275,16 +273,13 @@ async function startUp(state: State, besides: readonly Promise<void>[]): Promise
   await Promise.all([state.threads.load(), state.reviewed.load(), state.gitlab.checkNow()]);
 }
 
-async function loadFile(state: State, entry: RangeEntry): Promise<RangeFile | null> {
-  const { id, path } = entry;
-  const outcome = await attempt(() => state.source.loadRangeFile(id));
-  if (!outcome.ok) {
-    forget(state, id);
-    report(state, { action: "open", path, cause: outcome.cause });
-    return null;
-  }
-  clearProblemAbout(state, path);
-  return outcome.value;
+function loadFile(state: State, entry: RangeEntry): Promise<RangeFile | null> {
+  return loadView(
+    state,
+    entry,
+    () => state.source.loadRangeFile(entry.id),
+    (cause) => ({ action: "open", path: entry.path, cause }),
+  );
 }
 
 export function useRangeStore(): RangeStore {

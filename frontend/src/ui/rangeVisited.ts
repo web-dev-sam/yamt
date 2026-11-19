@@ -1,9 +1,10 @@
 import type { ShallowRef } from "vue";
 
-import type { RangeEntry, RangeFileId } from "../ipc";
+import type { RangeEntry, RangeFileId, SourceResult } from "../ipc";
+import { attempt, clearProblemAbout, report, type Problem, type ProblemCause } from "./problem";
 
 /** The mounted views: `visited` in first-shown order, `recent` the same files least recently shown first. */
-export type Visited = {
+type Visited = {
   readonly shown: ShallowRef<RangeFileId | null>;
   readonly visited: ShallowRef<readonly RangeEntry[]>;
   recent: readonly RangeFileId[];
@@ -28,7 +29,23 @@ export function markShown(state: Visited, entry: RangeEntry): void {
   }
 }
 
-export function forget(state: Visited, file: RangeFileId): void {
+function forget(state: Visited, file: RangeFileId): void {
   state.recent = state.recent.filter((each) => each !== file);
   state.visited.value = state.visited.value.filter((each) => each.id !== file);
+}
+
+export async function loadView<T>(
+  state: Visited & { readonly problem: ShallowRef<Problem | null> },
+  entry: RangeEntry,
+  call: () => Promise<SourceResult<T>>,
+  problem: (cause: ProblemCause) => Problem,
+): Promise<T | null> {
+  const outcome = await attempt(call);
+  if (!outcome.ok) {
+    forget(state, entry.id);
+    report(state, problem(outcome.cause));
+    return null;
+  }
+  clearProblemAbout(state, entry.path);
+  return outcome.value;
 }
