@@ -1,0 +1,2 @@
+just mutants HEAD: 82 mutants, 57 caught, 25 unviable, 0 missed. The first run missed 2 (NotFound guards in read_reviewed and sweep_texts); the read-failure test was added and the re-run killed both.
+

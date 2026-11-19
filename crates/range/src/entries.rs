@@ -2,7 +2,9 @@ use std::path::Path;
 
 use yamt_gitio::{Changed, ChangedFile, Numstat, Oid, TreeSide};
 
-use crate::{RangeChange, RangeEntry, RangeEntryKind, RangeFileId, RangeLineCounts};
+use crate::{
+    FileSides, RangeChange, RangeEntry, RangeEntryKind, RangeFileId, RangeLineCounts, SideObject,
+};
 
 const EXECUTABLE_MODE: u32 = 0o100_755;
 const LINK_MODE: u32 = 0o120_000;
@@ -14,6 +16,15 @@ pub(crate) struct FileAt {
     pub(crate) old: Option<BlobAt>,
     pub(crate) new: Option<BlobAt>,
     pub(crate) binary: bool,
+}
+
+impl FileAt {
+    pub(crate) fn sides(&self) -> FileSides {
+        FileSides {
+            left: self.old.as_ref().map(BlobAt::object),
+            right: self.new.as_ref().map(BlobAt::object),
+        }
+    }
 }
 
 /// One side's object: `size` is `None` for a gitlink, whose id names a commit, not a blob.
@@ -36,6 +47,13 @@ impl BlobAt {
 
     pub(crate) fn is_gitlink(&self) -> bool {
         self.mode == GITLINK_MODE
+    }
+
+    fn object(&self) -> SideObject {
+        SideObject {
+            id: self.oid.clone(),
+            kind: self.kind(),
+        }
     }
 }
 

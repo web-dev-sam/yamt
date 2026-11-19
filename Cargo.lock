@@ -4641,6 +4641,7 @@ dependencies = [
  "yamt-merge-requests",
  "yamt-range",
  "yamt-review",
+ "yamt-reviewed",
  "yamt-session",
  "yamt-settings",
 ]
@@ -4771,6 +4772,21 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
+ "specta",
+ "tempfile",
+ "thiserror 2.0.21",
+ "yamt-conflict-repo",
+ "yamt-gitio",
+ "yamt-merge-core",
+ "yamt-range",
+]
+
+[[package]]
+name = "yamt-reviewed"
+version = "0.7.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "specta",
  "tempfile",
  "thiserror 2.0.21",

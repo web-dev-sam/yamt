@@ -28,6 +28,19 @@ pub(crate) fn load_file(repo: &Repo, file: &FileAt) -> Result<RangeFile> {
     }
 }
 
+/// The right side's text when `load_file` answers `Texts`, read by the same rule; else `None`.
+pub(crate) fn right_text(repo: &Repo, file: &FileAt) -> Result<Option<String>> {
+    if decide(file).is_some() {
+        return Ok(None);
+    }
+    let mut reader = repo.blob_reader()?;
+    let (left, right) = read_sides(&mut reader, file)?;
+    match decoded(left, right) {
+        Decoded::Texts { right, .. } => Ok(Some(right)),
+        Decoded::NotUtf8 { .. } => Ok(None),
+    }
+}
+
 /// Both sides' bytes; a missing side reads as empty.
 pub(crate) fn read_sides(reader: &mut BlobReader, file: &FileAt) -> Result<(Vec<u8>, Vec<u8>)> {
     let left = read_side(reader, file.old.as_ref())?;
@@ -117,5 +130,97 @@ fn mode_change(file: &FileAt) -> RangeModeChange {
             new: new.kind(),
         },
         _ => RangeModeChange::Same,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo};
+
+    use crate::{Range, RangeFileId, RangeSpec, Resolved};
+
+    use super::*;
+
+    const FIRST_COMMIT: &str = "1111111111111111111111111111111111111111";
+    const SECOND_COMMIT: &str = "2222222222222222222222222222222222222222";
+
+    fn changed<'a>(
+        path: &'a str,
+        kind: FileKind,
+        base: Option<&'a [u8]>,
+        local: Option<&'a [u8]>,
+    ) -> ConflictFile<'a> {
+        ConflictFile {
+            path,
+            kind,
+            base,
+            local,
+            remote: base,
+        }
+    }
+
+    fn shown_right(range: &Range, file: RangeFileId) -> Option<String> {
+        match range.load(file).unwrap() {
+            RangeFile::Texts { right, .. } => Some(right),
+            RangeFile::Binary
+            | RangeFile::TooLarge { .. }
+            | RangeFile::NotUtf8 { .. }
+            | RangeFile::ModeOnly { .. }
+            | RangeFile::KindChanged { .. }
+            | RangeFile::Submodule { .. } => None,
+        }
+    }
+
+    /// `main..local` lists, in this order: a text, a binary, a too large and a deleted file, a file not UTF-8 on the
+    /// right, one not UTF-8 on the left, and a submodule.
+    fn every_shape_range() -> (TempDir, Range) {
+        let too_large = vec![b'x'; MAX_TEXT_BYTES + 1];
+        let regular = FileKind::Regular;
+        let repo = diverged_repo(&[
+            changed("a-text.txt", regular, Some(b"one\n"), Some(b"two\n")),
+            changed("b-binary.bin", regular, Some(b"\0one"), Some(b"\0two")),
+            changed("c-large.txt", regular, None, Some(&too_large)),
+            changed("d-gone.txt", regular, Some(b"old\n"), None),
+            changed("e-latin1.txt", regular, Some(b"cafe\n"), Some(b"caf\xe9\n")),
+            changed("f-left.txt", regular, Some(b"caf\xe9\n"), Some(b"cafe\n")),
+            changed(
+                "g-vendor",
+                FileKind::Submodule,
+                Some(FIRST_COMMIT.as_bytes()),
+                Some(SECOND_COMMIT.as_bytes()),
+            ),
+        ])
+        .unwrap();
+        let spec = RangeSpec::parse("main..local").unwrap();
+        let range = Resolved::resolve(repo.path(), &spec).unwrap();
+        (repo, range.list().unwrap())
+    }
+
+    #[test]
+    fn right_text_is_the_right_column_load_shows_and_none_when_load_shows_no_texts() {
+        let (_repo, range) = every_shape_range();
+
+        let right_texts: Vec<Option<String>> = range
+            .entries()
+            .iter()
+            .map(|entry| range.right_text(entry.id).unwrap())
+            .collect();
+        let some = |text: &str| Some(text.to_owned());
+        assert_eq!(
+            right_texts,
+            [some("two\n"), None, None, some(""), None, None, None]
+        );
+        for entry in range.entries() {
+            assert_eq!(
+                range.right_text(entry.id).unwrap(),
+                shown_right(&range, entry.id)
+            );
+        }
+        let past_the_list = RangeFileId(7);
+        let refused = range.right_text(past_the_list).unwrap_err();
+        assert!(
+            matches!(refused, crate::Error::UnknownFile { file } if file == past_the_list),
+            "{refused:?}"
+        );
     }
 }

@@ -1,0 +1,2060 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 0f70d6f..6b4a776 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4641,6 +4641,7 @@ dependencies = [
+  "yamt-merge-requests",
+  "yamt-range",
+  "yamt-review",
++ "yamt-reviewed",
+  "yamt-session",
+  "yamt-settings",
+ ]
+@@ -4780,6 +4781,21 @@ dependencies = [
+  "yamt-range",
+ ]
+ 
++[[package]]
++name = "yamt-reviewed"
++version = "0.7.0"
++dependencies = [
++ "serde",
++ "serde_json",
++ "specta",
++ "tempfile",
++ "thiserror 2.0.21",
++ "yamt-conflict-repo",
++ "yamt-gitio",
++ "yamt-merge-core",
++ "yamt-range",
++]
++
+ [[package]]
+ name = "yamt-session"
+ version = "0.7.0"
+diff --git a/crates/range/AGENTS.md b/crates/range/AGENTS.md
+index 11a1cdc..3ba743b 100644
+--- a/crates/range/AGENTS.md
++++ b/crates/range/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. A commit range for the `yamt --diff=<range>` window (plan §2 #103–#105, #107, #127): `lib.rs` (the IPC types `RangeFileId`, `RangeSideLabel`, `RangeSide`, `RangeChange`, `RangeLineCounts`, `RangeEntry`, `RangeStart`, `RangeEntryKind`, `RangeModeChange`, `RangeSides`, `RangeFile`, `SearchText`, `SearchTexts`; `Error`), `spec.rs` (`RangeSpec::parse`: split at the first `..`, a third dot means three dots, no further `..`, no side starting with `-`, an empty side is `HEAD`; `SpecError` carries the usage lines), `open.rs` (`Resolved::resolve`: `discover`, two `commit_named`, `merge_base` for `...`, two `commit_summary`; `Resolved::list` → `Range`: one `changed_files`, one `blob_sizes` over every side but a gitlink; `Range::start`, `Range::load`, `Range::search_texts`; `Range` is immutable and `Sync`), `entries.rs` (`FileAt`/`BlobAt`: rows sorted by display path, ids in that order, a deleted row named by its old path, paths lossy UTF-8 for display only), `load.rs` (`decide` from listing data in #105's order — submodule, kind change, mode only, git's numstat binary, over `yamt_merge_core::MAX_TEXT_BYTES` — so such a blob is never read; then `read_sides` (both blobs from one `BlobReader`) and `decoded` (UTF-8 per side), `Texts` with `yamt_merge_core::compare`; `decide`, `read_sides` and `decoded` are the one rule `search.rs` shares), `search.rs` (`search_page`, the window-wide search's texts, #127: from an id on, every file `load` answers as `Texts`, with `yamt_merge_core::line_changes` and no word diffs, one `BlobReader` per page, ending once `SEARCH_PAGE_BYTES` (4 MiB) of blobs were read — at least one file —, `next` the id the following page starts at, `None` after the last file; `from` equal to the list's length answers an empty last page, past it `UnknownFile`), `lock.rs` (`PairLock`: `File::try_lock` on `<range_dir>/<repo key>/<left id>-<right id>/lock` for the process's life; repo key = the repository's folder name (the common git dir's, or its parent's when it is `.git`) + `-` + FNV-1a 64 of the absolute common git dir, so every worktree shares it; the pair folder's name is built only by `take` and read back only by `pair_right_commit`, both on one `PAIR_SEPARATOR`; for `yamt-agent`'s sweep (plan §2 #110): `PairLock::try_hold(folder)` takes an existing pair folder's lock, `None` while a window holds it, and `pair_folders(range_dir)` lists every pair folder). Depends on `yamt-gitio` and `yamt-merge-core` only among `yamt-*`, never on tauri (`scripts/arch-check.sh`). Tests: unit tests in `spec.rs`, `entries.rs`, `lock.rs`; `tests/range.rs` against real temp repositories (`yamt-conflict-repo`), deleting loose objects to prove what the listing answers is never read; `tests/listing_answers.rs` what `load` answers per kind (one every-kind repository) and the search pages (skipped kinds, both sides of the 4 MiB page boundary, the end).
++Owner skill: `skill://rust-conventions`. A commit range for the `yamt --diff=<range>` window (plan §2 #103–#105, #107, #127): `lib.rs` (the IPC types `RangeFileId`, `RangeSideLabel`, `RangeSide`, `RangeChange`, `RangeLineCounts`, `RangeEntry`, `RangeStart`, `RangeEntryKind`, `RangeModeChange`, `RangeSides`, `RangeFile`, `SearchText`, `SearchTexts`; `SideObject`/`FileSides`, a listed file's two sides' object ids and kinds, `None` for a missing side; `Error`), `spec.rs` (`RangeSpec::parse`: split at the first `..`, a third dot means three dots, no further `..`, no side starting with `-`, an empty side is `HEAD`; `Dots`; `SpecError` carries the usage lines), `open.rs` (`Resolved::resolve`: `discover`, two `commit_named`, `merge_base` for `...`, two `commit_summary`; `Resolved::list` → `Range`: one `changed_files`, one `blob_sizes` over every side but a gitlink; `Range::start`, `Range::load`, `Range::search_texts`, and for `yamt-reviewed` (plan §2 #195) `Range::sides`, `Range::right_text`, `Range::side_names`, `Range::repo_key`; `Range` is immutable and `Sync`), `side_names.rs` (`SideNames`: each typed side by name — the full ref `symbolic_full_name` gives when it starts with `refs/` (`HEAD` on a branch → that branch), else the commit the typed name names now; the typed left, never the merge base; git asked on every call, an unknown name `UnknownName`), `entries.rs` (`FileAt`/`BlobAt`: rows sorted by display path, ids in that order, a deleted row named by its old path, paths lossy UTF-8 for display only; `FileAt::sides`), `load.rs` (`decide` from listing data in #105's order — submodule, kind change, mode only, git's numstat binary, over `yamt_merge_core::MAX_TEXT_BYTES` — so such a blob is never read; then `read_sides` (both blobs from one `BlobReader`) and `decoded` (UTF-8 per side), `Texts` with `yamt_merge_core::compare`; `decide`, `read_sides` and `decoded` are the one rule `search.rs` and `right_text` (the right column `load` shows as `Texts`, else `None`; no `compare`) share), `search.rs` (`search_page`, the window-wide search's texts, #127: from an id on, every file `load` answers as `Texts`, with `yamt_merge_core::line_changes` and no word diffs, one `BlobReader` per page, ending once `SEARCH_PAGE_BYTES` (4 MiB) of blobs were read — at least one file —, `next` the id the following page starts at, `None` after the last file; `from` equal to the list's length answers an empty last page, past it `UnknownFile`), `lock.rs` (`PairLock`: `File::try_lock` on `<range_dir>/<repo key>/<left id>-<right id>/lock` for the process's life; repo key = the repository's folder name (the common git dir's, or its parent's when it is `.git`) + `-` + FNV-1a 64 (`fnv1a_64`, public: `yamt-reviewed` names its review folders with it) of the absolute common git dir, so every worktree shares it; the pair folder's name is built only by `take` and read back only by `pair_right_commit`, both on one `PAIR_SEPARATOR`; for `yamt-agent`'s sweep (plan §2 #110): `PairLock::try_hold(folder)` takes an existing pair folder's lock, `None` while a window holds it, and `pair_folders(range_dir)` lists every pair folder). Depends on `yamt-gitio` and `yamt-merge-core` only among `yamt-*`, never on tauri (`scripts/arch-check.sh`). Tests: unit tests in `spec.rs`, `entries.rs`, `lock.rs` (also `repo_key` against `PairLock::take`), `open.rs` (`sides`), `load.rs` (`right_text` against `load` per kind), `side_names.rs` (branches, `HEAD` on a branch, an abbreviated id, a detached `HEAD`, an expression, a deleted branch); `tests/range.rs` against real temp repositories (`yamt-conflict-repo`), deleting loose objects to prove what the listing answers is never read; `tests/listing_answers.rs` what `load` answers per kind (one every-kind repository) and the search pages (skipped kinds, both sides of the 4 MiB page boundary, the end).
+diff --git a/crates/range/src/entries.rs b/crates/range/src/entries.rs
+index 78e253d..a88476e 100644
+--- a/crates/range/src/entries.rs
++++ b/crates/range/src/entries.rs
+@@ -2,7 +2,9 @@ use std::path::Path;
+ 
+ use yamt_gitio::{Changed, ChangedFile, Numstat, Oid, TreeSide};
+ 
+-use crate::{RangeChange, RangeEntry, RangeEntryKind, RangeFileId, RangeLineCounts};
++use crate::{
++    FileSides, RangeChange, RangeEntry, RangeEntryKind, RangeFileId, RangeLineCounts, SideObject,
++};
+ 
+ const EXECUTABLE_MODE: u32 = 0o100_755;
+ const LINK_MODE: u32 = 0o120_000;
+@@ -16,6 +18,15 @@ pub(crate) struct FileAt {
+     pub(crate) binary: bool,
+ }
+ 
++impl FileAt {
++    pub(crate) fn sides(&self) -> FileSides {
++        FileSides {
++            left: self.old.as_ref().map(BlobAt::object),
++            right: self.new.as_ref().map(BlobAt::object),
++        }
++    }
++}
++
+ /// One side's object: `size` is `None` for a gitlink, whose id names a commit, not a blob.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub(crate) struct BlobAt {
+@@ -37,6 +48,13 @@ impl BlobAt {
+     pub(crate) fn is_gitlink(&self) -> bool {
+         self.mode == GITLINK_MODE
+     }
++
++    fn object(&self) -> SideObject {
++        SideObject {
++            id: self.oid.clone(),
++            kind: self.kind(),
++        }
++    }
+ }
+ 
+ pub(crate) fn sort_by_display_path(changed: &mut [ChangedFile]) {
+diff --git a/crates/range/src/lib.rs b/crates/range/src/lib.rs
+index 6f2c00e..78cafae 100644
+--- a/crates/range/src/lib.rs
++++ b/crates/range/src/lib.rs
+@@ -6,6 +6,7 @@ mod load;
+ mod lock;
+ mod open;
+ mod search;
++mod side_names;
+ mod spec;
+ 
+ use std::path::PathBuf;
+@@ -15,9 +16,10 @@ use specta::Type;
+ use yamt_gitio::Oid;
+ use yamt_merge_core::{Difference, LineChange};
+ 
+-pub use crate::lock::{PairLock, pair_folders, pair_right_commit};
++pub use crate::lock::{PairLock, fnv1a_64, pair_folders, pair_right_commit};
+ pub use crate::open::{Range, Resolved};
+-pub use crate::spec::{RangeSpec, SpecError};
++pub use crate::side_names::{SideName, SideNames};
++pub use crate::spec::{Dots, RangeSpec, SpecError};
+ 
+ /// A changed file's place in the range's list: 0.. in list order, fixed for the window's life.
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+@@ -84,7 +86,7 @@ pub struct RangeStart {
+     pub files: Vec<RangeEntry>,
+ }
+ 
+-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+ #[serde(rename_all = "camelCase")]
+ pub enum RangeEntryKind {
+     File,
+@@ -93,6 +95,20 @@ pub enum RangeEntryKind {
+     Submodule,
+ }
+ 
++/// A listed file's side as git lists it: the object id (a blob, or a gitlink's commit) and its kind.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct SideObject {
++    pub id: Oid,
++    pub kind: RangeEntryKind,
++}
++
++/// A listed file's two sides; `None` where the range has no such side (added, deleted).
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct FileSides {
++    pub left: Option<SideObject>,
++    pub right: Option<SideObject>,
++}
++
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+ #[serde(tag = "kind", rename_all = "camelCase")]
+ pub enum RangeModeChange {
+diff --git a/crates/range/src/load.rs b/crates/range/src/load.rs
+index d6125b1..bd14eb9 100644
+--- a/crates/range/src/load.rs
++++ b/crates/range/src/load.rs
+@@ -28,6 +28,19 @@ pub(crate) fn load_file(repo: &Repo, file: &FileAt) -> Result<RangeFile> {
+     }
+ }
+ 
++/// The right side's text when `load_file` answers `Texts`, read by the same rule; else `None`.
++pub(crate) fn right_text(repo: &Repo, file: &FileAt) -> Result<Option<String>> {
++    if decide(file).is_some() {
++        return Ok(None);
++    }
++    let mut reader = repo.blob_reader()?;
++    let (left, right) = read_sides(&mut reader, file)?;
++    match decoded(left, right) {
++        Decoded::Texts { right, .. } => Ok(Some(right)),
++        Decoded::NotUtf8 { .. } => Ok(None),
++    }
++}
++
+ /// Both sides' bytes; a missing side reads as empty.
+ pub(crate) fn read_sides(reader: &mut BlobReader, file: &FileAt) -> Result<(Vec<u8>, Vec<u8>)> {
+     let left = read_side(reader, file.old.as_ref())?;
+@@ -119,3 +132,95 @@ fn mode_change(file: &FileAt) -> RangeModeChange {
+         _ => RangeModeChange::Same,
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo};
++
++    use crate::{Range, RangeFileId, RangeSpec, Resolved};
++
++    use super::*;
++
++    const FIRST_COMMIT: &str = "1111111111111111111111111111111111111111";
++    const SECOND_COMMIT: &str = "2222222222222222222222222222222222222222";
++
++    fn changed<'a>(
++        path: &'a str,
++        kind: FileKind,
++        base: Option<&'a [u8]>,
++        local: Option<&'a [u8]>,
++    ) -> ConflictFile<'a> {
++        ConflictFile {
++            path,
++            kind,
++            base,
++            local,
++            remote: base,
++        }
++    }
++
++    fn shown_right(range: &Range, file: RangeFileId) -> Option<String> {
++        match range.load(file).unwrap() {
++            RangeFile::Texts { right, .. } => Some(right),
++            RangeFile::Binary
++            | RangeFile::TooLarge { .. }
++            | RangeFile::NotUtf8 { .. }
++            | RangeFile::ModeOnly { .. }
++            | RangeFile::KindChanged { .. }
++            | RangeFile::Submodule { .. } => None,
++        }
++    }
++
++    /// `main..local` lists, in this order: a text, a binary, a too large and a deleted file, a file not UTF-8 on the
++    /// right, one not UTF-8 on the left, and a submodule.
++    fn every_shape_range() -> (TempDir, Range) {
++        let too_large = vec![b'x'; MAX_TEXT_BYTES + 1];
++        let regular = FileKind::Regular;
++        let repo = diverged_repo(&[
++            changed("a-text.txt", regular, Some(b"one\n"), Some(b"two\n")),
++            changed("b-binary.bin", regular, Some(b"\0one"), Some(b"\0two")),
++            changed("c-large.txt", regular, None, Some(&too_large)),
++            changed("d-gone.txt", regular, Some(b"old\n"), None),
++            changed("e-latin1.txt", regular, Some(b"cafe\n"), Some(b"caf\xe9\n")),
++            changed("f-left.txt", regular, Some(b"caf\xe9\n"), Some(b"cafe\n")),
++            changed(
++                "g-vendor",
++                FileKind::Submodule,
++                Some(FIRST_COMMIT.as_bytes()),
++                Some(SECOND_COMMIT.as_bytes()),
++            ),
++        ])
++        .unwrap();
++        let spec = RangeSpec::parse("main..local").unwrap();
++        let range = Resolved::resolve(repo.path(), &spec).unwrap();
++        (repo, range.list().unwrap())
++    }
++
++    #[test]
++    fn right_text_is_the_right_column_load_shows_and_none_when_load_shows_no_texts() {
++        let (_repo, range) = every_shape_range();
++
++        let right_texts: Vec<Option<String>> = range
++            .entries()
++            .iter()
++            .map(|entry| range.right_text(entry.id).unwrap())
++            .collect();
++        let some = |text: &str| Some(text.to_owned());
++        assert_eq!(
++            right_texts,
++            [some("two\n"), None, None, some(""), None, None, None]
++        );
++        for entry in range.entries() {
++            assert_eq!(
++                range.right_text(entry.id).unwrap(),
++                shown_right(&range, entry.id)
++            );
++        }
++        let past_the_list = RangeFileId(7);
++        let refused = range.right_text(past_the_list).unwrap_err();
++        assert!(
++            matches!(refused, crate::Error::UnknownFile { file } if file == past_the_list),
++            "{refused:?}"
++        );
++    }
++}
+diff --git a/crates/range/src/lock.rs b/crates/range/src/lock.rs
+index 73a04c3..13aec87 100644
+--- a/crates/range/src/lock.rs
++++ b/crates/range/src/lock.rs
+@@ -105,7 +105,7 @@ fn hold(path: &Path) -> io::Result<Option<File>> {
+ }
+ 
+ /// The repository's folder name, `-`, and the FNV-1a hash of its common git dir: the same from every worktree.
+-fn repo_key(common_dir: &Path) -> OsString {
++pub(crate) fn repo_key(common_dir: &Path) -> OsString {
+     let in_work_tree = common_dir
+         .file_name()
+         .is_some_and(|name| name == GIT_DIR_NAME);
+@@ -121,7 +121,8 @@ fn repo_key(common_dir: &Path) -> OsString {
+ }
+ 
+ /// FNV-1a, 64 bits (<http://www.isthe.com/chongo/tech/comp/fnv/>): stable across Rust releases, unlike `DefaultHasher`.
+-fn fnv1a_64(bytes: &[u8]) -> u64 {
++#[must_use]
++pub fn fnv1a_64(bytes: &[u8]) -> u64 {
+     let mut hash = FNV_OFFSET_BASIS;
+     for &byte in bytes {
+         hash ^= u64::from(byte);
+@@ -170,6 +171,30 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn repo_key_is_the_pair_lock_s_repository_folder() {
++        let file = ConflictFile {
++            path: "a.txt",
++            kind: FileKind::Regular,
++            base: Some(b"base\n"),
++            local: Some(b"local\n"),
++            remote: None,
++        };
++        let repo = diverged_repo(&[file]).unwrap();
++        let range_dir = tempfile::tempdir().unwrap();
++        let spec = RangeSpec::parse("main..local").unwrap();
++        let resolved = Resolved::resolve(repo.path(), &spec).unwrap();
++        let lock = PairLock::take(range_dir.path(), &resolved).unwrap();
++        let range = resolved.list().unwrap();
++
++        let repo_folder = lock.folder().parent().unwrap();
++        assert_eq!(repo_folder.parent(), Some(range_dir.path()));
++        assert_eq!(
++            Some(range.repo_key().unwrap().as_os_str()),
++            repo_folder.file_name()
++        );
++    }
++
+     #[test]
+     fn fnv1a_64_gives_the_published_vectors() {
+         assert_eq!(format!("{:016x}", fnv1a_64(b"a")), "af63dc4c8601ec8c");
+diff --git a/crates/range/src/open.rs b/crates/range/src/open.rs
+index 8f68782..2602851 100644
+--- a/crates/range/src/open.rs
++++ b/crates/range/src/open.rs
+@@ -1,14 +1,17 @@
++use std::ffi::OsString;
+ use std::path::Path;
+ 
+ use yamt_gitio::{Oid, Repo};
+ 
+ use crate::entries::{FileAt, blob_ids, entries_at, files_at, sort_by_display_path};
+-use crate::load::load_file;
++use crate::load::{load_file, right_text};
++use crate::lock::repo_key;
+ use crate::search::search_page;
++use crate::side_names::{SideNames, side_names};
+ use crate::spec::Dots;
+ use crate::{
+-    Compared, Error, RangeEntry, RangeFile, RangeFileId, RangeSide, RangeSideLabel, RangeSpec,
+-    RangeStart, Result, SearchTexts,
++    Compared, Error, FileSides, RangeEntry, RangeFile, RangeFileId, RangeSide, RangeSideLabel,
++    RangeSpec, RangeStart, Result, SearchTexts,
+ };
+ 
+ /// A range whose two commits git has named: built before any window opens.
+@@ -94,10 +97,32 @@ impl Range {
+     }
+ 
+     pub fn load(&self, file: RangeFileId) -> Result<RangeFile> {
+-        let Some(found) = list_index(file).and_then(|index| self.files.get(index)) else {
+-            return Err(Error::UnknownFile { file });
+-        };
+-        load_file(&self.resolved.repo, found)
++        load_file(&self.resolved.repo, self.file_at(file)?)
++    }
++
++    /// The right column's text exactly as `load` shows it; `None` when `load` answers anything but `Texts`.
++    pub fn right_text(&self, file: RangeFileId) -> Result<Option<String>> {
++        right_text(&self.resolved.repo, self.file_at(file)?)
++    }
++
++    pub fn sides(&self, file: RangeFileId) -> Result<FileSides> {
++        Ok(self.file_at(file)?.sides())
++    }
++
++    /// Both typed sides by name, as git names them now.
++    pub fn side_names(&self) -> Result<SideNames> {
++        side_names(&self.resolved.repo, &self.resolved.spec)
++    }
++
++    /// The repository's folder name under a data folder: the one `PairLock::take` uses.
++    pub fn repo_key(&self) -> Result<OsString> {
++        Ok(repo_key(&self.resolved.repo.common_dir()?))
++    }
++
++    fn file_at(&self, file: RangeFileId) -> Result<&FileAt> {
++        list_index(file)
++            .and_then(|index| self.files.get(index))
++            .ok_or(Error::UnknownFile { file })
+     }
+ 
+     /// One page of text files from `from` on; `from` may be the list's length, which answers an empty last page.
+@@ -152,7 +177,7 @@ fn not_a_repository(cwd: &Path, error: yamt_gitio::Error) -> Error {
+     Error::Git(error)
+ }
+ 
+-fn commit_named(repo: &Repo, name: &str) -> Result<Oid> {
++pub(crate) fn commit_named(repo: &Repo, name: &str) -> Result<Oid> {
+     repo.commit_named(name)?.ok_or_else(|| Error::UnknownName {
+         name: name.to_owned(),
+     })
+@@ -178,9 +203,10 @@ fn side_at(repo: &Repo, oid: Oid, label: RangeSideLabel) -> Result<SideAt> {
+ mod tests {
+     use std::fs;
+ 
+-    use yamt_conflict_repo::{ConflictFile, FileKind, git_ok};
++    use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, git_ok};
+ 
+     use super::*;
++    use crate::{RangeEntryKind, SideObject};
+ 
+     fn file<'a>(path: &'a str, local: &'a [u8]) -> ConflictFile<'a> {
+         ConflictFile {
+@@ -235,4 +261,80 @@ mod tests {
+             fs::canonicalize(root).unwrap()
+         );
+     }
++
++    const GITLINK_AT_BASE: &str = "1111111111111111111111111111111111111111";
++    const GITLINK_AT_LOCAL: &str = "2222222222222222222222222222222222222222";
++
++    fn object(id: Oid, kind: RangeEntryKind) -> SideObject {
++        SideObject { id, kind }
++    }
++
++    /// `main..local` lists `added.txt`, `gone.txt` (deleted), `run.sh` (edited, made executable) and the submodule
++    /// `vendor` moved from `GITLINK_AT_BASE` to `GITLINK_AT_LOCAL`.
++    fn sides_repo() -> TempDir {
++        let sides = |path, kind, base: Option<&'static [u8]>, local| ConflictFile {
++            path,
++            kind,
++            base,
++            local,
++            remote: base,
++        };
++        let regular = FileKind::Regular;
++        let repo = yamt_conflict_repo::diverged_repo(&[
++            sides("added.txt", regular, None, Some(b"new\n")),
++            sides("gone.txt", regular, Some(b"old\n"), None),
++            sides("run.sh", regular, Some(b"echo\n"), Some(b"echo hi\n")),
++            sides(
++                "vendor",
++                FileKind::Submodule,
++                Some(GITLINK_AT_BASE.as_bytes()),
++                Some(GITLINK_AT_LOCAL.as_bytes()),
++            ),
++        ])
++        .unwrap();
++        git_ok(repo.path(), &["update-index", "--chmod=+x", "run.sh"]).unwrap();
++        git_ok(repo.path(), &["commit", "--quiet", "-m", "executable"]).unwrap();
++        repo
++    }
++
++    #[test]
++    fn sides_name_each_side_s_object_and_kind_and_none_for_a_missing_side() {
++        let repo = sides_repo();
++        let root = repo.path();
++        let spec = RangeSpec::parse("main..local").unwrap();
++        let range = Resolved::resolve(root, &spec).unwrap().list().unwrap();
++
++        let listed: Vec<FileSides> = (0..4)
++            .map(|id| range.sides(RangeFileId(id)).unwrap())
++            .collect();
++
++        let blob = |revision| Some(object(commit(root, revision), RangeEntryKind::File));
++        let submodule = |id| Some(object(Oid::parse(id).unwrap(), RangeEntryKind::Submodule));
++        let executable = object(commit(root, "local:run.sh"), RangeEntryKind::Executable);
++        let expected = [
++            FileSides {
++                left: None,
++                right: blob("local:added.txt"),
++            },
++            FileSides {
++                left: blob("main:gone.txt"),
++                right: None,
++            },
++            FileSides {
++                left: blob("main:run.sh"),
++                right: Some(executable),
++            },
++            FileSides {
++                left: submodule(GITLINK_AT_BASE),
++                right: submodule(GITLINK_AT_LOCAL),
++            },
++        ];
++        assert_eq!(listed, expected);
++        let past_the_list = RangeFileId(4);
++        let refused = range.sides(past_the_list).unwrap_err();
++        assert!(
++            matches!(refused, Error::UnknownFile { file } if file == past_the_list),
++            "{refused:?}"
++        );
++    }
+ }
+diff --git a/crates/range/src/side_names.rs b/crates/range/src/side_names.rs
+new file mode 100644
+index 0000000..f3a23d3
+--- /dev/null
++++ b/crates/range/src/side_names.rs
+@@ -0,0 +1,141 @@
++use yamt_gitio::{Oid, Repo};
++
++use crate::Result;
++use crate::open::commit_named;
++use crate::spec::{Dots, RangeSpec};
++
++const REFS_PREFIX: &str = "refs/";
++
++/// One side of the range as a review remembers it (plan §2 #195, request rule 4).
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum SideName {
++    /// The full ref `symbolic_full_name` gives when it starts with `refs/` (`HEAD` on a branch → that branch).
++    Ref { full_name: String },
++    /// Otherwise (a commit id, a detached HEAD, `HEAD~2`): the commit the typed name names now.
++    Commit { id: Oid },
++}
++
++/// Both typed sides by name and the dots between them; the left is the typed left, never the merge base.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct SideNames {
++    pub left: SideName,
++    pub dots: Dots,
++    pub right: SideName,
++}
++
++pub(crate) fn side_names(repo: &Repo, spec: &RangeSpec) -> Result<SideNames> {
++    Ok(SideNames {
++        left: side_name(repo, &spec.left)?,
++        dots: spec.dots,
++        right: side_name(repo, &spec.right)?,
++    })
++}
++
++/// `commit_named` first: it answers an unknown name as `UnknownName`, where `symbolic_full_name` fails.
++fn side_name(repo: &Repo, typed: &str) -> Result<SideName> {
++    let id = commit_named(repo, typed)?;
++    let full_name = repo
++        .symbolic_full_name(typed)?
++        .and_then(|name| String::from_utf8(name).ok())
++        .filter(|name| name.starts_with(REFS_PREFIX));
++    Ok(match full_name {
++        Some(full_name) => SideName::Ref { full_name },
++        None => SideName::Commit { id },
++    })
++}
++
++#[cfg(test)]
++mod tests {
++    use std::path::Path;
++
++    use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
++
++    use super::*;
++    use crate::{Error, Resolved};
++
++    fn repo() -> TempDir {
++        let file = ConflictFile {
++            path: "a.txt",
++            kind: FileKind::Regular,
++            base: Some(b"base\n"),
++            local: Some(b"local\n"),
++            remote: Some(b"remote\n"),
++        };
++        diverged_repo(&[file]).unwrap()
++    }
++
++    fn rev_parse(root: &Path, args: &[&str]) -> String {
++        let output = git_ok(root, &[&["rev-parse"], args].concat()).unwrap();
++        String::from_utf8(output).unwrap().trim_end().to_owned()
++    }
++
++    fn commit(root: &Path, revision: &str) -> SideName {
++        SideName::Commit {
++            id: Oid::parse(&rev_parse(root, &[revision])).unwrap(),
++        }
++    }
++
++    fn reference(full_name: &str) -> SideName {
++        SideName::Ref {
++            full_name: full_name.to_owned(),
++        }
++    }
++
++    fn names(root: &Path, text: &str) -> SideNames {
++        let spec = RangeSpec::parse(text).unwrap();
++        let range = Resolved::resolve(root, &spec).unwrap().list().unwrap();
++        range.side_names().unwrap()
++    }
++
++    #[test]
++    fn side_names_follow_the_branch_head_names_and_keep_a_commit_id() {
++        let repo = repo();
++        let root = repo.path();
++        git_ok(root, &["branch", "dev", "main"]).unwrap();
++        git_ok(root, &["checkout", "--quiet", "-b", "feature-x"]).unwrap();
++
++        let on_branch = SideNames {
++            left: reference("refs/heads/dev"),
++            dots: Dots::Three,
++            right: reference("refs/heads/feature-x"),
++        };
++        assert_eq!(names(root, "dev...HEAD"), on_branch);
++
++        let abbreviated = rev_parse(root, &["--short", "remote"]);
++        let by_id = SideNames {
++            left: reference("refs/heads/main"),
++            dots: Dots::Two,
++            right: commit(root, "remote"),
++        };
++        assert_eq!(names(root, &format!("main..{abbreviated}")), by_id);
++    }
++
++    #[test]
++    fn a_detached_head_and_an_expression_are_the_commit_they_name_now() {
++        let repo = repo();
++        let root = repo.path();
++        git_ok(root, &["checkout", "--quiet", "--detach", "local"]).unwrap();
++
++        let detached = SideNames {
++            left: commit(root, "main"),
++            dots: Dots::Two,
++            right: commit(root, "local"),
++        };
++        assert_eq!(names(root, "HEAD~1..HEAD"), detached);
++    }
++
++    #[test]
++    fn a_side_name_git_no_longer_knows_is_unknown_name() {
++        let repo = repo();
++        let root = repo.path();
++        let spec = RangeSpec::parse("main..remote").unwrap();
++        let range = Resolved::resolve(root, &spec).unwrap().list().unwrap();
++        git_ok(root, &["branch", "--quiet", "-D", "remote"]).unwrap();
++
++        let refused = range.side_names().unwrap_err();
++        assert!(
++            matches!(&refused, Error::UnknownName { name } if name == "remote"),
++            "{refused:?}"
++        );
++    }
++}
+diff --git a/crates/range/src/spec.rs b/crates/range/src/spec.rs
+index ae8584c..cbb2ad7 100644
+--- a/crates/range/src/spec.rs
++++ b/crates/range/src/spec.rs
+@@ -11,7 +11,7 @@ pub struct RangeSpec {
+ }
+ 
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+-pub(crate) enum Dots {
++pub enum Dots {
+     Two,
+     Three,
+ }
+diff --git a/crates/reviewed/AGENTS.md b/crates/reviewed/AGENTS.md
+new file mode 100644
+index 0000000..1a8aed0
+--- /dev/null
++++ b/crates/reviewed/AGENTS.md
+@@ -0,0 +1 @@
++Owner skill: `skill://rust-conventions`. The user's "Reviewed" marks on a range's files, remembered per review in yamt's data folder (plan §2 #195; request `docs/slices/request-range-reviewed.md`, design `docs/slices/briefs/range-reviewed-design.md` option A): `lib.rs` (the IPC types `ReviewMark` — `reviewed`/`changedSinceReview` —, `FileReview { file, mark }`, `SinceReview` — `texts { reviewed, current, differences }` (the right side's text at the mark against today's, `yamt_merge_core::compare`) or `noText`; `Error`), `review_of.rs` (`ReviewOf`: a range's `yamt_range::SideNames` or a merge request's project and iid; `key_text()` — `range ref:refs/heads/dev...ref:refs/heads/x`, `range commit:<hex>..ref:…`, `merge-request group/project!12` — whose FNV-1a 64 (`yamt_range::fnv1a_64`, 16 hex digits) names the review's folder), `stored.rs` (the folder `<reviewed_dir>/<repo key>/<16 hex>/`: `lock` (`File::lock`, held for one read-modify-write only), `reviewed.json` format 1 — `format`, `review` (`{kind: range, left, dots: two|three, right}` with sides `{kind: ref, name}` | `{kind: commit, id}`, or `{kind: mergeRequest, project, iid}`), `marks` sorted by path, each `path`, `left`/`right` `{id, kind: file|executable|link|submodule}` or `null`, `keptText` —, and `texts/<right blob id>`, the right side's text at a mark, written once; refusals by name, the file untouched: `NewerFormat` above format 1, `Broken` with serde's line and column, another `review` in the file, marks out of path order or an id that is not git's; every write is a temp file + rename, a leftover `.tmp` ignored), `store.rs` (`ReviewedStore`: `open` — no folder: no marks and nothing written; else under the lock drops marks on paths the range does not list (written back once), sweeps `texts/` files no mark keeps, then classifies each listed file once: `Reviewed` while its right side's `(id, kind)` is the marked one, else `ChangedSinceReview` —; `mark`/`unmark` take the lock, re-read `reviewed.json`, write the text first, apply one change by path and write, so two windows on one review keep both their clicks; a failed write changes nothing in memory; `since_review` for a marked file: `""` for a deleted right side, the kept text, else `NoText`, against `Range::right_text`; an unmarked file answers `NoText`). The folder is outside `range/`, so `yamt_range::pair_folders` never lists it. Depends on `yamt-range`, `yamt-gitio` (`Oid`) and `yamt-merge-core` (`compare`) only among `yamt-*`, never on tauri (`scripts/arch-check.sh`). Tests: `tests/reviewed.rs` (marks across new commits, a moved left side, a rename, a deletion, two stores on one review, since-review texts) and `tests/stored_file/` (key text, the pinned folder name and file, refusals, a failed write, a leftover temp file, not a pair folder) over `yamt-conflict-repo` temp repositories.
+diff --git a/crates/reviewed/Cargo.toml b/crates/reviewed/Cargo.toml
+new file mode 100644
+index 0000000..539b8b1
+--- /dev/null
++++ b/crates/reviewed/Cargo.toml
+@@ -0,0 +1,22 @@
++[package]
++name = "yamt-reviewed"
++version.workspace = true
++edition.workspace = true
++publish.workspace = true
++license.workspace = true
++
++[dependencies]
++yamt-range.workspace = true
++yamt-gitio.workspace = true
++yamt-merge-core.workspace = true
++serde.workspace = true
++serde_json.workspace = true
++specta.workspace = true
++thiserror.workspace = true
++
++[dev-dependencies]
++yamt-conflict-repo.workspace = true
++tempfile.workspace = true
++
++[lints]
++workspace = true
+diff --git a/crates/reviewed/src/lib.rs b/crates/reviewed/src/lib.rs
+new file mode 100644
+index 0000000..48c765f
+--- /dev/null
++++ b/crates/reviewed/src/lib.rs
+@@ -0,0 +1,60 @@
++//! The user's "Reviewed" marks on a range's files, remembered per review in yamt's data folder (plan §2 #195).
++#![forbid(unsafe_code)]
++
++mod review_of;
++mod store;
++mod stored;
++
++use std::path::PathBuf;
++
++use serde::Serialize;
++use specta::Type;
++use yamt_merge_core::Difference;
++use yamt_range::RangeFileId;
++
++pub use crate::review_of::ReviewOf;
++pub use crate::store::ReviewedStore;
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub enum ReviewMark {
++    Reviewed,
++    ChangedSinceReview,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct FileReview {
++    pub file: RangeFileId,
++    pub mark: ReviewMark,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum SinceReview {
++    /// The right side's text at the mark (left column) against today's right side (right column).
++    Texts {
++        reviewed: String,
++        current: String,
++        differences: Vec<Difference>,
++    },
++    /// Either text is missing: the mark kept none (not text then) or today's file is not text.
++    NoText,
++}
++
++#[derive(Debug, thiserror::Error)]
++pub enum Error {
++    #[error("cannot read {}: {message}", path.display())]
++    ReadFailed { path: PathBuf, message: String },
++    #[error("the reviewed marks {} cannot be read: {message}; nothing was changed", path.display())]
++    Broken { path: PathBuf, message: String },
++    #[error("the reviewed marks {} were written by a newer yamt (format {format})", path.display())]
++    NewerFormat { path: PathBuf, format: u32 },
++    #[error("cannot write {}: {message}", path.display())]
++    WriteFailed { path: PathBuf, message: String },
++    #[error("no file {} in this range", file.0)]
++    UnknownFile { file: RangeFileId },
++    #[error(transparent)]
++    Range(#[from] yamt_range::Error),
++}
++
++pub type Result<T, E = Error> = std::result::Result<T, E>;
+diff --git a/crates/reviewed/src/review_of.rs b/crates/reviewed/src/review_of.rs
+new file mode 100644
+index 0000000..b35dfaf
+--- /dev/null
++++ b/crates/reviewed/src/review_of.rs
+@@ -0,0 +1,44 @@
++use yamt_range::{Dots, SideName, SideNames, fnv1a_64};
++
++/// What a window's marks belong to (rule 4).
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum ReviewOf {
++    Range(SideNames),
++    MergeRequest { project: String, iid: u32 },
++}
++
++impl ReviewOf {
++    /// `range ref:refs/heads/dev...ref:refs/heads/feature-x`, `range commit:<hex>..ref:refs/heads/x`,
++    /// `merge-request group/project!12`.
++    #[must_use]
++    pub fn key_text(&self) -> String {
++        match self {
++            ReviewOf::Range(names) => format!(
++                "range {}{}{}",
++                side_text(&names.left),
++                dots_text(names.dots),
++                side_text(&names.right)
++            ),
++            ReviewOf::MergeRequest { project, iid } => format!("merge-request {project}!{iid}"),
++        }
++    }
++
++    /// The review's folder name: the FNV-1a 64 of its key text, so no name escapes or grows past a file name's limit.
++    pub(crate) fn folder_name(&self) -> String {
++        format!("{:016x}", fnv1a_64(self.key_text().as_bytes()))
++    }
++}
++
++fn side_text(side: &SideName) -> String {
++    match side {
++        SideName::Ref { full_name } => format!("ref:{full_name}"),
++        SideName::Commit { id } => format!("commit:{}", id.as_str()),
++    }
++}
++
++fn dots_text(dots: Dots) -> &'static str {
++    match dots {
++        Dots::Two => "..",
++        Dots::Three => "...",
++    }
++}
+diff --git a/crates/reviewed/src/store.rs b/crates/reviewed/src/store.rs
+new file mode 100644
+index 0000000..6cf2530
+--- /dev/null
++++ b/crates/reviewed/src/store.rs
+@@ -0,0 +1,202 @@
++use std::collections::HashMap;
++use std::collections::HashSet;
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use yamt_merge_core::compare;
++use yamt_range::{Range, RangeFileId};
++
++use crate::stored::{
++    ReviewedFile, StoredMark, StoredSide, keep_text, kept_text, lock, read_reviewed, sweep_texts,
++    write_reviewed,
++};
++use crate::{Error, FileReview, Result, ReviewMark, ReviewOf, SinceReview};
++
++/// One window's marks on its range: classified at open, then changed only by its own `mark` and `unmark`.
++pub struct ReviewedStore {
++    folder: PathBuf,
++    review: ReviewOf,
++    files: Vec<Option<Marked>>,
++}
++
++/// A listed file's mark as stored, and what it means for this range.
++struct Marked {
++    mark: ReviewMark,
++    stored: StoredMark,
++}
++
++impl ReviewedStore {
++    /// `<reviewed_dir>/<range.repo_key()>/<16 hex>/`: under its lock, reads `reviewed.json` (missing = no marks, nothing
++    /// written), refuses newer/broken (file untouched), drops marks on paths `range` does not list and sweeps
++    /// `texts/` files no mark names (writing only when something was dropped), then classifies each listed file.
++    pub fn open(reviewed_dir: &Path, review: ReviewOf, range: &Range) -> Result<ReviewedStore> {
++        let folder = reviewed_dir
++            .join(range.repo_key()?)
++            .join(review.folder_name());
++        let has_folder = fs::exists(&folder).map_err(|error| Error::ReadFailed {
++            path: folder.clone(),
++            message: error.to_string(),
++        })?;
++        let marks = if has_folder {
++            listed_marks(&folder, &review, range)?
++        } else {
++            Vec::new()
++        };
++        Ok(ReviewedStore {
++            files: classified(range, marks)?,
++            folder,
++            review,
++        })
++    }
++
++    /// Marked files in list order; a file not in it is unreviewed.
++    #[must_use]
++    pub fn marks(&self) -> Vec<FileReview> {
++        (0..)
++            .zip(&self.files)
++            .filter_map(|(id, marked)| {
++                marked.as_ref().map(|marked| FileReview {
++                    file: RangeFileId(id),
++                    mark: marked.mark,
++                })
++            })
++            .collect()
++    }
++
++    /// Records the file's current two sides (and its right text in `texts/<right id>` when `right_text` is `Some`
++    /// and the file is missing there); the file becomes `Reviewed`.
++    pub fn mark(&mut self, range: &Range, file: RangeFileId) -> Result<()> {
++        let path = listed_path(range, file)?;
++        let sides = range.sides(file)?;
++        let right = sides.right.as_ref().map(StoredSide::of);
++        let text = match &right {
++            Some(right) => range.right_text(file)?.map(|text| (right.id.clone(), text)),
++            None => None,
++        };
++        let stored = StoredMark {
++            path: path.to_owned(),
++            left: sides.left.as_ref().map(StoredSide::of),
++            right,
++            kept_text: text.is_some(),
++        };
++        self.write_change(text.as_ref(), |reviewed| reviewed.put(stored.clone()))?;
++        if let Some(slot) = self.slot_mut(file) {
++            *slot = Some(Marked {
++                mark: ReviewMark::Reviewed,
++                stored,
++            });
++        }
++        Ok(())
++    }
++
++    /// Forgets the file's mark ("Unmark" and "Review from start"); a file with no mark writes nothing.
++    pub fn unmark(&mut self, range: &Range, file: RangeFileId) -> Result<()> {
++        let path = listed_path(range, file)?;
++        if self.marked(file).is_none() {
++            return Ok(());
++        }
++        self.write_change(None, |reviewed| reviewed.remove(path))?;
++        if let Some(slot) = self.slot_mut(file) {
++            *slot = None;
++        }
++        Ok(())
++    }
++
++    /// The reviewed right text (`""` when the mark's right side was deleted, `NoText` when the mark kept none, and for
++    /// a file with no mark) against `range.right_text(file)`.
++    pub fn since_review(&self, range: &Range, file: RangeFileId) -> Result<SinceReview> {
++        listed_path(range, file)?;
++        let Some(marked) = self.marked(file) else {
++            return Ok(SinceReview::NoText);
++        };
++        let reviewed = match &marked.stored.right {
++            None => String::new(),
++            Some(right) if marked.stored.kept_text => kept_text(&self.folder, &right.id)?,
++            Some(_) => return Ok(SinceReview::NoText),
++        };
++        let Some(current) = range.right_text(file)? else {
++            return Ok(SinceReview::NoText);
++        };
++        Ok(SinceReview::Texts {
++            differences: compare(&reviewed, &current),
++            reviewed,
++            current,
++        })
++    }
++
++    /// Under the lock: re-reads `reviewed.json`, keeps `text` as `texts/<id>`, applies `change`, writes the file.
++    fn write_change(
++        &self,
++        text: Option<&(String, String)>,
++        change: impl FnOnce(&mut ReviewedFile),
++    ) -> Result<()> {
++        let _held = lock(&self.folder)?;
++        let mut reviewed = read_reviewed(&self.folder, &self.review)?;
++        if let Some((id, text)) = text {
++            keep_text(&self.folder, id, text)?;
++        }
++        change(&mut reviewed);
++        write_reviewed(&self.folder, &reviewed)
++    }
++
++    fn marked(&self, file: RangeFileId) -> Option<&Marked> {
++        let index = usize::try_from(file.0).ok()?;
++        self.files.get(index)?.as_ref()
++    }
++
++    fn slot_mut(&mut self, file: RangeFileId) -> Option<&mut Option<Marked>> {
++        let index = usize::try_from(file.0).ok()?;
++        self.files.get_mut(index)
++    }
++}
++
++fn listed_path(range: &Range, file: RangeFileId) -> Result<&str> {
++    match range.entry(file) {
++        Some(entry) => Ok(&entry.path),
++        None => Err(Error::UnknownFile { file }),
++    }
++}
++
++/// Under the lock: the stored marks on paths `range` lists; the others are dropped from the file, and texts no mark
++/// keeps are removed.
++fn listed_marks(folder: &Path, review: &ReviewOf, range: &Range) -> Result<Vec<StoredMark>> {
++    let _held = lock(folder)?;
++    let mut reviewed = read_reviewed(folder, review)?;
++    let listed: HashSet<&str> = range
++        .entries()
++        .iter()
++        .map(|entry| entry.path.as_str())
++        .collect();
++    let stored = reviewed.marks.len();
++    reviewed
++        .marks
++        .retain(|mark| listed.contains(mark.path.as_str()));
++    if reviewed.marks.len() != stored {
++        write_reviewed(folder, &reviewed)?;
++    }
++    sweep_texts(folder, &reviewed.marks)?;
++    Ok(reviewed.marks)
++}
++
++/// Each listed file's mark: `Reviewed` while its right side is the one marked, else `ChangedSinceReview`.
++fn classified(range: &Range, marks: Vec<StoredMark>) -> Result<Vec<Option<Marked>>> {
++    let mut by_path: HashMap<String, StoredMark> = marks
++        .into_iter()
++        .map(|mark| (mark.path.clone(), mark))
++        .collect();
++    let mut files = Vec::with_capacity(range.entries().len());
++    for entry in range.entries() {
++        let Some(stored) = by_path.remove(&entry.path) else {
++            files.push(None);
++            continue;
++        };
++        let right = range.sides(entry.id)?.right;
++        let mark = if stored.right == right.as_ref().map(StoredSide::of) {
++            ReviewMark::Reviewed
++        } else {
++            ReviewMark::ChangedSinceReview
++        };
++        files.push(Some(Marked { mark, stored }));
++    }
++    Ok(files)
++}
+diff --git a/crates/reviewed/src/stored.rs b/crates/reviewed/src/stored.rs
+new file mode 100644
+index 0000000..19c0738
+--- /dev/null
++++ b/crates/reviewed/src/stored.rs
+@@ -0,0 +1,303 @@
++use std::collections::HashSet;
++use std::fmt::Display;
++use std::fs::{self, File, OpenOptions};
++use std::io::ErrorKind;
++use std::path::{Path, PathBuf};
++
++use serde::{Deserialize, Serialize};
++use yamt_gitio::Oid;
++use yamt_range::{Dots, RangeEntryKind, SideName, SideObject};
++
++use crate::{Error, Result, ReviewOf};
++
++const REVIEWED_FILE: &str = "reviewed.json";
++const TEXTS_FOLDER: &str = "texts";
++const LOCK_FILE: &str = "lock";
++const FORMAT: u32 = 1;
++const TEMP_SUFFIX: &str = ".tmp";
++
++/// `reviewed.json`: the review its folder holds and the marks, sorted by path.
++#[derive(Serialize, Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub(crate) struct ReviewedFile {
++    format: u32,
++    review: StoredReview,
++    pub(crate) marks: Vec<StoredMark>,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++enum StoredReview {
++    Range {
++        left: StoredSideName,
++        dots: StoredDots,
++        right: StoredSideName,
++    },
++    MergeRequest {
++        project: String,
++        iid: u32,
++    },
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++enum StoredSideName {
++    Ref { name: String },
++    Commit { id: String },
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase")]
++enum StoredDots {
++    Two,
++    Three,
++}
++
++/// A file's two sides when it was marked; `keptText`: `texts/<right id>` holds the right side's text.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub(crate) struct StoredMark {
++    pub(crate) path: String,
++    pub(crate) left: Option<StoredSide>,
++    pub(crate) right: Option<StoredSide>,
++    pub(crate) kept_text: bool,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++pub(crate) struct StoredSide {
++    pub(crate) id: String,
++    pub(crate) kind: RangeEntryKind,
++}
++
++#[derive(Deserialize)]
++struct FormatOnly {
++    format: u32,
++}
++
++impl StoredReview {
++    fn of(review: &ReviewOf) -> StoredReview {
++        match review {
++            ReviewOf::Range(names) => StoredReview::Range {
++                left: StoredSideName::of(&names.left),
++                dots: match names.dots {
++                    Dots::Two => StoredDots::Two,
++                    Dots::Three => StoredDots::Three,
++                },
++                right: StoredSideName::of(&names.right),
++            },
++            ReviewOf::MergeRequest { project, iid } => StoredReview::MergeRequest {
++                project: project.clone(),
++                iid: *iid,
++            },
++        }
++    }
++}
++
++impl StoredSideName {
++    fn of(side: &SideName) -> StoredSideName {
++        match side {
++            SideName::Ref { full_name } => StoredSideName::Ref {
++                name: full_name.clone(),
++            },
++            SideName::Commit { id } => StoredSideName::Commit {
++                id: id.as_str().to_owned(),
++            },
++        }
++    }
++}
++
++impl StoredSide {
++    pub(crate) fn of(side: &SideObject) -> StoredSide {
++        StoredSide {
++            id: side.id.as_str().to_owned(),
++            kind: side.kind,
++        }
++    }
++}
++
++impl ReviewedFile {
++    /// Puts `mark` in its place by path, over the mark on the same path.
++    pub(crate) fn put(&mut self, mark: StoredMark) {
++        match self.position(&mark.path) {
++            Ok(index) => {
++                if let Some(stored) = self.marks.get_mut(index) {
++                    *stored = mark;
++                }
++            }
++            Err(index) => self.marks.insert(index, mark),
++        }
++    }
++
++    pub(crate) fn remove(&mut self, path: &str) {
++        if let Ok(index) = self.position(path) {
++            self.marks.remove(index);
++        }
++    }
++
++    fn position(&self, path: &str) -> std::result::Result<usize, usize> {
++        self.marks
++            .binary_search_by(|mark| mark.path.as_str().cmp(path))
++    }
++
++    /// What makes parsed marks unusable: paths not in strictly ascending order, or an id that is not git's.
++    fn problem(&self) -> Option<String> {
++        for pair in self.marks.windows(2) {
++            if let [first, second] = pair
++                && first.path >= second.path
++            {
++                return Some(format!(
++                    "the marks are not sorted by path at \"{}\"",
++                    second.path
++                ));
++            }
++        }
++        for mark in &self.marks {
++            for side in [&mark.left, &mark.right].into_iter().flatten() {
++                if Oid::parse(&side.id).is_err() {
++                    return Some(format!(
++                        "\"{}\" of {} is not an object id",
++                        side.id, mark.path
++                    ));
++                }
++            }
++        }
++        None
++    }
++}
++
++/// The folder's lock, taken for one read-modify-write and released when the file is dropped (`File::lock`,
++/// flock(2) / `LockFileEx`); creates the folder.
++pub(crate) fn lock(folder: &Path) -> Result<File> {
++    fs::create_dir_all(folder).map_err(|error| write_failed(folder, &error))?;
++    let path = folder.join(LOCK_FILE);
++    let file = OpenOptions::new()
++        .create(true)
++        .truncate(false)
++        .write(true)
++        .open(&path)
++        .and_then(|file| file.lock().map(|()| file))
++        .map_err(|error| write_failed(&path, &error))?;
++    Ok(file)
++}
++
++/// The folder's marks of `review`; no marks when it holds no `reviewed.json`.
++pub(crate) fn read_reviewed(folder: &Path, review: &ReviewOf) -> Result<ReviewedFile> {
++    let path = folder.join(REVIEWED_FILE);
++    let review = StoredReview::of(review);
++    match fs::read(&path) {
++        Ok(bytes) => parsed(&path, &bytes, &review),
++        Err(error) if error.kind() == ErrorKind::NotFound => Ok(ReviewedFile {
++            format: FORMAT,
++            review,
++            marks: Vec::new(),
++        }),
++        Err(error) => Err(read_failed(&path, &error)),
++    }
++}
++
++fn parsed(path: &Path, bytes: &[u8], review: &StoredReview) -> Result<ReviewedFile> {
++    let FormatOnly { format } =
++        serde_json::from_slice(bytes).map_err(|error| broken(path, error.to_string()))?;
++    if format > FORMAT {
++        return Err(Error::NewerFormat {
++            path: path.to_owned(),
++            format,
++        });
++    }
++    if format != FORMAT {
++        return Err(broken(path, format!("format {format} is not {FORMAT}")));
++    }
++    let file: ReviewedFile =
++        serde_json::from_slice(bytes).map_err(|error| broken(path, error.to_string()))?;
++    if file.review != *review {
++        return Err(broken(path, "`review` names another review".to_owned()));
++    }
++    match file.problem() {
++        Some(message) => Err(broken(path, message)),
++        None => Ok(file),
++    }
++}
++
++pub(crate) fn write_reviewed(folder: &Path, file: &ReviewedFile) -> Result<()> {
++    let path = folder.join(REVIEWED_FILE);
++    let mut text =
++        serde_json::to_string_pretty(file).map_err(|error| write_failed(&path, &error))?;
++    text.push('\n');
++    write_atomically(&path, text.as_bytes())
++}
++
++/// Writes `texts/<id>` unless it is there: a blob's text never changes.
++pub(crate) fn keep_text(folder: &Path, id: &str, text: &str) -> Result<()> {
++    let texts = folder.join(TEXTS_FOLDER);
++    let path = texts.join(id);
++    if path.exists() {
++        return Ok(());
++    }
++    fs::create_dir_all(&texts).map_err(|error| write_failed(&texts, &error))?;
++    write_atomically(&path, text.as_bytes())
++}
++
++pub(crate) fn kept_text(folder: &Path, id: &str) -> Result<String> {
++    let path = folder.join(TEXTS_FOLDER).join(id);
++    let bytes = fs::read(&path).map_err(|error| read_failed(&path, &error))?;
++    String::from_utf8(bytes).map_err(|error| read_failed(&path, &error))
++}
++
++/// Removes every file in `texts/` no mark keeps.
++pub(crate) fn sweep_texts(folder: &Path, marks: &[StoredMark]) -> Result<()> {
++    let texts = folder.join(TEXTS_FOLDER);
++    let entries = match fs::read_dir(&texts) {
++        Ok(entries) => entries,
++        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
++        Err(error) => return Err(read_failed(&texts, &error)),
++    };
++    let kept: HashSet<&str> = marks
++        .iter()
++        .filter(|mark| mark.kept_text)
++        .filter_map(|mark| mark.right.as_ref().map(|right| right.id.as_str()))
++        .collect();
++    for entry in entries {
++        let path = entry.map_err(|error| read_failed(&texts, &error))?.path();
++        let is_kept = path
++            .file_name()
++            .and_then(|name| name.to_str())
++            .is_some_and(|name| kept.contains(name));
++        if !is_kept {
++            fs::remove_file(&path).map_err(|error| write_failed(&path, &error))?;
++        }
++    }
++    Ok(())
++}
++
++/// Through a temporary file beside `path` and a rename, so a kill leaves the old or the new text.
++fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
++    let mut temp = path.as_os_str().to_owned();
++    temp.push(TEMP_SUFFIX);
++    let temp = PathBuf::from(temp);
++    if let Err(error) = fs::write(&temp, bytes).and_then(|()| fs::rename(&temp, path)) {
++        fs::remove_file(&temp).ok();
++        return Err(write_failed(path, &error));
++    }
++    Ok(())
++}
++
++fn broken(path: &Path, message: String) -> Error {
++    Error::Broken {
++        path: path.to_owned(),
++        message,
++    }
++}
++
++fn read_failed(path: &Path, error: &impl Display) -> Error {
++    Error::ReadFailed {
++        path: path.to_owned(),
++        message: error.to_string(),
++    }
++}
++
++fn write_failed(path: &Path, error: &impl Display) -> Error {
++    Error::WriteFailed {
++        path: path.to_owned(),
++        message: error.to_string(),
++    }
++}
+diff --git a/crates/reviewed/tests/fixture/mod.rs b/crates/reviewed/tests/fixture/mod.rs
+new file mode 100644
+index 0000000..d2a4adc
+--- /dev/null
++++ b/crates/reviewed/tests/fixture/mod.rs
+@@ -0,0 +1,133 @@
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
++use yamt_range::{FileSides, Range, RangeFileId, RangeSpec, Resolved, fnv1a_64};
++use yamt_reviewed::{Error, ReviewMark, ReviewOf, ReviewedStore};
++
++pub(crate) const REVIEWED_FILE: &str = "reviewed.json";
++pub(crate) const TEXTS_FOLDER: &str = "texts";
++pub(crate) const THREE_DOTS: &str = "main...HEAD";
++
++fn changed<'a>(path: &'a str, base: Option<&'a [u8]>, local: Option<&'a [u8]>) -> ConflictFile<'a> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base,
++        local,
++        remote: base,
++    }
++}
++
++/// On branch `local`, `main...HEAD` lists `a.txt` and `b.txt` (edited, `b.txt` enough alike to be found renamed),
++/// `bin.dat` (binary) and `gone.txt` (deleted).
++pub(crate) fn repo() -> TempDir {
++    diverged_repo(&[
++        changed("a.txt", Some(b"a\n"), Some(b"a1\n")),
++        changed("b.txt", Some(b"b\nb\nb\nb\n"), Some(b"b\nb\nb\nb1\n")),
++        changed("bin.dat", Some(b"\0x"), Some(b"\0y")),
++        changed("gone.txt", Some(b"g\n"), None),
++    ])
++    .unwrap()
++}
++
++pub(crate) fn range(repo: &TempDir, text: &str) -> Range {
++    let spec = RangeSpec::parse(text).unwrap();
++    Resolved::resolve(repo.path(), &spec)
++        .unwrap()
++        .list()
++        .unwrap()
++}
++
++pub(crate) fn review_of(range: &Range) -> ReviewOf {
++    ReviewOf::Range(range.side_names().unwrap())
++}
++
++pub(crate) fn open(data: &TempDir, range: &Range) -> ReviewedStore {
++    ReviewedStore::open(data.path(), review_of(range), range).unwrap()
++}
++
++pub(crate) fn refused(data: &TempDir, range: &Range) -> Error {
++    match ReviewedStore::open(data.path(), review_of(range), range) {
++        Ok(_) => panic!("the store opened"),
++        Err(error) => error,
++    }
++}
++
++pub(crate) fn id(range: &Range, path: &str) -> RangeFileId {
++    let entry = range.entries().iter().find(|entry| entry.path == path);
++    entry.unwrap().id
++}
++
++/// The store's marks by path, in list order.
++pub(crate) fn marked(store: &ReviewedStore, range: &Range) -> Vec<(String, ReviewMark)> {
++    let mut marks = Vec::new();
++    for review in store.marks() {
++        let entry = range.entry(review.file).unwrap();
++        marks.push((entry.path.clone(), review.mark));
++    }
++    marks
++}
++
++pub(crate) fn reviewed(paths: &[&str]) -> Vec<(String, ReviewMark)> {
++    paths
++        .iter()
++        .map(|path| ((*path).to_owned(), ReviewMark::Reviewed))
++        .collect()
++}
++
++pub(crate) fn mark(store: &mut ReviewedStore, range: &Range, paths: &[&str]) {
++    for path in paths {
++        store.mark(range, id(range, path)).unwrap();
++    }
++}
++
++/// Writes `path` and commits it on the checked-out branch.
++pub(crate) fn commit(repo: &TempDir, path: &str, bytes: &[u8]) {
++    let root = repo.path();
++    fs::write(root.join(path), bytes).unwrap();
++    git_ok(root, &["add", "--", path]).unwrap();
++    git_ok(root, &["commit", "--quiet", "-m", path]).unwrap();
++}
++
++pub(crate) fn object_id(repo: &TempDir, revision: &str) -> String {
++    let output = git_ok(repo.path(), &["rev-parse", revision]).unwrap();
++    String::from_utf8(output).unwrap().trim_end().to_owned()
++}
++
++pub(crate) fn review_folder(data: &Path, range: &Range, review: &ReviewOf) -> PathBuf {
++    let name = format!("{:016x}", fnv1a_64(review.key_text().as_bytes()));
++    data.join(range.repo_key().unwrap()).join(name)
++}
++
++pub(crate) fn range_folder(data: &TempDir, range: &Range) -> PathBuf {
++    review_folder(data.path(), range, &review_of(range))
++}
++
++pub(crate) fn sides_of(range: &Range, path: &str) -> FileSides {
++    range.sides(id(range, path)).unwrap()
++}
++
++pub(crate) fn json_on_disk(folder: &Path) -> serde_json::Value {
++    let bytes = fs::read(folder.join(REVIEWED_FILE)).unwrap();
++    serde_json::from_slice(&bytes).unwrap()
++}
++
++pub(crate) fn stored_paths(folder: &Path) -> Vec<String> {
++    let json = json_on_disk(folder);
++    let marks = json["marks"].as_array().unwrap();
++    marks
++        .iter()
++        .map(|mark| mark["path"].as_str().unwrap().to_owned())
++        .collect()
++}
++
++/// The file names in `texts/`, sorted.
++pub(crate) fn kept_texts(folder: &Path) -> Vec<String> {
++    let mut names: Vec<String> = fs::read_dir(folder.join(TEXTS_FOLDER))
++        .unwrap()
++        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
++        .collect();
++    names.sort();
++    names
++}
+diff --git a/crates/reviewed/tests/reviewed.rs b/crates/reviewed/tests/reviewed.rs
+new file mode 100644
+index 0000000..0258d65
+--- /dev/null
++++ b/crates/reviewed/tests/reviewed.rs
+@@ -0,0 +1,267 @@
++#![cfg(test)]
++
++mod fixture;
++mod stored_file;
++
++use std::fs;
++
++use yamt_conflict_repo::git_ok;
++use yamt_merge_core::compare;
++use yamt_range::RangeFileId;
++use yamt_reviewed::{Error, ReviewMark, SinceReview};
++
++use fixture::{
++    THREE_DOTS, commit, id, kept_texts, mark, marked, object_id, open, range, range_folder, repo,
++    reviewed, stored_paths,
++};
++
++fn changed_since(path: &str) -> (String, ReviewMark) {
++    (path.to_owned(), ReviewMark::ChangedSinceReview)
++}
++
++fn texts(reviewed: &str, current: &str) -> SinceReview {
++    SinceReview::Texts {
++        reviewed: reviewed.to_owned(),
++        current: current.to_owned(),
++        differences: compare(reviewed, current),
++    }
++}
++
++#[test]
++fn a_missing_file_is_no_marks_and_nothing_is_written() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let range = range(&repo, THREE_DOTS);
++
++    let store = open(&data, &range);
++
++    assert_eq!(store.marks(), []);
++    assert_eq!(fs::read_dir(data.path()).unwrap().count(), 0);
++}
++
++#[test]
++fn a_mark_is_reviewed_again_after_a_new_commit_that_leaves_its_right_side() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let before = range(&repo, THREE_DOTS);
++    mark(&mut open(&data, &before), &before, &["a.txt", "bin.dat"]);
++
++    commit(&repo, "new.txt", b"new\n");
++    let after = range(&repo, THREE_DOTS);
++
++    assert_eq!(after.entries().len(), before.entries().len() + 1);
++    let store = open(&data, &after);
++    assert_eq!(marked(&store, &after), reviewed(&["a.txt", "bin.dat"]));
++}
++
++#[test]
++fn a_moved_left_side_keeps_the_mark_reviewed() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let before = range(&repo, "main..HEAD");
++    mark(&mut open(&data, &before), &before, &["a.txt"]);
++
++    git_ok(repo.path(), &["checkout", "--quiet", "main"]).unwrap();
++    commit(&repo, "a.txt", b"a on main\n");
++    git_ok(repo.path(), &["checkout", "--quiet", "local"]).unwrap();
++    let after = range(&repo, "main..HEAD");
++
++    let left = |range| fixture::sides_of(range, "a.txt").left;
++    assert_ne!(left(&after), left(&before));
++    let store = open(&data, &after);
++    assert_eq!(marked(&store, &after), reviewed(&["a.txt"]));
++}
++
++#[test]
++fn a_changed_right_side_is_changed_since_review() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let before = range(&repo, THREE_DOTS);
++    mark(&mut open(&data, &before), &before, &["a.txt", "b.txt"]);
++
++    commit(&repo, "a.txt", b"a2\n");
++    let after = range(&repo, THREE_DOTS);
++
++    let store = open(&data, &after);
++    let expected = vec![
++        changed_since("a.txt"),
++        ("b.txt".to_owned(), ReviewMark::Reviewed),
++    ];
++    assert_eq!(marked(&store, &after), expected);
++}
++
++#[test]
++fn a_mark_on_a_path_no_longer_listed_is_dropped_written_and_its_text_swept() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let before = range(&repo, THREE_DOTS);
++    mark(&mut open(&data, &before), &before, &["a.txt", "b.txt"]);
++    let folder = range_folder(&data, &before);
++    let a_text = object_id(&repo, "local:a.txt");
++    let b_text = object_id(&repo, "local:b.txt");
++    let mut both = vec![a_text.clone(), b_text];
++    both.sort();
++    assert_eq!(kept_texts(&folder), both);
++
++    git_ok(repo.path(), &["mv", "b.txt", "c.txt"]).unwrap();
++    git_ok(repo.path(), &["commit", "--quiet", "-m", "rename"]).unwrap();
++    let after = range(&repo, THREE_DOTS);
++
++    let store = open(&data, &after);
++    assert_eq!(marked(&store, &after), reviewed(&["a.txt"]));
++    assert_eq!(stored_paths(&folder), ["a.txt"]);
++    assert_eq!(kept_texts(&folder), [a_text]);
++}
++
++#[test]
++fn marking_again_records_the_current_contents() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let before = range(&repo, THREE_DOTS);
++    mark(&mut open(&data, &before), &before, &["a.txt"]);
++    commit(&repo, "a.txt", b"a2\n");
++    let after = range(&repo, THREE_DOTS);
++    let mut store = open(&data, &after);
++    assert_eq!(marked(&store, &after), [changed_since("a.txt")]);
++
++    mark(&mut store, &after, &["a.txt"]);
++
++    assert_eq!(marked(&store, &after), reviewed(&["a.txt"]));
++    let reopened = open(&data, &after);
++    assert_eq!(marked(&reopened, &after), reviewed(&["a.txt"]));
++    let folder = range_folder(&data, &after);
++    assert_eq!(kept_texts(&folder), [object_id(&repo, "local:a.txt")]);
++    let a = fixture::json_on_disk(&folder)["marks"][0].clone();
++    assert_eq!(a["left"]["id"], object_id(&repo, "main:a.txt"));
++    assert_eq!(a["right"]["id"], object_id(&repo, "local:a.txt"));
++}
++
++#[test]
++fn unmark_forgets_and_an_unmarked_file_writes_nothing() {
++    let repo = repo();
++    let range = range(&repo, THREE_DOTS);
++    let untouched = tempfile::tempdir().unwrap();
++    open(&untouched, &range)
++        .unmark(&range, id(&range, "a.txt"))
++        .unwrap();
++    assert_eq!(fs::read_dir(untouched.path()).unwrap().count(), 0);
++
++    let data = tempfile::tempdir().unwrap();
++    let mut store = open(&data, &range);
++    mark(&mut store, &range, &["a.txt", "b.txt"]);
++    store.unmark(&range, id(&range, "a.txt")).unwrap();
++
++    assert_eq!(marked(&store, &range), reviewed(&["b.txt"]));
++    assert_eq!(marked(&open(&data, &range), &range), reviewed(&["b.txt"]));
++    let folder = range_folder(&data, &range);
++    let written = fs::read(folder.join(fixture::REVIEWED_FILE)).unwrap();
++    store.unmark(&range, id(&range, "a.txt")).unwrap();
++    assert_eq!(
++        fs::read(folder.join(fixture::REVIEWED_FILE)).unwrap(),
++        written
++    );
++}
++
++#[test]
++fn a_file_past_the_list_is_unknown_file() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let range = range(&repo, THREE_DOTS);
++    let mut store = open(&data, &range);
++    let past = RangeFileId(4);
++    let is_unknown = |error: Error| matches!(error, Error::UnknownFile { file } if file == past);
++
++    assert!(is_unknown(store.mark(&range, past).unwrap_err()));
++    assert!(is_unknown(store.unmark(&range, past).unwrap_err()));
++    assert!(is_unknown(store.since_review(&range, past).unwrap_err()));
++    assert_eq!(fs::read_dir(data.path()).unwrap().count(), 0);
++}
++
++#[test]
++fn since_review_shows_the_kept_text_against_today_s_right_side() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let before = range(&repo, THREE_DOTS);
++    mark(&mut open(&data, &before), &before, &["a.txt"]);
++    commit(&repo, "a.txt", b"a1\nmore\n");
++    let after = range(&repo, THREE_DOTS);
++
++    let store = open(&data, &after);
++
++    let since = store.since_review(&after, id(&after, "a.txt")).unwrap();
++    assert_eq!(since, texts("a1\n", "a1\nmore\n"));
++    let unmarked = store.since_review(&after, id(&after, "b.txt")).unwrap();
++    assert_eq!(unmarked, SinceReview::NoText);
++}
++
++#[test]
++fn since_review_of_a_file_marked_as_binary_is_no_text() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let before = range(&repo, THREE_DOTS);
++    mark(&mut open(&data, &before), &before, &["bin.dat"]);
++    let folder = range_folder(&data, &before);
++    assert_eq!(
++        fixture::json_on_disk(&folder)["marks"][0]["keptText"],
++        false
++    );
++    commit(&repo, "bin.dat", b"text now\n");
++    let after = range(&repo, THREE_DOTS);
++
++    let store = open(&data, &after);
++
++    assert_eq!(marked(&store, &after), [changed_since("bin.dat")]);
++    let since = store.since_review(&after, id(&after, "bin.dat")).unwrap();
++    assert_eq!(since, SinceReview::NoText);
++}
++
++#[test]
++fn a_deleted_right_side_reviewed_compares_from_empty_text() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let before = range(&repo, THREE_DOTS);
++    mark(&mut open(&data, &before), &before, &["gone.txt"]);
++    commit(&repo, "gone.txt", b"back\n");
++    let after = range(&repo, THREE_DOTS);
++
++    let store = open(&data, &after);
++
++    assert_eq!(marked(&store, &after), [changed_since("gone.txt")]);
++    let since = store.since_review(&after, id(&after, "gone.txt")).unwrap();
++    assert_eq!(since, texts("", "back\n"));
++}
++
++#[test]
++fn a_file_not_text_today_has_no_since_review_texts() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let before = range(&repo, THREE_DOTS);
++    mark(&mut open(&data, &before), &before, &["a.txt"]);
++    commit(&repo, "a.txt", b"caf\xe9\n");
++    let after = range(&repo, THREE_DOTS);
++
++    let store = open(&data, &after);
++
++    let since = store.since_review(&after, id(&after, "a.txt")).unwrap();
++    assert_eq!(since, SinceReview::NoText);
++}
++
++#[test]
++fn two_stores_on_one_review_keep_both_changes() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let first = range(&repo, THREE_DOTS);
++    commit(&repo, "new.txt", b"new\n");
++    let second = range(&repo, THREE_DOTS);
++    assert_ne!(first.compared().right, second.compared().right);
++    let mut on_first = open(&data, &first);
++    let mut on_second = open(&data, &second);
++
++    mark(&mut on_first, &first, &["a.txt"]);
++    mark(&mut on_second, &second, &["b.txt"]);
++
++    assert_eq!(marked(&on_first, &first), reviewed(&["a.txt"]));
++    assert_eq!(marked(&on_second, &second), reviewed(&["b.txt"]));
++    let reopened = open(&data, &second);
++    assert_eq!(marked(&reopened, &second), reviewed(&["a.txt", "b.txt"]));
++}
+diff --git a/crates/reviewed/tests/stored_file/mod.rs b/crates/reviewed/tests/stored_file/mod.rs
+new file mode 100644
+index 0000000..4286b6e
+--- /dev/null
++++ b/crates/reviewed/tests/stored_file/mod.rs
+@@ -0,0 +1,293 @@
++use std::fs;
++use std::path::PathBuf;
++
++use tempfile::TempDir;
++use yamt_gitio::Oid;
++use yamt_range::{Dots, PairLock, RangeSpec, Resolved, SideName, SideNames, pair_folders};
++use yamt_reviewed::{Error, ReviewOf, ReviewedStore};
++
++use crate::fixture::{
++    REVIEWED_FILE, TEXTS_FOLDER, THREE_DOTS, id, kept_texts, mark, marked, object_id, open, range,
++    range_folder, refused, repo, review_folder, review_of, reviewed,
++};
++
++fn reference(full_name: &str) -> SideName {
++    SideName::Ref {
++        full_name: full_name.to_owned(),
++    }
++}
++
++fn merge_request() -> ReviewOf {
++    ReviewOf::MergeRequest {
++        project: "group/project".to_owned(),
++        iid: 12,
++    }
++}
++
++/// A `reviewed.json` written into the folder of `main...HEAD`'s review before the store opens it.
++fn stored(json: &str) -> (TempDir, TempDir, PathBuf) {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let folder = range_folder(&data, &range(&repo, THREE_DOTS));
++    fs::create_dir_all(&folder).unwrap();
++    fs::write(folder.join(REVIEWED_FILE), json).unwrap();
++    (repo, data, folder)
++}
++
++fn broken_message(json: &str) -> String {
++    let (repo, data, folder) = stored(json);
++    let error = refused(&data, &range(&repo, THREE_DOTS));
++    assert_eq!(
++        fs::read_to_string(folder.join(REVIEWED_FILE)).unwrap(),
++        json
++    );
++    let Error::Broken { path, message } = error else {
++        panic!("expected Broken, got {error:?}");
++    };
++    assert_eq!(path, folder.join(REVIEWED_FILE));
++    message
++}
++
++const RANGE_REVIEW: &str = r#"{"kind":"range","left":{"kind":"ref","name":"refs/heads/main"},"dots":"three","right":{"kind":"ref","name":"refs/heads/local"}}"#;
++
++fn with_marks(marks: &str) -> String {
++    format!(r#"{{"format":1,"review":{RANGE_REVIEW},"marks":[{marks}]}}"#)
++}
++
++#[test]
++fn the_review_key_text_names_refs_commits_dots_and_merge_requests() {
++    let on_branches = ReviewOf::Range(SideNames {
++        left: reference("refs/heads/dev"),
++        dots: Dots::Three,
++        right: reference("refs/heads/feature-x"),
++    });
++    let hex = "ab".repeat(20);
++    let by_commit = ReviewOf::Range(SideNames {
++        left: SideName::Commit {
++            id: Oid::parse(&hex).unwrap(),
++        },
++        dots: Dots::Two,
++        right: reference("refs/heads/x"),
++    });
++
++    assert_eq!(
++        on_branches.key_text(),
++        "range ref:refs/heads/dev...ref:refs/heads/feature-x"
++    );
++    assert_eq!(
++        by_commit.key_text(),
++        format!("range commit:{hex}..ref:refs/heads/x")
++    );
++    assert_eq!(merge_request().key_text(), "merge-request group/project!12");
++}
++
++/// `reviewed.json` with one mark on `a.txt`, as format 1 writes it.
++fn merge_request_file(left: &str, right: &str) -> String {
++    format!(
++        r#"{{
++  "format": 1,
++  "review": {{
++    "kind": "mergeRequest",
++    "project": "group/project",
++    "iid": 12
++  }},
++  "marks": [
++    {{
++      "path": "a.txt",
++      "left": {{
++        "id": "{left}",
++        "kind": "file"
++      }},
++      "right": {{
++        "id": "{right}",
++        "kind": "file"
++      }},
++      "keptText": true
++    }}
++  ]
++}}
++"#
++    )
++}
++
++#[test]
++fn the_folder_name_is_the_pinned_fnv_of_the_key_text() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let range = range(&repo, THREE_DOTS);
++    let mut store = ReviewedStore::open(data.path(), merge_request(), &range).unwrap();
++
++    store.mark(&range, id(&range, "a.txt")).unwrap();
++
++    let folder = data
++        .path()
++        .join(range.repo_key().unwrap())
++        .join("d4da12ac15071dca");
++    let json = fs::read_to_string(folder.join(REVIEWED_FILE)).unwrap();
++    let right = object_id(&repo, "local:a.txt");
++    let left = object_id(&repo, "main:a.txt");
++    assert_eq!(json, merge_request_file(&left, &right));
++    assert_eq!(
++        fs::read_to_string(folder.join(TEXTS_FOLDER).join(&right)).unwrap(),
++        "a1\n"
++    );
++}
++
++#[test]
++fn a_newer_format_is_refused_by_name_and_left_unchanged() {
++    let json = r#"{"format":2,"anything":"new"}"#;
++    let (repo, data, folder) = stored(json);
++
++    let error = refused(&data, &range(&repo, THREE_DOTS));
++
++    assert!(
++        matches!(&error, Error::NewerFormat { path, format: 2 } if *path == folder.join(REVIEWED_FILE)),
++        "{error:?}"
++    );
++    assert!(
++        error
++            .to_string()
++            .ends_with("were written by a newer yamt (format 2)")
++    );
++    assert_eq!(
++        fs::read_to_string(folder.join(REVIEWED_FILE)).unwrap(),
++        json
++    );
++}
++
++#[test]
++fn a_broken_file_names_line_and_column_and_is_left_unchanged() {
++    assert_eq!(
++        broken_message("{\"format\":1,\n\"marks\": ["),
++        "EOF while parsing a list at line 2 column 10"
++    );
++    assert_eq!(
++        broken_message(&with_marks(r#"{"path":"a.txt"}"#)),
++        "missing field `keptText` at line 1 column 174"
++    );
++    assert_eq!(broken_message(r#"{"format":0}"#), "format 0 is not 1");
++}
++
++#[test]
++fn marks_out_of_path_order_or_with_a_foreign_id_are_broken() {
++    let side = r#"{"id":"1111111111111111111111111111111111111111","kind":"file"}"#;
++    let mark =
++        |path: &str| format!(r#"{{"path":"{path}","left":null,"right":{side},"keptText":false}}"#);
++    let unsorted = with_marks(&format!("{},{}", mark("b.txt"), mark("a.txt")));
++    assert_eq!(
++        broken_message(&unsorted),
++        "the marks are not sorted by path at \"a.txt\""
++    );
++    let twice = with_marks(&format!("{},{}", mark("a.txt"), mark("a.txt")));
++    assert_eq!(
++        broken_message(&twice),
++        "the marks are not sorted by path at \"a.txt\""
++    );
++    let foreign = with_marks(
++        r#"{"path":"a.txt","left":{"id":"../x","kind":"file"},"right":null,"keptText":false}"#,
++    );
++    assert_eq!(
++        broken_message(&foreign),
++        "\"../x\" of a.txt is not an object id"
++    );
++}
++
++#[test]
++fn a_file_naming_another_review_is_broken() {
++    let other = r#"{"format":1,"review":{"kind":"mergeRequest","project":"group/project","iid":12},"marks":[]}"#;
++    assert_eq!(broken_message(other), "`review` names another review");
++}
++
++fn read_failed_at(data: &TempDir, range: &yamt_range::Range) -> PathBuf {
++    let error = refused(data, range);
++    let Error::ReadFailed { path, .. } = error else {
++        panic!("expected ReadFailed, got {error:?}");
++    };
++    path
++}
++
++#[test]
++fn a_reviewed_file_or_texts_folder_that_cannot_be_read_is_read_failed() {
++    let repo = repo();
++    let range = range(&repo, THREE_DOTS);
++
++    let a_folder = tempfile::tempdir().unwrap();
++    let folder = range_folder(&a_folder, &range);
++    fs::create_dir_all(folder.join(REVIEWED_FILE)).unwrap();
++    assert_eq!(
++        read_failed_at(&a_folder, &range),
++        folder.join(REVIEWED_FILE)
++    );
++
++    let a_file = tempfile::tempdir().unwrap();
++    let folder = range_folder(&a_file, &range);
++    fs::create_dir_all(&folder).unwrap();
++    fs::write(folder.join(REVIEWED_FILE), with_marks("")).unwrap();
++    fs::write(folder.join(TEXTS_FOLDER), "not a folder").unwrap();
++    assert_eq!(read_failed_at(&a_file, &range), folder.join(TEXTS_FOLDER));
++}
++
++#[test]
++fn a_failed_write_changes_nothing_in_memory() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let range = range(&repo, THREE_DOTS);
++    let mut store = open(&data, &range);
++    mark(&mut store, &range, &["a.txt"]);
++    let folder = range_folder(&data, &range);
++    let written = fs::read(folder.join(REVIEWED_FILE)).unwrap();
++    let blocking_temp = folder.join(format!("{REVIEWED_FILE}.tmp"));
++    fs::create_dir(&blocking_temp).unwrap();
++
++    let marking = store.mark(&range, id(&range, "b.txt")).unwrap_err();
++    let unmarking = store.unmark(&range, id(&range, "a.txt")).unwrap_err();
++
++    for error in [marking, unmarking] {
++        assert!(
++            matches!(&error, Error::WriteFailed { path, .. } if *path == folder.join(REVIEWED_FILE)),
++            "{error:?}"
++        );
++    }
++    assert_eq!(marked(&store, &range), reviewed(&["a.txt"]));
++    assert_eq!(fs::read(folder.join(REVIEWED_FILE)).unwrap(), written);
++}
++
++#[test]
++fn a_leftover_temp_file_is_ignored() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let range = range(&repo, THREE_DOTS);
++    mark(&mut open(&data, &range), &range, &["a.txt"]);
++    let folder = range_folder(&data, &range);
++    fs::write(folder.join(format!("{REVIEWED_FILE}.tmp")), "{\"form").unwrap();
++    let a_text = object_id(&repo, "local:a.txt");
++    fs::write(folder.join(TEXTS_FOLDER).join(format!("{a_text}.tmp")), "a").unwrap();
++
++    let mut store = open(&data, &range);
++    assert_eq!(marked(&store, &range), reviewed(&["a.txt"]));
++    assert_eq!(kept_texts(&folder), [a_text]);
++    mark(&mut store, &range, &["b.txt"]);
++
++    let reopened = open(&data, &range);
++    assert_eq!(marked(&reopened, &range), reviewed(&["a.txt", "b.txt"]));
++}
++
++#[test]
++fn the_reviewed_folder_is_not_a_pair_folder() {
++    let repo = repo();
++    let app = tempfile::tempdir().unwrap();
++    let range_dir = app.path().join("range");
++    let reviewed_dir = app.path().join("reviewed");
++    let spec = RangeSpec::parse(THREE_DOTS).unwrap();
++    let resolved = Resolved::resolve(repo.path(), &spec).unwrap();
++    let lock = PairLock::take(&range_dir, &resolved).unwrap();
++    let range = resolved.list().unwrap();
++    let review = review_of(&range);
++    let folder = review_folder(&reviewed_dir, &range, &review);
++    let mut store = ReviewedStore::open(&reviewed_dir, review, &range).unwrap();
++
++    store.mark(&range, id(&range, "a.txt")).unwrap();
++
++    assert_eq!(pair_folders(&range_dir), [lock.folder().to_owned()]);
++    assert!(folder.join(REVIEWED_FILE).is_file());
++}
+diff --git a/scripts/arch-check.sh b/scripts/arch-check.sh
+index ff31c56..dccbd98 100755
+--- a/scripts/arch-check.sh
++++ b/scripts/arch-check.sh
+@@ -62,6 +62,13 @@ if [ -n "$forbidden_in_review" ]; then
+     failed=1
+ fi
+ 
++reviewed_deps=$(normal_deps yamt-reviewed)
++forbidden_in_reviewed=$(grep -E '^(yamt-|tauri(-|$))' <<<"$reviewed_deps" | grep -vxE 'yamt-(reviewed|range|gitio|merge-core)' || true)
++if [ -n "$forbidden_in_reviewed" ]; then
++    echo "arch-check: yamt-reviewed depends on yamt-range, yamt-gitio and yamt-merge-core only among yamt crates, and never on tauri, not:" $forbidden_in_reviewed >&2
++    failed=1
++fi
++
+ agent_deps=$(normal_deps yamt-agent)
+ agent_direct_deps=$(cargo tree --package yamt-agent --edges normal --target all --all-features --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
+ forbidden_in_agent=$( { grep -E '^(yamt-|tauri(-|$))' <<<"$agent_deps"; grep -xE 'serde_json' <<<"$agent_direct_deps"; } | grep -vxE 'yamt-(agent|gitio|pipe|range|merge-core)' || true)
+@@ -85,9 +92,9 @@ if [ -n "$forbidden_in_local_merge" ]; then
+ fi
+ 
+ app_deps=$(cargo tree --package yamt-app --edges normal --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
+-forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare|range|review|agent|merge-requests|local-merge)' || true)
++forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare|range|review|reviewed|agent|merge-requests|local-merge)' || true)
+ if [ -n "$forbidden_in_app" ]; then
+-    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host, yamt-compare, yamt-range, yamt-review, yamt-agent, yamt-merge-requests and yamt-local-merge only, not:" $forbidden_in_app >&2
++    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host, yamt-compare, yamt-range, yamt-review, yamt-reviewed, yamt-agent, yamt-merge-requests and yamt-local-merge only, not:" $forbidden_in_app >&2
+     failed=1
+ fi
+ 
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index a1c80a2..958346f 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -30,6 +30,7 @@ yamt-lsp-host.workspace = true
+ yamt-compare.workspace = true
+ yamt-range.workspace = true
+ yamt-review.workspace = true
++yamt-reviewed = { path = "../crates/reviewed" }
+ yamt-agent.workspace = true
+ yamt-merge-requests.workspace = true
+ yamt-local-merge.workspace = true

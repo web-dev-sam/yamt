@@ -1,14 +1,17 @@
+use std::ffi::OsString;
 use std::path::Path;
 
 use yamt_gitio::{Oid, Repo};
 
 use crate::entries::{FileAt, blob_ids, entries_at, files_at, sort_by_display_path};
-use crate::load::load_file;
+use crate::load::{load_file, right_text};
+use crate::lock::repo_key;
 use crate::search::search_page;
+use crate::side_names::{SideNames, side_names};
 use crate::spec::Dots;
 use crate::{
-    Compared, Error, RangeEntry, RangeFile, RangeFileId, RangeSide, RangeSideLabel, RangeSpec,
-    RangeStart, Result, SearchTexts,
+    Compared, Error, FileSides, RangeEntry, RangeFile, RangeFileId, RangeSide, RangeSideLabel,
+    RangeSpec, RangeStart, Result, SearchTexts,
 };
 
 /// A range whose two commits git has named: built before any window opens.
@@ -94,10 +97,32 @@ impl Range {
     }
 
     pub fn load(&self, file: RangeFileId) -> Result<RangeFile> {
-        let Some(found) = list_index(file).and_then(|index| self.files.get(index)) else {
-            return Err(Error::UnknownFile { file });
-        };
-        load_file(&self.resolved.repo, found)
+        load_file(&self.resolved.repo, self.file_at(file)?)
+    }
+
+    /// The right column's text exactly as `load` shows it; `None` when `load` answers anything but `Texts`.
+    pub fn right_text(&self, file: RangeFileId) -> Result<Option<String>> {
+        right_text(&self.resolved.repo, self.file_at(file)?)
+    }
+
+    pub fn sides(&self, file: RangeFileId) -> Result<FileSides> {
+        Ok(self.file_at(file)?.sides())
+    }
+
+    /// Both typed sides by name, as git names them now.
+    pub fn side_names(&self) -> Result<SideNames> {
+        side_names(&self.resolved.repo, &self.resolved.spec)
+    }
+
+    /// The repository's folder name under a data folder: the one `PairLock::take` uses.
+    pub fn repo_key(&self) -> Result<OsString> {
+        Ok(repo_key(&self.resolved.repo.common_dir()?))
+    }
+
+    fn file_at(&self, file: RangeFileId) -> Result<&FileAt> {
+        list_index(file)
+            .and_then(|index| self.files.get(index))
+            .ok_or(Error::UnknownFile { file })
     }
 
     /// One page of text files from `from` on; `from` may be the list's length, which answers an empty last page.
@@ -152,7 +177,7 @@ fn not_a_repository(cwd: &Path, error: yamt_gitio::Error) -> Error {
     Error::Git(error)
 }
 
-fn commit_named(repo: &Repo, name: &str) -> Result<Oid> {
+pub(crate) fn commit_named(repo: &Repo, name: &str) -> Result<Oid> {
     repo.commit_named(name)?.ok_or_else(|| Error::UnknownName {
         name: name.to_owned(),
     })
@@ -178,9 +203,10 @@ fn side_at(repo: &Repo, oid: Oid, label: RangeSideLabel) -> Result<SideAt> {
 mod tests {
     use std::fs;
 
-    use yamt_conflict_repo::{ConflictFile, FileKind, git_ok};
+    use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, git_ok};
 
     use super::*;
+    use crate::{RangeEntryKind, SideObject};
 
     fn file<'a>(path: &'a str, local: &'a [u8]) -> ConflictFile<'a> {
         ConflictFile {
@@ -233,6 +259,82 @@ mod tests {
         assert_eq!(
             fs::canonicalize(range.root()).unwrap(),
             fs::canonicalize(root).unwrap()
+        );
+    }
+
+    const GITLINK_AT_BASE: &str = "1111111111111111111111111111111111111111";
+    const GITLINK_AT_LOCAL: &str = "2222222222222222222222222222222222222222";
+
+    fn object(id: Oid, kind: RangeEntryKind) -> SideObject {
+        SideObject { id, kind }
+    }
+
+    /// `main..local` lists `added.txt`, `gone.txt` (deleted), `run.sh` (edited, made executable) and the submodule
+    /// `vendor` moved from `GITLINK_AT_BASE` to `GITLINK_AT_LOCAL`.
+    fn sides_repo() -> TempDir {
+        let sides = |path, kind, base: Option<&'static [u8]>, local| ConflictFile {
+            path,
+            kind,
+            base,
+            local,
+            remote: base,
+        };
+        let regular = FileKind::Regular;
+        let repo = yamt_conflict_repo::diverged_repo(&[
+            sides("added.txt", regular, None, Some(b"new\n")),
+            sides("gone.txt", regular, Some(b"old\n"), None),
+            sides("run.sh", regular, Some(b"echo\n"), Some(b"echo hi\n")),
+            sides(
+                "vendor",
+                FileKind::Submodule,
+                Some(GITLINK_AT_BASE.as_bytes()),
+                Some(GITLINK_AT_LOCAL.as_bytes()),
+            ),
+        ])
+        .unwrap();
+        git_ok(repo.path(), &["update-index", "--chmod=+x", "run.sh"]).unwrap();
+        git_ok(repo.path(), &["commit", "--quiet", "-m", "executable"]).unwrap();
+        repo
+    }
+
+    #[test]
+    fn sides_name_each_side_s_object_and_kind_and_none_for_a_missing_side() {
+        let repo = sides_repo();
+        let root = repo.path();
+        let spec = RangeSpec::parse("main..local").unwrap();
+        let range = Resolved::resolve(root, &spec).unwrap().list().unwrap();
+
+        let listed: Vec<FileSides> = (0..4)
+            .map(|id| range.sides(RangeFileId(id)).unwrap())
+            .collect();
+
+        let blob = |revision| Some(object(commit(root, revision), RangeEntryKind::File));
+        let submodule = |id| Some(object(Oid::parse(id).unwrap(), RangeEntryKind::Submodule));
+        let executable = object(commit(root, "local:run.sh"), RangeEntryKind::Executable);
+        let expected = [
+            FileSides {
+                left: None,
+                right: blob("local:added.txt"),
+            },
+            FileSides {
+                left: blob("main:gone.txt"),
+                right: None,
+            },
+            FileSides {
+                left: blob("main:run.sh"),
+                right: Some(executable),
+            },
+            FileSides {
+                left: submodule(GITLINK_AT_BASE),
+                right: submodule(GITLINK_AT_LOCAL),
+            },
+        ];
+        assert_eq!(listed, expected);
+        let past_the_list = RangeFileId(4);
+        let refused = range.sides(past_the_list).unwrap_err();
+        assert!(
+            matches!(refused, Error::UnknownFile { file } if file == past_the_list),
+            "{refused:?}"
         );
     }
 }

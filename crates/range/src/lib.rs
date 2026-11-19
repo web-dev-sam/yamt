@@ -6,6 +6,7 @@ mod load;
 mod lock;
 mod open;
 mod search;
+mod side_names;
 mod spec;
 
 use std::path::PathBuf;
@@ -15,9 +16,10 @@ use specta::Type;
 use yamt_gitio::Oid;
 use yamt_merge_core::{Difference, LineChange};
 
-pub use crate::lock::{PairLock, pair_folders, pair_right_commit};
+pub use crate::lock::{PairLock, fnv1a_64, pair_folders, pair_right_commit};
 pub use crate::open::{Range, Resolved};
-pub use crate::spec::{RangeSpec, SpecError};
+pub use crate::side_names::{SideName, SideNames};
+pub use crate::spec::{Dots, RangeSpec, SpecError};
 
 /// A changed file's place in the range's list: 0.. in list order, fixed for the window's life.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
@@ -84,13 +86,27 @@ pub struct RangeStart {
     pub files: Vec<RangeEntry>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum RangeEntryKind {
     File,
     Executable,
     Link,
     Submodule,
+}
+
+/// A listed file's side as git lists it: the object id (a blob, or a gitlink's commit) and its kind.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SideObject {
+    pub id: Oid,
+    pub kind: RangeEntryKind,
+}
+
+/// A listed file's two sides; `None` where the range has no such side (added, deleted).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileSides {
+    pub left: Option<SideObject>,
+    pub right: Option<SideObject>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]

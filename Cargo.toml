@@ -12,6 +12,7 @@ members = [
   "crates/compare",
   "crates/range",
   "crates/review",
+  "crates/reviewed",
   "crates/agent",
   "crates/merge-requests",
   "crates/local-merge",
@@ -35,6 +36,7 @@ yamt-pipe = { path = "crates/pipe" }
 yamt-compare = { path = "crates/compare" }
 yamt-range = { path = "crates/range" }
 yamt-review = { path = "crates/review" }
+yamt-reviewed = { path = "crates/reviewed" }
 yamt-agent = { path = "crates/agent" }
 yamt-merge-requests = { path = "crates/merge-requests" }
 yamt-local-merge = { path = "crates/local-merge" }

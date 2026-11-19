@@ -11,7 +11,7 @@ pub struct RangeSpec {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Dots {
+pub enum Dots {
     Two,
     Three,
 }

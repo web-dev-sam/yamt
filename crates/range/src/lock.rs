@@ -105,7 +105,7 @@ fn hold(path: &Path) -> io::Result<Option<File>> {
 }
 
 /// The repository's folder name, `-`, and the FNV-1a hash of its common git dir: the same from every worktree.
-fn repo_key(common_dir: &Path) -> OsString {
+pub(crate) fn repo_key(common_dir: &Path) -> OsString {
     let in_work_tree = common_dir
         .file_name()
         .is_some_and(|name| name == GIT_DIR_NAME);
@@ -121,7 +121,8 @@ fn repo_key(common_dir: &Path) -> OsString {
 }
 
 /// FNV-1a, 64 bits (<http://www.isthe.com/chongo/tech/comp/fnv/>): stable across Rust releases, unlike `DefaultHasher`.
-fn fnv1a_64(bytes: &[u8]) -> u64 {
+#[must_use]
+pub fn fnv1a_64(bytes: &[u8]) -> u64 {
     let mut hash = FNV_OFFSET_BASIS;
     for &byte in bytes {
         hash ^= u64::from(byte);
@@ -167,6 +168,30 @@ mod tests {
         assert_eq!(
             pair_right_commit(&Path::new("no-separator").join("x")),
             None
+        );
+    }
+
+    #[test]
+    fn repo_key_is_the_pair_lock_s_repository_folder() {
+        let file = ConflictFile {
+            path: "a.txt",
+            kind: FileKind::Regular,
+            base: Some(b"base\n"),
+            local: Some(b"local\n"),
+            remote: None,
+        };
+        let repo = diverged_repo(&[file]).unwrap();
+        let range_dir = tempfile::tempdir().unwrap();
+        let spec = RangeSpec::parse("main..local").unwrap();
+        let resolved = Resolved::resolve(repo.path(), &spec).unwrap();
+        let lock = PairLock::take(range_dir.path(), &resolved).unwrap();
+        let range = resolved.list().unwrap();
+
+        let repo_folder = lock.folder().parent().unwrap();
+        assert_eq!(repo_folder.parent(), Some(range_dir.path()));
+        assert_eq!(
+            Some(range.repo_key().unwrap().as_os_str()),
+            repo_folder.file_name()
         );
     }
 
