@@ -38,7 +38,7 @@ impl ReviewedStore {
             message: error.to_string(),
         })?;
         let marks = if has_folder {
-            listed_marks(&folder, &review, range)?
+            prune_unlisted_marks(&folder, &review, range)?
         } else {
             Vec::new()
         };
@@ -102,8 +102,8 @@ impl ReviewedStore {
         Ok(())
     }
 
-    /// The reviewed right text (`""` when the mark's right side was deleted, `NoText` when the mark kept none, and for
-    /// a file with no mark) against `range.right_text(file)`.
+    /// The reviewed right text (`""` when the mark's right side was deleted; `NoText` when the mark kept none, when
+    /// another window's open swept the kept text, and for a file with no mark) against `range.right_text(file)`.
     pub fn since_review(&self, range: &Range, file: RangeFileId) -> Result<SinceReview> {
         listed_path(range, file)?;
         let Some(marked) = self.marked(file) else {
@@ -111,7 +111,10 @@ impl ReviewedStore {
         };
         let reviewed = match &marked.stored.right {
             None => String::new(),
-            Some(right) if marked.stored.kept_text => kept_text(&self.folder, &right.id)?,
+            Some(right) if marked.stored.kept_text => match kept_text(&self.folder, &right.id)? {
+                Some(text) => text,
+                None => return Ok(SinceReview::NoText),
+            },
             Some(_) => return Ok(SinceReview::NoText),
         };
         let Some(current) = range.right_text(file)? else {
@@ -157,9 +160,13 @@ fn listed_path(range: &Range, file: RangeFileId) -> Result<&str> {
     }
 }
 
-/// Under the lock: the stored marks on paths `range` lists; the others are dropped from the file, and texts no mark
-/// keeps are removed.
-fn listed_marks(folder: &Path, review: &ReviewOf, range: &Range) -> Result<Vec<StoredMark>> {
+/// Under the lock: drops from `reviewed.json` the marks on paths `range` does not list, removes the texts no remaining
+/// mark keeps, and returns the remaining marks.
+fn prune_unlisted_marks(
+    folder: &Path,
+    review: &ReviewOf,
+    range: &Range,
+) -> Result<Vec<StoredMark>> {
     let _held = lock(folder)?;
     let mut reviewed = read_reviewed(folder, review)?;
     let listed: HashSet<&str> = range

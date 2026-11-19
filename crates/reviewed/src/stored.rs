@@ -58,7 +58,9 @@ enum StoredDots {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StoredMark {
     pub(crate) path: String,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub(crate) left: Option<StoredSide>,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub(crate) right: Option<StoredSide>,
     pub(crate) kept_text: bool,
 }
@@ -237,10 +239,17 @@ pub(crate) fn keep_text(folder: &Path, id: &str, text: &str) -> Result<()> {
     write_atomically(&path, text.as_bytes())
 }
 
-pub(crate) fn kept_text(folder: &Path, id: &str) -> Result<String> {
+/// The text kept as `texts/<id>`; `None` when it is not there (another window's open swept it).
+pub(crate) fn kept_text(folder: &Path, id: &str) -> Result<Option<String>> {
     let path = folder.join(TEXTS_FOLDER).join(id);
-    let bytes = fs::read(&path).map_err(|error| read_failed(&path, &error))?;
-    String::from_utf8(bytes).map_err(|error| read_failed(&path, &error))
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(read_failed(&path, &error)),
+    };
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|error| read_failed(&path, &error))
 }
 
 /// Removes every file in `texts/` no mark keeps.

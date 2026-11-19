@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 use yamt_gitio::Oid;
 use yamt_range::{Dots, PairLock, RangeSpec, Resolved, SideName, SideNames, pair_folders};
-use yamt_reviewed::{Error, ReviewOf, ReviewedStore};
+use yamt_reviewed::{Error, ReviewOf, ReviewedStore, SinceReview};
 
 use crate::fixture::{
     REVIEWED_FILE, TEXTS_FOLDER, THREE_DOTS, id, kept_texts, mark, marked, object_id, open, range,
@@ -163,7 +163,13 @@ fn a_broken_file_names_line_and_column_and_is_left_unchanged() {
     );
     assert_eq!(
         broken_message(&with_marks(r#"{"path":"a.txt"}"#)),
-        "missing field `keptText` at line 1 column 174"
+        "missing field `left` at line 1 column 174"
+    );
+    assert_eq!(
+        broken_message(&with_marks(
+            r#"{"path":"a.txt","left":null,"keptText":true}"#
+        )),
+        "missing field `right` at line 1 column 202"
     );
     assert_eq!(broken_message(r#"{"format":0}"#), "format 0 is not 1");
 }
@@ -225,6 +231,46 @@ fn a_reviewed_file_or_texts_folder_that_cannot_be_read_is_read_failed() {
     fs::write(folder.join(REVIEWED_FILE), with_marks("")).unwrap();
     fs::write(folder.join(TEXTS_FOLDER), "not a folder").unwrap();
     assert_eq!(read_failed_at(&a_file, &range), folder.join(TEXTS_FOLDER));
+}
+
+#[test]
+fn a_kept_text_that_cannot_be_read_is_read_failed() {
+    let repo = repo();
+    let data = tempfile::tempdir().unwrap();
+    let range = range(&repo, THREE_DOTS);
+    let mut store = open(&data, &range);
+    mark(&mut store, &range, &["a.txt"]);
+    let text = range_folder(&data, &range)
+        .join(TEXTS_FOLDER)
+        .join(object_id(&repo, "local:a.txt"));
+    fs::remove_file(&text).unwrap();
+    fs::create_dir(&text).unwrap();
+
+    let error = store.since_review(&range, id(&range, "a.txt")).unwrap_err();
+
+    assert!(
+        matches!(&error, Error::ReadFailed { path, .. } if *path == text),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_mark_that_kept_no_text_is_no_text_whatever_texts_holds() {
+    let (repo, data, folder) = stored("");
+    let left = object_id(&repo, "main:a.txt");
+    let right = object_id(&repo, "local:a.txt");
+    let mark = format!(
+        r#"{{"path":"a.txt","left":{{"id":"{left}","kind":"file"}},"right":{{"id":"{right}","kind":"file"}},"keptText":false}}"#
+    );
+    fs::write(folder.join(REVIEWED_FILE), with_marks(&mark)).unwrap();
+    let range = range(&repo, THREE_DOTS);
+    let store = open(&data, &range);
+    fs::create_dir_all(folder.join(TEXTS_FOLDER)).unwrap();
+    fs::write(folder.join(TEXTS_FOLDER).join(right), "stray\n").unwrap();
+
+    let since = store.since_review(&range, id(&range, "a.txt")).unwrap();
+
+    assert_eq!(since, SinceReview::NoText);
 }
 
 #[test]

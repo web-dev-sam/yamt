@@ -1,0 +1,199 @@
+diff --git a/crates/reviewed/AGENTS.md b/crates/reviewed/AGENTS.md
+index 1a8aed0..a2e761c 100644
+--- a/crates/reviewed/AGENTS.md
++++ b/crates/reviewed/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The user's "Reviewed" marks on a range's files, remembered per review in yamt's data folder (plan §2 #195; request `docs/slices/request-range-reviewed.md`, design `docs/slices/briefs/range-reviewed-design.md` option A): `lib.rs` (the IPC types `ReviewMark` — `reviewed`/`changedSinceReview` —, `FileReview { file, mark }`, `SinceReview` — `texts { reviewed, current, differences }` (the right side's text at the mark against today's, `yamt_merge_core::compare`) or `noText`; `Error`), `review_of.rs` (`ReviewOf`: a range's `yamt_range::SideNames` or a merge request's project and iid; `key_text()` — `range ref:refs/heads/dev...ref:refs/heads/x`, `range commit:<hex>..ref:…`, `merge-request group/project!12` — whose FNV-1a 64 (`yamt_range::fnv1a_64`, 16 hex digits) names the review's folder), `stored.rs` (the folder `<reviewed_dir>/<repo key>/<16 hex>/`: `lock` (`File::lock`, held for one read-modify-write only), `reviewed.json` format 1 — `format`, `review` (`{kind: range, left, dots: two|three, right}` with sides `{kind: ref, name}` | `{kind: commit, id}`, or `{kind: mergeRequest, project, iid}`), `marks` sorted by path, each `path`, `left`/`right` `{id, kind: file|executable|link|submodule}` or `null`, `keptText` —, and `texts/<right blob id>`, the right side's text at a mark, written once; refusals by name, the file untouched: `NewerFormat` above format 1, `Broken` with serde's line and column, another `review` in the file, marks out of path order or an id that is not git's; every write is a temp file + rename, a leftover `.tmp` ignored), `store.rs` (`ReviewedStore`: `open` — no folder: no marks and nothing written; else under the lock drops marks on paths the range does not list (written back once), sweeps `texts/` files no mark keeps, then classifies each listed file once: `Reviewed` while its right side's `(id, kind)` is the marked one, else `ChangedSinceReview` —; `mark`/`unmark` take the lock, re-read `reviewed.json`, write the text first, apply one change by path and write, so two windows on one review keep both their clicks; a failed write changes nothing in memory; `since_review` for a marked file: `""` for a deleted right side, the kept text, else `NoText`, against `Range::right_text`; an unmarked file answers `NoText`). The folder is outside `range/`, so `yamt_range::pair_folders` never lists it. Depends on `yamt-range`, `yamt-gitio` (`Oid`) and `yamt-merge-core` (`compare`) only among `yamt-*`, never on tauri (`scripts/arch-check.sh`). Tests: `tests/reviewed.rs` (marks across new commits, a moved left side, a rename, a deletion, two stores on one review, since-review texts) and `tests/stored_file/` (key text, the pinned folder name and file, refusals, a failed write, a leftover temp file, not a pair folder) over `yamt-conflict-repo` temp repositories.
++Owner skill: `skill://rust-conventions`. The user's "Reviewed" marks on a range's files, remembered per review in yamt's data folder (plan §2 #195; request `docs/slices/request-range-reviewed.md`, design `docs/slices/briefs/range-reviewed-design.md` option A): `lib.rs` (the IPC types `ReviewMark` — `reviewed`/`changedSinceReview` —, `FileReview { file, mark }`, `SinceReview` — `texts { reviewed, current, differences }` (the right side's text at the mark against today's, `yamt_merge_core::compare`) or `noText`; `Error`), `review_of.rs` (`ReviewOf`: a range's `yamt_range::SideNames` or a merge request's project and iid; `key_text()` — `range ref:refs/heads/dev...ref:refs/heads/x`, `range commit:<hex>..ref:…`, `merge-request group/project!12` — whose FNV-1a 64 (`yamt_range::fnv1a_64`, 16 hex digits) names the review's folder), `stored.rs` (the folder `<reviewed_dir>/<repo key>/<16 hex>/`: `lock` (`File::lock`, held for one read-modify-write only), `reviewed.json` format 1 — `format`, `review` (`{kind: range, left, dots: two|three, right}` with sides `{kind: ref, name}` | `{kind: commit, id}`, or `{kind: mergeRequest, project, iid}`), `marks` sorted by path, each `path`, `left`/`right` `{id, kind: file|executable|link|submodule}` or `null`, `keptText` —, and `texts/<right blob id>`, the right side's text at a mark, written once; refusals by name, the file untouched: `NewerFormat` above format 1, `Broken` with serde's line and column (a mark missing `left` or `right` included), another `review` in the file, marks out of path order or an id that is not git's; every write is a temp file + rename, a leftover `.tmp` ignored), `store.rs` (`ReviewedStore`: `open` — no folder: no marks and nothing written; else under the lock drops marks on paths the range does not list (written back once), sweeps `texts/` files no mark keeps, then classifies each listed file once: `Reviewed` while its right side's `(id, kind)` is the marked one, else `ChangedSinceReview` —; `mark`/`unmark` take the lock, re-read `reviewed.json`, write the text first, apply one change by path and write, so two windows on one review keep both their clicks; a failed write changes nothing in memory; `since_review` for a marked file: `""` for a deleted right side, the kept text (`NoText` when another window's open swept it), else `NoText`, against `Range::right_text`; an unmarked file answers `NoText`). The folder is outside `range/`, so `yamt_range::pair_folders` never lists it. Depends on `yamt-range`, `yamt-gitio` (`Oid`) and `yamt-merge-core` (`compare`) only among `yamt-*`, never on tauri (`scripts/arch-check.sh`). Tests: `tests/reviewed.rs` (marks across new commits, a moved left side, a rename, a deletion, two stores on one review, since-review texts) and `tests/stored_file/` (key text, the pinned folder name and file, refusals, a failed write, a leftover temp file, not a pair folder) over `yamt-conflict-repo` temp repositories.
+diff --git a/crates/reviewed/src/store.rs b/crates/reviewed/src/store.rs
+index 6cf2530..01bc4cc 100644
+--- a/crates/reviewed/src/store.rs
++++ b/crates/reviewed/src/store.rs
+@@ -38,7 +38,7 @@ impl ReviewedStore {
+             message: error.to_string(),
+         })?;
+         let marks = if has_folder {
+-            listed_marks(&folder, &review, range)?
++            prune_unlisted_marks(&folder, &review, range)?
+         } else {
+             Vec::new()
+         };
+@@ -102,8 +102,8 @@ impl ReviewedStore {
+         Ok(())
+     }
+ 
+-    /// The reviewed right text (`""` when the mark's right side was deleted, `NoText` when the mark kept none, and for
+-    /// a file with no mark) against `range.right_text(file)`.
++    /// The reviewed right text (`""` when the mark's right side was deleted; `NoText` when the mark kept none, when
++    /// another window's open swept the kept text, and for a file with no mark) against `range.right_text(file)`.
+     pub fn since_review(&self, range: &Range, file: RangeFileId) -> Result<SinceReview> {
+         listed_path(range, file)?;
+         let Some(marked) = self.marked(file) else {
+@@ -111,7 +111,10 @@ impl ReviewedStore {
+         };
+         let reviewed = match &marked.stored.right {
+             None => String::new(),
+-            Some(right) if marked.stored.kept_text => kept_text(&self.folder, &right.id)?,
++            Some(right) if marked.stored.kept_text => match kept_text(&self.folder, &right.id)? {
++                Some(text) => text,
++                None => return Ok(SinceReview::NoText),
++            },
+             Some(_) => return Ok(SinceReview::NoText),
+         };
+         let Some(current) = range.right_text(file)? else {
+@@ -157,9 +160,13 @@ fn listed_path(range: &Range, file: RangeFileId) -> Result<&str> {
+     }
+ }
+ 
+-/// Under the lock: the stored marks on paths `range` lists; the others are dropped from the file, and texts no mark
+-/// keeps are removed.
+-fn listed_marks(folder: &Path, review: &ReviewOf, range: &Range) -> Result<Vec<StoredMark>> {
++/// Under the lock: drops from `reviewed.json` the marks on paths `range` does not list, removes the texts no remaining
++/// mark keeps, and returns the remaining marks.
++fn prune_unlisted_marks(
++    folder: &Path,
++    review: &ReviewOf,
++    range: &Range,
++) -> Result<Vec<StoredMark>> {
+     let _held = lock(folder)?;
+     let mut reviewed = read_reviewed(folder, review)?;
+     let listed: HashSet<&str> = range
+diff --git a/crates/reviewed/src/stored.rs b/crates/reviewed/src/stored.rs
+index 19c0738..47f85c4 100644
+--- a/crates/reviewed/src/stored.rs
++++ b/crates/reviewed/src/stored.rs
+@@ -58,7 +58,9 @@ enum StoredDots {
+ #[serde(rename_all = "camelCase")]
+ pub(crate) struct StoredMark {
+     pub(crate) path: String,
++    #[serde(deserialize_with = "Option::deserialize")]
+     pub(crate) left: Option<StoredSide>,
++    #[serde(deserialize_with = "Option::deserialize")]
+     pub(crate) right: Option<StoredSide>,
+     pub(crate) kept_text: bool,
+ }
+@@ -237,10 +239,17 @@ pub(crate) fn keep_text(folder: &Path, id: &str, text: &str) -> Result<()> {
+     write_atomically(&path, text.as_bytes())
+ }
+ 
+-pub(crate) fn kept_text(folder: &Path, id: &str) -> Result<String> {
++/// The text kept as `texts/<id>`; `None` when it is not there (another window's open swept it).
++pub(crate) fn kept_text(folder: &Path, id: &str) -> Result<Option<String>> {
+     let path = folder.join(TEXTS_FOLDER).join(id);
+-    let bytes = fs::read(&path).map_err(|error| read_failed(&path, &error))?;
+-    String::from_utf8(bytes).map_err(|error| read_failed(&path, &error))
++    let bytes = match fs::read(&path) {
++        Ok(bytes) => bytes,
++        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
++        Err(error) => return Err(read_failed(&path, &error)),
++    };
++    String::from_utf8(bytes)
++        .map(Some)
++        .map_err(|error| read_failed(&path, &error))
+ }
+ 
+ /// Removes every file in `texts/` no mark keeps.
+diff --git a/crates/reviewed/tests/reviewed.rs b/crates/reviewed/tests/reviewed.rs
+index 0258d65..41d7803 100644
+--- a/crates/reviewed/tests/reviewed.rs
++++ b/crates/reviewed/tests/reviewed.rs
+@@ -265,3 +265,24 @@ fn two_stores_on_one_review_keep_both_changes() {
+     let reopened = open(&data, &second);
+     assert_eq!(marked(&reopened, &second), reviewed(&["a.txt", "b.txt"]));
+ }
++
++#[test]
++fn a_kept_text_swept_by_another_window_s_open_is_no_text() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let before = range(&repo, THREE_DOTS);
++    let mut on_before = open(&data, &before);
++    mark(&mut on_before, &before, &["a.txt"]);
++    let folder = range_folder(&data, &before);
++    commit(&repo, "a.txt", b"a2\n");
++    let after = range(&repo, THREE_DOTS);
++    mark(&mut open(&data, &after), &after, &["a.txt"]);
++
++    open(&data, &after);
++
++    assert_eq!(kept_texts(&folder), [object_id(&repo, "local:a.txt")]);
++    let since = on_before
++        .since_review(&before, id(&before, "a.txt"))
++        .unwrap();
++    assert_eq!(since, SinceReview::NoText);
++}
+diff --git a/crates/reviewed/tests/stored_file/mod.rs b/crates/reviewed/tests/stored_file/mod.rs
+index 4286b6e..8a1b087 100644
+--- a/crates/reviewed/tests/stored_file/mod.rs
++++ b/crates/reviewed/tests/stored_file/mod.rs
+@@ -4,7 +4,7 @@ use std::path::PathBuf;
+ use tempfile::TempDir;
+ use yamt_gitio::Oid;
+ use yamt_range::{Dots, PairLock, RangeSpec, Resolved, SideName, SideNames, pair_folders};
+-use yamt_reviewed::{Error, ReviewOf, ReviewedStore};
++use yamt_reviewed::{Error, ReviewOf, ReviewedStore, SinceReview};
+ 
+ use crate::fixture::{
+     REVIEWED_FILE, TEXTS_FOLDER, THREE_DOTS, id, kept_texts, mark, marked, object_id, open, range,
+@@ -163,7 +163,13 @@ fn a_broken_file_names_line_and_column_and_is_left_unchanged() {
+     );
+     assert_eq!(
+         broken_message(&with_marks(r#"{"path":"a.txt"}"#)),
+-        "missing field `keptText` at line 1 column 174"
++        "missing field `left` at line 1 column 174"
++    );
++    assert_eq!(
++        broken_message(&with_marks(
++            r#"{"path":"a.txt","left":null,"keptText":true}"#
++        )),
++        "missing field `right` at line 1 column 202"
+     );
+     assert_eq!(broken_message(r#"{"format":0}"#), "format 0 is not 1");
+ }
+@@ -227,6 +233,46 @@ fn a_reviewed_file_or_texts_folder_that_cannot_be_read_is_read_failed() {
+     assert_eq!(read_failed_at(&a_file, &range), folder.join(TEXTS_FOLDER));
+ }
+ 
++#[test]
++fn a_kept_text_that_cannot_be_read_is_read_failed() {
++    let repo = repo();
++    let data = tempfile::tempdir().unwrap();
++    let range = range(&repo, THREE_DOTS);
++    let mut store = open(&data, &range);
++    mark(&mut store, &range, &["a.txt"]);
++    let text = range_folder(&data, &range)
++        .join(TEXTS_FOLDER)
++        .join(object_id(&repo, "local:a.txt"));
++    fs::remove_file(&text).unwrap();
++    fs::create_dir(&text).unwrap();
++
++    let error = store.since_review(&range, id(&range, "a.txt")).unwrap_err();
++
++    assert!(
++        matches!(&error, Error::ReadFailed { path, .. } if *path == text),
++        "{error:?}"
++    );
++}
++
++#[test]
++fn a_mark_that_kept_no_text_is_no_text_whatever_texts_holds() {
++    let (repo, data, folder) = stored("");
++    let left = object_id(&repo, "main:a.txt");
++    let right = object_id(&repo, "local:a.txt");
++    let mark = format!(
++        r#"{{"path":"a.txt","left":{{"id":"{left}","kind":"file"}},"right":{{"id":"{right}","kind":"file"}},"keptText":false}}"#
++    );
++    fs::write(folder.join(REVIEWED_FILE), with_marks(&mark)).unwrap();
++    let range = range(&repo, THREE_DOTS);
++    let store = open(&data, &range);
++    fs::create_dir_all(folder.join(TEXTS_FOLDER)).unwrap();
++    fs::write(folder.join(TEXTS_FOLDER).join(right), "stray\n").unwrap();
++
++    let since = store.since_review(&range, id(&range, "a.txt")).unwrap();
++
++    assert_eq!(since, SinceReview::NoText);
++}
++
+ #[test]
+ fn a_failed_write_changes_nothing_in_memory() {
+     let repo = repo();

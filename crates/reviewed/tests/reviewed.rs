@@ -265,3 +265,24 @@ fn two_stores_on_one_review_keep_both_changes() {
     let reopened = open(&data, &second);
     assert_eq!(marked(&reopened, &second), reviewed(&["a.txt", "b.txt"]));
 }
+
+#[test]
+fn a_kept_text_swept_by_another_window_s_open_is_no_text() {
+    let repo = repo();
+    let data = tempfile::tempdir().unwrap();
+    let before = range(&repo, THREE_DOTS);
+    let mut on_before = open(&data, &before);
+    mark(&mut on_before, &before, &["a.txt"]);
+    let folder = range_folder(&data, &before);
+    commit(&repo, "a.txt", b"a2\n");
+    let after = range(&repo, THREE_DOTS);
+    mark(&mut open(&data, &after), &after, &["a.txt"]);
+
+    open(&data, &after);
+
+    assert_eq!(kept_texts(&folder), [object_id(&repo, "local:a.txt")]);
+    let since = on_before
+        .since_review(&before, id(&before, "a.txt"))
+        .unwrap();
+    assert_eq!(since, SinceReview::NoText);
+}
