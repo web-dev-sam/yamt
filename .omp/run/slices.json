@@ -30,5 +30,15 @@
       "frontend/src/ui/rangeThreads.test.ts",
       "frontend/scripts/app-session/**"
     ]
+  },
+  "RangeReviewedAppR1": {
+    "owned": [
+      "src-tauri/**",
+      "src-tauri/AGENTS.md",
+      "crates/merge-requests/src/lib.rs",
+      "crates/merge-requests/src/open.rs",
+      "crates/merge-requests/tests/open.rs",
+      "crates/merge-requests/AGENTS.md"
+    ]
   }
 }
