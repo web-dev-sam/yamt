@@ -1,34 +1,17 @@
 {
-  "RangeReviewedStore": {
+  "RangeReviewedView": {
     "owned": [
-      "frontend/src/ipc/ReviewedSource.ts",
-      "frontend/src/ipc/reviewedDomain.ts",
-      "frontend/src/ipc/reviewedDomain.test.ts",
-      "frontend/src/ipc/tauriReviewed.ts",
-      "frontend/src/ipc/tauriReviewed.test.ts",
-      "frontend/src/ipc/fixtureReviewed.ts",
-      "frontend/src/ipc/fixtureReviewed.test.ts",
-      "frontend/src/ipc/RangeSource.ts",
-      "frontend/src/ipc/tauriRange.ts",
-      "frontend/src/ipc/tauriRange.test.ts",
-      "frontend/src/ipc/fixtureRange.ts",
-      "frontend/src/ipc/fixtureRange.test.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ui/rangeReviewed.ts",
-      "frontend/src/ui/rangeReviewed.test.ts",
-      "frontend/src/ui/rangeVisited.ts",
-      "frontend/src/ui/rangeVisited.test.ts",
-      "frontend/src/ui/nextFile.ts",
-      "frontend/src/ui/nextFile.test.ts",
-      "frontend/src/ui/problem.ts",
-      "frontend/src/ui/problem.test.ts",
-      "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ui/rangeStore.ts",
-      "frontend/src/ui/rangeStore.test.ts",
-      "frontend/src/ui/rangeThreads.test.ts",
-      "frontend/scripts/app-session/**"
+      "frontend/src/editor/range.ts",
+      "frontend/src/editor/range.browser.test.ts",
+      "frontend/src/editor/rangeThreads.browser.test.ts",
+      "frontend/src/ui/useRangeController.ts",
+      "frontend/src/ui/useRangeController.test.ts",
+      "frontend/src/ui/RangeView.vue",
+      "frontend/src/ui/RangeApp.vue",
+      "frontend/src/ui/RangeFileRow.vue",
+      "frontend/src/ui/rangeText.ts",
+      "frontend/src/ui/rangeText.test.ts",
+      "frontend/src/ui/AGENTS.md"
     ]
   }
 }
