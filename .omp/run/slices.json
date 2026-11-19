@@ -8,5 +8,8 @@
       "crates/merge-requests/tests/open.rs",
       "crates/merge-requests/AGENTS.md"
     ]
+  },
+  "RangeReviewedCoreR1": {
+    "owned": ["crates/range/**", "crates/reviewed/**"]
   }
 }

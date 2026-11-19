@@ -125,6 +125,8 @@ impl ReviewedStore {
     pub fn unmark(&mut self, range: &Range, file: RangeFileId) -> Result<(), Error>;
     /// For a `ChangedSinceReview` file (any marked file answers the same way): reviewed text = `""` when the mark's right
     /// side was `null` (deleted), `texts/<id>` when `keptText`, else `NoText`; current = `range.right_text(file)`.
+    /// A kept text another window's open swept (`texts/<id>` not found) is `NoText` too (R1, #2538); a mark missing
+    /// its `left` or `right` key is `Broken` (R1, #2539).
     pub fn since_review(&self, range: &Range, file: RangeFileId) -> Result<SinceReview, Error>;
 }
 ```
