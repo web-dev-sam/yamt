@@ -1,10 +1,12 @@
 {
-  "RangeReviewedCore": {
+  "RangeReviewedApp": {
     "owned": [
-      "crates/range/**",
-      "crates/reviewed/**",
-      "src-tauri/Cargo.toml",
-      "scripts/arch-check.sh"
+      "src-tauri/**",
+      "src-tauri/AGENTS.md",
+      "crates/merge-requests/src/lib.rs",
+      "crates/merge-requests/src/open.rs",
+      "crates/merge-requests/tests/open.rs",
+      "crates/merge-requests/AGENTS.md"
     ]
   }
 }
