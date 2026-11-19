@@ -6,6 +6,16 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Reviewed marks in the diff window (session 56; owner: "in diff mode add a "reviewed" button in place of "resolve" …")
+
+Request `docs/slices/request-range-reviewed.md` (rules 1–7, acceptance, non-goals); base `b42a6c6b`. Rules 2–7's
+details by the orchestrator (OR13; owner may veto). Owner's answer 1: a changed-again file shows only the changes
+since the review, plus "Review from start" (rules 5–6). Order: design, then its slices.
+
+| row | slice  | owner    | status  | evidence |
+| --- | ------ | -------- | ------- | -------- |
+| 1   | design | designer | running |          |
+
 ## Release 0.7.0 (session 55, owner: "release 0.7.0")
 
 0.7.0 = 0.6.9 plus `@` completion, the fast comment preview, the review fixes, table alignment and one person's

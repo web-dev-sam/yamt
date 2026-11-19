@@ -1,1 +1,5 @@
-{}
+{
+  "RangeReviewedDesign": {
+    "owned": ["docs/slices/briefs/range-reviewed-*.md"]
+  }
+}
