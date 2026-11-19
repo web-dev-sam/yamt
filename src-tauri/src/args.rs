@@ -22,6 +22,8 @@ name git knows (branch, tag, commit id, HEAD~3); an empty side is HEAD.
   --mr              open the merge-request page at start; without --diff=<range> it means --diff
   --ai              with --diff=<range>: an AI agent answers review comments in its own checkout; with --diff or
                     --diff=<range>: the changes windows its merge-request page opens get it too
+  --review-of=<project>!<iid>  with --diff=<range>: remember Reviewed marks for this merge request
+                    (the merge-request page passes it)
   YAMT_AI=1         in the environment: every start behaves as with --ai (unset, empty or 0: off)
   --help            print this help
   --version         print the version
@@ -30,6 +32,8 @@ name git knows (branch, tag, commit id, HEAD~3); an empty side is HEAD.
 const DIFF_WITH_REPO: &str = "--diff compares pasted text and takes no --repo";
 const DIFF_TWICE: &str = "give --diff or one --diff=<range>, not both";
 const RANGE_FLAG: &str = "--diff=";
+const REVIEW_OF_FLAG: &str = "--review-of=";
+const REVIEW_OF_WITHOUT_RANGE: &str = "--review-of goes with --diff=<range>";
 /// The folder yamt was started in: a merge's or range's repository unless `--repo` names one, and where the
 /// compare window's merge-request page looks for a repository (plan §2 #94 as amended for #128–#135).
 pub(crate) const START_FOLDER: &str = ".";
@@ -48,6 +52,7 @@ pub(crate) enum Invocation {
         repo: PathBuf,
         ai: Ai,
         start: StartScreen,
+        marks: MarksOf,
     },
     Help,
     Version,
@@ -66,6 +71,14 @@ pub(crate) enum Ai {
 pub(crate) enum StartScreen {
     Files,
     MergeRequests,
+}
+
+/// What a range window's Reviewed marks belong to: its two sides by name, or the merge request `--review-of` names
+/// (plan §2 #195).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum MarksOf {
+    SideNames,
+    MergeRequest { project: String, iid: u32 },
 }
 
 /// What the `--diff` flags seen so far ask for.
@@ -108,6 +121,22 @@ fn ai_from_variable(value: Option<&OsStr>) -> Ai {
     }
 }
 
+fn merge_request_marks(text: &str) -> Result<MarksOf, String> {
+    if let Some((project, iid)) = text.rsplit_once('!')
+        && !project.is_empty()
+        && let Ok(iid) = iid.parse::<u32>()
+        && iid > 0
+    {
+        return Ok(MarksOf::MergeRequest {
+            project: project.to_owned(),
+            iid,
+        });
+    }
+    Err(format!(
+        "{REVIEW_OF_FLAG}{text}: give <group/project>!<iid>"
+    ))
+}
+
 pub(crate) fn parse(
     args: Vec<OsString>,
     ai_variable: Option<&OsStr>,
@@ -117,6 +146,7 @@ pub(crate) fn parse(
     let mut ai = ai_from_variable(ai_variable);
     let mut start = StartScreen::Files;
     let mut window = Ok(Window::Merge);
+    let mut marks = Ok(MarksOf::SideNames);
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--help") => return Ok(Invocation::Help),
@@ -134,19 +164,36 @@ pub(crate) fn parse(
             Some(text) if let Some(range) = text.strip_prefix(RANGE_FLAG) => {
                 window = window.and_then(|window| window.with_range(range));
             }
+            Some(text) if let Some(review) = text.strip_prefix(REVIEW_OF_FLAG) => {
+                marks = marks.and_then(|_| merge_request_marks(review));
+            }
             _ => return Err(format!("unknown argument {}", arg.to_string_lossy())),
         }
     }
-    match (window?.started_on(start), repo) {
-        (Window::Compare, Some(_)) => Err(DIFF_WITH_REPO.to_owned()),
-        (Window::Compare, None) => Ok(Invocation::Compare { ai, start }),
-        (Window::Range(spec), repo) => Ok(Invocation::Range {
+    invocation(window?.started_on(start), repo, marks?, ai, start)
+}
+
+fn invocation(
+    window: Window,
+    repo: Option<PathBuf>,
+    marks: MarksOf,
+    ai: Ai,
+    start: StartScreen,
+) -> Result<Invocation, String> {
+    match (window, repo, marks) {
+        (Window::Compare | Window::Merge, _, MarksOf::MergeRequest { .. }) => {
+            Err(REVIEW_OF_WITHOUT_RANGE.to_owned())
+        }
+        (Window::Compare, Some(_), MarksOf::SideNames) => Err(DIFF_WITH_REPO.to_owned()),
+        (Window::Compare, None, MarksOf::SideNames) => Ok(Invocation::Compare { ai, start }),
+        (Window::Range(spec), repo, marks) => Ok(Invocation::Range {
             spec,
             repo: repo.unwrap_or_else(|| PathBuf::from(START_FOLDER)),
             ai,
             start,
+            marks,
         }),
-        (Window::Merge, repo) => Ok(Invocation::Merge {
+        (Window::Merge, repo, MarksOf::SideNames) => Ok(Invocation::Merge {
             repo: repo.unwrap_or_else(|| PathBuf::from(START_FOLDER)),
         }),
     }
@@ -265,6 +312,7 @@ mod tests {
             repo: PathBuf::from(repo),
             ai: Ai::Off,
             start,
+            marks: MarksOf::SideNames,
         }
     }
 
@@ -290,6 +338,7 @@ mod tests {
             repo: PathBuf::from("."),
             ai: Ai::On,
             start: StartScreen::Files,
+            marks: MarksOf::SideNames,
         };
         assert_eq!(parsed(&["--diff=a...b", "--ai"]), Ok(with_ai));
         assert_eq!(parsed(&["--diff=a...b"]), Ok(range("a...b", ".")));
@@ -397,6 +446,58 @@ mod tests {
     fn the_usage_names_mr() {
         assert!(USAGE.contains("       yamt --mr\n"), "{USAGE}");
         assert!(USAGE.contains("  --mr              "), "{USAGE}");
+    }
+
+    #[test]
+    fn review_of_with_a_range_names_the_merge_request_s_marks() {
+        let marked = |project: &str, iid| Invocation::Range {
+            spec: RangeSpec::parse("a..b").unwrap(),
+            repo: PathBuf::from("."),
+            ai: Ai::Off,
+            start: StartScreen::Files,
+            marks: MarksOf::MergeRequest {
+                project: project.to_owned(),
+                iid,
+            },
+        };
+        assert_eq!(
+            parsed(&["--diff=a..b", "--review-of=group/sub/project!12"]),
+            Ok(marked("group/sub/project", 12))
+        );
+        assert_eq!(
+            parsed(&["--review-of=g/p!7", "--diff=a..b"]),
+            Ok(marked("g/p", 7))
+        );
+        assert_eq!(
+            parsed(&["--diff=a..b", "--review-of=g!p!3"]),
+            Ok(marked("g!p", 3))
+        );
+    }
+
+    #[test]
+    fn review_of_without_a_range_or_malformed_is_refused() {
+        let without_range = Err(REVIEW_OF_WITHOUT_RANGE.to_owned());
+        assert_eq!(parsed(&["--review-of=g/p!1"]), without_range);
+        assert_eq!(parsed(&["--diff", "--review-of=g/p!1"]), without_range);
+        assert_eq!(parsed(&["--review-of=g/p!1", "--mr"]), without_range);
+        assert_eq!(parsed(&["--review-of=g/p!1", "--repo", "p"]), without_range);
+        for text in ["g/p", "!3", "g/p!0", "g/p!x", "g/p!"] {
+            let flag = format!("--review-of={text}");
+            let refused = Err(format!("{flag}: give <group/project>!<iid>"));
+            assert_eq!(parsed(&["--diff=a..b", &flag]), refused, "{text}");
+        }
+        assert_eq!(
+            parsed(&["--diff=a..b", "--review-of=g/p", "--help"]),
+            Ok(Invocation::Help)
+        );
+    }
+
+    #[test]
+    fn the_usage_names_review_of() {
+        assert!(
+            USAGE.contains("  --review-of=<project>!<iid>  with --diff=<range>: "),
+            "{USAGE}"
+        );
     }
 
     #[test]

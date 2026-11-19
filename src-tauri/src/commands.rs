@@ -7,7 +7,7 @@ use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, Wr
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
 use crate::merge::{self, AbortReply, ContinueReply, Listing, Merge, MergeState, lock};
-use crate::{ai, clipboard, compare, merge_requests, range, review, servers, settings};
+use crate::{ai, clipboard, compare, merge_requests, range, review, reviewed, servers, settings};
 
 #[expect(
     clippy::too_many_lines,
@@ -54,6 +54,10 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         range::open_range,
         range::load_range_file::<tauri::Wry>,
         range::search_range_texts::<tauri::Wry>,
+        reviewed::list_reviewed,
+        reviewed::mark_reviewed::<tauri::Wry>,
+        reviewed::unmark_reviewed::<tauri::Wry>,
+        reviewed::load_since_review::<tauri::Wry>,
         review::list_threads,
         review::add_thread,
         review::add_note,

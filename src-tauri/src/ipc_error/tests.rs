@@ -200,6 +200,65 @@ fn an_unknown_range_file_has_its_kind_and_a_start_refusal_is_its_line() {
     );
 }
 
+fn reviewed_json(error: yamt_reviewed::Error) -> Value {
+    serde_json::to_value(IpcError::from(error)).unwrap()
+}
+
+#[test]
+fn reviewed_store_problems_serialise_as_read_and_write_failures_naming_the_file() {
+    let path = "/d/yamt/reviewed/r/0123456789abcdef/reviewed.json";
+    let read_failed = yamt_reviewed::Error::ReadFailed {
+        path: path.into(),
+        message: "permission denied".to_owned(),
+    };
+    assert_eq!(
+        reviewed_json(read_failed),
+        json!({ "kind": "ReadFailed", "path": path, "message": "permission denied" })
+    );
+    let broken = yamt_reviewed::Error::Broken {
+        path: path.into(),
+        message: "EOF at line 1 column 2".to_owned(),
+    };
+    assert_eq!(
+        reviewed_json(broken),
+        json!({ "kind": "ReadFailed", "path": path, "message": "EOF at line 1 column 2" })
+    );
+    let newer = yamt_reviewed::Error::NewerFormat {
+        path: path.into(),
+        format: 2,
+    };
+    assert_eq!(
+        reviewed_json(newer),
+        json!({ "kind": "ReadFailed", "path": path, "message": "written by a newer yamt (format 2)" })
+    );
+    let write_failed = yamt_reviewed::Error::WriteFailed {
+        path: path.into(),
+        message: "disk full".to_owned(),
+    };
+    assert_eq!(
+        reviewed_json(write_failed),
+        json!({ "kind": "WriteFailed", "path": path, "message": "disk full" })
+    );
+}
+
+#[test]
+fn a_reviewed_unknown_file_or_range_error_has_the_range_s_kind() {
+    let unknown = yamt_reviewed::Error::UnknownFile {
+        file: RangeFileId(9),
+    };
+    assert_eq!(
+        reviewed_json(unknown),
+        json!({ "kind": "UnknownRangeFile", "file": 9 })
+    );
+    let range = yamt_reviewed::Error::Range(yamt_range::Error::UnknownFile {
+        file: RangeFileId(4),
+    });
+    assert_eq!(
+        reviewed_json(range),
+        json!({ "kind": "UnknownRangeFile", "file": 4 })
+    );
+}
+
 fn review_json(error: yamt_review::Error) -> Value {
     serde_json::to_value(IpcError::from(error)).unwrap()
 }

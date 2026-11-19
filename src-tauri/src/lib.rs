@@ -23,6 +23,7 @@ mod mock_window;
 mod outcome;
 mod range;
 mod review;
+mod reviewed;
 mod second_window;
 mod servers;
 mod settings;
@@ -69,7 +70,8 @@ pub fn run() -> ExitCode {
             repo,
             ai,
             start,
-        }) => range::run_range(&from_start_dir(repo), &spec, ai, start).report(),
+            marks,
+        }) => range::run_range(&from_start_dir(repo), &spec, ai, start, marks).report(),
         Err(problem) => Ending::failure(format!("{problem}\n{USAGE}")).report(),
     }
 }

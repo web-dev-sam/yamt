@@ -45,6 +45,10 @@ export const commands = {
 	openRange: () => __TAURI_INVOKE<RangeStart>("open_range"),
 	loadRangeFile: (file: RangeFileId) => typedError<RangeFile, IpcError>(__TAURI_INVOKE("load_range_file", { file })),
 	searchRangeTexts: (from: RangeFileId) => typedError<SearchTexts, IpcError>(__TAURI_INVOKE("search_range_texts", { from })),
+	listReviewed: () => typedError<FileReview[], IpcError>(__TAURI_INVOKE("list_reviewed")),
+	markReviewed: (file: RangeFileId) => typedError<null, IpcError>(__TAURI_INVOKE("mark_reviewed", { file })),
+	unmarkReviewed: (file: RangeFileId) => typedError<null, IpcError>(__TAURI_INVOKE("unmark_reviewed", { file })),
+	loadSinceReview: (file: RangeFileId) => typedError<SinceReview, IpcError>(__TAURI_INVOKE("load_since_review", { file })),
 	listThreads: () => typedError<ThreadList, IpcError>(__TAURI_INVOKE("list_threads")),
 	addThread: (file: RangeFileId, place: ThreadPlace, text: string) => typedError<ThreadAdded, IpcError>(__TAURI_INVOKE("add_thread", { file, place, text })),
 	addNote: (thread: ThreadId, text: string) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("add_note", { thread, text })),
@@ -705,6 +709,11 @@ export type FileMergeData = {
 	eol: Eol,
 	chunks: MergeChunk[],
 	disk_version: DiskVersion,
+};
+
+export type FileReview = {
+	file: RangeFileId,
+	mark: ReviewMark,
 };
 
 export type FileSides = {
@@ -1631,6 +1640,8 @@ export type ReturnTo = { kind: "branch"; name: string } |
 /**  `id`: the commit's first 7 hex characters. */
 { kind: "commit"; id: string };
 
+export type ReviewMark = "reviewed" | "changedSinceReview";
+
 /**  How far a reviewer's review is: GitLab's state in the four the window names. */
 export type ReviewState = 
 /**  Their review is asked for, or under way. */
@@ -1780,6 +1791,12 @@ export type SideWordChanges<L> = {
 	 */
 	removals: Removal<L>[],
 };
+
+export type SinceReview = 
+/**  The right side's text at the mark (left column) against today's right side (right column). */
+{ kind: "texts"; reviewed: string; current: string; differences: Difference[] } | 
+/**  Either text is missing: the mark kept none (not text then) or today's file is not text. */
+{ kind: "noText" };
 
 export type StartReply = { kind: "Started"; run: RunId } | { kind: "NotFound"; program: string; searched: string[] } | { kind: "SpawnFailed"; program: string; message: string } | { kind: "OutsideRepository"; project: string };
 

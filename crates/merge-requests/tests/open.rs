@@ -101,6 +101,16 @@ fn resolved(root: &Path, spec: &str) -> Resolved {
 }
 
 #[test]
+fn an_opened_merge_request_names_the_logged_in_project_and_its_iid() {
+    let setup = Setup::new();
+
+    let opened = setup.open(12).unwrap();
+
+    assert_eq!(opened.project, "taskboard/taskboard");
+    assert_eq!(opened.iid, MergeRequestIid(12));
+}
+
+#[test]
 fn a_merge_request_whose_head_is_only_on_gitlab_is_fetched_and_its_range_lines_up() {
     let setup = Setup::new();
     let before = setup.untouched();

@@ -1,0 +1,2 @@
+just mutants HEAD — 33 mutants: 11 caught, 22 unviable, 0 missed, 0 timeouts
+

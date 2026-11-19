@@ -198,6 +198,28 @@ impl From<yamt_review::Error> for IpcError {
     }
 }
 
+impl From<yamt_reviewed::Error> for IpcError {
+    fn from(error: yamt_reviewed::Error) -> IpcError {
+        match error {
+            yamt_reviewed::Error::WriteFailed { path, message } => IpcError::WriteFailed {
+                path: path.display().to_string(),
+                message,
+            },
+            yamt_reviewed::Error::UnknownFile { file } => IpcError::UnknownRangeFile { file },
+            yamt_reviewed::Error::ReadFailed { path, message }
+            | yamt_reviewed::Error::Broken { path, message } => IpcError::ReadFailed {
+                path: path.display().to_string(),
+                message,
+            },
+            yamt_reviewed::Error::NewerFormat { path, format } => IpcError::ReadFailed {
+                path: path.display().to_string(),
+                message: format!("written by a newer yamt (format {format})"),
+            },
+            yamt_reviewed::Error::Range(source) => IpcError::from(source),
+        }
+    }
+}
+
 impl From<yamt_agent::Error> for IpcError {
     fn from(error: yamt_agent::Error) -> IpcError {
         match error {

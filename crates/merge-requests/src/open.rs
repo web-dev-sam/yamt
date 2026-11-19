@@ -67,6 +67,8 @@ pub fn prepare_open(
     Ok(RangeToOpen {
         root: resolved.root().to_owned(),
         spec,
+        project: full_path,
+        iid,
     })
 }
 

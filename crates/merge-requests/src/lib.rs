@@ -206,6 +206,10 @@ pub struct RangeToOpen {
     pub root: PathBuf,
     /// `<base_sha>..<head_sha>`, both GitLab's full commit ids.
     pub spec: String,
+    /// The project's full path (`group/sub/project`) and the merge request: the marks' review (plan §2 #195).
+    pub project: String,
+    /// The merge request within `project`.
+    pub iid: MergeRequestIid,
 }
 
 /// The branches of merge request `iid` and the remote holding them, asked afresh (plan §2 #139).
