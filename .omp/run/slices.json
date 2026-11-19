@@ -1,1 +1,19 @@
-{}
+{
+  "RangeReviewedViewR1": {
+    "owned": [
+      "frontend/src/editor/range.ts",
+      "frontend/src/editor/range.browser.test.ts",
+      "frontend/src/editor/rangeThreads.browser.test.ts",
+      "frontend/src/ui/useRangeController.ts",
+      "frontend/src/ui/useRangeController.test.ts",
+      "frontend/src/ui/RangeView.vue",
+      "frontend/src/ui/RangeApp.vue",
+      "frontend/src/ui/RangeFileRow.vue",
+      "frontend/src/ui/rangeText.ts",
+      "frontend/src/ui/rangeText.test.ts",
+      "frontend/src/ui/AGENTS.md",
+      "frontend/src/ui/rangeStore.ts",
+      "frontend/src/ui/rangeStore.test.ts"
+    ]
+  }
+}

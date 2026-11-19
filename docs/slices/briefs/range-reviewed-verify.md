@@ -60,7 +60,7 @@ logo.png's = the no-text sentence. Log lines `range.fixture_reviewed { kind, fil
 5. Rule 6: "Review from start" on board.ts → the whole change (7 differences, the seeded thread), no row mark, the count
    unchanged in its reviewed part; marking board.ts afterwards → checked, the next file opens; back on board.ts: the whole
    change.
-6. A search (Ctrl/Cmd+Shift+F) for a word on board.ts's right side while it is changed since review (reload to re-seed)
+6. A search (Ctrl/Cmd+Shift+S, `toggle-search` in `ipc/keys.ts`) for a word on board.ts's right side while it is changed since review (reload to re-seed)
    → the right column goes to it; a left-side hit opens board.ts and does not move.
 7. The merge fixture page and `?diff` (compare) show no Reviewed button and behave as before.
 8. `shot` of steps 1, 4 and 5, dark and light.
