@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-11-20
+
+### Added
+
+- In the diff window's file tree, a folder shows the reviewed check too once every file inside it, at any depth, is
+  marked reviewed; a file changed since its review keeps the folder unmarked.
+
 ## [0.7.2] - 2026-11-20
 
 ### Fixed
@@ -621,7 +628,8 @@ The 0.6 line as a release: everything in 0.6.0-beta.1 and 0.6.0-beta.2 below, wi
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.7.2...HEAD
+[Unreleased]: ../../compare/v0.7.3...HEAD
+[0.7.3]: ../../compare/v0.7.2...v0.7.3
 [0.7.2]: ../../compare/v0.7.1...v0.7.2
 [0.7.1]: ../../compare/v0.7.0...v0.7.1
 [0.7.0]: ../../compare/v0.6.9...v0.7.0
