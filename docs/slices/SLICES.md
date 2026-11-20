@@ -6,6 +6,17 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Release 0.7.3 (session 58, owner: "release patch")
+
+0.7.3 = 0.7.2 plus folder rows showing the reviewed check when every file below is reviewed (`1ed48f9e`). The owner
+pushes `main`, waits for green ci, then tags.
+
+| row | slice                                                                                            | owner        | status      | evidence                                                                                                                                                                                                                                                                                        |
+| --- | ------------------------------------------------------------------------------------------------ | ------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | release commit 0.7.3: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer` + `readmer`) | orchestrator | done        | `4ed4ccba` (`readmer check` exit 0)                                                                                                                                                                                                                                                             |
+| 2   | final run 0.7.3 before tagging (`briefs/release-0.7.3-verify.md`)                                | verifier     | done        | `Release073Verify` at `4ed4ccba`: `just check` pass (76 s, 1563 Rust + 4710 TS tests, hooks 18/18), readmer, licences pass; `yamt_0.7.3_amd64.deb` Version `0.7.3`, `yamt 0.7.3`; release binary: folder checks follow marks (board, then src; both lost on unmark). Note `Release073Verify.md` |
+| 3   | push `main`, ci green on all four jobs, tag `v0.7.3`, publish                                    | human        | handed over |                                                                                                                                                                                                                                                                                                 |
+
 ## Release 0.7.2 (session 57, owner: "release patch")
 
 0.7.2 = 0.7.1 plus the local conflict check fix (section below; owner's check on !3197 still open). The owner pushes
