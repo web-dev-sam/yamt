@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-20
+
 ### Fixed
 
 - The merge-request page no longer shows a merge request with real conflicts as conflict-free: the local check now
@@ -619,7 +621,8 @@ The 0.6 line as a release: everything in 0.6.0-beta.1 and 0.6.0-beta.2 below, wi
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.7.1...HEAD
+[Unreleased]: ../../compare/v0.7.2...HEAD
+[0.7.2]: ../../compare/v0.7.1...v0.7.2
 [0.7.1]: ../../compare/v0.7.0...v0.7.1
 [0.7.0]: ../../compare/v0.6.9...v0.7.0
 [0.6.9]: ../../compare/v0.6.8...v0.6.9
