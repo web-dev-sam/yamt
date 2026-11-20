@@ -1,7 +1,13 @@
 import { expect, test } from "vitest";
 
-import type { RangeLineCounts } from "../ipc";
-import { folderSums } from "./rangeFolderSums";
+import {
+  createFixtureRangeSource,
+  log,
+  type RangeFileId,
+  type RangeLineCounts,
+  type ReviewMark,
+} from "../ipc";
+import { folderSums, reviewedFolders } from "./rangeFolderSums";
 
 function counted(path: string, added: number, removed: number) {
   return { path, lines: { kind: "counted", added, removed } satisfies RangeLineCounts };
@@ -64,4 +70,34 @@ test("folderSums: a root-level file adds to no key", () => {
   expect(sums([counted("config", 3, 3), counted("data/x.json", 1, 0)])).toEqual({
     data: [1, 0],
   });
+});
+
+test("reviewedFolders: only folders whose every file at any depth is reviewed; changedSinceReview and unmarked keep them out", async () => {
+  const start = await createFixtureRangeSource(log, "?range=review").openRange();
+  if (!start.ok) {
+    throw new Error("the fixture did not open");
+  }
+  const marked: readonly [string, ReviewMark | null][] = [
+    ["src/board/parts/card.ts", "reviewed"],
+    ["src/board/view.ts", "reviewed"],
+    ["src/main.ts", null],
+    ["docs/keys.md", "changedSinceReview"],
+    ["docs/README.md", "reviewed"],
+    ["README.md", "reviewed"],
+  ];
+  const ids = start.value.files.map(({ id }) => id);
+  const files = marked.map(([path], index) => {
+    const id = ids[index];
+    if (id === undefined) {
+      throw new Error(`the fixture has no file ${index}`);
+    }
+    return { id, path };
+  });
+  const marks = new Map<RangeFileId, ReviewMark>(
+    files.flatMap(({ id }, index): [RangeFileId, ReviewMark][] => {
+      const mark = marked[index]?.[1] ?? null;
+      return mark === null ? [] : [[id, mark]];
+    }),
+  );
+  expect([...reviewedFolders(files, marks)].toSorted()).toEqual(["src/board", "src/board/parts"]);
 });

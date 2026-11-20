@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useEventListener, useWindowFocus } from "@vueuse/core";
 import { computed, onMounted, watch } from "vue";
+import Check from "~icons/lucide/check";
 
 import { log, onWindowClose, type RangeEntry, type RangeLineCounts } from "../ipc";
 import AgentSettings from "./AgentSettings.vue";
@@ -15,9 +16,9 @@ import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
 import RangeCounts from "./RangeCounts.vue";
 import RangeFileRow from "./RangeFileRow.vue";
-import { folderSums } from "./rangeFolderSums";
+import { folderSums, reviewedFolders } from "./rangeFolderSums";
 import { useRangeStore } from "./rangeStore";
-import { emptyRangeText, RANGE_LIST_LABEL } from "./rangeText";
+import { emptyRangeText, FOLDER_REVIEWED_WORD, RANGE_LIST_LABEL } from "./rangeText";
 import { sendNoticeRow } from "./rangeThreadText";
 import RangeView from "./RangeView.vue";
 import SearchPanel from "./SearchPanel.vue";
@@ -61,6 +62,7 @@ useEventListener(window, "keydown", (event) => {
 
 const files = computed(() => start.value?.files ?? []);
 const sums = computed(() => folderSums(files.value));
+const doneFolders = computed(() => reviewedFolders(files.value, marks.value));
 const emptyText = computed(() =>
   start.value !== null && start.value.files.length === 0 ? emptyRangeText(start.value) : null,
 );
@@ -126,6 +128,15 @@ function viewOf(file: RangeEntry): RangeViewKind {
         </template>
         <template #folder="{ path }">
           <RangeCounts :lines="folderLines(path)" class="ml-auto" />
+          <span
+            v-if="doneFolders.has(path)"
+            role="img"
+            :title="FOLDER_REVIEWED_WORD"
+            :aria-label="FOLDER_REVIEWED_WORD"
+            class="flex shrink-0 text-fg-muted"
+          >
+            <Check class="size-3.5" aria-hidden="true" />
+          </span>
         </template>
       </FileList>
     </SideColumn>

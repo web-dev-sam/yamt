@@ -851,7 +851,9 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   The tree's folder rows show the sum of their files' `+a −r` (#125): `rangeFolderSums.ts` `folderSums` keys git's
   counts by the folder path a row carries (through `fileTree.ts` `folderPaths`, so a joined chain finds its deepest
   folder's sum), built once per list by `RangeApp`, which fills the tree's optional `folder` slot (after the label;
-  the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair of file and folder rows.
+  the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair of file and folder rows. After it, a
+  folder whose every file below is marked reviewed (`reviewedFolders`, same keys; a `changedSinceReview` or unmarked
+  file keeps it out) shows the reviewed file row's muted `check`, titled "every file reviewed", its name not muted.
   The Reviewed marks (#195, #196): `rangeReviewed.ts` `createRangeReviewed(source, window)` is the window's one mirror
   of the marks — `marks` (`ReadonlyMap<RangeFileId, ReviewMark>`) written only after Rust answered ok (`load` from
   `listReviewed`, a mark, an unmark), `counted` ("N of M reviewed": only `reviewed` marks over `start.files`), `busy`

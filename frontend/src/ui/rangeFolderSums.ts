@@ -1,4 +1,4 @@
-import type { RangeEntry, RangeLineCounts } from "../ipc";
+import type { RangeEntry, RangeLineCounts, ReviewMarks } from "../ipc";
 import { folderPaths } from "./fileTree";
 
 type Counted = Extract<RangeLineCounts, { kind: "counted" }>;
@@ -24,4 +24,26 @@ export function folderSums(
     }
   }
   return sums;
+}
+
+/** The folders, keyed like `folderSums`, whose every file below them at any depth is marked "reviewed"; a
+ *  "changedSinceReview" or unmarked file keeps each of its folders out. */
+export function reviewedFolders(
+  files: readonly Pick<RangeEntry, "id" | "path">[],
+  marks: ReviewMarks,
+): ReadonlySet<string> {
+  const reviewed = new Set<string>();
+  const open = new Set<string>();
+  for (const { id, path } of files) {
+    const done = marks.get(id) === "reviewed";
+    for (const folder of folderPaths(path)) {
+      if (!done) {
+        open.add(folder);
+        reviewed.delete(folder);
+      } else if (!open.has(folder)) {
+        reviewed.add(folder);
+      }
+    }
+  }
+  return reviewed;
 }
