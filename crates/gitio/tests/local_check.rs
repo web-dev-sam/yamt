@@ -83,6 +83,7 @@ fn merge_tree_is_clean_for_disjoint_changes_and_conflicts_for_the_same_line() {
     assert_eq!(conflicts.unwrap(), MergeOutcome::Conflicts);
 }
 
+/// Also the detector for plan §2 #197 (never `--quiet`): only the plain form writes the merge's objects.
 #[test]
 fn a_merge_leaves_refs_status_index_and_head_alone() {
     let dir = diverged_repo(&SAME_LINE).unwrap();
@@ -93,11 +94,13 @@ fn a_merge_leaves_refs_status_index_and_head_alone() {
     }
     let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
     let before = untouched(root);
+    let objects_before = text(root, &["count-objects", "-v"]);
 
     let merged = repo.merge_tree(&local, &remote, MERGE_TIMEOUT);
 
     assert_eq!(merged.unwrap(), MergeOutcome::Conflicts);
     assert_eq!(untouched(root), before);
+    assert_ne!(text(root, &["count-objects", "-v"]), objects_before);
 }
 
 #[test]

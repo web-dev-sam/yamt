@@ -289,47 +289,18 @@ fn a_row_is_sent_only_when_the_merge_changes_its_readiness() {
     assert_eq!(sent.try_iter().collect::<Vec<_>>(), [expected]);
 }
 
-#[cfg(unix)]
-const OLD_GIT_TEST: &str = "check::tests::a_git_reporting_2_37_cannot_merge_without_a_checkout";
-
-/// A `git` that reports version 2.37.1 and runs the real git for every other command.
-#[cfg(unix)]
-fn git_reporting_2_37(folder: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    const RUNNABLE: u32 = 0o755;
-    let exec_path = yamt_conflict_repo::git_ok(folder, &["--exec-path"]).unwrap();
-    let real_git = format!("{}/git", String::from_utf8(exec_path).unwrap().trim_end());
-    let script = format!(
-        "#!/bin/sh\ncase \"$*\" in *version) echo 'git version 2.37.1'; exit 0;; esac\nexec '{real_git}' \"$@\"\n"
-    );
-    let fake = folder.join("git");
-    std::fs::write(&fake, script).unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(RUNNABLE)).unwrap();
-}
-
-#[cfg(unix)]
 #[test]
 fn the_check_stops_on_a_git_older_than_2_38() {
-    let folder = tempfile::tempdir().unwrap();
-    git_reporting_2_37(folder.path());
-
-    let ran = yamt_conflict_repo::run_ignored_in_child(&[OLD_GIT_TEST], |child| {
-        child.env("PATH", folder.path());
+    let old = require_merge_tree(GitVersion {
+        major: 2,
+        minor: 37,
+    });
+    let first = require_merge_tree(GitVersion {
+        major: 2,
+        minor: 38,
     });
 
-    ran.unwrap_or_else(|error| panic!("{error}"));
-}
-
-#[cfg(unix)]
-#[test]
-#[ignore = "run by the_check_stops_on_a_git_older_than_2_38"]
-fn a_git_reporting_2_37_cannot_merge_without_a_checkout() {
-    let dir = tempfile::tempdir().unwrap();
-    yamt_conflict_repo::git_ok(dir.path(), &["init", "--quiet"]).unwrap();
-    let repo = Repo::discover(dir.path()).unwrap();
-
-    let required = require_merge_tree(&repo);
-
     let expected = "git 2.37 cannot merge without a checkout (needs 2.38)";
-    assert_eq!(required, Err(expected.to_owned()));
+    assert_eq!(old, Err(expected.to_owned()));
+    assert_eq!(first, Ok(()));
 }

@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use yamt_gitio::{FETCH_TIMEOUT, MergeOutcome, Oid, Repo, merge_tree_supported};
+use yamt_gitio::{FETCH_TIMEOUT, GitVersion, MergeOutcome, Oid, Repo, merge_tree_supported};
 
 use crate::open::{branch_ref, head_ref};
 use crate::page::count;
@@ -130,7 +130,7 @@ fn decided_rows(
         return Ok(0);
     }
     let repo = repository.repo();
-    require_merge_tree(repo)?;
+    require_merge_tree(repo.version().map_err(|error| error.to_string())?)?;
     let remote = remote_for(repository.gitlab_remotes(), &check.full_path).ok_or_else(|| {
         format!(
             "no remote of the repository names the project {}",
@@ -152,8 +152,7 @@ fn decided_rows(
     Ok(merge_and_send(repo, &to_merge, memory, on_checked, summary))
 }
 
-fn require_merge_tree(repo: &Repo) -> Result<(), String> {
-    let version = repo.version().map_err(|error| error.to_string())?;
+fn require_merge_tree(version: GitVersion) -> Result<(), String> {
     if merge_tree_supported(version) {
         Ok(())
     } else {
