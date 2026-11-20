@@ -1,0 +1,522 @@
+diff --git a/crates/gitio/AGENTS.md b/crates/gitio/AGENTS.md
+index 307834b..b52fb95 100644
+--- a/crates/gitio/AGENTS.md
++++ b/crates/gitio/AGENTS.md
+@@ -10,6 +10,6 @@ The merge-request fetch (`src/fetch.rs`, plan §2 #128–#135): `Repo::fetch_wit
+ 
+ The merge-request merge in the user's own checkout (`src/fetch.rs`, `src/branch.rs`, `src/push.rs`, `src/repo.rs`, plan §2 #138–#143): a run that talks to a server is one helper, `fetch.rs` `run_without_prompts(command, verb, timeout)`: the no-prompt environment above (`refuse_prompts`), the argv logged at `debug`, `run_with_deadline`, and `Err` "cannot run git <verb>: …" or "git <verb> got no answer within N s"; the push reads only the `Finished` run it gives, and both fetches and `remote_refs` go through `stdout_without_prompts`, the same run with a non-zero exit as `Err` too (git's first stderr line, else "git <verb> failed: <status>"), the one place that wording lives. `Repo::fetch_branches(remote, branches, timeout)` runs the same fetch with one `+refs/heads/<b>:refs/remotes/<remote>/<b>` refspec per branch, so it writes those remote-tracking refs and nothing else, forced over a rebased branch (no `FETCH_HEAD`; `--refmap=` keeps the configured refspec from updating others); the caller refuses a branch name holding ':'. `is_ancestor(ancestor, of)` runs `merge-base --is-ancestor` (exit 0 true, 1 false, else `GitFailed`). `has_tracked_changes()` runs `status --porcelain=v1 -z --untracked-files=no` (any staged, unstaged or unmerged entry; untracked files do not count). `git_path(name)` is public: `rev-parse --git-path <name>`. A GitLab name is never read as an option: `--end-of-options` comes before it wherever git would parse a leading `-` as a flag, and `-B`'s value is a name whatever it starts with (`tests/branch.rs` `*_reads_a_leading_dash_as_*`). `checkout_branch_at(branch, commit)` runs `checkout --quiet -B <branch> <commit>` (an existing branch keeps its `branch.*` config). `checkout_branch(branch)` runs `checkout --quiet --end-of-options <branch> --`. `set_upstream(branch, remote)` runs `config branch.<b>.remote <remote>` then `config branch.<b>.merge refs/heads/<b>`. `delete_branch(branch)` runs `branch --quiet -D --end-of-options <branch>` (its config goes too). `move_branch(branch, commit)` runs `branch --quiet --force --end-of-options <branch> <commit>` (the config stays; both refuse a branch checked out in any worktree). `reset_keep(commit)` runs `reset --quiet --keep <commit>`. `merge_no_commit(rev)` runs `merge --no-ff --no-commit --end-of-options <rev>` (`--no-ff` leaves `MERGE_HEAD` even when HEAD could fast-forward) and answers `GitRun` (a non-zero exit is not an `Err`, as `continue_operation`). The checkouts, the reset and the merge run without a deadline (`run_to_success`/`run_to_end`), the config and branch writes with `GIT_TIMEOUT`. `Repo::push_branch(remote, branch, timeout)` runs `push --porcelain --no-follow-tags --recurse-submodules=no --end-of-options <remote> refs/heads/<b>:refs/heads/<b>` (never `+`, never `--force`; a configured `remote.<name>.push` does not apply) with the no-prompt environment, killed at `timeout` — callers pass `PUSH_TIMEOUT`, 120 s; `Err(String)` is the ref's porcelain summary and reason when its flag is `!` ("[rejected] (fetch first)"), else git's first `fatal:`/`error:` stderr line, else the exit status. `tests/branch.rs`, `tests/push.rs` and `tests/fetch.rs` run each against real tempdir repositories and a bare remote.
+ 
+-The local conflict check's git runs (`src/merge_tree.rs`, `src/ls_remote.rs`, `src/objects.rs`; RK52): `Repo::merge_tree(first, second, run_kind, timeout)` runs `merge-tree --write-tree [--quiet] <first> <second>` through `run` and answers `MergeOutcome` (`Clean` on exit 0, `Conflicts` on exit 1 with an empty stderr; git also exits 1 for a commit it cannot find, with a message, which stays `GitFailed`), never touching the index, the worktree or a ref. `MergeTreeRun::for_version(GitVersion)` picks `Quiet` (`--quiet`, git 2.50+, `Access::Read`, writes no object) or `Writing` (git 2.38–2.49, `Access::Write`, leaves unreferenced objects), `None` before 2.38; `FIRST_WITH_WRITE_TREE` and `FIRST_WITH_QUIET` are the only place these versions live. `Repo::remote_refs(remote, patterns, timeout)` runs `ls-remote --refs --end-of-options <remote> <patterns>` through `fetch.rs` `stdout_without_prompts` and gives each `<oid>\t<name>` line as a `RemoteRef { name, id }` in git's order (no object fetched, nothing written; `Err(String)` git's first stderr line, the exit status, or "git ls-remote printed …" for an unreadable line). `Repo::missing_commits(ids)` names, in the order given, every id that is missing or not a commit, from one `objects.rs` `batch_check`. `batch_check(ids, fields, LazyFetch)` is the one `cat-file --batch-check='%(objectname) <fields>' --buffer` runner (`blob_sizes` uses it too): no run for no ids, one answer per id in order with the echoed id checked and stripped, else `UnexpectedOutput`. merge-tree and `missing_commits` (`LazyFetch::Refused`) run with `objects.rs` `refuse_lazy_fetch` (`GIT_NO_LAZY_FETCH=1`, git 2.45+), so a partial clone fails on an object it lacks, or calls it missing, instead of fetching it from its promisor remote; `blob_sizes` keeps `LazyFetch::Allowed`. `tests/local_check.rs` runs each against real tempdir repositories, a bare remote (the no-prompt environment recorded for `remote_refs`) and a blobless partial clone whose server records any contact. `Oid` derives `Hash`.
++The local conflict check's git runs (`src/merge_tree.rs`, `src/ls_remote.rs`, `src/objects.rs`; RK52): `Repo::merge_tree(first, second, timeout)` runs `merge-tree --write-tree <first> <second>` through `run` (`Access::Write`: it leaves the merge's objects unreferenced) and answers `MergeOutcome` (`Clean` on exit 0, `Conflicts` on exit 1 with an empty stderr; git also exits 1 for a commit it cannot find, with a message, which stays `GitFailed`), never touching the index, the worktree or a ref; never with the no-object option, which git 2.50.1 was measured answering clean for a real conflict (`docs/slices/briefs/local-conflicts-no-quiet.md`). `merge_tree_supported(GitVersion)` is false before 2.38, which has no `--write-tree`; `FIRST_WITH_WRITE_TREE` is the only place that version lives. `Repo::remote_refs(remote, patterns, timeout)` runs `ls-remote --refs --end-of-options <remote> <patterns>` through `fetch.rs` `stdout_without_prompts` and gives each `<oid>\t<name>` line as a `RemoteRef { name, id }` in git's order (no object fetched, nothing written; `Err(String)` git's first stderr line, the exit status, or "git ls-remote printed …" for an unreadable line). `Repo::missing_commits(ids)` names, in the order given, every id that is missing or not a commit, from one `objects.rs` `batch_check`. `batch_check(ids, fields, LazyFetch)` is the one `cat-file --batch-check='%(objectname) <fields>' --buffer` runner (`blob_sizes` uses it too): no run for no ids, one answer per id in order with the echoed id checked and stripped, else `UnexpectedOutput`. merge-tree and `missing_commits` (`LazyFetch::Refused`) run with `objects.rs` `refuse_lazy_fetch` (`GIT_NO_LAZY_FETCH=1`, git 2.45+), so a partial clone fails on an object it lacks, or calls it missing, instead of fetching it from its promisor remote; `blob_sizes` keeps `LazyFetch::Allowed`. `tests/local_check.rs` runs each against real tempdir repositories, a bare remote (the no-prompt environment recorded for `remote_refs`) and a blobless partial clone whose server records any contact. `Oid` derives `Hash`.
+ 
+ glab (`src/glab.rs`, plan §2 #118, #128–#135, #181): `Glab::find()` (the first runnable `glab` on PATH, `program.rs` `program_in`; `None` when not installed), `Glab::at(program)`, `with_timeout` (default `GLAB_TIMEOUT`, 20 s); `run(cwd, args, stdin)` → `GlabRun` = `Printed { stdout }` | `Failed { status, stdout, stderr }` | `TimedOut`, with the user's environment plus `NO_COLOR=1` and `GIT_TERMINAL_PROMPT=0`, stdin closed or written and closed, a glab that cannot start `Error::GlabIo { program, source }`; `get(cwd, args)` → stdout or `Err(String)`: glab's `last_line` of stderr (its error comes after any notice), else the exit status or signal in words, `TIMED_OUT` (`"glab timed out"`) at the deadline; `post(cwd, args, body)` the same with `body` on stdin; `send(cwd, args, body)` → `HttpCall` (`args` must hold `--include`; `body` None closes stdin), read by `glab/http.rs` `http_call`: `Answered(HttpAnswer { status, body, glab_line })` when stdout starts with an `HTTP/…` status line (`body` what follows the first CRLF CRLF, `glab_line` glab's last stderr line), else `NotAnswered(reason)` (glab could not run, `TIMED_OUT`, glab's last line, else "glab printed no HTTP answer"); `HttpAnswer::reason()` in this order: GitLab's string `message` (another `message` as JSON text), its `error`, `glab_line`, `HTTP <status>`; `is_success` is 2xx; `auth_status(cwd)` → `AuthStatus` = `LoggedIn` | `LoggedOut { detail }` (glab's first line of stderr, else stdout, naming the instance) | `Failed { message }` (could not run, or `TIMED_OUT`). `first_line`/`last_line`: the first or last non-blank line, trimmed, of bytes decoded lossily. `tests/glab.rs` runs the committed `scripts/fake-glab` on the `tests/glab/runner` scenario through a symlink (stdin and stdout, a failure's exit and streams, a hang's timeout, the environment overrides in a child process, a missing glab, `send`'s body on stdin and its answer).
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index c5a47e9..09c126e 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -48,7 +48,7 @@ pub use glab::{
+ pub use ls_remote::RemoteRef;
+ pub use merge_config::MergeConfig;
+ pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
+-pub use merge_tree::{MergeOutcome, MergeTreeRun};
++pub use merge_tree::{MergeOutcome, merge_tree_supported};
+ pub use names::{CommitSummary, RemoteUrl};
+ pub use operation::{Operation, Progress, Rebase, Stop, StopId};
+ pub use push::PUSH_TIMEOUT;
+diff --git a/crates/gitio/src/merge_tree.rs b/crates/gitio/src/merge_tree.rs
+index 1c54225..0dcb557 100644
+--- a/crates/gitio/src/merge_tree.rs
++++ b/crates/gitio/src/merge_tree.rs
+@@ -13,10 +13,12 @@ const FIRST_WITH_WRITE_TREE: GitVersion = GitVersion {
+     major: 2,
+     minor: 38,
+ };
+-const FIRST_WITH_QUIET: GitVersion = GitVersion {
+-    major: 2,
+-    minor: 50,
+-};
++
++/// Whether `version` has `merge-tree --write-tree` (git 2.38.0 release notes).
++#[must_use]
++pub fn merge_tree_supported(version: GitVersion) -> bool {
++    version >= FIRST_WITH_WRITE_TREE
++}
+ 
+ /// Whether git's merge of two commits is clean.
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+@@ -25,65 +27,33 @@ pub enum MergeOutcome {
+     Conflicts,
+ }
+ 
+-/// How `merge_tree` runs git, by what the installed git can do.
+-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+-pub enum MergeTreeRun {
+-    /// `--write-tree --quiet` (git 2.50+): no object is written, and git stops at the first conflict.
+-    Quiet,
+-    /// `--write-tree` (git 2.38–2.49): the merge's objects are left unreferenced in the object store.
+-    Writing,
+-}
+-
+-impl MergeTreeRun {
+-    /// The run `version` can do; `None` before 2.38, which has no `--write-tree`.
+-    #[must_use]
+-    pub fn for_version(version: GitVersion) -> Option<MergeTreeRun> {
+-        if version >= FIRST_WITH_QUIET {
+-            Some(MergeTreeRun::Quiet)
+-        } else if version >= FIRST_WITH_WRITE_TREE {
+-            Some(MergeTreeRun::Writing)
+-        } else {
+-            None
+-        }
+-    }
+-}
+-
+ impl Repo {
+-    /// `git merge-tree --write-tree [--quiet] <first> <second>` (`Quiet` adds `--quiet`): exit 0 → `Clean`,
+-    /// exit 1 with nothing on stderr → `Conflicts`, any other exit → `Error::GitFailed`; killed at `timeout` →
+-    /// `Error::Timeout`. Never reads or writes the index, the working tree or a ref (git-merge-tree(1)), and never
+-    /// fetches an object a partial clone lacks: the run fails instead.
++    /// `git merge-tree --write-tree <first> <second>`: exit 0 → `Clean`, exit 1 with nothing on stderr → `Conflicts`,
++    /// any other exit → `Error::GitFailed`; killed at `timeout` → `Error::Timeout`. Leaves the merge's objects
++    /// unreferenced in the object store; never reads or writes the index, the working tree or a ref
++    /// (git-merge-tree(1)), and never fetches an object a partial clone lacks: the run fails instead.
++    /// No `--quiet`: git 2.50.1 exited 0 on a content conflict the plain form reports (brief local-conflicts-no-quiet).
+     /// Attributes come from `first`'s tree only (`attr.tree`), never the working tree, the global or the system
+     /// file (gitattributes(5); git(1) "ENVIRONMENT" `GIT_ATTR_NOSYSTEM`); except `$GIT_DIR/info/attributes`, which
+     /// gitattributes(5) reads with the highest precedence, and git before 2.43, which ignores `attr.tree` (git
+     /// 2.43.0 release notes).
+-    pub fn merge_tree(
+-        &self,
+-        first: &Oid,
+-        second: &Oid,
+-        run_kind: MergeTreeRun,
+-        timeout: Duration,
+-    ) -> Result<MergeOutcome> {
+-        let (access, options): (Access, &[&str]) = match run_kind {
+-            MergeTreeRun::Quiet => (Access::Read, &["--write-tree", "--quiet"]),
+-            MergeTreeRun::Writing => (Access::Write, &["--write-tree"]),
+-        };
++    pub fn merge_tree(&self, first: &Oid, second: &Oid, timeout: Duration) -> Result<MergeOutcome> {
+         let attributes_tree = format!("attr.tree={}", first.as_str());
+-        let leading = [
++        let args = [
+             "-c",
+             &attributes_tree,
+             "-c",
+             NO_GLOBAL_ATTRIBUTES,
+             MERGE_TREE,
++            "--write-tree",
++            first.as_str(),
++            second.as_str(),
+         ];
+-        let mut command = self.command(access, &leading);
+-        command
+-            .args(options)
+-            .args([first.as_str(), second.as_str()]);
++        let mut command = self.command(Access::Write, &args);
+         refuse_lazy_fetch(&mut command);
+         command.env("GIT_ATTR_NOSYSTEM", "1");
+         // git also exits 1 for a commit it cannot find, printing "merge-tree: <id> - not something we can merge"
+-        // (measured with git 2.56, both forms); a conflict leaves stderr empty.
++        // (measured with git 2.56); a conflict leaves stderr empty.
+         match run(command, None, timeout) {
+             Ok(_) => Ok(MergeOutcome::Clean),
+             Err(Error::GitFailed {
+@@ -100,25 +70,19 @@ impl Repo {
+ mod tests {
+     use super::*;
+ 
+-    fn run_for(major: u32, minor: u32) -> Option<MergeTreeRun> {
+-        MergeTreeRun::for_version(GitVersion { major, minor })
++    fn supported(major: u32, minor: u32) -> bool {
++        merge_tree_supported(GitVersion { major, minor })
+     }
+ 
+     #[test]
+     fn git_before_2_38_cannot_merge_without_a_worktree() {
+-        assert_eq!(run_for(2, 37), None);
+-        assert_eq!(run_for(1, 99), None);
++        assert!(!supported(2, 37));
++        assert!(!supported(1, 99));
+     }
+ 
+     #[test]
+-    fn git_2_38_to_2_49_writes_the_merge_objects() {
+-        assert_eq!(run_for(2, 38), Some(MergeTreeRun::Writing));
+-        assert_eq!(run_for(2, 49), Some(MergeTreeRun::Writing));
+-    }
+-
+-    #[test]
+-    fn git_2_50_and_later_merges_quietly() {
+-        assert_eq!(run_for(2, 50), Some(MergeTreeRun::Quiet));
+-        assert_eq!(run_for(3, 0), Some(MergeTreeRun::Quiet));
++    fn git_2_38_and_later_can_merge_without_a_worktree() {
++        assert!(supported(2, 38));
++        assert!(supported(3, 0));
+     }
+ }
+diff --git a/crates/gitio/tests/local_check.rs b/crates/gitio/tests/local_check.rs
+index fcb5142..e627ea6 100644
+--- a/crates/gitio/tests/local_check.rs
++++ b/crates/gitio/tests/local_check.rs
+@@ -6,7 +6,7 @@ use std::time::Duration;
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
+ use yamt_gitio::{
+-    Error, FETCH_TIMEOUT, GitVersion, MergeOutcome, MergeTreeRun, Oid, RemoteRef, Repo,
++    Error, FETCH_TIMEOUT, GitVersion, MergeOutcome, Oid, RemoteRef, Repo, merge_tree_supported,
+ };
+ 
+ const MERGE_TIMEOUT: Duration = Duration::from_secs(30);
+@@ -43,13 +43,9 @@ fn commit(repo: &Repo, name: &str) -> Oid {
+     repo.commit_named(name).unwrap().unwrap()
+ }
+ 
+-/// Every run the installed git can do: `Writing` works wherever `Quiet` does.
+-fn supported_runs(repo: &Repo) -> Vec<MergeTreeRun> {
+-    match MergeTreeRun::for_version(repo.version().unwrap()) {
+-        Some(MergeTreeRun::Quiet) => vec![MergeTreeRun::Quiet, MergeTreeRun::Writing],
+-        Some(MergeTreeRun::Writing) => vec![MergeTreeRun::Writing],
+-        None => Vec::new(),
+-    }
++/// Whether the installed git can run `merge_tree`; a test of it passes vacuously where it cannot.
++fn merge_tree_runs(repo: &Repo) -> bool {
++    merge_tree_supported(repo.version().unwrap())
+ }
+ 
+ /// What a merge must leave as it was: every ref, the status, the index and HEAD.
+@@ -68,48 +64,40 @@ fn merge_tree_is_clean_for_disjoint_changes_and_conflicts_for_the_same_line() {
+     let same_line = diverged_repo(&SAME_LINE).unwrap();
+     let disjoint = Repo::discover(disjoint.path()).unwrap();
+     let same_line = Repo::discover(same_line.path()).unwrap();
+-    let runs = supported_runs(&disjoint);
+-
+-    for run in runs {
+-        let clean = disjoint.merge_tree(
+-            &commit(&disjoint, "local"),
+-            &commit(&disjoint, "remote"),
+-            run,
+-            MERGE_TIMEOUT,
+-        );
+-        let conflicts = same_line.merge_tree(
+-            &commit(&same_line, "local"),
+-            &commit(&same_line, "remote"),
+-            run,
+-            MERGE_TIMEOUT,
+-        );
+-
+-        assert_eq!(clean.unwrap(), MergeOutcome::Clean, "{run:?}");
+-        assert_eq!(conflicts.unwrap(), MergeOutcome::Conflicts, "{run:?}");
++    if !merge_tree_runs(&disjoint) {
++        return;
+     }
++
++    let clean = disjoint.merge_tree(
++        &commit(&disjoint, "local"),
++        &commit(&disjoint, "remote"),
++        MERGE_TIMEOUT,
++    );
++    let conflicts = same_line.merge_tree(
++        &commit(&same_line, "local"),
++        &commit(&same_line, "remote"),
++        MERGE_TIMEOUT,
++    );
++
++    assert_eq!(clean.unwrap(), MergeOutcome::Clean);
++    assert_eq!(conflicts.unwrap(), MergeOutcome::Conflicts);
+ }
+ 
+ #[test]
+-fn a_quiet_merge_writes_no_object_and_leaves_refs_index_and_worktree_alone() {
++fn a_merge_leaves_refs_status_index_and_head_alone() {
+     let dir = diverged_repo(&SAME_LINE).unwrap();
+     let root = dir.path();
+     let repo = Repo::discover(root).unwrap();
+-    let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
+-
+-    for run in supported_runs(&repo) {
+-        let before = untouched(root);
+-        let objects_before = text(root, &["count-objects", "-v"]);
+-
+-        let merged = repo.merge_tree(&local, &remote, run, MERGE_TIMEOUT);
+-
+-        assert_eq!(merged.unwrap(), MergeOutcome::Conflicts, "{run:?}");
+-        assert_eq!(untouched(root), before, "{run:?}");
+-        let objects_after = text(root, &["count-objects", "-v"]);
+-        match run {
+-            MergeTreeRun::Quiet => assert_eq!(objects_after, objects_before),
+-            MergeTreeRun::Writing => assert_ne!(objects_after, objects_before),
+-        }
++    if !merge_tree_runs(&repo) {
++        return;
+     }
++    let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
++    let before = untouched(root);
++
++    let merged = repo.merge_tree(&local, &remote, MERGE_TIMEOUT);
++
++    assert_eq!(merged.unwrap(), MergeOutcome::Conflicts);
++    assert_eq!(untouched(root), before);
+ }
+ 
+ #[test]
+@@ -122,15 +110,17 @@ fn a_merge_of_a_missing_commit_or_unrelated_histories_is_an_error_not_a_conflict
+     let repo = Repo::discover(root).unwrap();
+     let local = commit(&repo, "local");
+ 
+-    for run in supported_runs(&repo) {
+-        for other in [&unknown, &unrelated] {
+-            let merged = repo.merge_tree(&local, other, run, MERGE_TIMEOUT);
++    if !merge_tree_runs(&repo) {
++        return;
++    }
+ 
+-            assert!(
+-                matches!(merged, Err(Error::GitFailed { .. })),
+-                "{run:?} {other:?}: {merged:?}"
+-            );
+-        }
++    for other in [&unknown, &unrelated] {
++        let merged = repo.merge_tree(&local, other, MERGE_TIMEOUT);
++
++        assert!(
++            matches!(merged, Err(Error::GitFailed { .. })),
++            "{other:?}: {merged:?}"
++        );
+     }
+ }
+ 
+@@ -140,14 +130,13 @@ fn a_merge_past_its_deadline_is_a_timeout() {
+     let repo = Repo::discover(dir.path()).unwrap();
+     let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
+ 
+-    for run in supported_runs(&repo) {
+-        let merged = repo.merge_tree(&local, &remote, run, Duration::ZERO);
+-
+-        assert!(
+-            matches!(merged, Err(Error::Timeout { .. })),
+-            "{run:?}: {merged:?}"
+-        );
++    if !merge_tree_runs(&repo) {
++        return;
+     }
++
++    let merged = repo.merge_tree(&local, &remote, Duration::ZERO);
++
++    assert!(matches!(merged, Err(Error::Timeout { .. })), "{merged:?}");
+ }
+ 
+ const UNION_A: &str = "a.txt merge=union\n";
+@@ -161,16 +150,10 @@ fn honours_attr_tree(version: GitVersion) -> bool {
+     version >= FIRST_WITH_ATTR_TREE
+ }
+ 
+-/// The `local`/`remote` merge of `SAME_LINE` in `repo`, for every supported run.
+-fn same_line_outcomes(repo: &Repo) -> Vec<MergeOutcome> {
++/// The `local`/`remote` merge of `SAME_LINE` in `repo`.
++fn same_line_outcome(repo: &Repo) -> MergeOutcome {
+     let (local, remote) = (commit(repo, "local"), commit(repo, "remote"));
+-    supported_runs(repo)
+-        .into_iter()
+-        .map(|run| {
+-            repo.merge_tree(&local, &remote, run, MERGE_TIMEOUT)
+-                .unwrap()
+-        })
+-        .collect()
++    repo.merge_tree(&local, &remote, MERGE_TIMEOUT).unwrap()
+ }
+ 
+ #[test]
+@@ -194,14 +177,7 @@ fn an_untracked_gitattributes_in_the_working_tree_does_not_clean_a_conflict() {
+         return;
+     }
+ 
+-    let outcomes = same_line_outcomes(&repo);
+-
+-    assert!(
+-        outcomes
+-            .iter()
+-            .all(|outcome| *outcome == MergeOutcome::Conflicts),
+-        "{outcomes:?}"
+-    );
++    assert_eq!(same_line_outcome(&repo), MergeOutcome::Conflicts);
+ }
+ 
+ #[test]
+@@ -213,14 +189,12 @@ fn the_users_attributes_file_does_not_clean_a_conflict() {
+     let attributes = attributes.to_str().unwrap();
+     git_ok(root, &["config", "core.attributesFile", attributes]).unwrap();
+ 
+-    let outcomes = same_line_outcomes(&Repo::discover(root).unwrap());
++    let repo = Repo::discover(root).unwrap();
++    if !merge_tree_runs(&repo) {
++        return;
++    }
+ 
+-    assert!(
+-        outcomes
+-            .iter()
+-            .all(|outcome| *outcome == MergeOutcome::Conflicts),
+-        "{outcomes:?}"
+-    );
++    assert_eq!(same_line_outcome(&repo), MergeOutcome::Conflicts);
+ }
+ 
+ #[test]
+@@ -236,14 +210,7 @@ fn a_gitattributes_committed_in_the_first_commit_still_applies() {
+         return;
+     }
+ 
+-    let outcomes = same_line_outcomes(&repo);
+-
+-    assert!(
+-        outcomes
+-            .iter()
+-            .all(|outcome| *outcome == MergeOutcome::Clean),
+-        "{outcomes:?}"
+-    );
++    assert_eq!(same_line_outcome(&repo), MergeOutcome::Clean);
+ }
+ 
+ /// A repository with a remote `gitlab`, a bare clone of it holding merge-request heads.
+@@ -444,14 +411,13 @@ fn merge_tree_of_a_partial_clone_fails_on_a_blob_it_lacks_instead_of_fetching_it
+         commit(&repo, "origin/local"),
+         commit(&repo, "origin/remote"),
+     );
+-    for run in supported_runs(&repo) {
+-        let merged = repo.merge_tree(&local, &remote, run, MERGE_TIMEOUT);
+-
+-        assert!(
+-            matches!(merged, Err(Error::GitFailed { .. })),
+-            "{run:?}: {merged:?}"
+-        );
++    if !merge_tree_runs(&repo) {
++        return;
+     }
++
++    let merged = repo.merge_tree(&local, &remote, MERGE_TIMEOUT);
++
++    assert!(matches!(merged, Err(Error::GitFailed { .. })), "{merged:?}");
+     assert!(!partial.contacted.exists());
+ }
+ 
+diff --git a/crates/merge-requests/src/check.rs b/crates/merge-requests/src/check.rs
+index dbffef9..5be2477 100644
+--- a/crates/merge-requests/src/check.rs
++++ b/crates/merge-requests/src/check.rs
+@@ -5,7 +5,7 @@ use std::sync::mpsc;
+ use std::thread;
+ use std::time::{Duration, Instant};
+ 
+-use yamt_gitio::{FETCH_TIMEOUT, MergeOutcome, MergeTreeRun, Oid, Repo};
++use yamt_gitio::{FETCH_TIMEOUT, MergeOutcome, Oid, Repo, merge_tree_supported};
+ 
+ use crate::open::{branch_ref, head_ref};
+ use crate::page::count;
+@@ -130,7 +130,7 @@ fn decided_rows(
+         return Ok(0);
+     }
+     let repo = repository.repo();
+-    let run_kind = merge_tree_run(repo)?;
++    require_merge_tree(repo)?;
+     let remote = remote_for(repository.gitlab_remotes(), &check.full_path).ok_or_else(|| {
+         format!(
+             "no remote of the repository names the project {}",
+@@ -149,19 +149,19 @@ fn decided_rows(
+     let paired = paired_rows(&check.rows, &advertised, summary);
+     let not_remembered = send_remembered(paired, memory, on_checked, summary);
+     let to_merge = fetched_unless_local(repo, &remote.name, not_remembered, summary)?;
+-    Ok(merge_and_send(
+-        repo, run_kind, &to_merge, memory, on_checked, summary,
+-    ))
++    Ok(merge_and_send(repo, &to_merge, memory, on_checked, summary))
+ }
+ 
+-fn merge_tree_run(repo: &Repo) -> Result<MergeTreeRun, String> {
++fn require_merge_tree(repo: &Repo) -> Result<(), String> {
+     let version = repo.version().map_err(|error| error.to_string())?;
+-    MergeTreeRun::for_version(version).ok_or_else(|| {
+-        format!(
++    if merge_tree_supported(version) {
++        Ok(())
++    } else {
++        Err(format!(
+             "git {}.{} cannot merge without a checkout (needs 2.38)",
+             version.major, version.minor
+-        )
+-    })
++        ))
++    }
+ }
+ 
+ /// `refs/heads/<t>` once for each target of a row with a head, a target holding `:` left out, then every merge
+@@ -293,7 +293,6 @@ fn refspecs_for(rows: &[PairedRow], missing: &HashSet<Oid>) -> Vec<String> {
+ /// merges decided.
+ fn merge_and_send(
+     repo: &Repo,
+-    run_kind: MergeTreeRun,
+     rows: &[PairedRow],
+     memory: &mut MergedPairs,
+     on_checked: &dyn Fn(CheckedRow),
+@@ -306,7 +305,7 @@ fn merge_and_send(
+         }
+     }
+     let merge = |pair: &Pair| {
+-        repo.merge_tree(&pair.target, &pair.source, run_kind, MERGE_TIMEOUT)
++        repo.merge_tree(&pair.target, &pair.source, MERGE_TIMEOUT)
+             .map_err(|error| error.to_string())
+     };
+     let mut decided = 0;
+diff --git a/crates/merge-requests/src/check/tests.rs b/crates/merge-requests/src/check/tests.rs
+index 131281b..69bcf58 100644
+--- a/crates/merge-requests/src/check/tests.rs
++++ b/crates/merge-requests/src/check/tests.rs
+@@ -288,3 +288,48 @@ fn a_row_is_sent_only_when_the_merge_changes_its_readiness() {
+     };
+     assert_eq!(sent.try_iter().collect::<Vec<_>>(), [expected]);
+ }
++
++#[cfg(unix)]
++const OLD_GIT_TEST: &str = "check::tests::a_git_reporting_2_37_cannot_merge_without_a_checkout";
++
++/// A `git` that reports version 2.37.1 and runs the real git for every other command.
++#[cfg(unix)]
++fn git_reporting_2_37(folder: &std::path::Path) {
++    use std::os::unix::fs::PermissionsExt;
++    const RUNNABLE: u32 = 0o755;
++    let exec_path = yamt_conflict_repo::git_ok(folder, &["--exec-path"]).unwrap();
++    let real_git = format!("{}/git", String::from_utf8(exec_path).unwrap().trim_end());
++    let script = format!(
++        "#!/bin/sh\ncase \"$*\" in *version) echo 'git version 2.37.1'; exit 0;; esac\nexec '{real_git}' \"$@\"\n"
++    );
++    let fake = folder.join("git");
++    std::fs::write(&fake, script).unwrap();
++    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(RUNNABLE)).unwrap();
++}
++
++#[cfg(unix)]
++#[test]
++fn the_check_stops_on_a_git_older_than_2_38() {
++    let folder = tempfile::tempdir().unwrap();
++    git_reporting_2_37(folder.path());
++
++    let ran = yamt_conflict_repo::run_ignored_in_child(&[OLD_GIT_TEST], |child| {
++        child.env("PATH", folder.path());
++    });
++
++    ran.unwrap_or_else(|error| panic!("{error}"));
++}
++
++#[cfg(unix)]
++#[test]
++#[ignore = "run by the_check_stops_on_a_git_older_than_2_38"]
++fn a_git_reporting_2_37_cannot_merge_without_a_checkout() {
++    let dir = tempfile::tempdir().unwrap();
++    yamt_conflict_repo::git_ok(dir.path(), &["init", "--quiet"]).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
++
++    let required = require_merge_tree(&repo);
++
++    let expected = "git 2.37 cannot merge without a checkout (needs 2.38)";
++    assert_eq!(required, Err(expected.to_owned()));
++}

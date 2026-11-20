@@ -13,10 +13,12 @@ const FIRST_WITH_WRITE_TREE: GitVersion = GitVersion {
     major: 2,
     minor: 38,
 };
-const FIRST_WITH_QUIET: GitVersion = GitVersion {
-    major: 2,
-    minor: 50,
-};
+
+/// Whether `version` has `merge-tree --write-tree` (git 2.38.0 release notes).
+#[must_use]
+pub fn merge_tree_supported(version: GitVersion) -> bool {
+    version >= FIRST_WITH_WRITE_TREE
+}
 
 /// Whether git's merge of two commits is clean.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -25,65 +27,33 @@ pub enum MergeOutcome {
     Conflicts,
 }
 
-/// How `merge_tree` runs git, by what the installed git can do.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MergeTreeRun {
-    /// `--write-tree --quiet` (git 2.50+): no object is written, and git stops at the first conflict.
-    Quiet,
-    /// `--write-tree` (git 2.38–2.49): the merge's objects are left unreferenced in the object store.
-    Writing,
-}
-
-impl MergeTreeRun {
-    /// The run `version` can do; `None` before 2.38, which has no `--write-tree`.
-    #[must_use]
-    pub fn for_version(version: GitVersion) -> Option<MergeTreeRun> {
-        if version >= FIRST_WITH_QUIET {
-            Some(MergeTreeRun::Quiet)
-        } else if version >= FIRST_WITH_WRITE_TREE {
-            Some(MergeTreeRun::Writing)
-        } else {
-            None
-        }
-    }
-}
-
 impl Repo {
-    /// `git merge-tree --write-tree [--quiet] <first> <second>` (`Quiet` adds `--quiet`): exit 0 → `Clean`,
-    /// exit 1 with nothing on stderr → `Conflicts`, any other exit → `Error::GitFailed`; killed at `timeout` →
-    /// `Error::Timeout`. Never reads or writes the index, the working tree or a ref (git-merge-tree(1)), and never
-    /// fetches an object a partial clone lacks: the run fails instead.
+    /// `git merge-tree --write-tree <first> <second>`: exit 0 → `Clean`, exit 1 with nothing on stderr → `Conflicts`,
+    /// any other exit → `Error::GitFailed`; killed at `timeout` → `Error::Timeout`. Leaves the merge's objects
+    /// unreferenced in the object store; never reads or writes the index, the working tree or a ref
+    /// (git-merge-tree(1)), and never fetches an object a partial clone lacks: the run fails instead.
+    /// No `--quiet`: git 2.50.1 exited 0 on a content conflict the plain form reports (brief local-conflicts-no-quiet).
     /// Attributes come from `first`'s tree only (`attr.tree`), never the working tree, the global or the system
     /// file (gitattributes(5); git(1) "ENVIRONMENT" `GIT_ATTR_NOSYSTEM`); except `$GIT_DIR/info/attributes`, which
     /// gitattributes(5) reads with the highest precedence, and git before 2.43, which ignores `attr.tree` (git
     /// 2.43.0 release notes).
-    pub fn merge_tree(
-        &self,
-        first: &Oid,
-        second: &Oid,
-        run_kind: MergeTreeRun,
-        timeout: Duration,
-    ) -> Result<MergeOutcome> {
-        let (access, options): (Access, &[&str]) = match run_kind {
-            MergeTreeRun::Quiet => (Access::Read, &["--write-tree", "--quiet"]),
-            MergeTreeRun::Writing => (Access::Write, &["--write-tree"]),
-        };
+    pub fn merge_tree(&self, first: &Oid, second: &Oid, timeout: Duration) -> Result<MergeOutcome> {
         let attributes_tree = format!("attr.tree={}", first.as_str());
-        let leading = [
+        let args = [
             "-c",
             &attributes_tree,
             "-c",
             NO_GLOBAL_ATTRIBUTES,
             MERGE_TREE,
+            "--write-tree",
+            first.as_str(),
+            second.as_str(),
         ];
-        let mut command = self.command(access, &leading);
-        command
-            .args(options)
-            .args([first.as_str(), second.as_str()]);
+        let mut command = self.command(Access::Write, &args);
         refuse_lazy_fetch(&mut command);
         command.env("GIT_ATTR_NOSYSTEM", "1");
         // git also exits 1 for a commit it cannot find, printing "merge-tree: <id> - not something we can merge"
-        // (measured with git 2.56, both forms); a conflict leaves stderr empty.
+        // (measured with git 2.56); a conflict leaves stderr empty.
         match run(command, None, timeout) {
             Ok(_) => Ok(MergeOutcome::Clean),
             Err(Error::GitFailed {
@@ -100,25 +70,19 @@ impl Repo {
 mod tests {
     use super::*;
 
-    fn run_for(major: u32, minor: u32) -> Option<MergeTreeRun> {
-        MergeTreeRun::for_version(GitVersion { major, minor })
+    fn supported(major: u32, minor: u32) -> bool {
+        merge_tree_supported(GitVersion { major, minor })
     }
 
     #[test]
     fn git_before_2_38_cannot_merge_without_a_worktree() {
-        assert_eq!(run_for(2, 37), None);
-        assert_eq!(run_for(1, 99), None);
+        assert!(!supported(2, 37));
+        assert!(!supported(1, 99));
     }
 
     #[test]
-    fn git_2_38_to_2_49_writes_the_merge_objects() {
-        assert_eq!(run_for(2, 38), Some(MergeTreeRun::Writing));
-        assert_eq!(run_for(2, 49), Some(MergeTreeRun::Writing));
-    }
-
-    #[test]
-    fn git_2_50_and_later_merges_quietly() {
-        assert_eq!(run_for(2, 50), Some(MergeTreeRun::Quiet));
-        assert_eq!(run_for(3, 0), Some(MergeTreeRun::Quiet));
+    fn git_2_38_and_later_can_merge_without_a_worktree() {
+        assert!(supported(2, 38));
+        assert!(supported(3, 0));
     }
 }

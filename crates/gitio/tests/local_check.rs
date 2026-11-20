@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
 use yamt_gitio::{
-    Error, FETCH_TIMEOUT, GitVersion, MergeOutcome, MergeTreeRun, Oid, RemoteRef, Repo,
+    Error, FETCH_TIMEOUT, GitVersion, MergeOutcome, Oid, RemoteRef, Repo, merge_tree_supported,
 };
 
 const MERGE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -43,13 +43,9 @@ fn commit(repo: &Repo, name: &str) -> Oid {
     repo.commit_named(name).unwrap().unwrap()
 }
 
-/// Every run the installed git can do: `Writing` works wherever `Quiet` does.
-fn supported_runs(repo: &Repo) -> Vec<MergeTreeRun> {
-    match MergeTreeRun::for_version(repo.version().unwrap()) {
-        Some(MergeTreeRun::Quiet) => vec![MergeTreeRun::Quiet, MergeTreeRun::Writing],
-        Some(MergeTreeRun::Writing) => vec![MergeTreeRun::Writing],
-        None => Vec::new(),
-    }
+/// Whether the installed git can run `merge_tree`; a test of it passes vacuously where it cannot.
+fn merge_tree_runs(repo: &Repo) -> bool {
+    merge_tree_supported(repo.version().unwrap())
 }
 
 /// What a merge must leave as it was: every ref, the status, the index and HEAD.
@@ -68,48 +64,40 @@ fn merge_tree_is_clean_for_disjoint_changes_and_conflicts_for_the_same_line() {
     let same_line = diverged_repo(&SAME_LINE).unwrap();
     let disjoint = Repo::discover(disjoint.path()).unwrap();
     let same_line = Repo::discover(same_line.path()).unwrap();
-    let runs = supported_runs(&disjoint);
-
-    for run in runs {
-        let clean = disjoint.merge_tree(
-            &commit(&disjoint, "local"),
-            &commit(&disjoint, "remote"),
-            run,
-            MERGE_TIMEOUT,
-        );
-        let conflicts = same_line.merge_tree(
-            &commit(&same_line, "local"),
-            &commit(&same_line, "remote"),
-            run,
-            MERGE_TIMEOUT,
-        );
-
-        assert_eq!(clean.unwrap(), MergeOutcome::Clean, "{run:?}");
-        assert_eq!(conflicts.unwrap(), MergeOutcome::Conflicts, "{run:?}");
+    if !merge_tree_runs(&disjoint) {
+        return;
     }
+
+    let clean = disjoint.merge_tree(
+        &commit(&disjoint, "local"),
+        &commit(&disjoint, "remote"),
+        MERGE_TIMEOUT,
+    );
+    let conflicts = same_line.merge_tree(
+        &commit(&same_line, "local"),
+        &commit(&same_line, "remote"),
+        MERGE_TIMEOUT,
+    );
+
+    assert_eq!(clean.unwrap(), MergeOutcome::Clean);
+    assert_eq!(conflicts.unwrap(), MergeOutcome::Conflicts);
 }
 
 #[test]
-fn a_quiet_merge_writes_no_object_and_leaves_refs_index_and_worktree_alone() {
+fn a_merge_leaves_refs_status_index_and_head_alone() {
     let dir = diverged_repo(&SAME_LINE).unwrap();
     let root = dir.path();
     let repo = Repo::discover(root).unwrap();
-    let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
-
-    for run in supported_runs(&repo) {
-        let before = untouched(root);
-        let objects_before = text(root, &["count-objects", "-v"]);
-
-        let merged = repo.merge_tree(&local, &remote, run, MERGE_TIMEOUT);
-
-        assert_eq!(merged.unwrap(), MergeOutcome::Conflicts, "{run:?}");
-        assert_eq!(untouched(root), before, "{run:?}");
-        let objects_after = text(root, &["count-objects", "-v"]);
-        match run {
-            MergeTreeRun::Quiet => assert_eq!(objects_after, objects_before),
-            MergeTreeRun::Writing => assert_ne!(objects_after, objects_before),
-        }
+    if !merge_tree_runs(&repo) {
+        return;
     }
+    let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
+    let before = untouched(root);
+
+    let merged = repo.merge_tree(&local, &remote, MERGE_TIMEOUT);
+
+    assert_eq!(merged.unwrap(), MergeOutcome::Conflicts);
+    assert_eq!(untouched(root), before);
 }
 
 #[test]
@@ -122,15 +110,17 @@ fn a_merge_of_a_missing_commit_or_unrelated_histories_is_an_error_not_a_conflict
     let repo = Repo::discover(root).unwrap();
     let local = commit(&repo, "local");
 
-    for run in supported_runs(&repo) {
-        for other in [&unknown, &unrelated] {
-            let merged = repo.merge_tree(&local, other, run, MERGE_TIMEOUT);
+    if !merge_tree_runs(&repo) {
+        return;
+    }
 
-            assert!(
-                matches!(merged, Err(Error::GitFailed { .. })),
-                "{run:?} {other:?}: {merged:?}"
-            );
-        }
+    for other in [&unknown, &unrelated] {
+        let merged = repo.merge_tree(&local, other, MERGE_TIMEOUT);
+
+        assert!(
+            matches!(merged, Err(Error::GitFailed { .. })),
+            "{other:?}: {merged:?}"
+        );
     }
 }
 
@@ -140,14 +130,13 @@ fn a_merge_past_its_deadline_is_a_timeout() {
     let repo = Repo::discover(dir.path()).unwrap();
     let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
 
-    for run in supported_runs(&repo) {
-        let merged = repo.merge_tree(&local, &remote, run, Duration::ZERO);
-
-        assert!(
-            matches!(merged, Err(Error::Timeout { .. })),
-            "{run:?}: {merged:?}"
-        );
+    if !merge_tree_runs(&repo) {
+        return;
     }
+
+    let merged = repo.merge_tree(&local, &remote, Duration::ZERO);
+
+    assert!(matches!(merged, Err(Error::Timeout { .. })), "{merged:?}");
 }
 
 const UNION_A: &str = "a.txt merge=union\n";
@@ -161,16 +150,10 @@ fn honours_attr_tree(version: GitVersion) -> bool {
     version >= FIRST_WITH_ATTR_TREE
 }
 
-/// The `local`/`remote` merge of `SAME_LINE` in `repo`, for every supported run.
-fn same_line_outcomes(repo: &Repo) -> Vec<MergeOutcome> {
+/// The `local`/`remote` merge of `SAME_LINE` in `repo`.
+fn same_line_outcome(repo: &Repo) -> MergeOutcome {
     let (local, remote) = (commit(repo, "local"), commit(repo, "remote"));
-    supported_runs(repo)
-        .into_iter()
-        .map(|run| {
-            repo.merge_tree(&local, &remote, run, MERGE_TIMEOUT)
-                .unwrap()
-        })
-        .collect()
+    repo.merge_tree(&local, &remote, MERGE_TIMEOUT).unwrap()
 }
 
 #[test]
@@ -194,14 +177,7 @@ fn an_untracked_gitattributes_in_the_working_tree_does_not_clean_a_conflict() {
         return;
     }
 
-    let outcomes = same_line_outcomes(&repo);
-
-    assert!(
-        outcomes
-            .iter()
-            .all(|outcome| *outcome == MergeOutcome::Conflicts),
-        "{outcomes:?}"
-    );
+    assert_eq!(same_line_outcome(&repo), MergeOutcome::Conflicts);
 }
 
 #[test]
@@ -213,14 +189,12 @@ fn the_users_attributes_file_does_not_clean_a_conflict() {
     let attributes = attributes.to_str().unwrap();
     git_ok(root, &["config", "core.attributesFile", attributes]).unwrap();
 
-    let outcomes = same_line_outcomes(&Repo::discover(root).unwrap());
+    let repo = Repo::discover(root).unwrap();
+    if !merge_tree_runs(&repo) {
+        return;
+    }
 
-    assert!(
-        outcomes
-            .iter()
-            .all(|outcome| *outcome == MergeOutcome::Conflicts),
-        "{outcomes:?}"
-    );
+    assert_eq!(same_line_outcome(&repo), MergeOutcome::Conflicts);
 }
 
 #[test]
@@ -236,14 +210,7 @@ fn a_gitattributes_committed_in_the_first_commit_still_applies() {
         return;
     }
 
-    let outcomes = same_line_outcomes(&repo);
-
-    assert!(
-        outcomes
-            .iter()
-            .all(|outcome| *outcome == MergeOutcome::Clean),
-        "{outcomes:?}"
-    );
+    assert_eq!(same_line_outcome(&repo), MergeOutcome::Clean);
 }
 
 /// A repository with a remote `gitlab`, a bare clone of it holding merge-request heads.
@@ -444,14 +411,13 @@ fn merge_tree_of_a_partial_clone_fails_on_a_blob_it_lacks_instead_of_fetching_it
         commit(&repo, "origin/local"),
         commit(&repo, "origin/remote"),
     );
-    for run in supported_runs(&repo) {
-        let merged = repo.merge_tree(&local, &remote, run, MERGE_TIMEOUT);
-
-        assert!(
-            matches!(merged, Err(Error::GitFailed { .. })),
-            "{run:?}: {merged:?}"
-        );
+    if !merge_tree_runs(&repo) {
+        return;
     }
+
+    let merged = repo.merge_tree(&local, &remote, MERGE_TIMEOUT);
+
+    assert!(matches!(merged, Err(Error::GitFailed { .. })), "{merged:?}");
     assert!(!partial.contacted.exists());
 }
 

@@ -48,7 +48,7 @@ pub use glab::{
 pub use ls_remote::RemoteRef;
 pub use merge_config::MergeConfig;
 pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
-pub use merge_tree::{MergeOutcome, MergeTreeRun};
+pub use merge_tree::{MergeOutcome, merge_tree_supported};
 pub use names::{CommitSummary, RemoteUrl};
 pub use operation::{Operation, Progress, Rebase, Stop, StopId};
 pub use push::PUSH_TIMEOUT;

@@ -1,0 +1,2 @@
+just mutants HEAD: 9 mutants tested in 72s: 8 caught, 1 unviable (the first run missed check.rs:156 require_merge_tree -> Ok(()); a new test kills it)
+

@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use yamt_gitio::{FETCH_TIMEOUT, MergeOutcome, MergeTreeRun, Oid, Repo};
+use yamt_gitio::{FETCH_TIMEOUT, MergeOutcome, Oid, Repo, merge_tree_supported};
 
 use crate::open::{branch_ref, head_ref};
 use crate::page::count;
@@ -130,7 +130,7 @@ fn decided_rows(
         return Ok(0);
     }
     let repo = repository.repo();
-    let run_kind = merge_tree_run(repo)?;
+    require_merge_tree(repo)?;
     let remote = remote_for(repository.gitlab_remotes(), &check.full_path).ok_or_else(|| {
         format!(
             "no remote of the repository names the project {}",
@@ -149,19 +149,19 @@ fn decided_rows(
     let paired = paired_rows(&check.rows, &advertised, summary);
     let not_remembered = send_remembered(paired, memory, on_checked, summary);
     let to_merge = fetched_unless_local(repo, &remote.name, not_remembered, summary)?;
-    Ok(merge_and_send(
-        repo, run_kind, &to_merge, memory, on_checked, summary,
-    ))
+    Ok(merge_and_send(repo, &to_merge, memory, on_checked, summary))
 }
 
-fn merge_tree_run(repo: &Repo) -> Result<MergeTreeRun, String> {
+fn require_merge_tree(repo: &Repo) -> Result<(), String> {
     let version = repo.version().map_err(|error| error.to_string())?;
-    MergeTreeRun::for_version(version).ok_or_else(|| {
-        format!(
+    if merge_tree_supported(version) {
+        Ok(())
+    } else {
+        Err(format!(
             "git {}.{} cannot merge without a checkout (needs 2.38)",
             version.major, version.minor
-        )
-    })
+        ))
+    }
 }
 
 /// `refs/heads/<t>` once for each target of a row with a head, a target holding `:` left out, then every merge
@@ -293,7 +293,6 @@ fn refspecs_for(rows: &[PairedRow], missing: &HashSet<Oid>) -> Vec<String> {
 /// merges decided.
 fn merge_and_send(
     repo: &Repo,
-    run_kind: MergeTreeRun,
     rows: &[PairedRow],
     memory: &mut MergedPairs,
     on_checked: &dyn Fn(CheckedRow),
@@ -306,7 +305,7 @@ fn merge_and_send(
         }
     }
     let merge = |pair: &Pair| {
-        repo.merge_tree(&pair.target, &pair.source, run_kind, MERGE_TIMEOUT)
+        repo.merge_tree(&pair.target, &pair.source, MERGE_TIMEOUT)
             .map_err(|error| error.to_string())
     };
     let mut decided = 0;
