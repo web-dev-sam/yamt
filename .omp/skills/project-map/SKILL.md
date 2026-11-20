@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `c764929b` (Reviewed marks in the range window: crate `yamt-reviewed` under `<data_dir>/yamt/reviewed/`, `yamt-range` `side_names`/`sides`/`right_text`, `--review-of=<project>!<iid>` from the merge-request page, the four `*_reviewed`/`load_since_review` commands, `ui/rangeReviewed.ts` the window's one marks mirror, `ui/rangeVisited.ts` the mounted views and the one view-load rule, the since-review view in `useRangeController.ts`). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `9628ca0a` (The local conflict check's merge, plan §2 #197: `Repo::merge_tree` always the plain `merge-tree --write-tree`, never `--quiet`, attributes from the target commit only; `merge_tree_supported(GitVersion)`, the one version gate; `check.rs` `require_merge_tree`). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 

@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The merge-request page no longer shows a merge request with real conflicts as conflict-free: the local check now
+  uses git's full merge on every git version (git 2.50.1's quick mode was measured reporting a conflict as clean),
+  and reads merge attributes only from the target branch, never from your checkout or personal git settings.
+
 ## [0.7.1] - 2026-11-19
 
 ### Added

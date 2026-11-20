@@ -24,8 +24,8 @@ crates/gitio        (yamt-gitio) git subprocess layer (ls-files -u/-s, cat-file 
                     `fetch_branches(remote, branches, timeout)`: `+refs/heads/<b>:refs/remotes/<remote>/<b>` per branch, those remote-tracking refs only; both through one private `fetch` and
                     `stdout_without_prompts` over `run_without_prompts`, which the push shares), the local conflict check (plan §2 #149): `ls_remote.rs` (`remote_refs` → `RemoteRef { name, id }`:
                     ls-remote --refs, no prompt, nothing written), `objects.rs` (`missing_commits`; `batch_check`, the one cat-file --batch-check runner; `LazyFetch`, `refuse_lazy_fetch`:
-                    GIT_NO_LAZY_FETCH=1), `merge_tree.rs` (`merge_tree` → `MergeOutcome` Clean | Conflicts, `MergeTreeRun` Quiet | Writing `for_version`: merge-tree --write-tree [--quiet],
-                    exit 1 with empty stderr = conflicts; no index, worktree or ref), the merge of a merge request in the user's checkout (plan §2 #139–#141): `branch.rs` (`checkout_branch_at` — checkout -B —,
+                    GIT_NO_LAZY_FETCH=1), `merge_tree.rs` (`merge_tree` → `MergeOutcome` Clean | Conflicts, `merge_tree_supported` ≥ 2.38: merge-tree --write-tree, never --quiet,
+                    attributes from the target commit only — `attr.tree`, no global or system file —, exit 1 with empty stderr = conflicts; no index, worktree or ref), the merge of a merge request in the user's checkout (plan §2 #139–#141): `branch.rs` (`checkout_branch_at` — checkout -B —,
                     `checkout_branch`, `set_upstream` — config branch.<b>.remote/merge —, `delete_branch` — branch -D —, `move_branch` — branch --force —, `reset_keep` — reset --keep —,
                     `merge_no_commit` — merge --no-ff --no-commit —; names after `--end-of-options`), `push.rs` (`push_branch`: push --porcelain --no-follow-tags --recurse-submodules=no,
                     never forced, no prompt, `PUSH_TIMEOUT` 120 s; a rejected ref's `!` summary as the error), `repo.rs` `git_path`, `is_ancestor`, `has_tracked_changes`,

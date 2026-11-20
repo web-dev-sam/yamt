@@ -6,6 +6,30 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Conflicts vanish after refresh (session 57; owner: "Conflicts disappear after refresh even though they are there")
+
+Owner's log: `3 rows: 0 merges, 0 refs fetched, 3 remembered, 0 moving, 0 kept`: the local merge (remembered from the
+first load) called GitLab's conflicting rows clean. The owner's project is not on this machine; the playground's
+conflicting row merges as GitLab says. Measured cause found: `merge_tree` reads `.gitattributes` from the user's
+checkout and global attributes file (`merge=union` there flips a conflict to clean). Second candidate: GitLab's
+`conflicts` flag is "cannot be merged" (playground !5, an empty change: `commits_status`, `has_conflicts: true`, no
+content conflict). Owner's data on !3197: `t` was the source branch, so T = H = `b4879e78` and both merges were a
+commit with itself (first answer invalid too). GitLab after recheck: `has_conflicts: true`, `discussions_not_resolved`,
+`start_sha 2e13432b`; `/conflicts` 404; not shallow. Then, plain `merge-tree` (Apple git 2.50.1): **conflicts**
+(`ProductReleaseController.php`) against dev now `649503c6` and at `2e13432b`; GitLab right, the app wrong. The app
+runs `--quiet` on 2.50+. **Confirmed**: on the owner's Apple git 2.50.1, `merge-tree --write-tree --quiet 649503c6
+b4879e78` exits 0 (plain, and with the app's exact env), the plain form exits 1. Cause not found in git's source
+(early exit at `merge-ort.c` `process_entries` looks right in 2.50.1 and master). Proposed: drop `--quiet`, always the
+plain form (plan #150 already allows its unreferenced objects). Owner: "do that fix".
+
+| row | slice                                                                                                         | owner     | status  | evidence                                                                                                                                                                                                        |
+| --- | ------------------------------------------------------------------------------------------------------------- | --------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | attributes from the target commit only (`briefs/local-conflicts-attributes.md`)                               | rust-impl | done    | `2a5d636d` reviews pass + R1 `fa441ab7` (#2567–#2569: 2.43 boundary, tests gated), re-checked with row 3's review. Notes `LocalConflictsAttributes*.md`                                                         |
+| 2   | owner's data: GitLab recheck, GitLab's conflict files, shallow clone, merge base                              | human     | done    | !3197: plain conflicts, `--quiet` exit 0 on Apple git 2.50.1                                                                                                                                                    |
+| 3   | never `--quiet` (`briefs/local-conflicts-no-quiet.md`)                                                        | rust-impl | review  | `2db4a651` reviews pass + R1 `9628ca0a` (#2570/#2574 guard takes `GitVersion`, fake git gone; #2575 object-store detector fails with `--quiet` re-added); re-reviews running. Notes `LocalConflictsNoQuiet*.md` |
+| 4   | plan #197, CHANGELOG, RK52 detector name (orchestrator, done); architecture, tree.md, AGENTS.md (docs keeper) | mixed     | running | `LocalConflictsDocs2`                                                                                                                                                                                           |
+| 5   | final: `just check`                                                                                           | verifier  | todo    |                                                                                                                                                                                                                 |
+
 ## Release 0.7.1 (session 56, owner: "make a patch release")
 
 0.7.1 = 0.7.0 plus the Reviewed marks in the diff window (section below; GitLab playground check still open). The

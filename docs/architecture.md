@@ -296,10 +296,10 @@ impl Repo {
     // the merge-request page (plan §2 #129, #130, #132)
     pub fn remote_urls(&self) -> Result<Vec<RemoteUrl>>;          // config -z --get-regexp ^remote\..*\.url$ (one reader with merge_config, `config_entries`); RemoteUrl { name, url } bytes, config order
     pub fn fetch_without_refs(&self, remote: &str, refspecs: &[&str], timeout: Duration) -> Result<(), String>; // fetch --no-tags --no-write-fetch-head --no-recurse-submodules --no-auto-maintenance --refmap= --quiet --end-of-options: no ref, no FETCH_HEAD; GIT_TERMINAL_PROMPT=0, GCM_INTERACTIVE=never, SSH_ASKPASS_REQUIRE=force + SSH_ASKPASS=false (Unix; `refuse_prompts`); killed at `timeout` (FETCH_TIMEOUT 120 s); through `fetch.rs` `stdout_without_prompts`: Err = git's first stderr line, else "git <verb> failed: <status>"
-    // the local conflict check (plan §2 #149; ls_remote.rs, objects.rs, merge_tree.rs)
+    // the local conflict check (plan §2 #149, #197; ls_remote.rs, objects.rs, merge_tree.rs)
     pub fn remote_refs(&self, remote: &str, patterns: &[&str], timeout: Duration) -> Result<Vec<RemoteRef>, String>; // ls-remote --refs --end-of-options <remote> <patterns> through `stdout_without_prompts`: RemoteRef { name: Vec<u8>, id: Oid }, git's order; nothing fetched or written; Err as fetch_without_refs, or "git ls-remote printed …"
     pub fn missing_commits(&self, ids: &[Oid]) -> Result<Vec<Oid>>; // one cat-file --batch-check (`batch_check`, `%(objecttype)`): the ids missing or not a commit, input order; no lazy fetch
-    pub fn merge_tree(&self, first: &Oid, second: &Oid, run_kind: MergeTreeRun, timeout: Duration) -> Result<MergeOutcome>; // merge-tree --write-tree [--quiet]: exit 0 Clean, exit 1 with empty stderr Conflicts (git also exits 1 for a commit it cannot find, with stderr), else GitFailed; killed at `timeout` → Timeout; Quiet runs Access::Read and writes no object, Writing Access::Write and leaves unreferenced objects; no index, worktree or ref; no lazy fetch
+    pub fn merge_tree(&self, first: &Oid, second: &Oid, timeout: Duration) -> Result<MergeOutcome>; // -c attr.tree=<first> -c core.attributesFile= merge-tree --write-tree <first> <second> with GIT_ATTR_NOSYSTEM=1 (never --quiet: git 2.50.1 answered clean for a real conflict): attributes from <first>'s tree only, never the worktree, global or system file ($GIT_DIR/info/attributes still applies; git < 2.43 ignores attr.tree); exit 0 Clean, exit 1 with empty stderr Conflicts (git also exits 1 for a commit it cannot find, with stderr), else GitFailed; killed at `timeout` → Timeout; Access::Write, leaves unreferenced objects; no index, worktree or ref; no lazy fetch
     // the merge of a merge request in the user's checkout (plan §2 #138–#143; fetch.rs, branch.rs, push.rs): every network run goes through `fetch.rs` `run_without_prompts`
     pub fn fetch_branches(&self, remote: &str, branches: &[&str], timeout: Duration) -> Result<(), String>; // the same fetch with +refs/heads/<b>:refs/remotes/<remote>/<b> per branch: writes those remote-tracking refs only; the caller refuses a name holding ':'
     pub fn git_path(&self, name: &str) -> Result<PathBuf>;          // rev-parse --git-path <name>
@@ -318,7 +318,7 @@ pub enum Operation { Merge { merging }, SquashMerge { merging }, Rebase(Rebase {
                      CherryPick { picking, progress }, Revert { reverting, progress }, Am { subject, message, progress } }
 impl Stop { pub fn id(&self) -> StopId; }                          // the stop's identity: the operation's kind, its ids and HEAD, never progress or the todo (`rebase --edit-todo` is the same stop)
 impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
-impl MergeTreeRun { pub fn for_version(version: GitVersion) -> Option<MergeTreeRun>; } // Quiet ≥ 2.50 (FIRST_WITH_QUIET), Writing 2.38–2.49 (FIRST_WITH_WRITE_TREE), None before
+pub fn merge_tree_supported(version: GitVersion) -> bool;          // --write-tree exists from 2.38 (FIRST_WITH_WRITE_TREE)
 pub enum MergeOutcome { Clean, Conflicts }                         // what `MergedPairs` remembers per pair
 // objects.rs: `batch_check(ids, fields, LazyFetch)` (pub(crate)) is the one `cat-file --batch-check='%(objectname) <fields>' --buffer` runner, answers in input order (`blob_sizes` with `%(objecttype) %(objectsize)` and LazyFetch::Allowed, `missing_commits` with LazyFetch::Refused); `refuse_lazy_fetch` sets GIT_NO_LAZY_FETCH=1 (git 2.45+; an older git ignores it and fetches), used by `missing_commits` and `merge_tree`
 impl Glab {                                                         // glab.rs: PATH lookup (`find`), GLAB_TIMEOUT 20 s per call, NO_COLOR, GIT_TERMINAL_PROMPT=0
@@ -981,7 +981,7 @@ reply, one resolve or unresolve, or one `bulk_publish` (RK54).
   `sourceProjectId` other than the target's, or null.
 - **The local conflict check** (`check.rs`, #149): `check_conflicts(repository, &ConflictCheck, &mut MergedPairs,
   on_checked) -> CheckSummary`, on the calling thread: no row with a head → nothing runs; `Repo::version` →
-  `MergeTreeRun::for_version` (`None` → stop, "git X.Y cannot merge without a checkout (needs 2.38)"); `remote_for`
+  `merge_tree_supported` (false → stop, "git X.Y cannot merge without a checkout (needs 2.38)"; `require_merge_tree`); `remote_for`
   (none → stop, "no remote of the repository names the project <path>"); one `Repo::remote_refs` of `refs/heads/<t>`
   per distinct target (`open.rs` `branch_ref`, a target holding `:` left out) and `refs/merge-requests/*/head`
   (`REMOTE_REFS_TIMEOUT` 20 s; a failure stops, "ls-remote: …"); per row with a head: a ref not advertised → kept,
