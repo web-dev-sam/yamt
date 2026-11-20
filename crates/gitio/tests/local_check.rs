@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
-use yamt_gitio::{Error, FETCH_TIMEOUT, MergeOutcome, MergeTreeRun, Oid, RemoteRef, Repo};
+use yamt_gitio::{
+    Error, FETCH_TIMEOUT, GitVersion, MergeOutcome, MergeTreeRun, Oid, RemoteRef, Repo,
+};
 
 const MERGE_TIMEOUT: Duration = Duration::from_secs(30);
 const UNKNOWN_ID: &str = "0123456789abcdef0123456789abcdef01234567";
@@ -149,12 +151,20 @@ fn a_merge_past_its_deadline_is_a_timeout() {
 }
 
 const UNION_A: &str = "a.txt merge=union\n";
+const FIRST_WITH_ATTR_TREE: GitVersion = GitVersion {
+    major: 2,
+    minor: 43,
+};
 
-/// The `local`/`remote` merge of `SAME_LINE` in `root`, for every supported run.
-fn same_line_outcomes(root: &Path) -> Vec<MergeOutcome> {
-    let repo = Repo::discover(root).unwrap();
-    let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
-    supported_runs(&repo)
+/// Whether `version` reads attributes from the tree `attr.tree` names (git 2.43.0 release notes).
+fn honours_attr_tree(version: GitVersion) -> bool {
+    version >= FIRST_WITH_ATTR_TREE
+}
+
+/// The `local`/`remote` merge of `SAME_LINE` in `repo`, for every supported run.
+fn same_line_outcomes(repo: &Repo) -> Vec<MergeOutcome> {
+    let (local, remote) = (commit(repo, "local"), commit(repo, "remote"));
+    supported_runs(repo)
         .into_iter()
         .map(|run| {
             repo.merge_tree(&local, &remote, run, MERGE_TIMEOUT)
@@ -164,11 +174,27 @@ fn same_line_outcomes(root: &Path) -> Vec<MergeOutcome> {
 }
 
 #[test]
+fn attr_tree_is_honoured_from_git_2_43() {
+    assert!(!honours_attr_tree(GitVersion {
+        major: 2,
+        minor: 42
+    }));
+    assert!(honours_attr_tree(GitVersion {
+        major: 2,
+        minor: 43
+    }));
+}
+
+#[test]
 fn an_untracked_gitattributes_in_the_working_tree_does_not_clean_a_conflict() {
     let dir = diverged_repo(&SAME_LINE).unwrap();
     fs::write(dir.path().join(".gitattributes"), UNION_A).unwrap();
+    let repo = Repo::discover(dir.path()).unwrap();
+    if !honours_attr_tree(repo.version().unwrap()) {
+        return;
+    }
 
-    let outcomes = same_line_outcomes(dir.path());
+    let outcomes = same_line_outcomes(&repo);
 
     assert!(
         outcomes
@@ -187,7 +213,7 @@ fn the_users_attributes_file_does_not_clean_a_conflict() {
     let attributes = attributes.to_str().unwrap();
     git_ok(root, &["config", "core.attributesFile", attributes]).unwrap();
 
-    let outcomes = same_line_outcomes(root);
+    let outcomes = same_line_outcomes(&Repo::discover(root).unwrap());
 
     assert!(
         outcomes
@@ -205,8 +231,12 @@ fn a_gitattributes_committed_in_the_first_commit_still_applies() {
     git_ok(root, &["add", "--", ".gitattributes"]).unwrap();
     git_ok(root, &["commit", "--quiet", "-m", "union"]).unwrap();
     git_ok(root, &["checkout", "--quiet", "remote"]).unwrap();
+    let repo = Repo::discover(root).unwrap();
+    if !honours_attr_tree(repo.version().unwrap()) {
+        return;
+    }
 
-    let outcomes = same_line_outcomes(root);
+    let outcomes = same_line_outcomes(&repo);
 
     assert!(
         outcomes

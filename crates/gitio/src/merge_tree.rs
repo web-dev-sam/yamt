@@ -54,7 +54,9 @@ impl Repo {
     /// `Error::Timeout`. Never reads or writes the index, the working tree or a ref (git-merge-tree(1)), and never
     /// fetches an object a partial clone lacks: the run fails instead.
     /// Attributes come from `first`'s tree only (`attr.tree`), never the working tree, the global or the system
-    /// file; except `$GIT_DIR/info/attributes`, always read, and git before 2.42, which ignores `attr.tree`.
+    /// file (gitattributes(5); git(1) "ENVIRONMENT" `GIT_ATTR_NOSYSTEM`); except `$GIT_DIR/info/attributes`, which
+    /// gitattributes(5) reads with the highest precedence, and git before 2.43, which ignores `attr.tree` (git
+    /// 2.43.0 release notes).
     pub fn merge_tree(
         &self,
         first: &Oid,

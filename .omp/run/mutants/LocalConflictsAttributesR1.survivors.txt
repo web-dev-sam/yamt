@@ -1,0 +1,2 @@
+just mutants HEAD → 'INFO No mutants to filter / mutants: no Rust changes since HEAD / no TypeScript changes since HEAD' (src change is doc-only; tests/ not mutated)
+
