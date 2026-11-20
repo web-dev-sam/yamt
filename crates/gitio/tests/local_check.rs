@@ -1,5 +1,6 @@
 #![cfg(test)]
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -145,6 +146,74 @@ fn a_merge_past_its_deadline_is_a_timeout() {
             "{run:?}: {merged:?}"
         );
     }
+}
+
+const UNION_A: &str = "a.txt merge=union\n";
+
+/// The `local`/`remote` merge of `SAME_LINE` in `root`, for every supported run.
+fn same_line_outcomes(root: &Path) -> Vec<MergeOutcome> {
+    let repo = Repo::discover(root).unwrap();
+    let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
+    supported_runs(&repo)
+        .into_iter()
+        .map(|run| {
+            repo.merge_tree(&local, &remote, run, MERGE_TIMEOUT)
+                .unwrap()
+        })
+        .collect()
+}
+
+#[test]
+fn an_untracked_gitattributes_in_the_working_tree_does_not_clean_a_conflict() {
+    let dir = diverged_repo(&SAME_LINE).unwrap();
+    fs::write(dir.path().join(".gitattributes"), UNION_A).unwrap();
+
+    let outcomes = same_line_outcomes(dir.path());
+
+    assert!(
+        outcomes
+            .iter()
+            .all(|outcome| *outcome == MergeOutcome::Conflicts),
+        "{outcomes:?}"
+    );
+}
+
+#[test]
+fn the_users_attributes_file_does_not_clean_a_conflict() {
+    let dir = diverged_repo(&SAME_LINE).unwrap();
+    let root = dir.path();
+    let attributes = root.join(".git").join("user-attributes");
+    fs::write(&attributes, UNION_A).unwrap();
+    let attributes = attributes.to_str().unwrap();
+    git_ok(root, &["config", "core.attributesFile", attributes]).unwrap();
+
+    let outcomes = same_line_outcomes(root);
+
+    assert!(
+        outcomes
+            .iter()
+            .all(|outcome| *outcome == MergeOutcome::Conflicts),
+        "{outcomes:?}"
+    );
+}
+
+#[test]
+fn a_gitattributes_committed_in_the_first_commit_still_applies() {
+    let dir = diverged_repo(&SAME_LINE).unwrap();
+    let root = dir.path();
+    fs::write(root.join(".gitattributes"), UNION_A).unwrap();
+    git_ok(root, &["add", "--", ".gitattributes"]).unwrap();
+    git_ok(root, &["commit", "--quiet", "-m", "union"]).unwrap();
+    git_ok(root, &["checkout", "--quiet", "remote"]).unwrap();
+
+    let outcomes = same_line_outcomes(root);
+
+    assert!(
+        outcomes
+            .iter()
+            .all(|outcome| *outcome == MergeOutcome::Clean),
+        "{outcomes:?}"
+    );
 }
 
 /// A repository with a remote `gitlab`, a bare clone of it holding merge-request heads.

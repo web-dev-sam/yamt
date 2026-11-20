@@ -7,6 +7,7 @@ use crate::run::{Access, run};
 use crate::{Error, GitVersion, Result};
 
 const MERGE_TREE: &str = "merge-tree";
+const NO_GLOBAL_ATTRIBUTES: &str = "core.attributesFile=";
 const CONFLICTS_STATUS: i32 = 1;
 const FIRST_WITH_WRITE_TREE: GitVersion = GitVersion {
     major: 2,
@@ -52,6 +53,8 @@ impl Repo {
     /// exit 1 with nothing on stderr → `Conflicts`, any other exit → `Error::GitFailed`; killed at `timeout` →
     /// `Error::Timeout`. Never reads or writes the index, the working tree or a ref (git-merge-tree(1)), and never
     /// fetches an object a partial clone lacks: the run fails instead.
+    /// Attributes come from `first`'s tree only (`attr.tree`), never the working tree, the global or the system
+    /// file; except `$GIT_DIR/info/attributes`, always read, and git before 2.42, which ignores `attr.tree`.
     pub fn merge_tree(
         &self,
         first: &Oid,
@@ -63,11 +66,20 @@ impl Repo {
             MergeTreeRun::Quiet => (Access::Read, &["--write-tree", "--quiet"]),
             MergeTreeRun::Writing => (Access::Write, &["--write-tree"]),
         };
-        let mut command = self.command(access, &[MERGE_TREE]);
+        let attributes_tree = format!("attr.tree={}", first.as_str());
+        let leading = [
+            "-c",
+            &attributes_tree,
+            "-c",
+            NO_GLOBAL_ATTRIBUTES,
+            MERGE_TREE,
+        ];
+        let mut command = self.command(access, &leading);
         command
             .args(options)
             .args([first.as_str(), second.as_str()]);
         refuse_lazy_fetch(&mut command);
+        command.env("GIT_ATTR_NOSYSTEM", "1");
         // git also exits 1 for a commit it cannot find, printing "merge-tree: <id> - not something we can merge"
         // (measured with git 2.56, both forms); a conflict leaves stderr empty.
         match run(command, None, timeout) {

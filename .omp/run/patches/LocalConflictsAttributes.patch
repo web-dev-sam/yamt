@@ -1,0 +1,129 @@
+diff --git a/crates/gitio/src/merge_tree.rs b/crates/gitio/src/merge_tree.rs
+index a5722a0..95a5cae 100644
+--- a/crates/gitio/src/merge_tree.rs
++++ b/crates/gitio/src/merge_tree.rs
+@@ -7,6 +7,7 @@ use crate::run::{Access, run};
+ use crate::{Error, GitVersion, Result};
+ 
+ const MERGE_TREE: &str = "merge-tree";
++const NO_GLOBAL_ATTRIBUTES: &str = "core.attributesFile=";
+ const CONFLICTS_STATUS: i32 = 1;
+ const FIRST_WITH_WRITE_TREE: GitVersion = GitVersion {
+     major: 2,
+@@ -52,6 +53,8 @@ impl Repo {
+     /// exit 1 with nothing on stderr → `Conflicts`, any other exit → `Error::GitFailed`; killed at `timeout` →
+     /// `Error::Timeout`. Never reads or writes the index, the working tree or a ref (git-merge-tree(1)), and never
+     /// fetches an object a partial clone lacks: the run fails instead.
++    /// Attributes come from `first`'s tree only (`attr.tree`), never the working tree, the global or the system
++    /// file; except `$GIT_DIR/info/attributes`, always read, and git before 2.42, which ignores `attr.tree`.
+     pub fn merge_tree(
+         &self,
+         first: &Oid,
+@@ -63,11 +66,20 @@ impl Repo {
+             MergeTreeRun::Quiet => (Access::Read, &["--write-tree", "--quiet"]),
+             MergeTreeRun::Writing => (Access::Write, &["--write-tree"]),
+         };
+-        let mut command = self.command(access, &[MERGE_TREE]);
++        let attributes_tree = format!("attr.tree={}", first.as_str());
++        let leading = [
++            "-c",
++            &attributes_tree,
++            "-c",
++            NO_GLOBAL_ATTRIBUTES,
++            MERGE_TREE,
++        ];
++        let mut command = self.command(access, &leading);
+         command
+             .args(options)
+             .args([first.as_str(), second.as_str()]);
+         refuse_lazy_fetch(&mut command);
++        command.env("GIT_ATTR_NOSYSTEM", "1");
+         // git also exits 1 for a commit it cannot find, printing "merge-tree: <id> - not something we can merge"
+         // (measured with git 2.56, both forms); a conflict leaves stderr empty.
+         match run(command, None, timeout) {
+diff --git a/crates/gitio/tests/local_check.rs b/crates/gitio/tests/local_check.rs
+index 5272845..0e99219 100644
+--- a/crates/gitio/tests/local_check.rs
++++ b/crates/gitio/tests/local_check.rs
+@@ -1,5 +1,6 @@
+ #![cfg(test)]
+ 
++use std::fs;
+ use std::path::{Path, PathBuf};
+ use std::time::Duration;
+ 
+@@ -147,6 +148,74 @@ fn a_merge_past_its_deadline_is_a_timeout() {
+     }
+ }
+ 
++const UNION_A: &str = "a.txt merge=union\n";
++
++/// The `local`/`remote` merge of `SAME_LINE` in `root`, for every supported run.
++fn same_line_outcomes(root: &Path) -> Vec<MergeOutcome> {
++    let repo = Repo::discover(root).unwrap();
++    let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
++    supported_runs(&repo)
++        .into_iter()
++        .map(|run| {
++            repo.merge_tree(&local, &remote, run, MERGE_TIMEOUT)
++                .unwrap()
++        })
++        .collect()
++}
++
++#[test]
++fn an_untracked_gitattributes_in_the_working_tree_does_not_clean_a_conflict() {
++    let dir = diverged_repo(&SAME_LINE).unwrap();
++    fs::write(dir.path().join(".gitattributes"), UNION_A).unwrap();
++
++    let outcomes = same_line_outcomes(dir.path());
++
++    assert!(
++        outcomes
++            .iter()
++            .all(|outcome| *outcome == MergeOutcome::Conflicts),
++        "{outcomes:?}"
++    );
++}
++
++#[test]
++fn the_users_attributes_file_does_not_clean_a_conflict() {
++    let dir = diverged_repo(&SAME_LINE).unwrap();
++    let root = dir.path();
++    let attributes = root.join(".git").join("user-attributes");
++    fs::write(&attributes, UNION_A).unwrap();
++    let attributes = attributes.to_str().unwrap();
++    git_ok(root, &["config", "core.attributesFile", attributes]).unwrap();
++
++    let outcomes = same_line_outcomes(root);
++
++    assert!(
++        outcomes
++            .iter()
++            .all(|outcome| *outcome == MergeOutcome::Conflicts),
++        "{outcomes:?}"
++    );
++}
++
++#[test]
++fn a_gitattributes_committed_in_the_first_commit_still_applies() {
++    let dir = diverged_repo(&SAME_LINE).unwrap();
++    let root = dir.path();
++    fs::write(root.join(".gitattributes"), UNION_A).unwrap();
++    git_ok(root, &["add", "--", ".gitattributes"]).unwrap();
++    git_ok(root, &["commit", "--quiet", "-m", "union"]).unwrap();
++    git_ok(root, &["checkout", "--quiet", "remote"]).unwrap();
++
++    let outcomes = same_line_outcomes(root);
++
++    assert!(
++        outcomes
++            .iter()
++            .all(|outcome| *outcome == MergeOutcome::Clean),
++        "{outcomes:?}"
++    );
++}
++
+ /// A repository with a remote `gitlab`, a bare clone of it holding merge-request heads.
+ struct Fixture {
+     repo: TempDir,

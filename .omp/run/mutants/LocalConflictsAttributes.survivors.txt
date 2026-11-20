@@ -1,0 +1,2 @@
+just mutants HEAD → Found 1 mutant to test; 1 mutant tested in 12s: 1 unviable (merge_tree -> Ok(Default::default()), MergeOutcome has no Default); 0 missed
+
