@@ -6,6 +6,17 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Release 0.7.2 (session 57, owner: "release patch")
+
+0.7.2 = 0.7.1 plus the local conflict check fix (section below; owner's check on !3197 still open). The owner pushes
+`main`, waits for green ci, then tags.
+
+| row | slice                                                                                            | owner        | status      | evidence                                                                                                                                                                                                                                                                                                                   |
+| --- | ------------------------------------------------------------------------------------------------ | ------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | release commit 0.7.2: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer` + `readmer`) | orchestrator | done        | `831a01c1` (`readmer check` exit 0)                                                                                                                                                                                                                                                                                        |
+| 2   | final run 0.7.2 before tagging (`briefs/release-0.7.2-verify.md`)                                | verifier     | done        | `Release072Verify` at `831a01c1`: `just check` pass (75 s, 1563 Rust + 4709 TS tests, hooks 18/18), readmer, licences pass; `yamt_0.7.2_amd64.deb` Version `0.7.2`, `yamt 0.7.2`; release binary on `local-conflicts-repo.sh`: nine labels, Refresh 0 merges/7 remembered, snapshots identical. Note `Release072Verify.md` |
+| 3   | push `main`, ci green on all four jobs, tag `v0.7.2`, publish                                    | human        | handed over |                                                                                                                                                                                                                                                                                                                            |
+
 ## Conflicts vanish after refresh (session 57; owner: "Conflicts disappear after refresh even though they are there")
 
 Owner's log: `3 rows: 0 merges, 0 refs fetched, 3 remembered, 0 moving, 0 kept`: the local merge (remembered from the
