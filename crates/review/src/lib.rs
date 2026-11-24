@@ -18,7 +18,7 @@ use serde::Serialize;
 use specta::Type;
 use yamt_range::RangeFileId;
 
-pub use crate::send::{check_gitlab, send_queue};
+pub use crate::send::{check_gitlab, send_message, send_queue};
 pub use crate::thread_store::ThreadStore;
 pub use crate::thread_types::{
     DiffLine, Message, MessageBody, MessageId, Posting, Thread, ThreadAdded, ThreadId, ThreadLine,
@@ -140,7 +140,7 @@ pub enum SendReply {
         /// Why.
         why: NotLinedUp,
     },
-    /// Every queued message was handled.
+    /// Every queued message the send covers was handled.
     Sent {
         /// The threads after the send.
         list: ThreadList,

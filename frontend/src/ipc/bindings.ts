@@ -60,6 +60,7 @@ export const commands = {
 	addAiAnswer: (thread: ThreadId, session: string) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("add_ai_answer", { thread, session })),
 	checkGitlab: () => typedError<GitLabCheck, IpcError>(__TAURI_INVOKE("check_gitlab")),
 	sendQueue: (progress: Channel<SendProgress>) => typedError<SendReply, IpcError>(__TAURI_INVOKE("send_queue", { progress })),
+	sendMessage: (message: MessageId, progress: Channel<SendProgress>) => typedError<SendReply, IpcError>(__TAURI_INVOKE("send_message", { message, progress })),
 	prepareCheckout: () => typedError<CheckoutReply, IpcError>(__TAURI_INVOKE("prepare_checkout")),
 	startAgent: (command: AgentCommand, events: Channel<HostEvent>) => typedError<AgentStartReply, IpcError>(__TAURI_INVOKE("start_agent", { command, events })),
 	sendToAgent: (run: AgentRun, message: string) => typedError<null, IpcError>(__TAURI_INVOKE("send_to_agent", { run, message })),
@@ -1702,7 +1703,7 @@ export type SendReply =
 { kind: "notLinedUp"; 
 /**  Why. */
 why: NotLinedUp } | 
-/**  Every queued message was handled. */
+/**  Every queued message the send covers was handled. */
 { kind: "sent"; 
 /**  The threads after the send. */
 list: ThreadList; 

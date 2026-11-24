@@ -168,5 +168,28 @@ pub(crate) async fn send_queue<R: Runtime>(
     .await
 }
 
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn send_message<R: Runtime>(
+    window: WebviewWindow<R>,
+    message: MessageId,
+    progress: Channel<SendProgress>,
+) -> Result<SendReply, IpcError> {
+    blocking_reply(move || {
+        let state = window.state::<RangeState>();
+        let _sending = send_guard(&state.sending)?;
+        let forward = |done| forward_progress(&progress, done);
+        let glab = Glab::find();
+        Ok(yamt_review::send_message(
+            &state.range,
+            glab.as_ref(),
+            &state.threads,
+            message,
+            &forward,
+        )?)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests;

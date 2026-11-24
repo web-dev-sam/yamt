@@ -16,8 +16,8 @@ use crate::position::{FileDiff, PostBody, line_place, multi_line, same_draft};
 use crate::right_branch::right_branch;
 use crate::thread_store::waiting::QueuedMessage;
 use crate::{
-    Error, GitLabCheck, LookedAt, NotLinedUp, Posting, Result, SendProgress, SendReply, ThreadList,
-    ThreadPlace, ThreadStore,
+    Error, GitLabCheck, LookedAt, MessageId, NotLinedUp, Posting, Result, SendProgress, SendReply,
+    ThreadList, ThreadPlace, ThreadStore,
 };
 
 const DIFFS_PAGE: &str = "/diffs";
@@ -46,13 +46,46 @@ pub fn send_queue(
     threads: &Mutex<ThreadStore>,
     progress: &dyn Fn(SendProgress),
 ) -> Result<SendReply> {
+    send(range, glab, threads, None, progress)
+}
+
+/// `send_queue` for `message` alone: every other message stays as it is (plan §2 #198). A message that does not
+/// wait for a send is answered `Sent` with nothing sent.
+pub fn send_message(
+    range: &Range,
+    glab: Option<&Glab>,
+    threads: &Mutex<ThreadStore>,
+    message: MessageId,
+    progress: &dyn Fn(SendProgress),
+) -> Result<SendReply> {
+    require_listed(&locked(threads).list(range), message)?;
+    send(range, glab, threads, Some(message), progress)
+}
+
+/// `only` names the one message to send; `None` sends the whole queue.
+fn send(
+    range: &Range,
+    glab: Option<&Glab>,
+    threads: &Mutex<ThreadStore>,
+    only: Option<MessageId>,
+    progress: &dyn Fn(SendProgress),
+) -> Result<SendReply> {
     let Some(glab) = glab else {
         let why = NotLinedUp::GlabMissing;
         return Ok(SendReply::NotLinedUp { why });
     };
     match lined_up(glab, range) {
-        Ok(target) => post_queue(glab, range, &target, threads, progress),
+        Ok(target) => post_queue(glab, range, &target, threads, only, progress),
         Err(why) => Ok(SendReply::NotLinedUp { why }),
+    }
+}
+
+fn require_listed(list: &ThreadList, message: MessageId) -> Result<()> {
+    let mut messages = list.threads.iter().flat_map(|thread| &thread.messages);
+    if messages.any(|listed| listed.id == message) {
+        Ok(())
+    } else {
+        Err(Error::UnknownMessage { message })
     }
 }
 
@@ -68,18 +101,19 @@ fn post_queue(
     range: &Range,
     target: &LinedUp,
     threads: &Mutex<ThreadStore>,
+    only: Option<MessageId>,
     progress: &dyn Fn(SendProgress),
 ) -> Result<SendReply> {
-    let (queued, owned) = {
-        let store = locked(threads);
-        (store.queued(range), store.pending_draft_notes())
-    };
+    let (queued, owned) = waiting_and_owned(threads, range, only);
     let mut tally = Tally {
         done: 0,
         of: u32::try_from(queued.len()).unwrap_or(u32::MAX),
         sent: 0,
         refused: 0,
     };
+    if queued.is_empty() {
+        return Ok(tally.sent(locked(threads).list(range)));
+    }
     let listed = answer(glab, range.root(), &draft_notes(&target.merge_request))
         .and_then(|json| draft_notes_from(&json));
     let mut drafts = match listed {
@@ -106,6 +140,20 @@ fn post_queue(
         });
     }
     Ok(tally.sent(locked(threads).list(range)))
+}
+
+/// The waiting messages the send covers, in thread order, and the drafts the store's pending messages own.
+fn waiting_and_owned(
+    threads: &Mutex<ThreadStore>,
+    range: &Range,
+    only: Option<MessageId>,
+) -> (Vec<QueuedMessage>, Vec<u64>) {
+    let store = locked(threads);
+    let mut queued = store.queued(range);
+    if let Some(message) = only {
+        queued.retain(|waiting| waiting.message == message);
+    }
+    (queued, store.pending_draft_notes())
 }
 
 /// Posts the message's text as it is now, unless it no longer waits, and records the result only if the message

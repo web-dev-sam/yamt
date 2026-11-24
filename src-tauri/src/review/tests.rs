@@ -151,9 +151,12 @@ fn a_second_send_while_one_runs_answers_send_running() {
     let _running = send_guard(&state.sending).unwrap();
 
     let progress = Channel::new(|_| Ok(()));
-    let second = block_on(send_queue(window.webview.clone(), progress));
+    let queue = block_on(send_queue(window.webview.clone(), progress.clone()));
+    let message = MessageId(UNKNOWN_ID);
+    let one = block_on(send_message(window.webview.clone(), message, progress));
 
-    assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
+    assert!(matches!(queue, Err(IpcError::SendRunning)), "{queue:?}");
+    assert!(matches!(one, Err(IpcError::SendRunning)), "{one:?}");
 }
 
 // A draft posted for a message deleted or edited meanwhile would leave GitLab and the file apart (#123).
@@ -253,6 +256,7 @@ mod through_glab {
 
     const FAKE_GLAB_LOG: &str = "YAMT_FAKE_GLAB_LOG";
     const SEND_TEST: &str = "review::tests::through_glab::a_send_on_path_s_glab";
+    const MESSAGE_SEND_TEST: &str = "review::tests::through_glab::a_message_send_on_path_s_glab";
     const CHECK_TEST: &str = "review::tests::through_glab::check_gitlab_on_path_s_glab";
     const POST_ARGV: &str =
         "argv: api --include --method POST projects/7/merge_requests/12/draft_notes --input -";
@@ -299,7 +303,7 @@ mod through_glab {
         open_range_window_on(repo, "main...feature")
     }
 
-    fn queue_one_message(window: &RangeWindow) {
+    fn queue_one_message(window: &RangeWindow) -> MessageId {
         let state = window.webview.state::<RangeState>();
         let entries = state.range.entries();
         let file = entries.iter().find(|entry| entry.path == ADDED_FILE);
@@ -310,6 +314,7 @@ mod through_glab {
         let message = &added["list"]["threads"][0]["messages"][0]["id"];
         let queued = json!({ "message": message, "text": "Why not a Duration?" });
         invoke(window, "queue_message", queued).unwrap();
+        serde_json::from_value(message.clone()).unwrap()
     }
 
     fn send(window: &RangeWindow) -> Result<SendReply, IpcError> {
@@ -356,6 +361,33 @@ mod through_glab {
         let steps: Vec<String> = received.try_iter().collect();
         assert_eq!(steps, [json!({ "done": 1, "of": 1 }).to_string()]);
         assert!(matches!(third, Ok(SendReply::Sent { .. })), "{third:?}");
+    }
+
+    #[test]
+    fn a_message_send_holds_off_a_queue_send_until_its_post_ends() {
+        run_with_fake_glab(MESSAGE_SEND_TEST, "slow-post");
+    }
+
+    #[test]
+    #[ignore = "run by a_message_send_holds_off_a_queue_send_until_its_post_ends"]
+    fn a_message_send_on_path_s_glab() {
+        let window = range_repo_window();
+        let message = queue_one_message(&window);
+        let (progress, received) = collecting_channel();
+        let webview = window.webview.clone();
+        let first = thread::spawn(move || block_on(send_message(webview, message, progress)));
+
+        wait_for_the_post();
+        let second = send(&window);
+        let first = first.join().unwrap();
+
+        assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
+        let Ok(SendReply::Sent { sent, refused, .. }) = first else {
+            panic!("not sent: {first:?}");
+        };
+        assert_eq!((sent, refused), (1, 0));
+        let steps: Vec<String> = received.try_iter().collect();
+        assert_eq!(steps, [json!({ "done": 1, "of": 1 }).to_string()]);
     }
 
     #[test]

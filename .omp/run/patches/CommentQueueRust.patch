@@ -1,0 +1,491 @@
+diff --git a/crates/review/src/lib.rs b/crates/review/src/lib.rs
+index f42958a..19cb60c 100644
+--- a/crates/review/src/lib.rs
++++ b/crates/review/src/lib.rs
+@@ -18,7 +18,7 @@ use serde::Serialize;
+ use specta::Type;
+ use yamt_range::RangeFileId;
+ 
+-pub use crate::send::{check_gitlab, send_queue};
++pub use crate::send::{check_gitlab, send_message, send_queue};
+ pub use crate::thread_store::ThreadStore;
+ pub use crate::thread_types::{
+     DiffLine, Message, MessageBody, MessageId, Posting, Thread, ThreadAdded, ThreadId, ThreadLine,
+@@ -140,7 +140,7 @@ pub enum SendReply {
+         /// Why.
+         why: NotLinedUp,
+     },
+-    /// Every queued message was handled.
++    /// Every queued message the send covers was handled.
+     Sent {
+         /// The threads after the send.
+         list: ThreadList,
+diff --git a/crates/review/src/send.rs b/crates/review/src/send.rs
+index a04fa1d..97db30d 100644
+--- a/crates/review/src/send.rs
++++ b/crates/review/src/send.rs
+@@ -16,8 +16,8 @@ use crate::position::{FileDiff, PostBody, line_place, multi_line, same_draft};
+ use crate::right_branch::right_branch;
+ use crate::thread_store::waiting::QueuedMessage;
+ use crate::{
+-    Error, GitLabCheck, LookedAt, NotLinedUp, Posting, Result, SendProgress, SendReply, ThreadList,
+-    ThreadPlace, ThreadStore,
++    Error, GitLabCheck, LookedAt, MessageId, NotLinedUp, Posting, Result, SendProgress, SendReply,
++    ThreadList, ThreadPlace, ThreadStore,
+ };
+ 
+ const DIFFS_PAGE: &str = "/diffs";
+@@ -45,17 +45,50 @@ pub fn send_queue(
+     glab: Option<&Glab>,
+     threads: &Mutex<ThreadStore>,
+     progress: &dyn Fn(SendProgress),
++) -> Result<SendReply> {
++    send(range, glab, threads, None, progress)
++}
++
++/// `send_queue` for `message` alone: every other message stays as it is (plan §2 #198). A message that does not
++/// wait for a send is answered `Sent` with nothing sent.
++pub fn send_message(
++    range: &Range,
++    glab: Option<&Glab>,
++    threads: &Mutex<ThreadStore>,
++    message: MessageId,
++    progress: &dyn Fn(SendProgress),
++) -> Result<SendReply> {
++    require_listed(&locked(threads).list(range), message)?;
++    send(range, glab, threads, Some(message), progress)
++}
++
++/// `only` names the one message to send; `None` sends the whole queue.
++fn send(
++    range: &Range,
++    glab: Option<&Glab>,
++    threads: &Mutex<ThreadStore>,
++    only: Option<MessageId>,
++    progress: &dyn Fn(SendProgress),
+ ) -> Result<SendReply> {
+     let Some(glab) = glab else {
+         let why = NotLinedUp::GlabMissing;
+         return Ok(SendReply::NotLinedUp { why });
+     };
+     match lined_up(glab, range) {
+-        Ok(target) => post_queue(glab, range, &target, threads, progress),
++        Ok(target) => post_queue(glab, range, &target, threads, only, progress),
+         Err(why) => Ok(SendReply::NotLinedUp { why }),
+     }
+ }
+ 
++fn require_listed(list: &ThreadList, message: MessageId) -> Result<()> {
++    let mut messages = list.threads.iter().flat_map(|thread| &thread.messages);
++    if messages.any(|listed| listed.id == message) {
++        Ok(())
++    } else {
++        Err(Error::UnknownMessage { message })
++    }
++}
++
+ struct Tally {
+     done: u32,
+     of: u32,
+@@ -68,18 +101,19 @@ fn post_queue(
+     range: &Range,
+     target: &LinedUp,
+     threads: &Mutex<ThreadStore>,
++    only: Option<MessageId>,
+     progress: &dyn Fn(SendProgress),
+ ) -> Result<SendReply> {
+-    let (queued, owned) = {
+-        let store = locked(threads);
+-        (store.queued(range), store.pending_draft_notes())
+-    };
++    let (queued, owned) = waiting_and_owned(threads, range, only);
+     let mut tally = Tally {
+         done: 0,
+         of: u32::try_from(queued.len()).unwrap_or(u32::MAX),
+         sent: 0,
+         refused: 0,
+     };
++    if queued.is_empty() {
++        return Ok(tally.sent(locked(threads).list(range)));
++    }
+     let listed = answer(glab, range.root(), &draft_notes(&target.merge_request))
+         .and_then(|json| draft_notes_from(&json));
+     let mut drafts = match listed {
+@@ -108,6 +142,20 @@ fn post_queue(
+     Ok(tally.sent(locked(threads).list(range)))
+ }
+ 
++/// The waiting messages the send covers, in thread order, and the drafts the store's pending messages own.
++fn waiting_and_owned(
++    threads: &Mutex<ThreadStore>,
++    range: &Range,
++    only: Option<MessageId>,
++) -> (Vec<QueuedMessage>, Vec<u64>) {
++    let store = locked(threads);
++    let mut queued = store.queued(range);
++    if let Some(message) = only {
++        queued.retain(|waiting| waiting.message == message);
++    }
++    (queued, store.pending_draft_notes())
++}
++
+ /// Posts the message's text as it is now, unless it no longer waits, and records the result only if the message
+ /// still waits with that text: the user may unqueue or edit it while the send runs. `Some` is why the send stops.
+ fn send_one(
+diff --git a/crates/review/tests/review.rs b/crates/review/tests/review.rs
+index d6436b1..f597d0e 100644
+--- a/crates/review/tests/review.rs
++++ b/crates/review/tests/review.rs
+@@ -13,8 +13,9 @@ use yamt_gitio::Glab;
+ use yamt_merge_core::{LeftLine, RightLine};
+ use yamt_range::{Range, RangeFileId, RangeSpec, Resolved};
+ use yamt_review::{
+-    DiffLine, GitLabCheck, LookedAt, MergeRequestRef, MessageId, NotLinedUp, Posting, SendProgress,
+-    SendReply, ThreadLine, ThreadList, ThreadPlace, ThreadStore, check_gitlab, send_queue,
++    DiffLine, Error, GitLabCheck, LookedAt, MergeRequestRef, MessageId, NotLinedUp, Posting,
++    SendProgress, SendReply, ThreadLine, ThreadList, ThreadPlace, ThreadStore, check_gitlab,
++    send_message, send_queue,
+ };
+ 
+ /// `scripts/range-repo.sh`'s commits, fixed by its names and dates.
+@@ -209,6 +210,14 @@ impl Review {
+         (reply, receiver.try_iter().collect())
+     }
+ 
++    /// `send_message` of `message` alone.
++    fn send_one(&self, glab: Option<&Glab>, message: MessageId) -> (SendReply, Vec<SendProgress>) {
++        let (sender, receiver) = mpsc::channel();
++        let report = |step: SendProgress| sender.send(step).unwrap();
++        let reply = send_message(&self.range, glab, &self.threads, message, &report).unwrap();
++        (reply, receiver.try_iter().collect())
++    }
++
+     /// The first message of the thread at `index` in creation order.
+     fn first_message(&self, index: usize) -> MessageId {
+         let list = self.threads.lock().unwrap().list(&self.range);
+@@ -831,3 +840,202 @@ fn a_draft_stands_in_for_a_range_only_when_its_range_matches() {
+     let posts = fake.argv().into_iter().filter(|argv| argv == POST_ARGV);
+     assert_eq!(posts.count(), 1, "{}", fake.log());
+ }
++
++fn sent(reply: SendReply) -> (ThreadList, u32, u32) {
++    let SendReply::Sent {
++        list,
++        sent,
++        refused,
++    } = reply
++    else {
++        panic!("not sent: {reply:?}");
++    };
++    (list, sent, refused)
++}
++
++#[test]
++fn send_message_posts_only_the_named_message_and_the_others_stay_queued() {
++    let review = Review::new();
++    let fake = Fake::new("lined-up");
++
++    let (reply, steps) = review.send_one(Some(&fake.glab), review.first_message(1));
++
++    let expected = vec![
++        queued(ADDED_TEXT),
++        pending(RENAMED_TEXT, 101),
++        queued(REMOVED_TEXT),
++    ];
++    let (list, sent, refused) = sent(reply);
++    assert_eq!((sent, refused), (1, 0));
++    assert_eq!(postings(&list), expected);
++    assert_eq!(review.postings_on_disk(), expected);
++    assert_eq!(steps, progress(&[1], 1));
++    let notes: Vec<String> = fake
++        .bodies()
++        .iter()
++        .map(|body| note_of(body).to_owned())
++        .collect();
++    assert_eq!(notes, [RENAMED_TEXT]);
++}
++
++#[test]
++fn send_message_keeps_a_refused_message_queued_with_its_reason() {
++    let review = Review::new();
++    let fake = Fake::new("refusal");
++    review.send_one(Some(&fake.glab), review.first_message(0));
++
++    let (reply, steps) = review.send_one(Some(&fake.glab), review.first_message(1));
++
++    let refused = Posting::Refused {
++        text: RENAMED_TEXT.to_owned(),
++        reason: REFUSAL.to_owned(),
++    };
++    let expected = vec![pending(ADDED_TEXT, 101), refused, queued(REMOVED_TEXT)];
++    let (list, sent, refused) = sent(reply);
++    assert_eq!((sent, refused), (0, 1));
++    assert_eq!(postings(&list), expected);
++    assert_eq!(review.postings_on_disk(), expected);
++    assert_eq!(steps, progress(&[1], 1));
++}
++
++#[test]
++fn send_message_stopped_by_a_timeout_leaves_the_message_queued() {
++    let review = Review::new();
++    let fake = Fake::new("timeout");
++    let glab = Glab::at(fake.dir.path().join("glab")).with_timeout(SHORT_TIMEOUT);
++    review.send_one(Some(&glab), review.first_message(0));
++
++    let (reply, steps) = review.send_one(Some(&glab), review.first_message(1));
++
++    let expected = vec![
++        pending(ADDED_TEXT, 101),
++        queued(RENAMED_TEXT),
++        queued(REMOVED_TEXT),
++    ];
++    let SendReply::Stopped {
++        list,
++        sent,
++        refused,
++        reason,
++    } = reply
++    else {
++        panic!("not stopped: {reply:?}");
++    };
++    assert_eq!((sent, refused, reason.as_str()), (0, 0, "glab timed out"));
++    assert_eq!(postings(&list), expected);
++    assert_eq!(review.postings_on_disk(), expected);
++    assert_eq!(steps, []);
++}
++
++#[test]
++fn send_message_takes_the_unowned_draft_with_its_text_instead_of_posting_again() {
++    let review = Review::new();
++    let fake = Fake::new("drafted");
++
++    let (reply, steps) = review.send_one(Some(&fake.glab), review.first_message(0));
++
++    let expected = vec![
++        pending(ADDED_TEXT, 301),
++        queued(RENAMED_TEXT),
++        queued(REMOVED_TEXT),
++    ];
++    let (list, sent, refused) = sent(reply);
++    assert_eq!((sent, refused), (1, 0));
++    assert_eq!(postings(&list), expected);
++    assert_eq!(review.postings_on_disk(), expected);
++    assert_eq!(steps, progress(&[1], 1));
++    assert_eq!(fake.bodies(), Vec::<Value>::new());
++}
++
++#[test]
++fn send_message_without_glab_or_lined_up_merge_request_is_not_lined_up() {
++    let review = Review::new();
++    let fake = Fake::new("moved");
++    let message = review.first_message(0);
++
++    let (without, _) = review.send_one(None, message);
++    let (moved, steps) = review.send_one(Some(&fake.glab), message);
++
++    let why = NotLinedUp::GlabMissing;
++    assert_eq!(without, SendReply::NotLinedUp { why });
++    let why = NotLinedUp::Moved {
++        merge_request: merge_request_12(),
++        gitlab_head: "d1e2f3a".to_owned(),
++        shown_head: "9c1ba3f".to_owned(),
++    };
++    assert_eq!(moved, SendReply::NotLinedUp { why });
++    assert_eq!(steps, []);
++    assert!(!fake.log().contains("draft_notes"), "{}", fake.log());
++    let unchanged = vec![
++        queued(ADDED_TEXT),
++        queued(RENAMED_TEXT),
++        queued(REMOVED_TEXT),
++    ];
++    assert_eq!(review.postings_on_disk(), unchanged);
++}
++
++#[test]
++fn send_message_on_an_unknown_id_is_the_store_s_error_before_any_glab_call() {
++    let review = Review::new();
++    let fake = Fake::new("lined-up");
++    let unknown = MessageId(99);
++    let no_progress = |_: SendProgress| panic!("progress for an unknown message");
++
++    let sent = send_message(
++        &review.range,
++        Some(&fake.glab),
++        &review.threads,
++        unknown,
++        &no_progress,
++    );
++
++    let Err(Error::UnknownMessage { message }) = sent else {
++        panic!("not unknown: {sent:?}");
++    };
++    assert_eq!(message, unknown);
++    assert_eq!(fake.log(), "");
++}
++
++#[test]
++fn send_message_on_a_message_that_does_not_wait_sends_nothing() {
++    let review = Review::new();
++    let fake = Fake::new("lined-up");
++    let first = review.first_message(0);
++    review.send_one(Some(&fake.glab), first);
++    let thread = review.threads.lock().unwrap().list(&review.range).threads[1].id;
++    let list = {
++        let mut store = review.threads.lock().unwrap();
++        store
++            .add_note(&review.range, thread, "Only for me")
++            .unwrap()
++    };
++    let note = list.threads[1].messages[1].id;
++    let calls_before = fake.argv().len();
++
++    let (not_queued, steps) = review.send_one(Some(&fake.glab), note);
++    let (pending_again, _) = review.send_one(Some(&fake.glab), first);
++
++    assert_eq!(
++        not_queued,
++        SendReply::Sent {
++            list: list.clone(),
++            sent: 0,
++            refused: 0
++        }
++    );
++    assert_eq!(
++        pending_again,
++        SendReply::Sent {
++            list,
++            sent: 0,
++            refused: 0
++        }
++    );
++    assert_eq!(steps, []);
++    let after_the_check = fake.argv().split_off(calls_before);
++    let drafts = after_the_check
++        .iter()
++        .filter(|argv| argv.contains("draft_notes"));
++    assert_eq!(drafts.count(), 0, "{}", fake.log());
++    assert_eq!(fake.bodies().len(), 1);
++}
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index 3c1e9cb..3511801 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -69,6 +69,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         review::add_ai_answer,
+         review::check_gitlab::<tauri::Wry>,
+         review::send_queue::<tauri::Wry>,
++        review::send_message::<tauri::Wry>,
+         ai::prepare_checkout::<tauri::Wry>,
+         ai::start_agent::<tauri::Wry>,
+         ai::send_to_agent,
+diff --git a/src-tauri/src/review.rs b/src-tauri/src/review.rs
+index a0a775e..5fa552f 100644
+--- a/src-tauri/src/review.rs
++++ b/src-tauri/src/review.rs
+@@ -168,5 +168,28 @@ pub(crate) async fn send_queue<R: Runtime>(
+     .await
+ }
+ 
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn send_message<R: Runtime>(
++    window: WebviewWindow<R>,
++    message: MessageId,
++    progress: Channel<SendProgress>,
++) -> Result<SendReply, IpcError> {
++    blocking_reply(move || {
++        let state = window.state::<RangeState>();
++        let _sending = send_guard(&state.sending)?;
++        let forward = |done| forward_progress(&progress, done);
++        let glab = Glab::find();
++        Ok(yamt_review::send_message(
++            &state.range,
++            glab.as_ref(),
++            &state.threads,
++            message,
++            &forward,
++        )?)
++    })
++    .await
++}
++
+ #[cfg(test)]
+ mod tests;
+diff --git a/src-tauri/src/review/tests.rs b/src-tauri/src/review/tests.rs
+index 9edd2c0..f830485 100644
+--- a/src-tauri/src/review/tests.rs
++++ b/src-tauri/src/review/tests.rs
+@@ -151,9 +151,12 @@ fn a_second_send_while_one_runs_answers_send_running() {
+     let _running = send_guard(&state.sending).unwrap();
+ 
+     let progress = Channel::new(|_| Ok(()));
+-    let second = block_on(send_queue(window.webview.clone(), progress));
++    let queue = block_on(send_queue(window.webview.clone(), progress.clone()));
++    let message = MessageId(UNKNOWN_ID);
++    let one = block_on(send_message(window.webview.clone(), message, progress));
+ 
+-    assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
++    assert!(matches!(queue, Err(IpcError::SendRunning)), "{queue:?}");
++    assert!(matches!(one, Err(IpcError::SendRunning)), "{one:?}");
+ }
+ 
+ // A draft posted for a message deleted or edited meanwhile would leave GitLab and the file apart (#123).
+@@ -253,6 +256,7 @@ mod through_glab {
+ 
+     const FAKE_GLAB_LOG: &str = "YAMT_FAKE_GLAB_LOG";
+     const SEND_TEST: &str = "review::tests::through_glab::a_send_on_path_s_glab";
++    const MESSAGE_SEND_TEST: &str = "review::tests::through_glab::a_message_send_on_path_s_glab";
+     const CHECK_TEST: &str = "review::tests::through_glab::check_gitlab_on_path_s_glab";
+     const POST_ARGV: &str =
+         "argv: api --include --method POST projects/7/merge_requests/12/draft_notes --input -";
+@@ -299,7 +303,7 @@ mod through_glab {
+         open_range_window_on(repo, "main...feature")
+     }
+ 
+-    fn queue_one_message(window: &RangeWindow) {
++    fn queue_one_message(window: &RangeWindow) -> MessageId {
+         let state = window.webview.state::<RangeState>();
+         let entries = state.range.entries();
+         let file = entries.iter().find(|entry| entry.path == ADDED_FILE);
+@@ -310,6 +314,7 @@ mod through_glab {
+         let message = &added["list"]["threads"][0]["messages"][0]["id"];
+         let queued = json!({ "message": message, "text": "Why not a Duration?" });
+         invoke(window, "queue_message", queued).unwrap();
++        serde_json::from_value(message.clone()).unwrap()
+     }
+ 
+     fn send(window: &RangeWindow) -> Result<SendReply, IpcError> {
+@@ -358,6 +363,33 @@ mod through_glab {
+         assert!(matches!(third, Ok(SendReply::Sent { .. })), "{third:?}");
+     }
+ 
++    #[test]
++    fn a_message_send_holds_off_a_queue_send_until_its_post_ends() {
++        run_with_fake_glab(MESSAGE_SEND_TEST, "slow-post");
++    }
++
++    #[test]
++    #[ignore = "run by a_message_send_holds_off_a_queue_send_until_its_post_ends"]
++    fn a_message_send_on_path_s_glab() {
++        let window = range_repo_window();
++        let message = queue_one_message(&window);
++        let (progress, received) = collecting_channel();
++        let webview = window.webview.clone();
++        let first = thread::spawn(move || block_on(send_message(webview, message, progress)));
++
++        wait_for_the_post();
++        let second = send(&window);
++        let first = first.join().unwrap();
++
++        assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
++        let Ok(SendReply::Sent { sent, refused, .. }) = first else {
++            panic!("not sent: {first:?}");
++        };
++        assert_eq!((sent, refused), (1, 0));
++        let steps: Vec<String> = received.try_iter().collect();
++        assert_eq!(steps, [json!({ "done": 1, "of": 1 }).to_string()]);
++    }
++
+     #[test]
+     fn check_gitlab_answers_lined_up_on_the_lined_up_merge_request() {
+         run_with_fake_glab(CHECK_TEST, "lined-up");
