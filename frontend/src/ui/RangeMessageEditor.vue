@@ -9,26 +9,22 @@ import { useMentions } from "./mergeRequestMentions";
 import { isBlank } from "./rangeDrafts";
 import { linedUpRow } from "./rangeGitLab";
 import { useRangeStore } from "./rangeStore";
-import {
-  CANCEL_LABEL,
-  EDIT_FIELD_LABEL,
-  POST_FIELD_LABEL,
-  QUEUE_LABEL,
-  SAVE_LABEL,
-} from "./rangeThreadText";
+import { CANCEL_LABEL, EDIT_FIELD_LABEL, POST_FIELD_LABEL, SAVE_LABEL } from "./rangeThreadText";
+import { useShiftHeld } from "./useShiftHeld";
 
 type MessageBox = "post" | "edit";
 
 const props = defineProps<{ message: MessageId; box: MessageBox; offTitle: string | null }>();
-const emit = defineEmits<{ submit: [text: string]; cancel: [] }>();
+const emit = defineEmits<{ submit: [text: string, sendNow: boolean]; cancel: [] }>();
 
-const WORDS: Readonly<Record<MessageBox, { readonly field: string; readonly submit: string }>> = {
-  post: { field: POST_FIELD_LABEL, submit: QUEUE_LABEL },
-  edit: { field: EDIT_FIELD_LABEL, submit: SAVE_LABEL },
+const FIELD_LABELS: Readonly<Record<MessageBox, string>> = {
+  post: POST_FIELD_LABEL,
+  edit: EDIT_FIELD_LABEL,
 };
 
 const field = useTemplateRef<HTMLTextAreaElement>("field");
 const { threads, gitlab, mergeRequests } = useRangeStore();
+const shift = useShiftHeld();
 const mentions =
   props.box === "post"
     ? useMentions(field, () =>
@@ -41,8 +37,15 @@ const text = computed(
     (props.box === "post" ? threads.postDraft(props.message) : threads.editDraft(props.message)) ??
     "",
 );
-const off = computed(() => props.offTitle !== null || isBlank(text.value));
-const words = computed(() => WORDS[props.box]);
+const button = computed(() =>
+  props.box === "post"
+    ? gitlab.queueButton(text.value, shift.value)
+    : {
+        label: SAVE_LABEL,
+        title: props.offTitle ?? undefined,
+        disabled: props.offTitle !== null || isBlank(text.value),
+      },
+);
 const fieldAria = computed(() => mentions?.fieldAria.value ?? {});
 
 onMounted(() => {
@@ -60,18 +63,25 @@ function typed(event: Event): void {
   }
 }
 
-function submit(): void {
+function submit(sendNow: boolean): void {
   mentions?.close();
-  if (!off.value) {
-    emit("submit", text.value);
+  if (!button.value.disabled) {
+    emit("submit", text.value, sendNow);
   }
+}
+
+function press(event: MouseEvent): void {
+  submit(event.shiftKey);
 }
 
 function keydown(event: KeyboardEvent): void {
   if (mentions?.keydown(event) === true) {
     return;
   }
-  boxKeydown(event, navigator.platform, { submit, cancel: () => emit("cancel") });
+  boxKeydown(event, navigator.platform, {
+    submit: () => submit(false),
+    cancel: () => emit("cancel"),
+  });
 }
 </script>
 
@@ -82,7 +92,7 @@ function keydown(event: KeyboardEvent): void {
         ref="field"
         :value="text"
         v-bind="fieldAria"
-        :aria-label="words.field"
+        :aria-label="FIELD_LABELS[box]"
         rows="4"
         class="block w-full resize-y rounded border border-control-border bg-panel-inline px-2 py-1 outline-none focus:border-primary"
         @input="typed"
@@ -98,15 +108,15 @@ function keydown(event: KeyboardEvent): void {
       />
     </div>
     <div class="flex gap-2">
-      <span :title="offTitle ?? undefined">
+      <span :title="button.title">
         <button
           type="button"
-          :disabled="off"
+          :disabled="button.disabled"
           class="rounded border border-primary bg-primary px-3 py-0.5 text-on-primary hover:brightness-110 disabled:pointer-events-none disabled:border-control-border disabled:bg-transparent disabled:text-fg-muted"
           @mousedown.prevent
-          @click="submit"
+          @click="press"
         >
-          {{ words.submit }}
+          {{ button.label }}
         </button>
       </span>
       <button

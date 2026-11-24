@@ -470,14 +470,59 @@ test("a queued Post closes its editor; a refused or blank Queue keeps the text",
   threads.writePost(open.id, "Is it still used?");
   threads.writePost(pending.id, "again");
 
-  await threads.queue(open.id, "  ");
+  expect(await threads.queue(open.id, "  ")).toBe(false);
   expect(threads.postDraft(open.id)).toBe("Is it still used?");
-  await threads.queue(pending.id, "again");
+  expect(await threads.queue(pending.id, "again")).toBe(false);
   expect(threads.postDraft(pending.id)).toBe("again");
 
-  await threads.queue(open.id, "Is it still used?");
+  expect(await threads.queue(open.id, "Is it still used?")).toBe(true);
   expect(threads.postDraft(open.id)).toBeNull();
   expect(threads.postDraft(pending.id)).toBe("again");
+});
+
+test("addTyped on a draft adds the thread and names it and its first message", async () => {
+  const { threads, board } = await opened(SEEDED);
+  const count = threads.list.value.threads.length;
+  threads.startThread(board, onePlace(changedThreadLine("left", 1)));
+
+  const added = await threads.addTyped({ kind: "draft", key: "draft-0" }, "Why 300?");
+
+  const thread = threadAt(threads, count);
+  expect(added).toEqual({ thread: thread.id, message: messageOf(thread).id });
+  expect(texts(thread)).toEqual(["Why 300?"]);
+  expect(threads.drafts.value.has("draft-0")).toBe(false);
+});
+
+test("addTyped on a thread appends the note and names that note, not the thread's first", async () => {
+  const { threads } = await opened(SEEDED);
+  const thread = threadAt(threads, 3);
+  threads.writeNote(thread.id, "And this?");
+
+  const added = await threads.addTyped({ kind: "thread", thread: thread.id }, "And this?");
+
+  const message = threadAt(threads, 3).messages.at(-1);
+  expect(message?.body).toEqual({ kind: "note", text: "And this?" });
+  expect(added).toEqual({ thread: thread.id, message: message?.id });
+  expect(added?.message).not.toBe(messageOf(thread).id);
+  expect(threads.noteText(thread.id)).toBe("");
+});
+
+test("addTyped answers null for a blank text, a refused add and a missing draft", async () => {
+  const { threads, problems, board } = await opened(SEEDED, () => ({
+    addNote: async () => ({ ok: false, failure: { kind: "UnknownThread", thread: 99 } }),
+  }));
+  const thread = threadAt(threads, 3).id;
+  threads.startThread(board, onePlace(changedThreadLine("left", 1)));
+
+  expect(await threads.addTyped({ kind: "draft", key: "draft-0" }, " ")).toBeNull();
+  expect(await threads.addTyped({ kind: "draft", key: "draft-9" }, "x")).toBeNull();
+  expect(await threads.addTyped({ kind: "thread", thread }, " ")).toBeNull();
+  expect(await threads.addTyped({ kind: "thread", thread }, "Kept")).toBeNull();
+
+  expect(threads.noteText(thread)).toBe("Kept");
+  expect(problems).toEqual([
+    { action: "threads", step: "note", cause: { kind: "UnknownThread", thread: 99 } },
+  ]);
 });
 
 test("a Post text outlives its file's view: 16 other files evict file 0 and the text is still there", async () => {

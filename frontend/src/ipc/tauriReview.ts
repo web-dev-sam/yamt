@@ -6,6 +6,19 @@ import type { ReviewSource } from "./ReviewSource";
 import { converted, toResult } from "./tauri";
 import { fromThreadPlace } from "./threadLine";
 
+function sends(): Pick<ReviewSource, "sendQueue" | "sendMessage"> {
+  return {
+    async sendQueue(onProgress) {
+      const progress = new Channel<SendProgress>(onProgress);
+      return converted(toResult(await commands.sendQueue(progress)), toSendReply);
+    },
+    async sendMessage(message, onProgress) {
+      const progress = new Channel<SendProgress>(onProgress);
+      return converted(toResult(await commands.sendMessage(message, progress)), toSendReply);
+    },
+  };
+}
+
 export function createTauriReview(): ReviewSource {
   return {
     async listThreads() {
@@ -39,9 +52,6 @@ export function createTauriReview(): ReviewSource {
     async checkGitLab() {
       return converted(toResult(await commands.checkGitlab()), toGitLabCheck);
     },
-    async sendQueue(onProgress) {
-      const progress = new Channel<SendProgress>(onProgress);
-      return converted(toResult(await commands.sendQueue(progress)), toSendReply);
-    },
+    ...sends(),
   };
 }

@@ -57,10 +57,16 @@ const link = computed(() =>
 
 function pressPost(): void {
   const { action } = post.value;
+  const shown = body.value;
   switch (action) {
+    case "queue":
+      if (shown.kind === "text") {
+        void threads.queue(props.message.id, shown.text);
+      }
+      return;
     case "write":
-      if (body.value.kind === "text") {
-        threads.writePost(props.message.id, body.value.text);
+      if (shown.kind === "text") {
+        threads.writePost(props.message.id, shown.text);
       }
       return;
     case "unqueue":
@@ -84,8 +90,8 @@ async function focusLater(target: () => HTMLElement | null): Promise<void> {
   target()?.focus({ preventScroll: true });
 }
 
-async function queue(text: string): Promise<void> {
-  await threads.queue(props.message.id, text);
+async function queue(text: string, sendNow: boolean): Promise<void> {
+  await gitlab.queuePost(props.message.id, text, sendNow);
   if (!postOpen.value) {
     await focusLater(() => postButton.value);
   }

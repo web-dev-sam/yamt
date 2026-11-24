@@ -5,24 +5,26 @@ import ChevronUp from "~icons/lucide/chevron-up";
 import type { RangeEntry } from "../ipc";
 import AiTurn from "./AiTurn.vue";
 import { boxKeydown } from "./boxKeys";
-import type { AskFrom } from "./rangeAi";
 import { answering, liveTurn } from "./rangeAiView";
 import { isBlank } from "./rangeDrafts";
 import RangeMessage from "./RangeMessage.vue";
 import { useRangeStore } from "./rangeStore";
+import type { AddTo } from "./rangeThreads";
 import {
   ASK_AI_LABEL,
   ASK_AI_TITLE,
   ASK_AI_WAITING,
   CANCEL_LABEL,
   COLLAPSE_THREAD,
-  COMMENT_LABEL,
   DRAFT_PROMPT,
+  NOTE_LABEL,
+  NOTE_TITLE,
   REPLY_PROMPT,
   STOP_AI_LABEL,
   STOP_AI_TITLE,
   threadPlaceText,
 } from "./rangeThreadText";
+import { useShiftHeld } from "./useShiftHeld";
 
 const props = defineProps<{ threadKey: string; file: RangeEntry }>();
 
@@ -32,7 +34,8 @@ const PROMPTS = {
 };
 
 const field = useTemplateRef<HTMLTextAreaElement>("field");
-const { threads, ai } = useRangeStore();
+const { threads, ai, gitlab } = useRangeStore();
+const shift = useShiftHeld();
 
 const box = computed(() => threads.boxOf(props.threadKey));
 const draft = computed(() => (box.value?.kind === "draft" ? box.value.draft : null));
@@ -56,15 +59,16 @@ const threadAi = computed(() =>
 );
 const live = computed(() => (threadAi.value === null ? null : liveTurn(threadAi.value)));
 const stoppable = computed(() => threadAi.value !== null && answering(threadAi.value));
-const askFrom = computed((): AskFrom | null => {
+const addTo = computed((): AddTo | null => {
   if (draft.value !== null) {
     return { kind: "draft", key: props.threadKey };
   }
   return thread.value === null ? null : { kind: "thread", thread: thread.value.id };
 });
 const askable = computed(
-  () => ai !== null && askFrom.value !== null && ai.canAsk(askFrom.value, text.value),
+  () => ai !== null && addTo.value !== null && ai.canAsk(addTo.value, text.value),
 );
+const queueView = computed(() => gitlab.queueButton(text.value, shift.value));
 const showsActions = computed(() => ai !== null || draft.value !== null || !blank.value);
 
 watch(
@@ -92,8 +96,8 @@ function loadConversation(): void {
 }
 
 function askAi(): void {
-  if (askFrom.value !== null) {
-    void ai?.ask(askFrom.value, text.value);
+  if (addTo.value !== null) {
+    void ai?.ask(addTo.value, text.value);
   }
 }
 
@@ -123,14 +127,15 @@ function typed(event: Event): void {
   }
 }
 
-function submit(): void {
-  if (blank.value) {
-    return;
+function note(): void {
+  if (addTo.value !== null) {
+    void threads.addTyped(addTo.value, text.value);
   }
-  if (draft.value !== null) {
-    void threads.addThread(props.threadKey, text.value);
-  } else if (thread.value !== null) {
-    void threads.addNote(thread.value.id, text.value);
+}
+
+function queue(event: MouseEvent): void {
+  if (addTo.value !== null) {
+    void gitlab.queueTyped(addTo.value, text.value, event.shiftKey);
   }
 }
 
@@ -143,7 +148,7 @@ function cancel(): void {
 }
 
 function keydown(event: KeyboardEvent): void {
-  boxKeydown(event, navigator.platform, { submit, cancel });
+  boxKeydown(event, navigator.platform, { submit: note, cancel });
 }
 
 function collapse(): void {
@@ -197,15 +202,28 @@ function collapse(): void {
       @keydown="keydown"
     />
     <div v-if="showsActions" class="flex gap-2">
-      <button
-        type="button"
-        :disabled="blank"
-        class="rounded border border-primary bg-primary px-3 py-0.5 text-on-primary hover:brightness-110 disabled:border-control-border disabled:bg-transparent disabled:text-fg-muted disabled:hover:brightness-100"
-        @mousedown.prevent
-        @click="submit"
-      >
-        {{ COMMENT_LABEL }}
-      </button>
+      <span :title="queueView.title">
+        <button
+          type="button"
+          :disabled="queueView.disabled"
+          class="rounded border border-primary bg-primary px-3 py-0.5 text-on-primary hover:brightness-110 disabled:pointer-events-none disabled:border-control-border disabled:bg-transparent disabled:text-fg-muted"
+          @mousedown.prevent
+          @click="queue"
+        >
+          {{ queueView.label }}
+        </button>
+      </span>
+      <span :title="NOTE_TITLE">
+        <button
+          type="button"
+          :disabled="blank"
+          class="rounded border border-control-border px-3 py-0.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
+          @mousedown.prevent
+          @click="note"
+        >
+          {{ NOTE_LABEL }}
+        </button>
+      </span>
       <button
         v-if="stoppable"
         type="button"

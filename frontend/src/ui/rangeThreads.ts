@@ -2,6 +2,7 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import type {
   AgentSessionId,
+  Message,
   MessageId,
   Posting,
   RangeFileId,
@@ -24,6 +25,14 @@ import {
 import { createRangeOpen, type RangeOpen, type StoredBox } from "./rangeOpen";
 
 type ThreadBox = { readonly kind: "draft"; readonly draft: ThreadDraft } | StoredBox;
+
+/** Where a box's typed text is added: an open thread, or a line's new thread not added yet (its draft key). */
+export type AddTo =
+  | { readonly kind: "thread"; readonly thread: ThreadId }
+  | { readonly kind: "draft"; readonly key: string };
+
+/** A typed text once stored: its thread and the message it became. */
+type Added = { readonly thread: ThreadId; readonly message: MessageId };
 
 export type RangeThreads = AddsInFlight & {
   readonly list: Readonly<ShallowRef<ThreadList>>;
@@ -51,7 +60,10 @@ export type RangeThreads = AddsInFlight & {
   addThread(draftKey: string, text: string): Promise<ThreadId | null>;
   /** Whether the note was stored; a blank text is not sent. */
   addNote(thread: ThreadId, text: string): Promise<boolean>;
-  queue(message: MessageId, text: string): Promise<void>;
+  /** A box's typed text as a new thread or note; null when nothing was added. */
+  addTyped(to: AddTo, text: string): Promise<Added | null>;
+  /** Whether the queued text was stored; a blank text is not sent. */
+  queue(message: MessageId, text: string): Promise<boolean>;
   unqueue(message: MessageId): Promise<void>;
   /** Whether the edit was stored; a blank text is not sent. */
   editNote(message: MessageId, text: string): Promise<boolean>;
@@ -121,7 +133,12 @@ async function changed(
   return outcome.value;
 }
 
-async function addThread(state: State, key: string, text: string): Promise<ThreadId | null> {
+/** The thread's last message in `list`, the one an add just appended. */
+function lastMessage(list: ThreadList, thread: ThreadId): Message | undefined {
+  return list.threads.find(({ id }) => id === thread)?.messages.at(-1);
+}
+
+async function addThread(state: State, key: string, text: string): Promise<Added | null> {
   const draft = state.drafts.threadDraft(key);
   if (draft === null || isBlank(text) || state.adds.inFlight.addingThread(key)) {
     return null;
@@ -138,18 +155,20 @@ async function addThread(state: State, key: string, text: string): Promise<Threa
   state.open.added(thread, key);
   state.drafts.dropDraft(key);
   setList(state, list);
-  return thread;
+  const message = lastMessage(list, thread);
+  return message === undefined ? null : { thread, message: message.id };
 }
 
-async function addNote(state: State, thread: ThreadId, text: string): Promise<boolean> {
+async function addNote(state: State, thread: ThreadId, text: string): Promise<Added | null> {
   if (isBlank(text)) {
-    return false;
+    return null;
   }
   const added = await state.adds.whileAdding({ kind: "note", thread }, () =>
     changed(state, "note", () => state.source.addNote(thread, text)),
   );
   state.drafts.writeNote(thread, added === null ? text : "");
-  return added !== null;
+  const message = added === null ? undefined : lastMessage(added, thread);
+  return message === undefined ? null : { thread, message: message.id };
 }
 
 function counted(state: State): Pick<RangeThreads, "counts" | "queued"> {
@@ -178,12 +197,14 @@ function replies(state: State): Pick<RangeThreads, "load" | "queue" | "unqueue" 
       state.listed.value = true;
     },
     queue: async (message, text) => {
-      if (
-        !isBlank(text) &&
-        (await changed(state, "queue", () => source.queueMessage(message, text))) !== null
-      ) {
+      if (isBlank(text)) {
+        return false;
+      }
+      const queued = await changed(state, "queue", () => source.queueMessage(message, text));
+      if (queued !== null) {
         state.drafts.dropPost(message);
       }
+      return queued !== null;
     },
     unqueue: async (message) => {
       await changed(state, "unqueue", () => source.unqueueMessage(message));
@@ -214,7 +235,7 @@ function noteChanges(state: State): Pick<RangeThreads, "editNote" | "deleteMessa
 }
 
 function addedTurn(list: ThreadList, id: ThreadId): number | null {
-  const body = list.threads.find((thread) => thread.id === id)?.messages.at(-1)?.body;
+  const body = lastMessage(list, id)?.body;
   return body?.kind === "aiAnswer" ? body.turn : null;
 }
 
@@ -258,8 +279,10 @@ export function createRangeThreads(
     toggle: (keys) => {
       state.open.toggle(state.list.value, keys);
     },
-    addThread: (key, text) => addThread(state, key, text),
-    addNote: (thread, text) => addNote(state, thread, text),
+    addThread: async (key, text) => (await addThread(state, key, text))?.thread ?? null,
+    addNote: async (thread, text) => (await addNote(state, thread, text)) !== null,
+    addTyped: (to, text) =>
+      to.kind === "draft" ? addThread(state, to.key, text) : addNote(state, to.thread, text),
     ...state.adds.inFlight,
   };
 }

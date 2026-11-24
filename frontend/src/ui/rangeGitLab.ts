@@ -5,14 +5,17 @@ import type {
   MergeRequestRef,
   MergeRequestRow,
   Message,
+  MessageId,
   RangeStart,
   ReviewSource,
   SendProgress,
   SendReply,
+  SourceResult,
 } from "../ipc";
 import { RECHECK_PAUSE_MS } from "./glab";
 import { attempt, type Problem } from "./problem";
-import { isQueued, type RangeThreads } from "./rangeThreads";
+import { isBlank } from "./rangeDrafts";
+import { isQueued, type AddTo, type RangeThreads } from "./rangeThreads";
 import {
   CHECKING_TEXT,
   NOTHING_QUEUED,
@@ -20,7 +23,12 @@ import {
   PENDING_TEXT,
   POST_LABEL,
   postTitle,
+  QUEUE_LABEL,
+  queueTitle,
+  SEND_LABEL,
+  SEND_RUNNING_TITLE,
   sendLabel,
+  sendOneTitle,
   sendTitle,
   UNQUEUE_LABEL,
   UNQUEUE_TITLE,
@@ -34,7 +42,7 @@ type ButtonView = {
   readonly disabled: boolean;
 };
 
-type PostAction = "write" | "unqueue";
+type PostAction = "queue" | "write" | "unqueue";
 
 type PostView = {
   readonly label: string;
@@ -54,9 +62,15 @@ export type GitLabState = {
   readonly result: Readonly<ShallowRef<SentReply | null>>;
   readonly sendButton: ComputedRef<ButtonView>;
   postButton(message: Message, body: PostBody): PostView;
+  /** Queue, or Send with `sendNow` (plan row 198): off while not lined up, Send also while a send runs. */
+  queueButton(text: string, sendNow: boolean): ButtonView;
   checkNow(): Promise<void>;
   checkOnFocus(): void;
   send(): Promise<void>;
+  /** Adds the typed text, queues it and, with `sendNow`, sends only that message; a failed step stops the rest. */
+  queueTyped(to: AddTo, text: string, sendNow: boolean): Promise<void>;
+  /** The Post box's Queue: queues the message with `text` and, with `sendNow`, sends only that message. */
+  queuePost(message: MessageId, text: string, sendNow: boolean): Promise<void>;
   dismissResult(): void;
 };
 
@@ -101,7 +115,7 @@ function sendButton(state: State): ButtonView {
   return { label, title, disabled: state.sending.value !== null };
 }
 
-function postButton(state: State, { posting }: Message, body: PostBody): PostView {
+function postButton(state: State, { posting, body: shown }: Message, body: PostBody): PostView {
   if (posting.kind === "pending") {
     return { label: POST_LABEL, title: PENDING_TEXT, action: null };
   }
@@ -111,10 +125,25 @@ function postButton(state: State, { posting }: Message, body: PostBody): PostVie
   if (body.kind === "none") {
     return { label: POST_LABEL, title: body.why, action: null };
   }
+  const lined = gate(state);
+  if (lined.kind === "blocked") {
+    return { label: POST_LABEL, title: lined.title, action: null };
+  }
+  const action = shown.kind === "note" ? "queue" : "write";
+  return { label: POST_LABEL, title: postTitle(lined.mergeRequest), action };
+}
+
+function queueButton(state: State, text: string, sendNow: boolean): ButtonView {
+  const label = sendNow ? SEND_LABEL : QUEUE_LABEL;
   const shown = gate(state);
-  return shown.kind === "blocked"
-    ? { label: POST_LABEL, title: shown.title, action: null }
-    : { label: POST_LABEL, title: postTitle(shown.mergeRequest), action: "write" };
+  if (shown.kind === "blocked") {
+    return { label, title: shown.title, disabled: true };
+  }
+  if (sendNow && state.sending.value !== null) {
+    return { label, title: SEND_RUNNING_TITLE, disabled: true };
+  }
+  const title = sendNow ? sendOneTitle(shown.mergeRequest) : queueTitle(shown.mergeRequest);
+  return { label, title, disabled: isBlank(text) };
 }
 
 async function checkNow(state: State): Promise<void> {
@@ -142,15 +171,17 @@ function checkOnFocus(state: State): void {
   }
 }
 
-async function send(state: State): Promise<void> {
+type SendCall = (onProgress: (progress: SendProgress) => void) => Promise<SourceResult<SendReply>>;
+
+async function send(state: State, of: number, call: SendCall): Promise<void> {
   if (state.sending.value !== null) {
     return;
   }
   state.result.value = null;
-  state.sending.value = { done: 0, of: state.threads.queued.value };
+  state.sending.value = { done: 0, of };
   let running = true;
   const outcome = await attempt(() =>
-    state.source.sendQueue((progress) => {
+    call((progress) => {
       if (running) {
         state.sending.value = progress;
       }
@@ -169,6 +200,38 @@ async function send(state: State): Promise<void> {
   }
   state.threads.replace(reply.list);
   state.result.value = reply;
+}
+
+async function queueAndSend(
+  state: State,
+  message: MessageId,
+  text: string,
+  sendNow: boolean,
+): Promise<void> {
+  if ((await state.threads.queue(message, text)) && sendNow) {
+    await send(state, 1, (onProgress) => state.source.sendMessage(message, onProgress));
+  }
+}
+
+async function queueTyped(state: State, to: AddTo, text: string, sendNow: boolean): Promise<void> {
+  if (queueButton(state, text, sendNow).disabled) {
+    return;
+  }
+  const added = await state.threads.addTyped(to, text);
+  if (added !== null) {
+    await queueAndSend(state, added.message, text, sendNow);
+  }
+}
+
+async function queuePost(
+  state: State,
+  message: MessageId,
+  text: string,
+  sendNow: boolean,
+): Promise<void> {
+  if (!queueButton(state, text, sendNow).disabled) {
+    await queueAndSend(state, message, text, sendNow);
+  }
 }
 
 /** The loaded row of the merge request the range lines up with (design §2.2): when `check` is `linedUp`, the first of
@@ -207,11 +270,14 @@ export function createGitLabCheck(
     result: state.result,
     sendButton: computed(() => sendButton(state)),
     postButton: (message, body) => postButton(state, message, body),
+    queueButton: (text, sendNow) => queueButton(state, text, sendNow),
     checkNow: () => checkNow(state),
     checkOnFocus: () => {
       checkOnFocus(state);
     },
-    send: () => send(state),
+    send: () => send(state, threads.queued.value, (onProgress) => source.sendQueue(onProgress)),
+    queueTyped: (to, text, sendNow) => queueTyped(state, to, text, sendNow),
+    queuePost: (message, text, sendNow) => queuePost(state, message, text, sendNow),
     dismissResult: () => {
       state.result.value = null;
     },

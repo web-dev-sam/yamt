@@ -18,4 +18,8 @@ export interface ReviewSource {
   addAiAnswer(thread: ThreadId, session: AgentSessionId): Promise<SourceResult<ThreadList>>;
   checkGitLab(): Promise<SourceResult<GitLabCheck>>;
   sendQueue(onProgress: (progress: SendProgress) => void): Promise<SourceResult<SendReply>>;
+  sendMessage(
+    message: MessageId,
+    onProgress: (progress: SendProgress) => void,
+  ): Promise<SourceResult<SendReply>>;
 }

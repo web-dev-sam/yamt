@@ -26,6 +26,7 @@ const commands = vi.hoisted(() => ({
   addAiAnswer: vi.fn(),
   checkGitlab: vi.fn(),
   sendQueue: vi.fn(),
+  sendMessage: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -220,6 +221,26 @@ test("sendQueue hands each progress from the channel to the callback and camelCa
   });
 });
 
+test("sendMessage passes the message, hands each progress to the callback and camelCases the reply", async () => {
+  const seen: unknown[] = [];
+  commands.sendMessage.mockImplementation(
+    async (message: number, channel: { onmessage: (progress: Generated.SendProgress) => void }) => {
+      channel.onmessage({ done: 1, of: 1 });
+      return ok({ kind: "stopped", list: PENDING_LIST, sent: message, refused: 0, reason: "r" });
+    },
+  );
+
+  const reply = await createTauriReview().sendMessage(messageId(4), (progress) =>
+    seen.push(progress),
+  );
+
+  expect(seen).toEqual([{ done: 1, of: 1 }]);
+  expect(reply).toEqual({
+    ok: true,
+    value: { kind: "stopped", list: CAMEL_LIST, sent: 4, refused: 0, reason: "r" },
+  });
+});
+
 test.each<[keyof typeof commands, Generated.IpcError]>([
   ["listThreads", { kind: "WriteFailed", path: "/p/threads.json", message: "full" }],
   ["addThread", { kind: "EmptyMessage" }],
@@ -232,6 +253,7 @@ test.each<[keyof typeof commands, Generated.IpcError]>([
   ["addAiAnswer", { kind: "WriteFailed", path: "/p/threads.json", message: "full" }],
   ["checkGitlab", { kind: "WorkerStopped" }],
   ["sendQueue", { kind: "SendRunning" }],
+  ["sendMessage", { kind: "UnknownMessage", message: 8 }],
 ])("a %s failure comes back unchanged", async (name, failure) => {
   commands[name].mockResolvedValue({ status: "error", error: failure });
   const review = createTauriReview();
@@ -247,6 +269,7 @@ test.each<[keyof typeof commands, Generated.IpcError]>([
     addAiAnswer: () => review.addAiAnswer(threadId(6), session("s")),
     checkGitlab: () => review.checkGitLab(),
     sendQueue: () => review.sendQueue(() => undefined),
+    sendMessage: () => review.sendMessage(messageId(8), () => undefined),
   };
 
   expect(await calls[name]()).toEqual({ ok: false, failure });

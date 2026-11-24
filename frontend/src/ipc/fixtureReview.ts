@@ -195,15 +195,17 @@ function record(
 
 async function postQueue(
   store: Store,
+  only: number | null,
   onProgress: (progress: SendProgress) => void,
 ): Promise<Generated.SendReply> {
-  const queued = messagesOf(store).filter((message) => waitingText(message.posting) !== null);
+  const waiting = messagesOf(store).filter(({ posting }) => waitingText(posting) !== null);
+  const queued = [...waiting.entries()].filter(([, { id }]) => only === null || id === only);
   const tally: Tally = { sent: 0, refused: 0 };
-  for (const [index, message] of queued.entries()) {
+  for (const [index, [place, message]] of queued.entries()) {
     await pause(POST_PAUSE_MS);
     const text = waitingText(message.posting);
     if (text !== null) {
-      const outcome = postOutcome(store.script, index);
+      const outcome = postOutcome(store.script, place);
       if (outcome === "stopped") {
         return { kind: "stopped", list: listed(store), ...tally, reason: TIMED_OUT };
       }
@@ -214,12 +216,17 @@ async function postQueue(
   return { kind: "sent", list: listed(store), ...tally };
 }
 
-async function sendQueue(
+/** `only` names the one message to send (plan row 198); null sends the whole queue. */
+async function send(
   store: Store,
+  only: number | null,
   onProgress: (progress: SendProgress) => void,
 ): Promise<SourceResult<SendReply>> {
   if (store.sending) {
     return { ok: false, failure: { kind: "SendRunning" } };
+  }
+  if (only !== null && !messagesOf(store).some((message) => message.id === only)) {
+    return { ok: false, failure: { kind: "UnknownMessage", message: only } };
   }
   const check = gitLabCheck(store.script, store.start);
   if (check.kind === "notLinedUp") {
@@ -227,7 +234,7 @@ async function sendQueue(
   }
   store.sending = true;
   try {
-    return { ok: true, value: toSendReply(await postQueue(store, onProgress)) };
+    return { ok: true, value: toSendReply(await postQueue(store, only, onProgress)) };
   } finally {
     store.sending = false;
   }
@@ -265,9 +272,7 @@ export function createFixtureReview(log: Log, search: string, start: RangeStart)
     sending: false,
   };
   return {
-    async listThreads() {
-      return { ok: true, value: toThreadList(listed(store)) };
-    },
+    listThreads: async () => ({ ok: true, value: toThreadList(listed(store)) }),
     ...threadCalls(store),
     async queueMessage(message, text) {
       return isBlank(text)
@@ -289,6 +294,7 @@ export function createFixtureReview(log: Log, search: string, start: RangeStart)
       }
       return { ok: true, value: toGitLabCheck(gitLabCheck(store.script, store.start)) };
     },
-    sendQueue: (onProgress) => sendQueue(store, onProgress),
+    sendQueue: (onProgress) => send(store, null, onProgress),
+    sendMessage: (message, onProgress) => send(store, message, onProgress),
   };
 }

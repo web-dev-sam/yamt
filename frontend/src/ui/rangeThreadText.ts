@@ -33,7 +33,10 @@ export const STOP_AI_TITLE = "Stop the AI's turn; what it wrote so far stays";
 export const POST_LABEL = "Post";
 export const UNQUEUE_LABEL = "Unqueue";
 export const UNQUEUE_TITLE = "Take this message out of the queue";
-export const COMMENT_LABEL = "Comment";
+export const NOTE_LABEL = "Note";
+export const NOTE_TITLE = "Keep this comment in yamt; Post queues it later";
+export const SEND_LABEL = "Send";
+export const SEND_RUNNING_TITLE = "A send to GitLab is running; Send is off until it ends";
 export const CANCEL_LABEL = "Cancel";
 export const COLLAPSE_THREAD = "Collapse the thread";
 export const DRAFT_PROMPT = "Write a comment…";
@@ -138,6 +141,14 @@ export function sendTitle(mergeRequest: MergeRequestRef, queued: number): string
 
 export function postTitle(mergeRequest: MergeRequestRef): string {
   return `Queue this message as its own comment on ${mergeRequest.reference}`;
+}
+
+export function queueTitle(mergeRequest: MergeRequestRef): string {
+  return `Queue this comment as a draft on ${mergeRequest.reference}; Send to GitLab sends the queue`;
+}
+
+export function sendOneTitle(mergeRequest: MergeRequestRef): string {
+  return `Send only this comment to ${mergeRequest.reference} as a draft now`;
 }
 
 export function sendResultText(reply: Exclude<SendReply, { readonly kind: "notLinedUp" }>): string {

@@ -24,10 +24,10 @@ import {
   type ThreadList,
 } from "../ipc";
 import type { Problem } from "./problem";
-import { createRangeAi, type AskFrom, type RangeAi } from "./rangeAi";
+import { createRangeAi, type RangeAi } from "./rangeAi";
 import type { AskContext } from "./rangeAiRules";
 import { answerView, liveTurn, postBody, type ThreadAi } from "./rangeAiView";
-import { createRangeThreads, type RangeThreads } from "./rangeThreads";
+import { createRangeThreads, type AddTo, type RangeThreads } from "./rangeThreads";
 
 type Asked = {
   readonly request: AskRequest;
@@ -148,7 +148,7 @@ async function rig(
   return { client, threads, ai, problems, fresh, seeded };
 }
 
-function on(thread: ThreadId): AskFrom {
+function on(thread: ThreadId): AddTo {
   return { kind: "thread", thread };
 }
 
@@ -911,7 +911,7 @@ function gate(): Gate {
   };
 }
 
-function draftOf(key: string): AskFrom {
+function draftOf(key: string): AddTo {
   return { kind: "draft", key };
 }
 

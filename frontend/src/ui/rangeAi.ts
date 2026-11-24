@@ -5,20 +5,15 @@ import { log, type AgentSessionId, type Thread, type ThreadId } from "../ipc";
 import { answersIn, heldAfter, isGone, isKept, promptText, type AskContext } from "./rangeAiRules";
 import { IDLE, type ThreadAi } from "./rangeAiView";
 import { isBlank } from "./rangeDrafts";
-import type { RangeThreads } from "./rangeThreads";
-
-/** Where Ask AI was pressed: an open thread, or a line's new thread not added yet (its draft key). */
-export type AskFrom =
-  | { readonly kind: "thread"; readonly thread: ThreadId }
-  | { readonly kind: "draft"; readonly key: string };
+import type { AddTo, RangeThreads } from "./rangeThreads";
 
 export type RangeAi = {
   of(thread: ThreadId): ThreadAi;
   /** Ask AI (plan row 124): a non-blank `typed` is added first (the note, or the new thread) and the AI is asked once
    *  it is stored; a failed add asks nothing; nothing typed asks with the notes since the last answer. */
-  ask(from: AskFrom, typed: string): Promise<void>;
+  ask(from: AddTo, typed: string): Promise<void>;
   /** Plan row 124: no turn runs, the conversation has loaded, no add in that box still runs, and something to send. */
-  canAsk(from: AskFrom, typed: string): boolean;
+  canAsk(from: AddTo, typed: string): boolean;
   retry(thread: ThreadId): void;
   stop(thread: ThreadId): void;
   load(thread: ThreadId): void;
@@ -27,7 +22,7 @@ export type RangeAi = {
 type AiClient = Pick<AgentClient, "ask" | "loadConversation">;
 type AiThreads = Pick<
   RangeThreads,
-  "list" | "setSession" | "addAiAnswer" | "addThread" | "addNote" | "addingThread" | "addingNote"
+  "list" | "setSession" | "addAiAnswer" | "addTyped" | "addingThread" | "addingNote"
 >;
 type Kept = Readonly<{ thread: ThreadId; session: AgentSessionId }>;
 type State = {
@@ -78,7 +73,7 @@ function canAsk(state: State, thread: Thread): boolean {
   return isReady(state, thread) && prompt !== null;
 }
 
-function canAskFrom(state: State, from: AskFrom, typed: string): boolean {
+function canAskFrom(state: State, from: AddTo, typed: string): boolean {
   if (from.kind === "draft") {
     return !isBlank(typed) && !state.threads.addingThread(from.key);
   }
@@ -190,15 +185,7 @@ function ask(state: State, id: ThreadId): void {
   }
 }
 
-/** The thread a non-blank typed text was added to: the open thread's new note, or the draft's new thread. */
-async function addTyped(state: State, from: AskFrom, typed: string): Promise<ThreadId | null> {
-  if (from.kind === "draft") {
-    return state.threads.addThread(from.key, typed);
-  }
-  return (await state.threads.addNote(from.thread, typed)) ? from.thread : null;
-}
-
-async function askFrom(state: State, from: AskFrom, typed: string): Promise<void> {
+async function askFrom(state: State, from: AddTo, typed: string): Promise<void> {
   if (!canAskFrom(state, from, typed)) {
     return;
   }
@@ -206,9 +193,9 @@ async function askFrom(state: State, from: AskFrom, typed: string): Promise<void
     ask(state, from.thread);
     return;
   }
-  const thread = await addTyped(state, from, typed);
-  if (thread !== null) {
-    ask(state, thread);
+  const added = await state.threads.addTyped(from, typed);
+  if (added !== null) {
+    ask(state, added.thread);
   }
 }
 

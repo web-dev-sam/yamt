@@ -1,0 +1,4 @@
+just mutants HEAD: 1105 killed, 2 timeout, 27 survived, 9 no-cov (96.85%); survivors on changed lines: 3, listed below
+frontend/src/ui/rangeThreads.ts:138 OptionalChaining `find(...)?.messages` → `.messages` — gate-covered: vue-tsc rejects member access on `Thread | undefined` (strict).
+frontend/src/ui/rangeThreads.ts:159 `message === undefined ? null` → `false ? null` — gate-covered: vue-tsc rejects `.id` on `Message | undefined`; the case only arises if Rust's add reply lacks the message it just appended.
+frontend/src/ui/rangeThreads.ts:238 OptionalChaining `lastMessage(list, id)?.body` → `.body` — gate-covered: vue-tsc rejects it (lastMessage returns `Message | undefined`).

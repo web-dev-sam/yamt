@@ -769,3 +769,108 @@ test("?gitlab=stopped skips a message unqueued before its post instead of stoppi
     { kind: "notQueued" },
   ]);
 });
+
+test("sendMessage posts only the named message and leaves the other queued ones waiting", async () => {
+  const source = review("?threads=seeded");
+  const before = postings(await threadsOf(source));
+  const seen: SendProgress[] = [];
+
+  const reply = valueOf(
+    await settled(source.sendMessage(messageId(1), (progress) => seen.push(progress))),
+  );
+
+  expect(reply).toMatchObject({ kind: "sent", sent: 1, refused: 0 });
+  expect(seen).toEqual([{ done: 1, of: 1 }]);
+  expect(postings(await threadsOf(source))).toEqual([
+    before[0],
+    {
+      kind: "pending",
+      text: "This needs a test.",
+      draftNote: 102,
+      mergeRequest: "!12",
+      link: LINK,
+    },
+    ...before.slice(2),
+  ]);
+});
+
+test("?gitlab=refusal refuses the named second queued message and sends nothing else", async () => {
+  const source = review("?threads=seeded&gitlab=refusal");
+  const before = postings(await threadsOf(source));
+
+  const reply = valueOf(await settled(source.sendMessage(messageId(1), () => undefined)));
+
+  expect(reply).toMatchObject({ kind: "sent", sent: 0, refused: 1 });
+  expect(postings(await threadsOf(source))).toEqual([
+    before[0],
+    { kind: "refused", text: "This needs a test.", reason: REFUSAL },
+    ...before.slice(2),
+  ]);
+});
+
+test("?gitlab=stopped stops on the named message and leaves it waiting", async () => {
+  const source = review("?threads=seeded&gitlab=stopped");
+  const before = await threadsOf(source);
+  const seen: SendProgress[] = [];
+
+  const reply = valueOf(
+    await settled(source.sendMessage(messageId(1), (progress) => seen.push(progress))),
+  );
+
+  expect(reply).toMatchObject({ kind: "stopped", sent: 0, refused: 0, reason: "glab timed out" });
+  expect(seen).toEqual([]);
+  expect(await threadsOf(source)).toEqual(before);
+});
+
+test("sendMessage of a message that does not wait sends nothing and answers 0 of 0 at once", async () => {
+  const source = review("?threads=seeded");
+  const before = await threadsOf(source);
+  const progress = vi.fn();
+
+  for (const id of [2, 3]) {
+    const reply = valueOf(await source.sendMessage(messageId(id), progress));
+
+    expect(reply).toEqual({ kind: "sent", list: { threads: before }, sent: 0, refused: 0 });
+  }
+  expect(progress).not.toHaveBeenCalled();
+});
+
+test("sendMessage of an unknown message answers UnknownMessage before the GitLab check", async () => {
+  const source = review("?threads=seeded&gitlab=noGlab");
+
+  expect(await source.sendMessage(messageId(99), () => undefined)).toEqual({
+    ok: false,
+    failure: { kind: "UnknownMessage", message: 99 },
+  });
+});
+
+test("sendMessage without a lined-up merge request answers why and changes nothing", async () => {
+  const source = review("?threads=seeded&gitlab=moved");
+  const before = await threadsOf(source);
+
+  const reply = valueOf(await settled(source.sendMessage(messageId(1), () => undefined)));
+
+  expect(reply).toEqual(valueOf(await settled(source.checkGitLab())));
+  expect(reply.kind).toBe("notLinedUp");
+  expect(await threadsOf(source)).toEqual(before);
+});
+
+test("sendMessage and sendQueue each answer SendRunning while the other runs, before the unknown check", async () => {
+  const source = review("?threads=seeded");
+  const queueSend = source.sendQueue(() => undefined);
+
+  expect(await source.sendMessage(messageId(99), () => undefined)).toEqual({
+    ok: false,
+    failure: { kind: "SendRunning" },
+  });
+  await settled(queueSend);
+  await source.queueMessage(messageId(3), "Third");
+  const messageSend = source.sendMessage(messageId(3), () => undefined);
+
+  expect(await source.sendQueue(() => undefined)).toEqual({
+    ok: false,
+    failure: { kind: "SendRunning" },
+  });
+  expect(valueOf(await settled(messageSend))).toMatchObject({ kind: "sent", sent: 1 });
+  expect(valueOf(await settled(source.sendQueue(() => undefined)))).toMatchObject({ sent: 0 });
+});
