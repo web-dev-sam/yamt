@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- In the diff window, a comment or reply box's main button is now Queue: one press adds the comment and queues it
+  as a GitLab draft, ready for Send to GitLab. Holding Shift turns the button into Send, which adds, queues and sends
+  that one comment right away, leaving the rest of the queue as it is.
+
+### Changed
+
+- The box's former Comment button is now Note: it keeps the comment in yamt only (Ctrl/Cmd+Enter, as before).
+- Post on one of your notes queues it at once instead of opening a box; only an AI answer opens the "Text to post"
+  box, whose button is Queue too (Send with Shift held).
+
 ## [0.7.3] - 2026-11-20
 
 ### Added

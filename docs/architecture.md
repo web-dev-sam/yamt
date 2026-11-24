@@ -733,7 +733,10 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   route with an explicit position (#118) — `glab_answer.rs` `sent` (one `Glab::send`) and `posted`, one status `match`
   over gitio's `HttpCall`: a 2xx is a draft (its id read from the body), 401/403/429 and any other non-4xx stop the
   send with `HttpAnswer::reason`, another 4xx refuses that message, no HTTP answer stops in glab's words —, and
-  reports progress per message. The position's `old_line`/`new_line` name the place's
+  reports progress per message. `send_message(range, glab, threads, message, progress)` is the same send restricted to
+  that one message (#198, `Covers { Queue | Message }`): `UnknownMessage` for a message not shown in the range before
+  the GitLab check (`ThreadStore::require_shown`), every other message left as it is, and a message that does not wait
+  answered `Sent` 0/0 without listing drafts. The position's `old_line`/`new_line` name the place's
   end (`gitlab_lines`, the 1-based `DiffLine::left`/`right` every end of a body uses); a one-line place posts that body
   unchanged, a range adds `position[line_range] { start, end }` (#147, `gitlab/line_range.rs`: each end
   `{ line_code, type?, old_line?, new_line? }`, `type` `old` for a removed end, `new` for an added one, left out for an
@@ -838,11 +841,21 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   (`RangeApp`, `rangeStore.ts`) owns the threads (`rangeThreads.ts`, `rangeOpen.ts` — each
   stored thread's box key and open state —, `rangeDrafts.ts`: a draft holds its `place`, and a drag of the same place
   — the same `start`, the same shown column and line of `end` — focuses it, any other opens a new draft;
-  `rangeAdds.ts` the one reactive record of adds in flight, which Ask AI reads, #124), GitLab (`rangeGitLab.ts`; its
-  `linedUpRow` gives the Post box's `@` completion the lined-up merge request's loaded row, #191, §5.4) and the
-  AI (`rangeAi.ts`: `ask(from: AskFrom, typed)` is Ask AI's one step — a non-blank typed text added first as the note
-  or the new thread, then asked — and `canAsk(from, typed)` its one enabled rule, #124; `rangeAiRules.ts` the pure
-  rules it reads: the prompt rule, the held tables, the replay checks; `rangeAiView.ts` the answer's view); every
+  `rangeAdds.ts` the one reactive record of adds in flight, which Ask AI reads, #124; `addTyped(to: AddTo, text) →
+  { thread, message } | null` the one add of a box's typed text, the new thread for a draft key or the note for an
+  open thread, used by Note, Queue and Ask AI; `queue` answers whether the queue was stored), GitLab (`rangeGitLab.ts`;
+  its `linedUpRow` gives the Post box's `@` completion the lined-up merge request's loaded row, #191, §5.4; the one
+  owner of every box's primary button, a `ButtonView { label, title, disabled }`: `queueButton(text, sendNow)` — Queue,
+  or Send while Shift is held, off while not lined up, Send also while a send runs — and `postButton`, whose action on
+  a note is `queue` (Post queues at once) and on an AI answer `write` (the Post box); `queueTyped(to, text, sendNow)`
+  adds, queues and, with `sendNow`, sends only that message through `sendMessage`, a failed step stopping the rest;
+  `queuePost(message, text, sendNow)` the Post box's same chain; a send already running is reported `SendRunning`,
+  #198) and the AI (`rangeAi.ts`: `ask(from: AddTo, typed)` is Ask AI's one step — a non-blank typed text added first
+  through `addTyped`, then asked — and `canAsk(from, typed)` its one enabled rule, #124; `rangeAiRules.ts` the pure
+  rules it reads: the prompt rule, the held tables, the replay checks; `rangeAiView.ts` the answer's view);
+  `RangeThreadBox.vue` offers Queue (primary, first) and Note (outlined, keeps the comment local; Ctrl/Cmd+Enter),
+  `RangeMessageEditor.vue` takes its `text` and its `button: ButtonView` from `RangeMessage.vue` and emits
+  `submit(text, sendNow)`; only a note gets an Edit draft and only an AI answer a Post draft (#198); every
   thread word is in `rangeThreadText.ts` (`threadPlaceText`: `path:N`, `path:a-b`, `path:-a to +b`, and both paths for a
   renamed file's mixed range; the box header, its label and the AI's place value use it), every AI word in `aiText.ts`; closing asks `aiMayClose` (Keep Changes
   preferred, #111).

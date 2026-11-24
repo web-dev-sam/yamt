@@ -233,6 +233,8 @@ Names in older rows (orchestrator 2026-10-22, the git-operations cutover, #1431)
 
 Names in #129 and #133 (orchestrator 2026-10-30, #137): `JobPage`/`JobPage::built` is `WebPage`/`WebPage::job`, `JobOpened` is `PageOpened`, `open_job_page` is `open_page`, the window's `Mutex<BTreeSet<JobPage>>` is `pages: Mutex<BTreeSet<WebPage>>`, which also holds every row's merge-request page. The rules those rows state are unchanged.
 
+#123's "A message's Edit and Post boxes are never open at once" (orchestrator 2026-11-24, #198): only a note has Edit and only an AI answer opens the Post box, so the two can no longer meet and no exclusion is kept (`rangeDrafts.ts` sets each draft directly). The rule's outcome is unchanged.
+
 Names and numbers in #162 and #169 (docs keeper, the threads feature, #183): #169's `withPeople`, the one writer of a row's people, is `withRow`, the one row patcher (`assignees`, `reviewers`, `openDiscussions`); #162's "at most 20 rows per glab call" is 10 rows (`DISCUSSION_BATCH`, #179). The rules those rows state are otherwise unchanged.
 
 `StopMovedOn` means the stop the window shows is gone (orchestrator 2026-10-22, refines #89 after reviews #1435/#1440): whenever Rust answers it, the next `list_stop` lists git's current stop — a write from an older stop is refused by the new stop's own session (its versions start above the old ones, #1383); an Abort or Continue that finds another stop, and a worker panic, leave the state `MovedOn`, so the list opens git's stop. The window sends every `StopMovedOn` through `reportFailure` to one `nextStop({ kind: "outside" })`, never to a list that would answer `MovedOn` again. Rejected: a stop identity in every `Listing` (an IPC change where one state rule suffices).

@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `9628ca0a` (The local conflict check's merge, plan §2 #197: `Repo::merge_tree` always the plain `merge-tree --write-tree`, never `--quiet`, attributes from the target commit only; `merge_tree_supported(GitVersion)`, the one version gate; `check.rs` `require_merge_tree`). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `d9d494c4` (Queue a comment in one press, plan §2 #198: `send_message`/`sendMessage` send one queued message on `send_queue`'s path; `rangeThreads.ts` `addTyped(to: AddTo, text)` the one add of a box's text; `rangeGitLab.ts` `queueButton`, `queueTyped`, `queuePost` and the exported `ButtonView`). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 
