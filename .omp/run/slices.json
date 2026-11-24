@@ -1,7 +1,9 @@
 {
   "CommentQueueWebBoundary": {
+  "CommentQueueWebR1Boundary": {
     "owned": []
   },
+  "CommentQueueWebR1Correctness": {
   "CommentQueueSmoke": {
     "owned": []
   }
