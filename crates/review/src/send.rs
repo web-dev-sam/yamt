@@ -46,7 +46,7 @@ pub fn send_queue(
     threads: &Mutex<ThreadStore>,
     progress: &dyn Fn(SendProgress),
 ) -> Result<SendReply> {
-    send(range, glab, threads, None, progress)
+    send(range, glab, threads, Covers::Queue, progress)
 }
 
 /// `send_queue` for `message` alone: every other message stays as it is (plan §2 #198). A message that does not
@@ -58,16 +58,22 @@ pub fn send_message(
     message: MessageId,
     progress: &dyn Fn(SendProgress),
 ) -> Result<SendReply> {
-    require_listed(&locked(threads).list(range), message)?;
-    send(range, glab, threads, Some(message), progress)
+    locked(threads).require_shown(range, message)?;
+    send(range, glab, threads, Covers::Message(message), progress)
 }
 
-/// `only` names the one message to send; `None` sends the whole queue.
+/// The waiting messages a send posts.
+#[derive(Clone, Copy)]
+enum Covers {
+    Queue,
+    Message(MessageId),
+}
+
 fn send(
     range: &Range,
     glab: Option<&Glab>,
     threads: &Mutex<ThreadStore>,
-    only: Option<MessageId>,
+    covers: Covers,
     progress: &dyn Fn(SendProgress),
 ) -> Result<SendReply> {
     let Some(glab) = glab else {
@@ -75,17 +81,8 @@ fn send(
         return Ok(SendReply::NotLinedUp { why });
     };
     match lined_up(glab, range) {
-        Ok(target) => post_queue(glab, range, &target, threads, only, progress),
+        Ok(target) => post_queue(glab, range, &target, threads, covers, progress),
         Err(why) => Ok(SendReply::NotLinedUp { why }),
-    }
-}
-
-fn require_listed(list: &ThreadList, message: MessageId) -> Result<()> {
-    let mut messages = list.threads.iter().flat_map(|thread| &thread.messages);
-    if messages.any(|listed| listed.id == message) {
-        Ok(())
-    } else {
-        Err(Error::UnknownMessage { message })
     }
 }
 
@@ -101,10 +98,10 @@ fn post_queue(
     range: &Range,
     target: &LinedUp,
     threads: &Mutex<ThreadStore>,
-    only: Option<MessageId>,
+    covers: Covers,
     progress: &dyn Fn(SendProgress),
 ) -> Result<SendReply> {
-    let (queued, owned) = waiting_and_owned(threads, range, only);
+    let (queued, owned) = waiting_and_owned(threads, range, covers);
     let mut tally = Tally {
         done: 0,
         of: u32::try_from(queued.len()).unwrap_or(u32::MAX),
@@ -146,12 +143,13 @@ fn post_queue(
 fn waiting_and_owned(
     threads: &Mutex<ThreadStore>,
     range: &Range,
-    only: Option<MessageId>,
+    covers: Covers,
 ) -> (Vec<QueuedMessage>, Vec<u64>) {
     let store = locked(threads);
     let mut queued = store.queued(range);
-    if let Some(message) = only {
-        queued.retain(|waiting| waiting.message == message);
+    match covers {
+        Covers::Queue => {}
+        Covers::Message(message) => queued.retain(|waiting| waiting.message == message),
     }
     (queued, store.pending_draft_notes())
 }

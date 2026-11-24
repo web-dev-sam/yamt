@@ -180,6 +180,11 @@ impl ThreadStore {
         Ok(self.list(range))
     }
 
+    /// Refuses a message whose thread is not on a file of `range`.
+    pub(crate) fn require_shown(&self, range: &Range, message: MessageId) -> Result<()> {
+        shown_message(&self.file, range, message).map(|_| ())
+    }
+
     fn change_posting(
         &mut self,
         range: &Range,
