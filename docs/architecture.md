@@ -795,8 +795,8 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   `UnknownFile` → `UnknownRangeFile`, `Range` as the range's.
   `review.rs`: `list_threads`, `add_thread`, `add_note`,
   `queue_message`, `unqueue_message`, `edit_note`, `delete_message` (both refused with `SendRunning` while a send
-  runs, #123), `set_thread_session`, `add_ai_answer`, `check_gitlab`, async `send_queue` (a
-  progress `Channel`). `ai.rs`: `Mutex<AiState>` (`AiState { Off | On(Workspace) }`, `AiState::workspace()` the one
+  runs, #123), `set_thread_session`, `add_ai_answer`, `check_gitlab`, async `send_queue` and `send_message(message)`
+  (the queue's send for that one message, #198; a progress `Channel`). `ai.rs`: `Mutex<AiState>` (`AiState { Off | On(Workspace) }`, `AiState::workspace()` the one
   `AiOff` mapping), commands `prepare_checkout`, async `start_agent`, `send_to_agent`, `stop_agent`,
   `checkout_changes`, `discard_checkout`, `diff_texts` (`merge_core::compare` on a worker, #114); a page load stops
   the agent (deferred while the lock is held), the exit ends the workspace. `settings.rs` gains `set_agent`.
@@ -807,7 +807,7 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   `unmarkReviewed(file)`, `loadSinceReview(file)` (#195); `ReviewSource`: `listThreads`, `addThread(file, place, text)`, `addNote(thread, text)`,
   `queueMessage(message, text)`, `unqueueMessage(message)`, `editNote(message, text)`, `deleteMessage(message)`,
   `setThreadSession(thread, session)`,
-  `addAiAnswer(thread, session)`, `checkGitLab()`, `sendQueue(onProgress)`; `SettingsSource`/`ChunkSource` gain
+  `addAiAnswer(thread, session)`, `checkGitLab()`, `sendQueue(onProgress)`, `sendMessage(message, onProgress)`; `SettingsSource`/`ChunkSource` gain
   `setAgent(current, agent)`; `AgentSource` (the seven agent commands) is built only in `main.ts` with AI on.
   `jsonrpc/` is the one JSON-RPC connection; `agent/` is the ACP client (`AgentClient { ask, loadConversation,
   editDiff, isRunning, destroy }`, the permission table, the fold of a turn); `ipc/threadLine.ts` holds the domain

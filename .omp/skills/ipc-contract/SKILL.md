@@ -93,6 +93,7 @@ edit_note(message, text) / delete_message(message) -> ThreadList   an unsent Not
 set_thread_session(thread, session) / add_ai_answer(thread, session) -> ThreadList   the store numbers the AI's turns per session (#121)
 check_gitlab()                    -> GitLabCheck   LinedUp { merge_request } | NotLinedUp { why } (#119)
 send_queue(progress: Channel<SendProgress>) -> SendReply   async: Sent { sent, refused, list } | Stopped { reason, … } | NotLinedUp; a second send while one runs → SendRunning
+send_message(message, progress: Channel<SendProgress>) -> SendReply   async: send_queue's path for that message only (#198); unknown id → UnknownMessage before the check; a message not waiting → Sent 0/0; SendRunning as send_queue
 # the AI (`--ai` or `YAMT_AI` only, plan §2 #108–#115, #167, crate yamt-agent; Mutex<AiState>, AiState::workspace() the one AiOff mapping)
 prepare_checkout() -> CheckoutReply; start_agent(command, events: Channel<HostEvent>) -> AgentStartReply (async); send_to_agent(run, message); stop_agent(run)
 checkout_changes() -> CheckoutLook; discard_checkout() (async; RemoveFailed); diff_texts(old, next) -> Difference[] (merge_core::compare on a worker, #114)
