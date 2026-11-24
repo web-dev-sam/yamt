@@ -1,0 +1,2 @@
+just mutants HEAD: 840 killed, 0 timeout, 13 survived, 4 no coverage (98.02%); the four TS files mutated whole
+13 survivors + 4 no-coverage, all on lines this round did not change (fixtureReview 108; rangeDrafts 88/98/108/122; rangeGitLab 97; rangeThreads 91/106/134/155/234/235/242). New report line rangeGitLab.ts:178 killed.

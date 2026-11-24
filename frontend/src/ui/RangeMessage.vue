@@ -6,6 +6,8 @@ import type { Message, ThreadId } from "../ipc";
 import AiTurn from "./AiTurn.vue";
 import { copyOrSelect } from "./copyOrSelect";
 import { answerText, answerView, postBody, type AnswerView } from "./rangeAiView";
+import { isBlank } from "./rangeDrafts";
+import type { ButtonView } from "./rangeGitLab";
 import RangeMessageEditor from "./RangeMessageEditor.vue";
 import { isChangeable, noteChangeBlock } from "./rangeNoteChange";
 import { useRangeStore } from "./rangeStore";
@@ -15,8 +17,10 @@ import {
   EDIT_LABEL,
   noteChangeTitle,
   postingLabel,
+  SAVE_LABEL,
 } from "./rangeThreadText";
 import { COPIED, COPY } from "./serverText";
+import { useShiftHeld } from "./useShiftHeld";
 
 const props = defineProps<{ message: Message; thread: ThreadId }>();
 
@@ -25,6 +29,7 @@ const postButton = useTemplateRef<HTMLButtonElement>("postButton");
 const editButton = useTemplateRef<HTMLButtonElement>("editButton");
 const { gitlab, threads, ai, deleteNote } = useRangeStore();
 const copied = shallowRef(false);
+const shift = useShiftHeld();
 
 const threadAi = computed(() => (ai === null ? null : ai.of(props.thread)));
 const answer = computed((): AnswerView | null => {
@@ -37,17 +42,24 @@ const unshownText = computed(() =>
   answer.value?.kind === "turn" ? null : answerText(answer.value, navigator.platform),
 );
 const body = computed(() => postBody(props.message.body, threadAi.value));
-const postOpen = computed(
-  () => body.value.kind === "text" && threads.postDraft(props.message.id) !== null,
+const postText = computed(() =>
+  body.value.kind === "text" ? threads.postDraft(props.message.id) : null,
 );
+const postOpen = computed(() => postText.value !== null);
 const changeable = computed(() => isChangeable(props.message));
-const editOpen = computed(() => changeable.value && threads.editDraft(props.message.id) !== null);
+const editText = computed(() => (changeable.value ? threads.editDraft(props.message.id) : null));
+const editOpen = computed(() => editText.value !== null);
 const block = computed(() =>
   noteChangeBlock(gitlab.sending.value, threadAi.value === null ? null : threadAi.value.running),
 );
 const editTitle = computed(() => noteChangeTitle("edit", block.value));
 const deleteTitle = computed(() => noteChangeTitle("delete", block.value));
-const saveOffTitle = computed(() => (block.value === null ? null : editTitle.value));
+const queueButton = computed(() => gitlab.queueButton(postText.value ?? "", shift.value));
+const saveButton = computed((): ButtonView => ({
+  label: SAVE_LABEL,
+  title: block.value === null ? undefined : editTitle.value,
+  disabled: block.value !== null || isBlank(editText.value ?? ""),
+}));
 const post = computed(() => gitlab.postButton(props.message, body.value));
 const label = computed(() => postingLabel(props.message.posting));
 const refused = computed(() => props.message.posting.kind === "refused");
@@ -132,18 +144,20 @@ async function copy(text: string): Promise<void> {
 <template>
   <li class="flex flex-col gap-1 py-2">
     <RangeMessageEditor
-      v-if="postOpen"
+      v-if="postText !== null"
       :message="message.id"
       box="post"
-      :off-title="null"
+      :text="postText"
+      :button="queueButton"
       @submit="queue"
       @cancel="cancel"
     />
     <RangeMessageEditor
-      v-else-if="editOpen"
+      v-else-if="editText !== null"
       :message="message.id"
       box="edit"
-      :off-title="saveOffTitle"
+      :text="editText"
+      :button="saveButton"
       @submit="saveEdit"
       @cancel="cancelEdit"
     />

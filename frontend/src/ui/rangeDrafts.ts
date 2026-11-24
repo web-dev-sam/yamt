@@ -74,14 +74,6 @@ function setDraft(state: State, key: string, draft: Draft | null): void {
   state.drafts.value = drafts;
 }
 
-/** A message's Post and Edit boxes are never open at once (plan row 123). */
-function openMessageBox(state: State, open: string, closed: string, draft: Draft): void {
-  const drafts = new Map(state.drafts.value);
-  drafts.delete(closed);
-  drafts.set(open, draft);
-  state.drafts.value = drafts;
-}
-
 function threadDraft(state: State, key: string): ThreadDraft | null {
   const draft = state.drafts.value.get(key);
   return draft?.kind === "thread" ? draft : null;
@@ -149,7 +141,7 @@ function messageDrafts(
       return draft?.kind === "post" ? draft.text : null;
     },
     writePost: (message, text) => {
-      openMessageBox(state, postKey(message), editKey(message), { kind: "post", message, text });
+      setDraft(state, postKey(message), { kind: "post", message, text });
     },
     dropPost: (message) => {
       setDraft(state, postKey(message), null);
@@ -159,7 +151,7 @@ function messageDrafts(
       return draft?.kind === "edit" ? draft.text : null;
     },
     writeEdit: (message, text) => {
-      openMessageBox(state, editKey(message), postKey(message), { kind: "edit", message, text });
+      setDraft(state, editKey(message), { kind: "edit", message, text });
     },
     dropEdit: (message) => {
       setDraft(state, editKey(message), null);

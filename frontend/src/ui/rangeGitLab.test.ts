@@ -304,6 +304,9 @@ test("the progress label counts the message being sent, one send at a time", asy
   expect(live.gitlab.sendButton.value.label).toBe("Sending 2 of 2…");
   await live.gitlab.send();
   expect(progress).toHaveLength(1);
+  expect(live.problems).toEqual([
+    { action: "threads", step: "send", cause: { kind: "SendRunning" } },
+  ]);
 
   vi.setSystemTime(T0 + RECHECK_PAUSE_MS);
   live.gitlab.checkOnFocus();
@@ -653,6 +656,34 @@ test("a failed send after the queue keeps the message queued and reports the sen
     { action: "threads", step: "send", cause: { kind: "SendRunning" } },
   ]);
   expect(live.gitlab.sending.value).toBeNull();
+});
+
+test("Send to GitLab starting between the queue and Send's one-message send reports SendRunning; the message stays queued", async () => {
+  const sent: MessageId[] = [];
+  const afterQueue: (() => void)[] = [];
+  const live = await rig(SEEDED, (fixture) => ({
+    ...sendsTo(sent)(fixture),
+    sendQueue: () => new Promise(() => undefined),
+    queueMessage: async (message, text) => {
+      const queued = await fixture.queueMessage(message, text);
+      for (const each of afterQueue) {
+        each();
+      }
+      return queued;
+    },
+  }));
+  await checked(live);
+  afterQueue.push(() => {
+    void live.gitlab.send();
+  });
+
+  await live.gitlab.queueTyped({ kind: "thread", thread: threadId(live, 3) }, "Raced", true);
+
+  expect(lastOf(live, 3).posting).toEqual({ kind: "queued", text: "Raced" });
+  expect(sent).toEqual([]);
+  expect(live.problems).toEqual([
+    { action: "threads", step: "send", cause: { kind: "SendRunning" } },
+  ]);
 });
 
 test("a failed add stops the chain and keeps the typed text", async () => {

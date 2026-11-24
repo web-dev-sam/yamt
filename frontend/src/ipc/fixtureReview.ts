@@ -37,6 +37,7 @@ type Store = {
 };
 
 type Tally = { sent: number; refused: number };
+type Covers = { readonly kind: "queue" } | { readonly kind: "message"; readonly id: number };
 
 const CHECKING_MS = 3000;
 const POST_PAUSE_MS = 300;
@@ -195,11 +196,13 @@ function record(
 
 async function postQueue(
   store: Store,
-  only: number | null,
+  covers: Covers,
   onProgress: (progress: SendProgress) => void,
 ): Promise<Generated.SendReply> {
   const waiting = messagesOf(store).filter(({ posting }) => waitingText(posting) !== null);
-  const queued = [...waiting.entries()].filter(([, { id }]) => only === null || id === only);
+  const queued = [...waiting.entries()].filter(
+    ([, { id }]) => covers.kind === "queue" || covers.id === id,
+  );
   const tally: Tally = { sent: 0, refused: 0 };
   for (const [index, [place, message]] of queued.entries()) {
     await pause(POST_PAUSE_MS);
@@ -216,28 +219,25 @@ async function postQueue(
   return { kind: "sent", list: listed(store), ...tally };
 }
 
-/** `only` names the one message to send (plan row 198); null sends the whole queue. */
 async function send(
   store: Store,
-  only: number | null,
+  covers: Covers,
   onProgress: (progress: SendProgress) => void,
 ): Promise<SourceResult<SendReply>> {
   if (store.sending) {
     return { ok: false, failure: { kind: "SendRunning" } };
   }
-  if (only !== null && !messagesOf(store).some((message) => message.id === only)) {
-    return { ok: false, failure: { kind: "UnknownMessage", message: only } };
+  if (covers.kind === "message" && !messagesOf(store).some(({ id }) => id === covers.id)) {
+    return { ok: false, failure: { kind: "UnknownMessage", message: covers.id } };
   }
   const check = gitLabCheck(store.script, store.start);
   if (check.kind === "notLinedUp") {
     return { ok: true, value: toSendReply({ kind: "notLinedUp", why: check.why }) };
   }
   store.sending = true;
-  try {
-    return { ok: true, value: toSendReply(await postQueue(store, only, onProgress)) };
-  } finally {
-    store.sending = false;
-  }
+  const reply = toSendReply(await postQueue(store, covers, onProgress));
+  store.sending = false;
+  return { ok: true, value: reply };
 }
 
 function threadCalls(
@@ -294,7 +294,7 @@ export function createFixtureReview(log: Log, search: string, start: RangeStart)
       }
       return { ok: true, value: toGitLabCheck(gitLabCheck(store.script, store.start)) };
     },
-    sendQueue: (onProgress) => send(store, null, onProgress),
-    sendMessage: (message, onProgress) => send(store, message, onProgress),
+    sendQueue: (onProgress) => send(store, { kind: "queue" }, onProgress),
+    sendMessage: (id, onProgress) => send(store, { kind: "message", id }, onProgress),
   };
 }

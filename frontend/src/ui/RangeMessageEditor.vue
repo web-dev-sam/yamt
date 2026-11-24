@@ -6,15 +6,18 @@ import { knownMentions } from "../mergeRequests";
 import { boxKeydown } from "./boxKeys";
 import MergeRequestMentionList from "./MergeRequestMentionList.vue";
 import { useMentions } from "./mergeRequestMentions";
-import { isBlank } from "./rangeDrafts";
-import { linedUpRow } from "./rangeGitLab";
+import { linedUpRow, type ButtonView } from "./rangeGitLab";
 import { useRangeStore } from "./rangeStore";
-import { CANCEL_LABEL, EDIT_FIELD_LABEL, POST_FIELD_LABEL, SAVE_LABEL } from "./rangeThreadText";
-import { useShiftHeld } from "./useShiftHeld";
+import { CANCEL_LABEL, EDIT_FIELD_LABEL, POST_FIELD_LABEL } from "./rangeThreadText";
 
 type MessageBox = "post" | "edit";
 
-const props = defineProps<{ message: MessageId; box: MessageBox; offTitle: string | null }>();
+const props = defineProps<{
+  message: MessageId;
+  box: MessageBox;
+  text: string;
+  button: ButtonView;
+}>();
 const emit = defineEmits<{ submit: [text: string, sendNow: boolean]; cancel: [] }>();
 
 const FIELD_LABELS: Readonly<Record<MessageBox, string>> = {
@@ -24,7 +27,6 @@ const FIELD_LABELS: Readonly<Record<MessageBox, string>> = {
 
 const field = useTemplateRef<HTMLTextAreaElement>("field");
 const { threads, gitlab, mergeRequests } = useRangeStore();
-const shift = useShiftHeld();
 const mentions =
   props.box === "post"
     ? useMentions(field, () =>
@@ -32,20 +34,6 @@ const mentions =
       )
     : null;
 
-const text = computed(
-  () =>
-    (props.box === "post" ? threads.postDraft(props.message) : threads.editDraft(props.message)) ??
-    "",
-);
-const button = computed(() =>
-  props.box === "post"
-    ? gitlab.queueButton(text.value, shift.value)
-    : {
-        label: SAVE_LABEL,
-        title: props.offTitle ?? undefined,
-        disabled: props.offTitle !== null || isBlank(text.value),
-      },
-);
 const fieldAria = computed(() => mentions?.fieldAria.value ?? {});
 
 onMounted(() => {
@@ -65,8 +53,8 @@ function typed(event: Event): void {
 
 function submit(sendNow: boolean): void {
   mentions?.close();
-  if (!button.value.disabled) {
-    emit("submit", text.value, sendNow);
+  if (!props.button.disabled) {
+    emit("submit", props.text, sendNow);
   }
 }
 

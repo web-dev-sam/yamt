@@ -200,7 +200,7 @@ async function loadedSeeded(live: Rig, turns: readonly TurnView[]): Promise<void
 
 test("a new thread's first turn sends every note, wrapped in First message", async () => {
   const live = await rig();
-  await live.threads.addNote(live.fresh, "And the reminder?");
+  await live.threads.addTyped(on(live.fresh), "And the reminder?");
 
   void live.ai.ask(on(live.fresh), "");
 
@@ -247,8 +247,8 @@ test("a finished turn adds one answer; the next ask sends only the notes since i
   expect(live.client.loads).toEqual([]);
   expect(live.ai.canAsk(on(live.fresh), "")).toBe(false);
 
-  await live.threads.addNote(live.fresh, "Where?");
-  await live.threads.addNote(live.fresh, "And why?");
+  await live.threads.addTyped(on(live.fresh), "Where?");
+  await live.threads.addTyped(on(live.fresh), "And why?");
   void live.ai.ask(on(live.fresh), "");
 
   expect(askedAt(live, 1).request).toEqual({ session: "s1", text: "Where?\n\nAnd why?" });
@@ -394,7 +394,7 @@ test("a stored session is loaded once when shown, and Ask waits for it", async (
 
   expect(live.client.loads.map((each) => each.session)).toEqual([SEEDED_SESSION]);
   expect(aiOf(live, live.seeded)).toMatchObject({ loadedSession: SEEDED_SESSION, loaded: null });
-  await live.threads.addNote(live.seeded, "Who calls it?");
+  await live.threads.addTyped(on(live.seeded), "Who calls it?");
   expect(live.ai.canAsk(on(live.seeded), "")).toBe(false);
   void live.ai.ask(on(live.seeded), "");
   expect(live.client.asks).toEqual([]);
@@ -410,7 +410,7 @@ test("a stored session is loaded once when shown, and Ask waits for it", async (
 
 test("turns omp holds without an answer in the thread (a reload mid-turn) become answers before Ask is offered", async () => {
   const live = await rig();
-  await live.threads.addNote(live.seeded, "Who calls it?");
+  await live.threads.addTyped(on(live.seeded), "Who calls it?");
   live.ai.load(live.seeded);
   const turns = [view("Yes"), view("Half"), view("Rest")];
   loadAt(live, 0).answer({ kind: "loaded", turns });
@@ -424,7 +424,7 @@ test("turns omp holds without an answer in the thread (a reload mid-turn) become
     { kind: "aiAnswer", session: SEEDED_SESSION, turn: 2 },
   ]);
   expect(live.ai.canAsk(on(live.seeded), "")).toBe(false);
-  await live.threads.addNote(live.seeded, "And now?");
+  await live.threads.addTyped(on(live.seeded), "And now?");
   void live.ai.ask(on(live.seeded), "");
   expect(askedAt(live, 0).request.text).toBe("And now?");
   askedAt(live, 0).end({ kind: "finished", turn: view("Now") });
@@ -498,7 +498,7 @@ test("a session omp lost at load: the next ask starts a new one with every note 
 test("a session omp lost at the ask: a new one starts at once with every note wrapped", async () => {
   const live = await rig();
   await loadedSeeded(live, [view("Yes")]);
-  await live.threads.addNote(live.seeded, "Who calls it?");
+  await live.threads.addTyped(on(live.seeded), "Who calls it?");
   void live.ai.ask(on(live.seeded), "");
   expect(askedAt(live, 0).request.text).toBe("Who calls it?");
 
@@ -520,7 +520,7 @@ test("a turn of a new session omp never held shows no answer of the lost session
   askedAt(live, 0).events.session(session("s1"));
   askedAt(live, 0).end({ kind: "finished", turn: view("A") });
   await settle();
-  await live.threads.addNote(live.fresh, "More?");
+  await live.threads.addTyped(on(live.fresh), "More?");
   void live.ai.ask(on(live.fresh), "");
   askedAt(live, 1).end({ kind: "failed", turn: view(""), failure: { kind: "sessionGone" } });
   await settle();
@@ -540,7 +540,7 @@ test("a turn of a new session omp never held shows no answer of the lost session
 test("two threads run at once; one ending leaves the other running", async () => {
   const live = await rig();
   await loadedSeeded(live, [view("Yes")]);
-  await live.threads.addNote(live.seeded, "Who calls it?");
+  await live.threads.addTyped(on(live.seeded), "Who calls it?");
 
   void live.ai.ask(on(live.fresh), "");
   void live.ai.ask(on(live.seeded), "");
@@ -605,7 +605,7 @@ test("no First message context (the range not open) means nothing to ask", async
 
 async function askedSeeded(live: Rig, turns: readonly TurnView[]): Promise<Asked> {
   await loadedSeeded(live, turns);
-  await live.threads.addNote(live.seeded, "Who calls it?");
+  await live.threads.addTyped(on(live.seeded), "Who calls it?");
   void live.ai.ask(on(live.seeded), "");
   return askedAt(live, live.client.asks.length - 1);
 }
@@ -629,7 +629,7 @@ async function failedSeededLoad(live: Rig): Promise<void> {
   live.ai.load(live.seeded);
   loadAt(live, 0).answer({ kind: "failed", failure: CRASHED });
   await settle();
-  await live.threads.addNote(live.seeded, "Who calls it?");
+  await live.threads.addTyped(on(live.seeded), "Who calls it?");
 }
 
 test("a session's second turn stopped before omp held it (replay of one turn) adds no answer", async () => {
@@ -816,7 +816,7 @@ test("showing the box again while a turn runs after a failed load loads nothing"
 
 test("a failed record of a replayed turn keeps Ask off until a load records it; answer i stays omp's turn i", async () => {
   const live = await rig((write) => write === 1);
-  await live.threads.addNote(live.seeded, "And now?");
+  await live.threads.addTyped(on(live.seeded), "And now?");
   live.ai.load(live.seeded);
   const turns = [view("Yes"), view("Half")];
   loadAt(live, 0).answer({ kind: "loaded", turns });
@@ -835,7 +835,7 @@ test("a failed record of a replayed turn keeps Ask off until a load records it; 
   loadAt(live, 1).answer({ kind: "loaded", turns });
   await settle();
   expect(lastAnswer(live, live.seeded)).toEqual(aiAnswer(seeded, 1));
-  await live.threads.addNote(live.seeded, "Then?");
+  await live.threads.addTyped(on(live.seeded), "Then?");
   void live.ai.ask(on(live.seeded), "");
   expect(askedAt(live, 0).request.text).toBe("Then?");
   const now = view("Now");
@@ -884,7 +884,7 @@ test("Retry after a crash omp never held asks again with the notes added since",
   await settle();
   loadAt(live, 0).answer({ kind: "loaded", turns: [] });
   await settle();
-  await live.threads.addNote(live.fresh, "Also X");
+  await live.threads.addTyped(on(live.fresh), "Also X");
 
   live.ai.retry(live.fresh);
 
@@ -918,7 +918,7 @@ function draftOf(key: string): AddTo {
 test("Ask AI with typed text on a thread with an answer stores it as a note, then asks with the notes since the answer", async () => {
   const live = await rig();
   await loadedSeeded(live, [view("Yes")]);
-  await live.threads.addNote(live.seeded, "Who calls it?");
+  await live.threads.addTyped(on(live.seeded), "Who calls it?");
   live.threads.writeNote(live.seeded, "And where?");
 
   await live.ai.ask(on(live.seeded), "And where?");
@@ -946,7 +946,7 @@ test("Ask AI with typed text on a thread's first turn wraps every note in First 
 test("Ask AI with only blank text typed adds nothing and asks with the notes since the answer", async () => {
   const live = await rig();
   await loadedSeeded(live, [view("Yes")]);
-  await live.threads.addNote(live.seeded, "Who calls it?");
+  await live.threads.addTyped(on(live.seeded), "Who calls it?");
 
   await live.ai.ask(on(live.seeded), " \n");
 
@@ -1123,7 +1123,7 @@ test.each([false, true])(
     const askable = computed(() => live.ai.canAsk(on(live.fresh), "Q?"));
     expect(askable.value).toBe(true);
 
-    const comment = live.threads.addNote(live.fresh, "Q?");
+    const comment = live.threads.addTyped(on(live.fresh), "Q?");
     expect(askable.value).toBe(false);
     expect(live.ai.canAsk(on(threadAt(live, 1)), "Q?")).toBe(true);
     adds.open();
@@ -1142,13 +1142,13 @@ test("Ask AI is off while Comment adds that line's new thread; the added thread 
   const askable = computed(() => live.ai.canAsk(draftOf("draft-0"), "New?"));
   expect(askable.value).toBe(true);
 
-  const comment = live.threads.addThread("draft-0", "New?");
+  const comment = live.threads.addTyped(draftOf("draft-0"), "New?");
   expect(askable.value).toBe(false);
   expect(live.ai.canAsk(draftOf("draft-1"), "New?")).toBe(true);
   adds.open();
   const added = await comment;
 
-  expect(added === null ? false : live.ai.canAsk(on(added), "")).toBe(true);
+  expect(added === null ? false : live.ai.canAsk(on(added.thread), "")).toBe(true);
   expect(live.client.asks).toEqual([]);
 });
 
@@ -1160,7 +1160,7 @@ test("a refused Comment of a line's new thread turns its Ask AI on again", async
   );
   const askable = computed(() => live.ai.canAsk(draftOf("draft-0"), "New?"));
 
-  const comment = live.threads.addThread("draft-0", "New?");
+  const comment = live.threads.addTyped(draftOf("draft-0"), "New?");
   expect(askable.value).toBe(false);
   adds.open();
   await comment;

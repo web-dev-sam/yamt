@@ -1,0 +1,780 @@
+diff --git a/frontend/src/ipc/fixtureReview.ts b/frontend/src/ipc/fixtureReview.ts
+index 29decff..849c6d6 100644
+--- a/frontend/src/ipc/fixtureReview.ts
++++ b/frontend/src/ipc/fixtureReview.ts
+@@ -37,6 +37,7 @@ type Store = {
+ };
+ 
+ type Tally = { sent: number; refused: number };
++type Covers = { readonly kind: "queue" } | { readonly kind: "message"; readonly id: number };
+ 
+ const CHECKING_MS = 3000;
+ const POST_PAUSE_MS = 300;
+@@ -195,11 +196,13 @@ function record(
+ 
+ async function postQueue(
+   store: Store,
+-  only: number | null,
++  covers: Covers,
+   onProgress: (progress: SendProgress) => void,
+ ): Promise<Generated.SendReply> {
+   const waiting = messagesOf(store).filter(({ posting }) => waitingText(posting) !== null);
+-  const queued = [...waiting.entries()].filter(([, { id }]) => only === null || id === only);
++  const queued = [...waiting.entries()].filter(
++    ([, { id }]) => covers.kind === "queue" || covers.id === id,
++  );
+   const tally: Tally = { sent: 0, refused: 0 };
+   for (const [index, [place, message]] of queued.entries()) {
+     await pause(POST_PAUSE_MS);
+@@ -216,28 +219,25 @@ async function postQueue(
+   return { kind: "sent", list: listed(store), ...tally };
+ }
+ 
+-/** `only` names the one message to send (plan row 198); null sends the whole queue. */
+ async function send(
+   store: Store,
+-  only: number | null,
++  covers: Covers,
+   onProgress: (progress: SendProgress) => void,
+ ): Promise<SourceResult<SendReply>> {
+   if (store.sending) {
+     return { ok: false, failure: { kind: "SendRunning" } };
+   }
+-  if (only !== null && !messagesOf(store).some((message) => message.id === only)) {
+-    return { ok: false, failure: { kind: "UnknownMessage", message: only } };
++  if (covers.kind === "message" && !messagesOf(store).some(({ id }) => id === covers.id)) {
++    return { ok: false, failure: { kind: "UnknownMessage", message: covers.id } };
+   }
+   const check = gitLabCheck(store.script, store.start);
+   if (check.kind === "notLinedUp") {
+     return { ok: true, value: toSendReply({ kind: "notLinedUp", why: check.why }) };
+   }
+   store.sending = true;
+-  try {
+-    return { ok: true, value: toSendReply(await postQueue(store, only, onProgress)) };
+-  } finally {
+-    store.sending = false;
+-  }
++  const reply = toSendReply(await postQueue(store, covers, onProgress));
++  store.sending = false;
++  return { ok: true, value: reply };
+ }
+ 
+ function threadCalls(
+@@ -294,7 +294,7 @@ export function createFixtureReview(log: Log, search: string, start: RangeStart)
+       }
+       return { ok: true, value: toGitLabCheck(gitLabCheck(store.script, store.start)) };
+     },
+-    sendQueue: (onProgress) => send(store, null, onProgress),
+-    sendMessage: (message, onProgress) => send(store, message, onProgress),
++    sendQueue: (onProgress) => send(store, { kind: "queue" }, onProgress),
++    sendMessage: (id, onProgress) => send(store, { kind: "message", id }, onProgress),
+   };
+ }
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index c979da1..778ec33 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -10,15 +10,15 @@ Collapse toggle (plan §2 #126): `RangeView.vue`'s header button after Previous/
+ 
+ Reviewed marks (request `docs/slices/request-range-reviewed.md`, design `docs/slices/briefs/range-reviewed-design.md` option A, plan §2 #196): `rangeReviewed.ts` owns `marks` (written only after Rust answered), `counted`, `busy`, `toggle` (next file via `nextFile.ts` `nextOpen`), `reviewFromStart`, `loadSince` (a failure forgets the view). The mounted list (`MOUNTED_FILES`, `markShown`, `forget`) is in `rangeVisited.ts`. `RangeView.vue`'s header starts with the Reviewed button (Mark resolved's look: filled and `aria-pressed` when the file is reviewed, disabled while `busy` — also while the first list failed, which the problem bar names) and shows `reviewedCount` after the collapse toggle. `RangeApp.vue` keys each view by file and `useRangeController.ts` `viewKind` (a `changedSinceReview` mark → `"sinceReview"`, else `"whole"`), so a mark change remounts the view; `viewParts` gives the since view `loadSince` → `sinceShown` (reviewed text left under `SINCE_REVIEW_HEADING`, current right), no threads, `startsThreads: false` (a number press starts no drag), and the header note with Review from start. A search hit on the since view's left column opens the file without moving. `RangeFileRow.vue` ends with the mark: lucide `check` and a muted name, or `refresh-ccw-dot` in warning colour; every word is in `rangeText.ts`.
+ 
+-Range threads (plan §2 #116–#120): `rangeThreads.ts` (list, open set, drafts through `rangeDrafts.ts`, counts, `boxOf`) and `rangeGitLab.ts` (the check, Send, `postButton`/`sendButton`/`queueButton`, the send result) are held by `rangeStore`; every thread word is in `rangeThreadText.ts` (labels, prompts, `threadCountText`, `sendNoticeRow`; Copy/Copied are `serverText.ts`'s). `RangeView` renders `RangeThreadLayer.vue`, which teleports one `RangeThreadBox.vue` per key of `useRangeController`'s `threadHosts` into the host the editor keeps for that thread, so a box keeps its DOM, focus and typed text across CodeMirror redraws. A box is a draft (place, text, Queue/Note/Cancel) or an open thread (place, collapse, one `RangeMessage.vue` per message, the reply field); a collapsed thread has no host and so no box. A thread's place is a `ThreadPlace` (plan §2 #145–#148): a drag over the line numbers reaches `startThread(file, place)` through `rangeThreadParts`' `events`; it focuses the open draft of the same file whose place has the same `start` (`sameDiffLine`) and an `end` in the same column on the same line (`rangeDrafts.ts` `samePlace`), and any other place is a new draft, even one ending on the same line. `threadPlaceText(entry, place)` is the box header, its `aria-label` and the AI's `RELATIVE_FILE_PATH_WITH_LINE`: each end is a removed line's old path (renamed) and old number, or any other line's path and new number; one line reads `path:204`, both ends removed or neither `path:201-204`, one of each `path:-200 to +204`, and one of each in a renamed file `old.md:-3 to new.md:+4`. `RangeMessage` shows a note's text or the one `aiAnswer` line (an exhaustive switch C replaces), or in its place the message's open `RangeMessageEditor.vue`; the `postButton` (disabled ones keep their sentence as title on a wrapper), the posting label, and for a pending message the link as selectable text with Copy (a failed clipboard write selects the link). `postButton` returns the label, the title and the press action (`queue` | `write` | `unqueue` | null); `queue` (a note, plan §2 #198) queues its text at once; `write` (an AI answer) opens `RangeMessageEditor.vue` (`box="post"`, label "Text to post", Queue) in the message's place by writing a `post` draft (`rangeDrafts.ts`, keyed by `MessageId`: `postDraft`/`writePost`/`dropPost`), so a half-edited Post text survives a collapse and the 16-view eviction; a queue that lands drops it, and focus moves to the message's Post/Unqueue button after a queue or a Cancel. `RangeMessageEditor.vue` is the one in-place message editor for Post and Edit: it reads and writes the draft its `box` names, focuses its field on mount, keeps focus in the field on a submit press (`@mousedown.prevent`) and emits `submit(text, sendNow)`/`cancel`; Edit's Save is off while the text is blank or `offTitle` is set (shown as the title), Post's button is `queueButton`'s (below). A failed clipboard write selects the link (`copyOrSelect.ts`, shared with `ServerMenu`). Keys in every box field (the range boxes and the merge-request reply field `MergeRequestReplyField.vue`) go through the window-neutral `boxKeys.ts` `boxKeydown`: `Mod-Enter` submits and `Escape` cancels (built with `keys.ts` `keyList`, matched by `pressesKey`; only the composing check is its own) (a draft is dropped, a reply cleared), both `preventDefault` and `stopPropagation`; every other key stays the field's. `RangeApp` calls `fileListKey(event, navigator.platform)` as the other roots do; the box's Queue and Note keep focus in the field (`@mousedown.prevent`). `RangeSendButton.vue` sits left of the gear in each `RangeView` header; `RangeApp` shows the last send's result (`sendNoticeRow`) as a closable `NoticeBar` row and passes each file's thread count to `RangeFileRow` (a muted speech bubble, none at 0).
++Range threads (plan §2 #116–#120): `rangeThreads.ts` (list, open set, drafts through `rangeDrafts.ts`, counts, `boxOf`) and `rangeGitLab.ts` (the check, Send, `postButton`/`sendButton`/`queueButton`, the send result) are held by `rangeStore`; every thread word is in `rangeThreadText.ts` (labels, prompts, `threadCountText`, `sendNoticeRow`; Copy/Copied are `serverText.ts`'s). `RangeView` renders `RangeThreadLayer.vue`, which teleports one `RangeThreadBox.vue` per key of `useRangeController`'s `threadHosts` into the host the editor keeps for that thread, so a box keeps its DOM, focus and typed text across CodeMirror redraws. A box is a draft (place, text, Queue/Note/Cancel) or an open thread (place, collapse, one `RangeMessage.vue` per message, the reply field); a collapsed thread has no host and so no box. A thread's place is a `ThreadPlace` (plan §2 #145–#148): a drag over the line numbers reaches `startThread(file, place)` through `rangeThreadParts`' `events`; it focuses the open draft of the same file whose place has the same `start` (`sameDiffLine`) and an `end` in the same column on the same line (`rangeDrafts.ts` `samePlace`), and any other place is a new draft, even one ending on the same line. `threadPlaceText(entry, place)` is the box header, its `aria-label` and the AI's `RELATIVE_FILE_PATH_WITH_LINE`: each end is a removed line's old path (renamed) and old number, or any other line's path and new number; one line reads `path:204`, both ends removed or neither `path:201-204`, one of each `path:-200 to +204`, and one of each in a renamed file `old.md:-3 to new.md:+4`. `RangeMessage` shows a note's text or the one `aiAnswer` line (an exhaustive switch C replaces), or in its place the message's open `RangeMessageEditor.vue`; the `postButton` (disabled ones keep their sentence as title on a wrapper), the posting label, and for a pending message the link as selectable text with Copy (a failed clipboard write selects the link). `postButton` returns the label, the title and the press action (`queue` | `write` | `unqueue` | null); `queue` (a note, plan §2 #198) queues its text at once; `write` (an AI answer) opens `RangeMessageEditor.vue` (`box="post"`, label "Text to post", Queue) in the message's place by writing a `post` draft (`rangeDrafts.ts`, keyed by `MessageId`: `postDraft`/`writePost`/`dropPost`), so a half-edited Post text survives a collapse and the 16-view eviction; a queue that lands drops it, and focus moves to the message's Post/Unqueue button after a queue or a Cancel. `RangeMessageEditor.vue` is the one in-place message editor for Post and Edit: it shows the `text` and the `button` (`rangeGitLab.ts` `ButtonView`) `RangeMessage` passes and writes the draft its `box` names, focuses its field on mount, keeps focus in the field on a submit press (`@mousedown.prevent`) and emits `submit(text, sendNow)`/`cancel` unless the button is off; Edit's Save is off while the text is blank or a block is set (its text the title), Post's button is `queueButton`'s (below). A failed clipboard write selects the link (`copyOrSelect.ts`, shared with `ServerMenu`). Keys in every box field (the range boxes and the merge-request reply field `MergeRequestReplyField.vue`) go through the window-neutral `boxKeys.ts` `boxKeydown`: `Mod-Enter` submits and `Escape` cancels (built with `keys.ts` `keyList`, matched by `pressesKey`; only the composing check is its own) (a draft is dropped, a reply cleared), both `preventDefault` and `stopPropagation`; every other key stays the field's. `RangeApp` calls `fileListKey(event, navigator.platform)` as the other roots do; the box's Queue and Note keep focus in the field (`@mousedown.prevent`). `RangeSendButton.vue` sits left of the gear in each `RangeView` header; `RangeApp` shows the last send's result (`sendNoticeRow`) as a closable `NoticeBar` row and passes each file's thread count to `RangeFileRow` (a muted speech bubble, none at 0).
+ 
+-Queue and Note (request `docs/slices/request-comment-queue.md`, plan §2 #198): the thread box's buttons are Queue (primary, first) and Note (outlined, today's add through `rangeThreads.ts` `addTyped`; Ctrl/Cmd+Enter), then Ask AI / Stop and Cancel. `rangeGitLab.ts` `queueButton(text, sendNow)` is the one rule for the box's Queue and the Post box's Queue: label Queue, or Send while `useShiftHeld()` is true; off with the gate's sentence while not lined up (Checking GitLab… before the first answer), Send also off while a send runs (`SEND_RUNNING_TITLE`), else off only for a blank text, its title `queueTitle`/`sendOneTitle`. The click's own `shiftKey` is `sendNow`. `queueTyped(to, text, sendNow)` (the box) and `queuePost(message, text, sendNow)` (the Post box) re-check that rule, then add (`addTyped` names the new message), `queue` and, with `sendNow`, run the one send routine (`send(state, of, call)`, shared with Send to GitLab: its progress, result notice and `notLinedUp` check) over `sendMessage`; each step stops the chain on a failure, which goes through the problem path, so the message stays a note or queued.
++Queue and Note (request `docs/slices/request-comment-queue.md`, plan §2 #198): the thread box's buttons are Queue (primary, first) and Note (outlined, today's add through `rangeThreads.ts` `addTyped`; Ctrl/Cmd+Enter), then Ask AI / Stop and Cancel. `rangeGitLab.ts` `queueButton(text, sendNow)` is the one rule for the box's Queue and the Post box's Queue: label Queue, or Send while `useShiftHeld()` is true; off with the gate's sentence while not lined up (Checking GitLab… before the first answer), Send also off while a send runs (`SEND_RUNNING_TITLE`), else off only for a blank text, its title `queueTitle`/`sendOneTitle`. The click's own `shiftKey` is `sendNow`. `RangeMessage.vue` computes each box's `ButtonView` (the Post box's `queueButton`, the Edit box's Save) and hands it with the draft's text to `RangeMessageEditor.vue`, which shows them and knows no button rule. `queueTyped(to, text, sendNow)` (the box) and `queuePost(message, text, sendNow)` (the Post box) re-check that rule, then add (`addTyped` names the new message), `queue` and, with `sendNow`, run the one send routine (`send(state, of, call)`, shared with Send to GitLab: its progress, result notice and `notLinedUp` check) over `sendMessage`; each step stops the chain on a failure, which goes through the problem path, so the message stays a note or queued. A send that finds another one running reports `SendRunning` under the send step, so a Shift+Send that loses that race leaves its message queued with a problem shown.
+ 
+-Edit and Delete (plan §2 #123): `rangeNoteChange.ts` holds both rules — `isChangeable` (a note not pending) decides whether `RangeMessage.vue` shows them, and `noteChangeBlock(sending, aiTurn)` (a send running first, then the thread's AI turn) turns them and Save off, with `noteChangeTitle`'s hover text. Edit writes an `edit` draft (`rangeDrafts.ts` `editDraft`/`writeEdit`/`dropEdit`), shown in the message's place by `RangeMessageEditor.vue` (`box="edit"`, label "Comment text", Save; its `offTitle` is the block's title); writing an `edit` draft drops the message's `post` draft and the reverse, so the two boxes are never open at once. `editNote` sends only a non-blank text and drops the draft when stored; focus returns to Edit after Save or Cancel. Delete goes through `rangeStore`'s `deleteNote`, which asks `{ kind: "deleteNote" }` first. Every list a reply brings (`setList`) drops the open state and the reply, Post and Edit drafts of threads and messages it no longer holds, and the Edit draft of a note no longer changeable (a Send that made it pending closes its box), so a thread removed with its last note leaves nothing behind.
++Edit and Delete (plan §2 #123): `rangeNoteChange.ts` holds both rules — `isChangeable` (a note not pending) decides whether `RangeMessage.vue` shows them, and `noteChangeBlock(sending, aiTurn)` (a send running first, then the thread's AI turn) turns them and Save off, with `noteChangeTitle`'s hover text. Edit writes an `edit` draft (`rangeDrafts.ts` `editDraft`/`writeEdit`/`dropEdit`), shown in the message's place by `RangeMessageEditor.vue` (`box="edit"`, label "Comment text", Save, titled with the block's text while blocked). Only a note gets an Edit draft and only an AI answer a Post draft, so a message never has both. `editNote` sends only a non-blank text and drops the draft when stored; focus returns to Edit after Save or Cancel. Delete goes through `rangeStore`'s `deleteNote`, which asks `{ kind: "deleteNote" }` first. Every list a reply brings (`setList`) drops the open state and the reply, Post and Edit drafts of threads and messages it no longer holds, and the Edit draft of a note no longer changeable (a Send that made it pending closes its box), so a thread removed with its last note leaves nothing behind.
+ 
+ The AI in a range thread (plan §2 #111–#115, #122): `AiTurn.vue` (`turn`, `end`, `client`, `@retry`) shows one turn — "Thinking and steps" collapsed (`AiStep.vue` per step, live while running), the answer through `useMarkdown`, then the stopped line or one failure sentence with Retry; `AiStep.vue` shows a step's title, status and outputs, an edit as `EditDiff.vue` (collapsed "Edited/Created <path>"; on opening `client.editDiff`, rows from `editDiffLines.ts`: 3 context lines, 2,000 rows, then "n more lines not shown" counting only context and changed lines; git's "\ No newline at end of file" row after a side's last line without one; a removed/added pair differing only by `\r` marked with each side's line ending, `\r` never shown; a created file needs no call). `AiStep` and `EditDiff` take only `Pick<AgentClient, "editDiff">`; `EditDiff` renders each row's cells from `diffRowCells` (old, new, sign, text, note: one exhaustive switch). `AgentSettings.vue` is the "AI" section the range root puts in `SettingsView`'s slot (rules in `agentSettingsFields.ts`: Use/Default, a default stored as null; the unknown placeholders from `agent`'s `unknownPlaceholders`). Every AI word is in `aiText.ts` (one sentence per `AgentFailure`, the turn's and diff's fixed words, the settings section's words, `YOLO_NOTE`, `unknownPlaceholderText`; the `app` kind, a diff failure and a failed discard through `problemText`'s `ai` action). The four views and `aiClose.ts` count as the range root (fence PM9 in `scripts/fences.ts`): they import no other root or `lsp/`, and only range files import them; the agent source and client are built only in `main.ts` (`scripts/agentFence.ts`, plan §2 #108). The range root's close guard calls `aiClose.ts` `aiMayClose`: Missing/Clean close silently, Changed/Unreadable ask `keepAiChanges`/`keepUnreadableCheckout` (Keep Changes the confirm; refs arrive as `{ branches, stash }` decided by `ipc/agentDomain.ts` `toCheckoutChanges`), Discard removes or reports and stays, Escape stays; a failed look closes (the shell removes only a clean checkout at exit). `useFollowEnd(scroller, content)` (useFollowEnd.ts) is the one follow-the-end rule for a scroller: ServerLogView's log and AiTurn's "Thinking and steps" list. A new follower uses it, never a copy. AiTurn's list is capped at 20rem (`max-h-80`, `opaque-scroller`) and EditDiff's box at 16rem (`max-h-64`) so a diff shows whole inside it; the answer below the list is never capped (plan §2 #124).
+ 
+-Ask AI (plan §2 #124): `RangeThreadBox.vue`'s header holds the place and the collapse button only; with AI on, the bottom row shows on every open thread and on a line's new thread — Queue, Note, Ask AI (Stop while this thread's turn runs), Cancel — and without it the row is as before (a new thread, or text typed). The box passes only its `AddTo` (`rangeThreads.ts`: `thread` or the new thread's `draft` key) and the typed text; `rangeAi.ts` holds the rule: `canAsk(from, typed)` — no turn runs, the conversation has loaded, no add in that box still runs (its own press's, Queue's or Note's), and a non-blank text typed or notes since the last answer (a new thread: a non-blank text) — and `ask(from, typed)` adds a non-blank text as a note through `rangeThreads`' `addTyped` (the thread and the new message, or null when nothing was stored), then asks; a refused add asks nothing. Ctrl/Cmd+Enter is Note. The adds in flight have one record, `rangeAdds.ts` (a `shallowRef` of a readonly set of `Add`s, replaced, never mutated: a line's new thread by its draft key, a note by its thread), held by `rangeThreads.ts`, which exposes `addingThread(draftKey)`/`addingNote(thread)`; `addThread` refuses a second add of the same draft, `addNote` refuses nothing; `rangeAi.ts` keeps no record of its own. `rangeAiView.ts` holds only the answer's view and the shared shape (`ThreadAi`, `IDLE`, `answerView`, `answering`, `liveTurn`, `answerText`, `postBody`); `rangeAiRules.ts` holds the pure rules `rangeAi.ts` reads: the prompt rule `promptText` with its `AskContext`, `answersIn`, `isGone`, `isKept`, and `heldAfter` (whether omp holds an ended turn's prompt).
++Ask AI (plan §2 #124): `RangeThreadBox.vue`'s header holds the place and the collapse button only; with AI on, the bottom row shows on every open thread and on a line's new thread — Queue, Note, Ask AI (Stop while this thread's turn runs), Cancel — and without it the row is as before (a new thread, or text typed). The box passes only its `AddTo` (`rangeThreads.ts`: `thread` or the new thread's `draft` key) and the typed text; `rangeAi.ts` holds the rule: `canAsk(from, typed)` — no turn runs, the conversation has loaded, no add in that box still runs (its own press's, Queue's or Note's), and a non-blank text typed or notes since the last answer (a new thread: a non-blank text) — and `ask(from, typed)` adds a non-blank text as a note through `rangeThreads`' `addTyped` (the thread and the new message, or null when nothing was stored), then asks; a refused add asks nothing. Ctrl/Cmd+Enter is Note. The adds in flight have one record, `rangeAdds.ts` (a `shallowRef` of a readonly set of `Add`s, replaced, never mutated: a line's new thread by its draft key, a note by its thread), held by `rangeThreads.ts`, which exposes `addingThread(draftKey)`/`addingNote(thread)`; `addTyped` refuses a second add of the same draft and nothing on a thread; `rangeAi.ts` keeps no record of its own. `rangeAiView.ts` holds only the answer's view and the shared shape (`ThreadAi`, `IDLE`, `answerView`, `answering`, `liveTurn`, `answerText`, `postBody`); `rangeAiRules.ts` holds the pure rules `rangeAi.ts` reads: the prompt rule `promptText` with its `AskContext`, `answersIn`, `isGone`, `isKept`, and `heldAfter` (whether omp holds an ended turn's prompt).
+ 
+ Language servers (plan §2 #67, #70): the store holds the app's one `LanguageServers` (built in `main.ts`) through `servers.ts` (`serverViews` follows `onChange`, the shown log, the actions, `screen` for the log); `ServerStatus.vue` sits left of the gear in all three header rows, `ServerMenu.vue` and `ServerLogView.vue` hang off it; every word is in `serverText.ts`, except an install hint's text (the commands per package manager, steps and lines), which is `installText.ts`. The menu reads each `ServerView`'s `help` and `notes` (plan §2 #72): a failed start or an exit (`failureHelp`) shows "If it is not installed:" and the same install text as "Not installed"; each note is one muted line under the state (`noteLine`).
+ 
+diff --git a/frontend/src/ui/RangeMessage.vue b/frontend/src/ui/RangeMessage.vue
+index ec667b4..18576f7 100644
+--- a/frontend/src/ui/RangeMessage.vue
++++ b/frontend/src/ui/RangeMessage.vue
+@@ -6,6 +6,8 @@ import type { Message, ThreadId } from "../ipc";
+ import AiTurn from "./AiTurn.vue";
+ import { copyOrSelect } from "./copyOrSelect";
+ import { answerText, answerView, postBody, type AnswerView } from "./rangeAiView";
++import { isBlank } from "./rangeDrafts";
++import type { ButtonView } from "./rangeGitLab";
+ import RangeMessageEditor from "./RangeMessageEditor.vue";
+ import { isChangeable, noteChangeBlock } from "./rangeNoteChange";
+ import { useRangeStore } from "./rangeStore";
+@@ -15,8 +17,10 @@ import {
+   EDIT_LABEL,
+   noteChangeTitle,
+   postingLabel,
++  SAVE_LABEL,
+ } from "./rangeThreadText";
+ import { COPIED, COPY } from "./serverText";
++import { useShiftHeld } from "./useShiftHeld";
+ 
+ const props = defineProps<{ message: Message; thread: ThreadId }>();
+ 
+@@ -25,6 +29,7 @@ const postButton = useTemplateRef<HTMLButtonElement>("postButton");
+ const editButton = useTemplateRef<HTMLButtonElement>("editButton");
+ const { gitlab, threads, ai, deleteNote } = useRangeStore();
+ const copied = shallowRef(false);
++const shift = useShiftHeld();
+ 
+ const threadAi = computed(() => (ai === null ? null : ai.of(props.thread)));
+ const answer = computed((): AnswerView | null => {
+@@ -37,17 +42,24 @@ const unshownText = computed(() =>
+   answer.value?.kind === "turn" ? null : answerText(answer.value, navigator.platform),
+ );
+ const body = computed(() => postBody(props.message.body, threadAi.value));
+-const postOpen = computed(
+-  () => body.value.kind === "text" && threads.postDraft(props.message.id) !== null,
++const postText = computed(() =>
++  body.value.kind === "text" ? threads.postDraft(props.message.id) : null,
+ );
++const postOpen = computed(() => postText.value !== null);
+ const changeable = computed(() => isChangeable(props.message));
+-const editOpen = computed(() => changeable.value && threads.editDraft(props.message.id) !== null);
++const editText = computed(() => (changeable.value ? threads.editDraft(props.message.id) : null));
++const editOpen = computed(() => editText.value !== null);
+ const block = computed(() =>
+   noteChangeBlock(gitlab.sending.value, threadAi.value === null ? null : threadAi.value.running),
+ );
+ const editTitle = computed(() => noteChangeTitle("edit", block.value));
+ const deleteTitle = computed(() => noteChangeTitle("delete", block.value));
+-const saveOffTitle = computed(() => (block.value === null ? null : editTitle.value));
++const queueButton = computed(() => gitlab.queueButton(postText.value ?? "", shift.value));
++const saveButton = computed((): ButtonView => ({
++  label: SAVE_LABEL,
++  title: block.value === null ? undefined : editTitle.value,
++  disabled: block.value !== null || isBlank(editText.value ?? ""),
++}));
+ const post = computed(() => gitlab.postButton(props.message, body.value));
+ const label = computed(() => postingLabel(props.message.posting));
+ const refused = computed(() => props.message.posting.kind === "refused");
+@@ -132,18 +144,20 @@ async function copy(text: string): Promise<void> {
+ <template>
+   <li class="flex flex-col gap-1 py-2">
+     <RangeMessageEditor
+-      v-if="postOpen"
++      v-if="postText !== null"
+       :message="message.id"
+       box="post"
+-      :off-title="null"
++      :text="postText"
++      :button="queueButton"
+       @submit="queue"
+       @cancel="cancel"
+     />
+     <RangeMessageEditor
+-      v-else-if="editOpen"
++      v-else-if="editText !== null"
+       :message="message.id"
+       box="edit"
+-      :off-title="saveOffTitle"
++      :text="editText"
++      :button="saveButton"
+       @submit="saveEdit"
+       @cancel="cancelEdit"
+     />
+diff --git a/frontend/src/ui/RangeMessageEditor.vue b/frontend/src/ui/RangeMessageEditor.vue
+index 0150973..a66fed3 100644
+--- a/frontend/src/ui/RangeMessageEditor.vue
++++ b/frontend/src/ui/RangeMessageEditor.vue
+@@ -6,15 +6,18 @@ import { knownMentions } from "../mergeRequests";
+ import { boxKeydown } from "./boxKeys";
+ import MergeRequestMentionList from "./MergeRequestMentionList.vue";
+ import { useMentions } from "./mergeRequestMentions";
+-import { isBlank } from "./rangeDrafts";
+-import { linedUpRow } from "./rangeGitLab";
++import { linedUpRow, type ButtonView } from "./rangeGitLab";
+ import { useRangeStore } from "./rangeStore";
+-import { CANCEL_LABEL, EDIT_FIELD_LABEL, POST_FIELD_LABEL, SAVE_LABEL } from "./rangeThreadText";
+-import { useShiftHeld } from "./useShiftHeld";
++import { CANCEL_LABEL, EDIT_FIELD_LABEL, POST_FIELD_LABEL } from "./rangeThreadText";
+ 
+ type MessageBox = "post" | "edit";
+ 
+-const props = defineProps<{ message: MessageId; box: MessageBox; offTitle: string | null }>();
++const props = defineProps<{
++  message: MessageId;
++  box: MessageBox;
++  text: string;
++  button: ButtonView;
++}>();
+ const emit = defineEmits<{ submit: [text: string, sendNow: boolean]; cancel: [] }>();
+ 
+ const FIELD_LABELS: Readonly<Record<MessageBox, string>> = {
+@@ -24,7 +27,6 @@ const FIELD_LABELS: Readonly<Record<MessageBox, string>> = {
+ 
+ const field = useTemplateRef<HTMLTextAreaElement>("field");
+ const { threads, gitlab, mergeRequests } = useRangeStore();
+-const shift = useShiftHeld();
+ const mentions =
+   props.box === "post"
+     ? useMentions(field, () =>
+@@ -32,20 +34,6 @@ const mentions =
+       )
+     : null;
+ 
+-const text = computed(
+-  () =>
+-    (props.box === "post" ? threads.postDraft(props.message) : threads.editDraft(props.message)) ??
+-    "",
+-);
+-const button = computed(() =>
+-  props.box === "post"
+-    ? gitlab.queueButton(text.value, shift.value)
+-    : {
+-        label: SAVE_LABEL,
+-        title: props.offTitle ?? undefined,
+-        disabled: props.offTitle !== null || isBlank(text.value),
+-      },
+-);
+ const fieldAria = computed(() => mentions?.fieldAria.value ?? {});
+ 
+ onMounted(() => {
+@@ -65,8 +53,8 @@ function typed(event: Event): void {
+ 
+ function submit(sendNow: boolean): void {
+   mentions?.close();
+-  if (!button.value.disabled) {
+-    emit("submit", text.value, sendNow);
++  if (!props.button.disabled) {
++    emit("submit", props.text, sendNow);
+   }
+ }
+ 
+diff --git a/frontend/src/ui/rangeAi.test.ts b/frontend/src/ui/rangeAi.test.ts
+index d4530ea..13a83c6 100644
+--- a/frontend/src/ui/rangeAi.test.ts
++++ b/frontend/src/ui/rangeAi.test.ts
+@@ -200,7 +200,7 @@ async function loadedSeeded(live: Rig, turns: readonly TurnView[]): Promise<void
+ 
+ test("a new thread's first turn sends every note, wrapped in First message", async () => {
+   const live = await rig();
+-  await live.threads.addNote(live.fresh, "And the reminder?");
++  await live.threads.addTyped(on(live.fresh), "And the reminder?");
+ 
+   void live.ai.ask(on(live.fresh), "");
+ 
+@@ -247,8 +247,8 @@ test("a finished turn adds one answer; the next ask sends only the notes since i
+   expect(live.client.loads).toEqual([]);
+   expect(live.ai.canAsk(on(live.fresh), "")).toBe(false);
+ 
+-  await live.threads.addNote(live.fresh, "Where?");
+-  await live.threads.addNote(live.fresh, "And why?");
++  await live.threads.addTyped(on(live.fresh), "Where?");
++  await live.threads.addTyped(on(live.fresh), "And why?");
+   void live.ai.ask(on(live.fresh), "");
+ 
+   expect(askedAt(live, 1).request).toEqual({ session: "s1", text: "Where?\n\nAnd why?" });
+@@ -394,7 +394,7 @@ test("a stored session is loaded once when shown, and Ask waits for it", async (
+ 
+   expect(live.client.loads.map((each) => each.session)).toEqual([SEEDED_SESSION]);
+   expect(aiOf(live, live.seeded)).toMatchObject({ loadedSession: SEEDED_SESSION, loaded: null });
+-  await live.threads.addNote(live.seeded, "Who calls it?");
++  await live.threads.addTyped(on(live.seeded), "Who calls it?");
+   expect(live.ai.canAsk(on(live.seeded), "")).toBe(false);
+   void live.ai.ask(on(live.seeded), "");
+   expect(live.client.asks).toEqual([]);
+@@ -410,7 +410,7 @@ test("a stored session is loaded once when shown, and Ask waits for it", async (
+ 
+ test("turns omp holds without an answer in the thread (a reload mid-turn) become answers before Ask is offered", async () => {
+   const live = await rig();
+-  await live.threads.addNote(live.seeded, "Who calls it?");
++  await live.threads.addTyped(on(live.seeded), "Who calls it?");
+   live.ai.load(live.seeded);
+   const turns = [view("Yes"), view("Half"), view("Rest")];
+   loadAt(live, 0).answer({ kind: "loaded", turns });
+@@ -424,7 +424,7 @@ test("turns omp holds without an answer in the thread (a reload mid-turn) become
+     { kind: "aiAnswer", session: SEEDED_SESSION, turn: 2 },
+   ]);
+   expect(live.ai.canAsk(on(live.seeded), "")).toBe(false);
+-  await live.threads.addNote(live.seeded, "And now?");
++  await live.threads.addTyped(on(live.seeded), "And now?");
+   void live.ai.ask(on(live.seeded), "");
+   expect(askedAt(live, 0).request.text).toBe("And now?");
+   askedAt(live, 0).end({ kind: "finished", turn: view("Now") });
+@@ -498,7 +498,7 @@ test("a session omp lost at load: the next ask starts a new one with every note
+ test("a session omp lost at the ask: a new one starts at once with every note wrapped", async () => {
+   const live = await rig();
+   await loadedSeeded(live, [view("Yes")]);
+-  await live.threads.addNote(live.seeded, "Who calls it?");
++  await live.threads.addTyped(on(live.seeded), "Who calls it?");
+   void live.ai.ask(on(live.seeded), "");
+   expect(askedAt(live, 0).request.text).toBe("Who calls it?");
+ 
+@@ -520,7 +520,7 @@ test("a turn of a new session omp never held shows no answer of the lost session
+   askedAt(live, 0).events.session(session("s1"));
+   askedAt(live, 0).end({ kind: "finished", turn: view("A") });
+   await settle();
+-  await live.threads.addNote(live.fresh, "More?");
++  await live.threads.addTyped(on(live.fresh), "More?");
+   void live.ai.ask(on(live.fresh), "");
+   askedAt(live, 1).end({ kind: "failed", turn: view(""), failure: { kind: "sessionGone" } });
+   await settle();
+@@ -540,7 +540,7 @@ test("a turn of a new session omp never held shows no answer of the lost session
+ test("two threads run at once; one ending leaves the other running", async () => {
+   const live = await rig();
+   await loadedSeeded(live, [view("Yes")]);
+-  await live.threads.addNote(live.seeded, "Who calls it?");
++  await live.threads.addTyped(on(live.seeded), "Who calls it?");
+ 
+   void live.ai.ask(on(live.fresh), "");
+   void live.ai.ask(on(live.seeded), "");
+@@ -605,7 +605,7 @@ test("no First message context (the range not open) means nothing to ask", async
+ 
+ async function askedSeeded(live: Rig, turns: readonly TurnView[]): Promise<Asked> {
+   await loadedSeeded(live, turns);
+-  await live.threads.addNote(live.seeded, "Who calls it?");
++  await live.threads.addTyped(on(live.seeded), "Who calls it?");
+   void live.ai.ask(on(live.seeded), "");
+   return askedAt(live, live.client.asks.length - 1);
+ }
+@@ -629,7 +629,7 @@ async function failedSeededLoad(live: Rig): Promise<void> {
+   live.ai.load(live.seeded);
+   loadAt(live, 0).answer({ kind: "failed", failure: CRASHED });
+   await settle();
+-  await live.threads.addNote(live.seeded, "Who calls it?");
++  await live.threads.addTyped(on(live.seeded), "Who calls it?");
+ }
+ 
+ test("a session's second turn stopped before omp held it (replay of one turn) adds no answer", async () => {
+@@ -816,7 +816,7 @@ test("showing the box again while a turn runs after a failed load loads nothing"
+ 
+ test("a failed record of a replayed turn keeps Ask off until a load records it; answer i stays omp's turn i", async () => {
+   const live = await rig((write) => write === 1);
+-  await live.threads.addNote(live.seeded, "And now?");
++  await live.threads.addTyped(on(live.seeded), "And now?");
+   live.ai.load(live.seeded);
+   const turns = [view("Yes"), view("Half")];
+   loadAt(live, 0).answer({ kind: "loaded", turns });
+@@ -835,7 +835,7 @@ test("a failed record of a replayed turn keeps Ask off until a load records it;
+   loadAt(live, 1).answer({ kind: "loaded", turns });
+   await settle();
+   expect(lastAnswer(live, live.seeded)).toEqual(aiAnswer(seeded, 1));
+-  await live.threads.addNote(live.seeded, "Then?");
++  await live.threads.addTyped(on(live.seeded), "Then?");
+   void live.ai.ask(on(live.seeded), "");
+   expect(askedAt(live, 0).request.text).toBe("Then?");
+   const now = view("Now");
+@@ -884,7 +884,7 @@ test("Retry after a crash omp never held asks again with the notes added since",
+   await settle();
+   loadAt(live, 0).answer({ kind: "loaded", turns: [] });
+   await settle();
+-  await live.threads.addNote(live.fresh, "Also X");
++  await live.threads.addTyped(on(live.fresh), "Also X");
+ 
+   live.ai.retry(live.fresh);
+ 
+@@ -918,7 +918,7 @@ function draftOf(key: string): AddTo {
+ test("Ask AI with typed text on a thread with an answer stores it as a note, then asks with the notes since the answer", async () => {
+   const live = await rig();
+   await loadedSeeded(live, [view("Yes")]);
+-  await live.threads.addNote(live.seeded, "Who calls it?");
++  await live.threads.addTyped(on(live.seeded), "Who calls it?");
+   live.threads.writeNote(live.seeded, "And where?");
+ 
+   await live.ai.ask(on(live.seeded), "And where?");
+@@ -946,7 +946,7 @@ test("Ask AI with typed text on a thread's first turn wraps every note in First
+ test("Ask AI with only blank text typed adds nothing and asks with the notes since the answer", async () => {
+   const live = await rig();
+   await loadedSeeded(live, [view("Yes")]);
+-  await live.threads.addNote(live.seeded, "Who calls it?");
++  await live.threads.addTyped(on(live.seeded), "Who calls it?");
+ 
+   await live.ai.ask(on(live.seeded), " \n");
+ 
+@@ -1123,7 +1123,7 @@ test.each([false, true])(
+     const askable = computed(() => live.ai.canAsk(on(live.fresh), "Q?"));
+     expect(askable.value).toBe(true);
+ 
+-    const comment = live.threads.addNote(live.fresh, "Q?");
++    const comment = live.threads.addTyped(on(live.fresh), "Q?");
+     expect(askable.value).toBe(false);
+     expect(live.ai.canAsk(on(threadAt(live, 1)), "Q?")).toBe(true);
+     adds.open();
+@@ -1142,13 +1142,13 @@ test("Ask AI is off while Comment adds that line's new thread; the added thread
+   const askable = computed(() => live.ai.canAsk(draftOf("draft-0"), "New?"));
+   expect(askable.value).toBe(true);
+ 
+-  const comment = live.threads.addThread("draft-0", "New?");
++  const comment = live.threads.addTyped(draftOf("draft-0"), "New?");
+   expect(askable.value).toBe(false);
+   expect(live.ai.canAsk(draftOf("draft-1"), "New?")).toBe(true);
+   adds.open();
+   const added = await comment;
+ 
+-  expect(added === null ? false : live.ai.canAsk(on(added), "")).toBe(true);
++  expect(added === null ? false : live.ai.canAsk(on(added.thread), "")).toBe(true);
+   expect(live.client.asks).toEqual([]);
+ });
+ 
+@@ -1160,7 +1160,7 @@ test("a refused Comment of a line's new thread turns its Ask AI on again", async
+   );
+   const askable = computed(() => live.ai.canAsk(draftOf("draft-0"), "New?"));
+ 
+-  const comment = live.threads.addThread("draft-0", "New?");
++  const comment = live.threads.addTyped(draftOf("draft-0"), "New?");
+   expect(askable.value).toBe(false);
+   adds.open();
+   await comment;
+diff --git a/frontend/src/ui/rangeDrafts.ts b/frontend/src/ui/rangeDrafts.ts
+index b29a20c..1c2186f 100644
+--- a/frontend/src/ui/rangeDrafts.ts
++++ b/frontend/src/ui/rangeDrafts.ts
+@@ -74,14 +74,6 @@ function setDraft(state: State, key: string, draft: Draft | null): void {
+   state.drafts.value = drafts;
+ }
+ 
+-/** A message's Post and Edit boxes are never open at once (plan row 123). */
+-function openMessageBox(state: State, open: string, closed: string, draft: Draft): void {
+-  const drafts = new Map(state.drafts.value);
+-  drafts.delete(closed);
+-  drafts.set(open, draft);
+-  state.drafts.value = drafts;
+-}
+-
+ function threadDraft(state: State, key: string): ThreadDraft | null {
+   const draft = state.drafts.value.get(key);
+   return draft?.kind === "thread" ? draft : null;
+@@ -149,7 +141,7 @@ function messageDrafts(
+       return draft?.kind === "post" ? draft.text : null;
+     },
+     writePost: (message, text) => {
+-      openMessageBox(state, postKey(message), editKey(message), { kind: "post", message, text });
++      setDraft(state, postKey(message), { kind: "post", message, text });
+     },
+     dropPost: (message) => {
+       setDraft(state, postKey(message), null);
+@@ -159,7 +151,7 @@ function messageDrafts(
+       return draft?.kind === "edit" ? draft.text : null;
+     },
+     writeEdit: (message, text) => {
+-      openMessageBox(state, editKey(message), postKey(message), { kind: "edit", message, text });
++      setDraft(state, editKey(message), { kind: "edit", message, text });
+     },
+     dropEdit: (message) => {
+       setDraft(state, editKey(message), null);
+diff --git a/frontend/src/ui/rangeGitLab.test.ts b/frontend/src/ui/rangeGitLab.test.ts
+index f1cb702..b419924 100644
+--- a/frontend/src/ui/rangeGitLab.test.ts
++++ b/frontend/src/ui/rangeGitLab.test.ts
+@@ -304,6 +304,9 @@ test("the progress label counts the message being sent, one send at a time", asy
+   expect(live.gitlab.sendButton.value.label).toBe("Sending 2 of 2…");
+   await live.gitlab.send();
+   expect(progress).toHaveLength(1);
++  expect(live.problems).toEqual([
++    { action: "threads", step: "send", cause: { kind: "SendRunning" } },
++  ]);
+ 
+   vi.setSystemTime(T0 + RECHECK_PAUSE_MS);
+   live.gitlab.checkOnFocus();
+@@ -655,6 +658,34 @@ test("a failed send after the queue keeps the message queued and reports the sen
+   expect(live.gitlab.sending.value).toBeNull();
+ });
+ 
++test("Send to GitLab starting between the queue and Send's one-message send reports SendRunning; the message stays queued", async () => {
++  const sent: MessageId[] = [];
++  const afterQueue: (() => void)[] = [];
++  const live = await rig(SEEDED, (fixture) => ({
++    ...sendsTo(sent)(fixture),
++    sendQueue: () => new Promise(() => undefined),
++    queueMessage: async (message, text) => {
++      const queued = await fixture.queueMessage(message, text);
++      for (const each of afterQueue) {
++        each();
++      }
++      return queued;
++    },
++  }));
++  await checked(live);
++  afterQueue.push(() => {
++    void live.gitlab.send();
++  });
++
++  await live.gitlab.queueTyped({ kind: "thread", thread: threadId(live, 3) }, "Raced", true);
++
++  expect(lastOf(live, 3).posting).toEqual({ kind: "queued", text: "Raced" });
++  expect(sent).toEqual([]);
++  expect(live.problems).toEqual([
++    { action: "threads", step: "send", cause: { kind: "SendRunning" } },
++  ]);
++});
++
+ test("a failed add stops the chain and keeps the typed text", async () => {
+   const live = await rig(SEEDED, () => ({
+     addNote: async () => ({ ok: false, failure: { kind: "WorkerStopped" } }),
+diff --git a/frontend/src/ui/rangeGitLab.ts b/frontend/src/ui/rangeGitLab.ts
+index 666a4b8..1ac2389 100644
+--- a/frontend/src/ui/rangeGitLab.ts
++++ b/frontend/src/ui/rangeGitLab.ts
+@@ -36,9 +36,10 @@ import {
+ 
+ type SentReply = Exclude<SendReply, { readonly kind: "notLinedUp" }>;
+ 
+-type ButtonView = {
++/** A box's primary button; `title` undefined when there is nothing to say on hover. */
++export type ButtonView = {
+   readonly label: string;
+-  readonly title: string;
++  readonly title: string | undefined;
+   readonly disabled: boolean;
+ };
+ 
+@@ -175,6 +176,7 @@ type SendCall = (onProgress: (progress: SendProgress) => void) => Promise<Source
+ 
+ async function send(state: State, of: number, call: SendCall): Promise<void> {
+   if (state.sending.value !== null) {
++    state.report({ action: "threads", step: "send", cause: { kind: "SendRunning" } });
+     return;
+   }
+   state.result.value = null;
+diff --git a/frontend/src/ui/rangeThreads.test.ts b/frontend/src/ui/rangeThreads.test.ts
+index 9d0327b..f6c1c20 100644
+--- a/frontend/src/ui/rangeThreads.test.ts
++++ b/frontend/src/ui/rangeThreads.test.ts
+@@ -17,7 +17,7 @@ import {
+ import type { Problem } from "./problem";
+ import { isChangeable } from "./rangeNoteChange";
+ import { createRangeStore } from "./rangeStore";
+-import { createRangeThreads, isQueued, type RangeThreads } from "./rangeThreads";
++import { createRangeThreads, isQueued, type AddTo, type RangeThreads } from "./rangeThreads";
+ import { MOUNTED_FILES } from "./rangeVisited";
+ 
+ type Edit = (fixture: RangeSource) => Partial<RangeSource>;
+@@ -30,6 +30,7 @@ type Opened = {
+ };
+ 
+ const SEEDED = "?range=review&threads=seeded";
++const DRAFT_0: AddTo = { kind: "draft", key: "draft-0" };
+ const UNKNOWN: SourceFailure = { kind: "UnknownRangeFile", file: 99 };
+ 
+ async function opened(search = "?range=review", edit: Edit = () => ({})): Promise<Opened> {
+@@ -113,10 +114,10 @@ test("a draft's Comment adds the thread and its key becomes the stored id with t
+   });
+ 
+   threads.writeDraft("draft-0", "Why 300?");
+-  const added = await threads.addThread("draft-0", "Why 300?");
++  const added = await threads.addTyped(DRAFT_0, "Why 300?");
+ 
+   const thread = threadAt(threads, 0);
+-  expect(added).toBe(thread.id);
++  expect(added?.thread).toBe(thread.id);
+   expect(texts(thread)).toEqual(["Why 300?"]);
+   expect(thread.place).toEqual(place);
+   expect(threads.drafts.value.size).toBe(0);
+@@ -131,7 +132,7 @@ test("a refused Comment keeps the draft with its text and reports the add", asyn
+   }));
+   threads.startThread(board, onePlace(changedThreadLine("left", 1)));
+ 
+-  expect(await threads.addThread("draft-0", "Why 300?")).toBeNull();
++  expect(await threads.addTyped(DRAFT_0, "Why 300?")).toBeNull();
+ 
+   expect(threads.list.value.threads).toEqual([]);
+   expect(threads.drafts.value.get("draft-0")).toMatchObject({ kind: "thread", text: "Why 300?" });
+@@ -148,12 +149,9 @@ test("a second Comment while the first is in flight sends nothing more", async (
+   }));
+   threads.startThread(board, onePlace(changedThreadLine("left", 1)));
+ 
+-  const both = await Promise.all([
+-    threads.addThread("draft-0", "a"),
+-    threads.addThread("draft-0", "a"),
+-  ]);
++  const both = await Promise.all([threads.addTyped(DRAFT_0, "a"), threads.addTyped(DRAFT_0, "a")]);
+ 
+-  expect(both).toEqual([threadAt(threads, 0).id, null]);
++  expect(both.map((added) => added?.thread ?? null)).toEqual([threadAt(threads, 0).id, null]);
+ 
+   expect(calls).toBe(1);
+   expect(threads.list.value.threads).toHaveLength(1);
+@@ -172,8 +170,8 @@ test("after a refused Comment the next Comment on that draft is sent and stored
+   }));
+   threads.startThread(board, onePlace(changedThreadLine("left", 1)));
+ 
+-  await threads.addThread("draft-0", "a");
+-  await threads.addThread("draft-0", "a");
++  await threads.addTyped(DRAFT_0, "a");
++  await threads.addTyped(DRAFT_0, "a");
+ 
+   expect(calls).toBe(2);
+   expect(problems).toHaveLength(1);
+@@ -190,7 +188,7 @@ test("a Comment on a key with no draft makes no call and reports nothing", async
+     },
+   }));
+ 
+-  expect(await threads.addThread("draft-9", "x")).toBeNull();
++  expect(await threads.addTyped({ kind: "draft", key: "draft-9" }, "x")).toBeNull();
+ 
+   expect(calls).toBe(0);
+   expect(problems).toEqual([]);
+@@ -209,7 +207,7 @@ test("a refused Comment whose draft was dropped while it ran brings no draft bac
+     },
+   }));
+   threads.startThread(board, onePlace(changedThreadLine("left", 1)));
+-  const adding = threads.addThread("draft-0", "late");
++  const adding = threads.addTyped(DRAFT_0, "late");
+   threads.dropDraft("draft-0");
+ 
+   for (const open of openers) {
+@@ -306,7 +304,7 @@ test("counts per file ignore drafts", async () => {
+ 
+   expect([...threads.counts.value]).toEqual([[board, 6]]);
+ 
+-  await threads.addThread("draft-0", "here");
++  await threads.addTyped(DRAFT_0, "here");
+ 
+   expect(threads.counts.value.get(other)).toBe(1);
+   expect(threads.counts.value.get(board)).toBe(6);
+@@ -347,8 +345,8 @@ test("blank text is never sent", async () => {
+   }
+   threads.startThread(board, onePlace(changedThreadLine("left", 0)));
+ 
+-  expect(await threads.addThread("draft-0", "  \n")).toBeNull();
+-  expect(await threads.addNote(thread.id, "\t")).toBe(false);
++  expect(await threads.addTyped(DRAFT_0, "  \n")).toBeNull();
++  expect(await threads.addTyped({ kind: "thread", thread: thread.id }, "\t")).toBeNull();
+   await threads.queue(message.id, "");
+ 
+   expect(sent).toEqual([]);
+@@ -361,7 +359,7 @@ test("a note is added to its thread and its draft text cleared; a refused note k
+   threads.writeNote(id, "More?");
+   expect(threads.noteText(id)).toBe("More?");
+ 
+-  expect(await threads.addNote(id, "More?")).toBe(true);
++  expect(await threads.addTyped({ kind: "thread", thread: id }, "More?")).not.toBeNull();
+ 
+   expect(texts(threadAt(threads, 0))).toEqual(["Why does the overdue check go?", "More?"]);
+   expect(threads.noteText(id)).toBe("");
+@@ -369,7 +367,7 @@ test("a note is added to its thread and its draft text cleared; a refused note k
+   const refused = await opened(SEEDED, () => ({
+     addNote: async (thread) => ({ ok: false, failure: { kind: "UnknownThread", thread } }),
+   }));
+-  expect(await refused.threads.addNote(id, "Lost?")).toBe(false);
++  expect(await refused.threads.addTyped({ kind: "thread", thread: id }, "Lost?")).toBeNull();
+   expect(refused.threads.noteText(id)).toBe("Lost?");
+   expect(refused.problems).toEqual([
+     { action: "threads", step: "note", cause: { kind: "UnknownThread", thread: id } },
+@@ -536,7 +534,7 @@ test("a Post text outlives its file's view: 16 other files evict file 0 and the
+     throw new Error("no file");
+   }
+   store.threads.startThread(first.id, onePlace(changedThreadLine("right", 0)));
+-  await store.threads.addThread("draft-0", "Why?");
++  await store.threads.addTyped(DRAFT_0, "Why?");
+   const { id } = messageOf(threadAt(store.threads, 0));
+   store.threads.writePost(id, "Why is");
+ 
+@@ -588,7 +586,7 @@ test("a Cancel while Comment is in flight still adds and opens the thread", asyn
+   }));
+   const place = onePlace(changedThreadLine("left", 2));
+   threads.startThread(board, place);
+-  const adding = threads.addThread("draft-0", "late");
++  const adding = threads.addTyped(DRAFT_0, "late");
+   threads.dropDraft("draft-0");
+ 
+   for (const open of openers) {
+@@ -694,24 +692,7 @@ test("a refused edit or delete is reported, changes nothing and keeps the edit b
+   ]);
+ });
+ 
+-test("a message's Edit and Post boxes are never open at once", async () => {
+-  const { threads } = await opened(SEEDED);
+-  const { id } = messageOf(threadAt(threads, 3));
+-
+-  threads.writePost(id, "post");
+-  threads.writeEdit(id, "edit");
+-  expect([threads.postDraft(id), threads.editDraft(id)]).toEqual([null, "edit"]);
+-
+-  threads.writePost(id, "post");
+-  expect([threads.postDraft(id), threads.editDraft(id)]).toEqual(["post", null]);
+-
+-  threads.dropPost(id);
+-  threads.writeEdit(id, "edit");
+-  threads.dropEdit(id);
+-  expect([threads.postDraft(id), threads.editDraft(id)]).toEqual([null, null]);
+-});
+-
+-test("each message keeps its own Edit text; a Post on one leaves the other's Edit alone", async () => {
++test("each message keeps its own Edit text", async () => {
+   const { threads } = await opened(SEEDED);
+   const first = messageOf(threadAt(threads, 0));
+   const second = messageOf(threadAt(threads, 3));
+@@ -719,9 +700,6 @@ test("each message keeps its own Edit text; a Post on one leaves the other's Edi
+   threads.writeEdit(first.id, "first");
+   threads.writeEdit(second.id, "second");
+   expect([threads.editDraft(first.id), threads.editDraft(second.id)]).toEqual(["first", "second"]);
+-
+-  threads.writePost(first.id, "post");
+-  expect([threads.editDraft(first.id), threads.editDraft(second.id)]).toEqual([null, "second"]);
+ });
+ 
+ test("an Edit box on a note a send made pending closes; one on a note still unsent stays", async () => {
+@@ -845,7 +823,7 @@ test.each([false, true])(
+     threads.startThread(board, onePlace(changedThreadLine("left", 2)));
+     expect(threads.addingThread("draft-0")).toBe(false);
+ 
+-    const adding = threads.addThread("draft-0", "a");
++    const adding = threads.addTyped(DRAFT_0, "a");
+     expect([threads.addingThread("draft-0"), threads.addingThread("draft-1")]).toEqual([
+       true,
+       false,
+@@ -864,10 +842,10 @@ test.each([false, true])(
+     const { threads } = await opened(SEEDED, heldAdds([hold], refuses));
+     const [first, second] = [threadAt(threads, 0).id, threadAt(threads, 1).id];
+ 
+-    const adding = threads.addNote(first, "More?");
++    const adding = threads.addTyped({ kind: "thread", thread: first }, "More?");
+     expect([threads.addingNote(first), threads.addingNote(second)]).toEqual([true, false]);
+     hold.open();
+-    expect(await adding).toBe(!refuses);
++    expect((await adding) !== null).toBe(!refuses);
+ 
+     expect(threads.addingNote(first)).toBe(false);
+   },
+@@ -878,13 +856,13 @@ test("a second Comment while a note's add runs still sends; the thread is adding
+   const { threads } = await opened(SEEDED, heldAdds(holds));
+   const { id } = threadAt(threads, 0);
+ 
+-  const first = threads.addNote(id, "One?");
+-  const second = threads.addNote(id, "Two?");
++  const first = threads.addTyped({ kind: "thread", thread: id }, "One?");
++  const second = threads.addTyped({ kind: "thread", thread: id }, "Two?");
+   holds[0]?.open();
+-  expect(await first).toBe(true);
++  expect(await first).not.toBeNull();
+   expect(threads.addingNote(id)).toBe(true);
+   holds[1]?.open();
+-  expect(await second).toBe(true);
++  expect(await second).not.toBeNull();
+ 
+   expect(threads.addingNote(id)).toBe(false);
+   expect(texts(threadAt(threads, 0)).slice(-2)).toEqual(["One?", "Two?"]);
+diff --git a/frontend/src/ui/rangeThreads.ts b/frontend/src/ui/rangeThreads.ts
+index 24a86fe..ef18746 100644
+--- a/frontend/src/ui/rangeThreads.ts
++++ b/frontend/src/ui/rangeThreads.ts
+@@ -56,10 +56,6 @@ export type RangeThreads = AddsInFlight & {
+   writeEdit(message: MessageId, text: string): void;
+   dropEdit(message: MessageId): void;
+   toggle(keys: readonly string[]): void;
+-  /** The added thread; null when nothing was added (no such draft, blank text, an add of it running, a refusal). */
+-  addThread(draftKey: string, text: string): Promise<ThreadId | null>;
+-  /** Whether the note was stored; a blank text is not sent. */
+-  addNote(thread: ThreadId, text: string): Promise<boolean>;
+   /** A box's typed text as a new thread or note; null when nothing was added. */
+   addTyped(to: AddTo, text: string): Promise<Added | null>;
+   /** Whether the queued text was stored; a blank text is not sent. */
+@@ -279,8 +275,6 @@ export function createRangeThreads(
+     toggle: (keys) => {
+       state.open.toggle(state.list.value, keys);
+     },
+-    addThread: async (key, text) => (await addThread(state, key, text))?.thread ?? null,
+-    addNote: async (thread, text) => (await addNote(state, thread, text)) !== null,
+     addTyped: (to, text) =>
+       to.kind === "draft" ? addThread(state, to.key, text) : addNote(state, to.thread, text),
+     ...state.adds.inFlight,

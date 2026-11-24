@@ -36,9 +36,10 @@ import {
 
 type SentReply = Exclude<SendReply, { readonly kind: "notLinedUp" }>;
 
-type ButtonView = {
+/** A box's primary button; `title` undefined when there is nothing to say on hover. */
+export type ButtonView = {
   readonly label: string;
-  readonly title: string;
+  readonly title: string | undefined;
   readonly disabled: boolean;
 };
 
@@ -175,6 +176,7 @@ type SendCall = (onProgress: (progress: SendProgress) => void) => Promise<Source
 
 async function send(state: State, of: number, call: SendCall): Promise<void> {
   if (state.sending.value !== null) {
+    state.report({ action: "threads", step: "send", cause: { kind: "SendRunning" } });
     return;
   }
   state.result.value = null;

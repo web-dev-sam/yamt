@@ -56,10 +56,6 @@ export type RangeThreads = AddsInFlight & {
   writeEdit(message: MessageId, text: string): void;
   dropEdit(message: MessageId): void;
   toggle(keys: readonly string[]): void;
-  /** The added thread; null when nothing was added (no such draft, blank text, an add of it running, a refusal). */
-  addThread(draftKey: string, text: string): Promise<ThreadId | null>;
-  /** Whether the note was stored; a blank text is not sent. */
-  addNote(thread: ThreadId, text: string): Promise<boolean>;
   /** A box's typed text as a new thread or note; null when nothing was added. */
   addTyped(to: AddTo, text: string): Promise<Added | null>;
   /** Whether the queued text was stored; a blank text is not sent. */
@@ -279,8 +275,6 @@ export function createRangeThreads(
     toggle: (keys) => {
       state.open.toggle(state.list.value, keys);
     },
-    addThread: async (key, text) => (await addThread(state, key, text))?.thread ?? null,
-    addNote: async (thread, text) => (await addNote(state, thread, text)) !== null,
     addTyped: (to, text) =>
       to.kind === "draft" ? addThread(state, to.key, text) : addNote(state, to.thread, text),
     ...state.adds.inFlight,
