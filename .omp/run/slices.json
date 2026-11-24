@@ -1,12 +1,32 @@
 {
-  "CommentQueueRust": {
+  "CommentQueueWeb": {
     "owned": [
-      "crates/review/src/send.rs",
-      "crates/review/src/lib.rs",
-      "crates/review/tests/review.rs",
-      "src-tauri/src/review.rs",
-      "src-tauri/src/review/tests.rs",
-      "src-tauri/src/commands.rs"
+      "frontend/src/ipc/ReviewSource.ts",
+      "frontend/src/ipc/tauriReview.ts",
+      "frontend/src/ipc/tauriReview.test.ts",
+      "frontend/src/ipc/fixtureReview.ts",
+      "frontend/src/ipc/fixtureReview.test.ts",
+      "frontend/src/ipc/AGENTS.md",
+      "frontend/src/ui/rangeThreads.ts",
+      "frontend/src/ui/rangeThreads.test.ts",
+      "frontend/src/ui/rangeGitLab.ts",
+      "frontend/src/ui/rangeGitLab.test.ts",
+      "frontend/src/ui/rangeThreadText.ts",
+      "frontend/src/ui/rangeThreadText.test.ts",
+      "frontend/src/ui/rangeDrafts.ts",
+      "frontend/src/ui/rangeStore.ts",
+      "frontend/src/ui/rangeStore.test.ts",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problem.test.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts",
+      "frontend/src/ui/RangeThreadBox.vue",
+      "frontend/src/ui/RangeMessage.vue",
+      "frontend/src/ui/RangeMessageEditor.vue",
+      "frontend/src/ui/RangeSendButton.vue",
+      "frontend/src/ui/AGENTS.md"
     ]
-  }
+  },
+  "CommentQueueRustBoundary": { "owned": [] },
+  "CommentQueueRustCorrectness": { "owned": [] }
 }
