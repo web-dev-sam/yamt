@@ -1,1 +1,12 @@
-{}
+{
+  "CommentQueueRust": {
+    "owned": [
+      "crates/review/src/send.rs",
+      "crates/review/src/lib.rs",
+      "crates/review/tests/review.rs",
+      "src-tauri/src/review.rs",
+      "src-tauri/src/review/tests.rs",
+      "src-tauri/src/commands.rs"
+    ]
+  }
+}
