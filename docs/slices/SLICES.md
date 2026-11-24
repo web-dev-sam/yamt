@@ -6,19 +6,6 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
-## Queue a comment in one press (session 59; owner: "the primary option should be to send to gitlab as a draft")
-
-Request `docs/slices/request-comment-queue.md` (rules 1–7, owner's three answers: Shift+Send sends only this
-comment; not lined up → Queue off with the reason; Ctrl+Enter stays Note); plan §2 #198. Base `d6adb552`. Order:
-rust, then `just bindings`, then web (wires the window; smoke), docs ∥ final.
-
-| row | slice                                                                           | owner       | status  | evidence                                                                                                                                                                                                                                                                                                       |
-| --- | ------------------------------------------------------------------------------- | ----------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | rust: `send_message` (`briefs/comment-queue-rust.md`)                           | rust-impl   | done    | `0df29e6a` (+ bindings) + R1 `3122a741` (#2577–#2581: store's `require_shown`, `Covers` enum, `tests/send_message.rs`); mutants 0 missed both rounds; correctness pass, boundary re-check pass. Notes `CommentQueueRust*.md`                                                                                   |
-| 2   | web: Queue/Note, Shift+Send, Post queues a note (`briefs/comment-queue-web.md`) | web-impl    | done    | `8aa95cff` + R1 `d9d494c4` (#2582 SendRunning reported; #2584–#2586 #2588); 4734 TS tests; mutants: new lines killed, 3 kept type-covered. Smoke pass all 12 steps (WebKit dark/light, real Shift, real app one POST per Shift+Send). Re-checks pass both. Notes `CommentQueueWeb*.md`, `CommentQueueSmoke.md` |
-| 3   | docs keeper                                                                     | docs-keeper | running |                                                                                                                                                                                                                                                                                                                |
-| 4   | final: `just check` + smoke recipes of row 2                                    | verifier    | todo    |                                                                                                                                                                                                                                                                                                                |
-
 ## Release 0.7.3 (session 58, owner: "release patch")
 
 0.7.3 = 0.7.2 plus folder rows showing the reviewed check when every file below is reviewed (`1ed48f9e`). The owner
