@@ -1,0 +1,297 @@
+diff --git a/frontend/scripts/app-session/args.test.ts b/frontend/scripts/app-session/args.test.ts
+index 9c5d0d6..e5f9ebd 100644
+--- a/frontend/scripts/app-session/args.test.ts
++++ b/frontend/scripts/app-session/args.test.ts
+@@ -80,7 +80,7 @@ test("start-app --range opens the range window on the --repo folder", () => {
+     parseCommand(["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"]),
+   ).toMatchObject({
+     kind: "start-app",
+-    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr", reviewOf: null, names: null },
++    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr", review: null },
+   });
+ });
+ 
+@@ -99,8 +99,7 @@ test("the app opens the range window with --diff=<range> and --repo, the compare
+     kind: "range",
+     range: "main...feature",
+     dir: "rr",
+-    reviewOf: null,
+-    names: null,
++    review: null,
+   } as const;
+   expect(appArgs(range, "/tmp/rr", off)).toEqual(["--diff=main...feature", "--repo", "/tmp/rr"]);
+   expect(appArgs({ kind: "diff", startDir: "rr" }, null, off)).toEqual(["--diff"]);
+@@ -113,7 +112,7 @@ test("start-app --ai reaches the app as its own --ai after the repository", () =
+   expect(parseCommand([...range, "--ai"])).toMatchObject({ ai: true });
+   expect(parseCommand(range)).toMatchObject({ ai: false });
+   const on = { ai: true, mr: false };
+-  const opens = { kind: "range", range: "a...b", dir: "rr", reviewOf: null, names: null } as const;
++  const opens = { kind: "range", range: "a...b", dir: "rr", review: null } as const;
+   expect(appArgs(opens, "/tmp/rr", on)).toEqual(["--diff=a...b", "--repo", "/tmp/rr", "--ai"]);
+   expect(appArgs({ kind: "diff", startDir: null }, null, on)).toEqual(["--diff", "--ai"]);
+   expect(() => parseCommand([...range, "--ai-case", "crash"])).toThrow(/unknown option --ai-case/);
+@@ -132,7 +131,7 @@ test("start-app --mr reaches the app as its own --mr, only for the compare and r
+     needsWindow,
+   );
+   const both = { ai: true, mr: true };
+-  const opens = { kind: "range", range: "a...b", dir: "rr", reviewOf: null, names: null } as const;
++  const opens = { kind: "range", range: "a...b", dir: "rr", review: null } as const;
+   expect(appArgs(opens, "/tmp/rr", both)).toEqual([
+     "--diff=a...b",
+     "--repo",
+diff --git a/frontend/scripts/app-session/reviewArgs.ts b/frontend/scripts/app-session/reviewArgs.ts
+new file mode 100644
+index 0000000..627c19e
+--- /dev/null
++++ b/frontend/scripts/app-session/reviewArgs.ts
+@@ -0,0 +1,31 @@
++import type { Parsed } from "./argv";
++
++type MergeRequestNames = Readonly<Record<"title" | "source" | "target", string>>;
++export type Review = { readonly of: string; readonly names: MergeRequestNames | null };
++
++const NAME_FLAGS = ["mr-title", "mr-source", "mr-target"];
++
++function mergeRequestNames(parsed: Parsed, review: string | undefined): MergeRequestNames | null {
++  const [title, source, target] = NAME_FLAGS.map((flag) => parsed.values.get(flag));
++  if (title === undefined && source === undefined && target === undefined) return null;
++  if (title === undefined || source === undefined || target === undefined || review === undefined) {
++    throw new Error(
++      "start-app --mr-title, --mr-source and --mr-target go together, with --review-of",
++    );
++  }
++  return { title, source, target };
++}
++
++export function parseReview(parsed: Parsed): Review | null {
++  const of = parsed.values.get("review-of");
++  const names = mergeRequestNames(parsed, of);
++  return of === undefined ? null : { of, names };
++}
++
++export function reviewArgs(review: Review | null): readonly string[] {
++  if (review === null) return [];
++  const reviewOf = `--review-of=${review.of}`;
++  if (review.names === null) return [reviewOf];
++  const { title, source, target } = review.names;
++  return [reviewOf, `--mr-title=${title}`, `--mr-source=${source}`, `--mr-target=${target}`];
++}
+diff --git a/frontend/scripts/app-session/startArgs.test.ts b/frontend/scripts/app-session/startArgs.test.ts
+index 2e2d712..d52c207 100644
+--- a/frontend/scripts/app-session/startArgs.test.ts
++++ b/frontend/scripts/app-session/startArgs.test.ts
+@@ -153,8 +153,7 @@ test("start-app --review-of passes --review-of=<project!iid> after the range, on
+       kind: "range",
+       range: "main...feature",
+       dir: "/tmp/rr",
+-      reviewOf: "group/app!12",
+-      names: null,
++      review: { of: "group/app!12", names: null },
+     },
+   });
+   if (command.kind !== "start-app") {
+@@ -230,7 +229,12 @@ test("start-app --mr-title, --mr-source and --mr-target reach the app right afte
+   ];
+   const command = parseCommand([...reviewed, ...named, "--ai"]);
+   expect(command).toMatchObject({
+-    opens: { names: { title: 'Say "due" = soon', source: "sam:feature", target: "main" } },
++    opens: {
++      review: {
++        of: "group/app!12",
++        names: { title: 'Say "due" = soon', source: "sam:feature", target: "main" },
++      },
++    },
+   });
+   if (command.kind !== "start-app") {
+     throw new Error("not a start-app command");
+diff --git a/frontend/scripts/app-session/startArgs.ts b/frontend/scripts/app-session/startArgs.ts
+index 4e4220e..46ac9a2 100644
+--- a/frontend/scripts/app-session/startArgs.ts
++++ b/frontend/scripts/app-session/startArgs.ts
+@@ -1,18 +1,17 @@
+ import { join } from "node:path";
+ 
+ import { noPositionals, sessionName, wholeNumber, type Parsed } from "./argv";
++import { parseReview, reviewArgs, type Review } from "./reviewArgs";
+ import { fromRoot } from "./session";
+ import type { Size } from "./state";
+ 
+-type MergeRequestNames = Readonly<Record<"title" | "source" | "target", string>>;
+ type Opening =
+   | { readonly kind: "dir"; readonly dir: string }
+   | {
+       readonly kind: "range";
+       readonly range: string;
+       readonly dir: string;
+-      readonly reviewOf: string | null;
+-      readonly names: MergeRequestNames | null;
++      readonly review: Review | null;
+     }
+   | { readonly kind: "diff"; readonly startDir: string | null }
+   | { readonly kind: "fresh" };
+@@ -45,7 +44,6 @@ type AppFlags = { readonly ai: boolean; readonly mr: boolean };
+ const DEFAULT_SIZE: Size = { width: 1600, height: 1000 };
+ const DEFAULT_BINARY = "target/debug/yamt";
+ const SIZE = /^([1-9][0-9]*)x([1-9][0-9]*)$/;
+-const NAME_FLAGS = ["mr-title", "mr-source", "mr-target"];
+ 
+ function size(parsed: Parsed): Size {
+   const text = parsed.values.get("size");
+@@ -59,29 +57,17 @@ function size(parsed: Parsed): Size {
+   return { width: Number(width), height: Number(height) };
+ }
+ 
+-function mergeRequestNames(parsed: Parsed, review: string | undefined): MergeRequestNames | null {
+-  const [title, source, target] = NAME_FLAGS.map((flag) => parsed.values.get(flag));
+-  if (title === undefined && source === undefined && target === undefined) return null;
+-  if (title === undefined || source === undefined || target === undefined || review === undefined) {
+-    throw new Error(
+-      "start-app --mr-title, --mr-source and --mr-target go together, with --review-of",
+-    );
+-  }
+-  return { title, source, target };
+-}
+-
+ function opening(parsed: Parsed): Opening {
+   const dir = parsed.values.get("repo");
+   const range = parsed.values.get("range");
+   const startDir = parsed.values.get("dir");
+   const diff = parsed.flags.has("diff");
+   const fresh = parsed.flags.has("fresh-repo");
+-  const reviewOf = parsed.values.get("review-of");
+-  const names = mergeRequestNames(parsed, reviewOf);
++  const review = parseReview(parsed);
+   if (startDir !== undefined && !diff) {
+     throw new Error("start-app --dir <folder> goes with --diff: the compare window's start folder");
+   }
+-  if (reviewOf !== undefined && range === undefined) {
++  if (review !== null && range === undefined) {
+     throw new Error(
+       "start-app --review-of <project!iid> goes with --range: the range window's marks",
+     );
+@@ -90,7 +76,7 @@ function opening(parsed: Parsed): Opening {
+     if (dir === undefined || diff || fresh) {
+       throw new Error("start-app --range needs --repo <dir>, and neither --fresh-repo nor --diff");
+     }
+-    return { kind: "range", range, dir, reviewOf: reviewOf ?? null, names };
++    return { kind: "range", range, dir, review };
+   }
+   if ([dir !== undefined, fresh, diff].filter(Boolean).length !== 1) {
+     throw new Error("start-app needs one of --repo <dir>, --fresh-repo and --diff");
+@@ -264,12 +250,7 @@ export function appArgs(
+     case "diff":
+       return ["--diff", ...options];
+     case "range":
+-      return [
+-        `--diff=${opens.range}`,
+-        ...(opens.reviewOf === null ? [] : [`--review-of=${opens.reviewOf}`]),
+-        ...Object.entries(opens.names ?? {}).map(([name, value]) => `--mr-${name}=${value}`),
+-        ...options,
+-      ];
++      return [`--diff=${opens.range}`, ...reviewArgs(opens.review), ...options];
+     case "dir":
+     case "fresh":
+       return options;
+diff --git a/frontend/src/ipc/fixtureRange.ts b/frontend/src/ipc/fixtureRange.ts
+index 4b61211..3190906 100644
+--- a/frontend/src/ipc/fixtureRange.ts
++++ b/frontend/src/ipc/fixtureRange.ts
+@@ -116,7 +116,9 @@ const FORK_TITLE =
+   "Show every reminder of a board in one list, grouped by the day it is due, with a count per day and a link to each card";
+ const FORK_BRANCH = "feature/reminders-grouped-by-due-day";
+ 
+-const HEADINGS: Readonly<Record<string, Generated.RangeHeading>> = {
++type HeadingName = "mergeRequest" | "fork" | "hiddenFork" | "unnamed";
++
++const HEADINGS: Readonly<Record<HeadingName, Generated.RangeHeading>> = {
+   mergeRequest: {
+     kind: "mergeRequest",
+     iid: 12,
+@@ -135,6 +137,10 @@ const HEADINGS: Readonly<Record<string, Generated.RangeHeading>> = {
+   unnamed: { kind: "unnamedMergeRequest", iid: 12 },
+ };
+ 
++function isHeadingName(name: string): name is HeadingName {
++  return Object.hasOwn(HEADINGS, name);
++}
++
+ function missingCase(name: string): Case {
+   const side: RangeSide = {
+     label: { kind: "named", name: "HEAD" },
+@@ -159,15 +165,14 @@ function askedHeading(log: Log, search: string): Generated.RangeHeading | null {
+   if (asked === null || asked === "") {
+     return null;
+   }
+-  const heading = Object.hasOwn(HEADINGS, asked) ? HEADINGS[asked] : undefined;
+-  if (heading === undefined) {
+-    log.info("range.fixture_heading_miss", {
+-      heading: asked,
+-      known: Object.keys(HEADINGS).join(", "),
+-    });
+-    return null;
++  if (isHeadingName(asked)) {
++    return HEADINGS[asked];
+   }
+-  return heading;
++  log.info("range.fixture_heading_miss", {
++    heading: asked,
++    known: Object.keys(HEADINGS).join(", "),
++  });
++  return null;
+ }
+ 
+ function shownCase(log: Log, search: string, cases: ReadonlyMap<string, Case>): Case {
+diff --git a/frontend/src/ui/RangeHeadingLine.vue b/frontend/src/ui/RangeHeadingLine.vue
+index dd4a90b..454a460 100644
+--- a/frontend/src/ui/RangeHeadingLine.vue
++++ b/frontend/src/ui/RangeHeadingLine.vue
+@@ -7,6 +7,9 @@ import { headingLine, RANGE_HEADING_LABEL } from "./rangeText";
+ 
+ const props = defineProps<{ start: RangeStart }>();
+ 
++const CHIP_CLASS =
++  "max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code";
++
+ const line = computed(() => headingLine(props.start));
+ const totals = computed((): RangeLineCounts => ({ kind: "counted", ...props.start.totals }));
+ </script>
+@@ -18,17 +21,11 @@ const totals = computed((): RangeLineCounts => ({ kind: "counted", ...props.star
+     class="flex h-9 shrink-0 items-center gap-2 island bg-panel px-3"
+   >
+     <template v-if="line.kind === 'typed'">
+-      <code
+-        class="max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code"
+-        :title="line.left"
+-      >
++      <code :class="CHIP_CLASS" :title="line.left">
+         {{ line.left }}
+       </code>
+       <span class="shrink-0 font-mono text-fg-muted">{{ line.dots }}</span>
+-      <code
+-        class="max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code"
+-        :title="line.right"
+-      >
++      <code :class="CHIP_CLASS" :title="line.right">
+         {{ line.right }}
+       </code>
+     </template>
+@@ -41,17 +38,11 @@ const totals = computed((): RangeLineCounts => ({ kind: "counted", ...props.star
+       >
+         {{ line.title }}
+       </span>
+-      <code
+-        class="max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code"
+-        :title="line.source"
+-      >
++      <code :class="CHIP_CLASS" :title="line.source">
+         {{ line.source }}
+       </code>
+       <span class="shrink-0 text-fg-muted">→</span>
+-      <code
+-        class="max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code"
+-        :title="line.target"
+-      >
++      <code :class="CHIP_CLASS" :title="line.target">
+         {{ line.target }}
+       </code>
+     </template>

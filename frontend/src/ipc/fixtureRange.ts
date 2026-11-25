@@ -116,7 +116,9 @@ const FORK_TITLE =
   "Show every reminder of a board in one list, grouped by the day it is due, with a count per day and a link to each card";
 const FORK_BRANCH = "feature/reminders-grouped-by-due-day";
 
-const HEADINGS: Readonly<Record<string, Generated.RangeHeading>> = {
+type HeadingName = "mergeRequest" | "fork" | "hiddenFork" | "unnamed";
+
+const HEADINGS: Readonly<Record<HeadingName, Generated.RangeHeading>> = {
   mergeRequest: {
     kind: "mergeRequest",
     iid: 12,
@@ -134,6 +136,10 @@ const HEADINGS: Readonly<Record<string, Generated.RangeHeading>> = {
   },
   unnamed: { kind: "unnamedMergeRequest", iid: 12 },
 };
+
+function isHeadingName(name: string): name is HeadingName {
+  return Object.hasOwn(HEADINGS, name);
+}
 
 function missingCase(name: string): Case {
   const side: RangeSide = {
@@ -159,15 +165,14 @@ function askedHeading(log: Log, search: string): Generated.RangeHeading | null {
   if (asked === null || asked === "") {
     return null;
   }
-  const heading = Object.hasOwn(HEADINGS, asked) ? HEADINGS[asked] : undefined;
-  if (heading === undefined) {
-    log.info("range.fixture_heading_miss", {
-      heading: asked,
-      known: Object.keys(HEADINGS).join(", "),
-    });
-    return null;
+  if (isHeadingName(asked)) {
+    return HEADINGS[asked];
   }
-  return heading;
+  log.info("range.fixture_heading_miss", {
+    heading: asked,
+    known: Object.keys(HEADINGS).join(", "),
+  });
+  return null;
 }
 
 function shownCase(log: Log, search: string, cases: ReadonlyMap<string, Case>): Case {

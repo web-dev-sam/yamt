@@ -80,7 +80,7 @@ test("start-app --range opens the range window on the --repo folder", () => {
     parseCommand(["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"]),
   ).toMatchObject({
     kind: "start-app",
-    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr", reviewOf: null, names: null },
+    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr", review: null },
   });
 });
 
@@ -99,8 +99,7 @@ test("the app opens the range window with --diff=<range> and --repo, the compare
     kind: "range",
     range: "main...feature",
     dir: "rr",
-    reviewOf: null,
-    names: null,
+    review: null,
   } as const;
   expect(appArgs(range, "/tmp/rr", off)).toEqual(["--diff=main...feature", "--repo", "/tmp/rr"]);
   expect(appArgs({ kind: "diff", startDir: "rr" }, null, off)).toEqual(["--diff"]);
@@ -113,7 +112,7 @@ test("start-app --ai reaches the app as its own --ai after the repository", () =
   expect(parseCommand([...range, "--ai"])).toMatchObject({ ai: true });
   expect(parseCommand(range)).toMatchObject({ ai: false });
   const on = { ai: true, mr: false };
-  const opens = { kind: "range", range: "a...b", dir: "rr", reviewOf: null, names: null } as const;
+  const opens = { kind: "range", range: "a...b", dir: "rr", review: null } as const;
   expect(appArgs(opens, "/tmp/rr", on)).toEqual(["--diff=a...b", "--repo", "/tmp/rr", "--ai"]);
   expect(appArgs({ kind: "diff", startDir: null }, null, on)).toEqual(["--diff", "--ai"]);
   expect(() => parseCommand([...range, "--ai-case", "crash"])).toThrow(/unknown option --ai-case/);
@@ -132,7 +131,7 @@ test("start-app --mr reaches the app as its own --mr, only for the compare and r
     needsWindow,
   );
   const both = { ai: true, mr: true };
-  const opens = { kind: "range", range: "a...b", dir: "rr", reviewOf: null, names: null } as const;
+  const opens = { kind: "range", range: "a...b", dir: "rr", review: null } as const;
   expect(appArgs(opens, "/tmp/rr", both)).toEqual([
     "--diff=a...b",
     "--repo",

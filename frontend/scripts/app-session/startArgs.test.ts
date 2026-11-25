@@ -153,8 +153,7 @@ test("start-app --review-of passes --review-of=<project!iid> after the range, on
       kind: "range",
       range: "main...feature",
       dir: "/tmp/rr",
-      reviewOf: "group/app!12",
-      names: null,
+      review: { of: "group/app!12", names: null },
     },
   });
   if (command.kind !== "start-app") {
@@ -230,7 +229,12 @@ test("start-app --mr-title, --mr-source and --mr-target reach the app right afte
   ];
   const command = parseCommand([...reviewed, ...named, "--ai"]);
   expect(command).toMatchObject({
-    opens: { names: { title: 'Say "due" = soon', source: "sam:feature", target: "main" } },
+    opens: {
+      review: {
+        of: "group/app!12",
+        names: { title: 'Say "due" = soon', source: "sam:feature", target: "main" },
+      },
+    },
   });
   if (command.kind !== "start-app") {
     throw new Error("not a start-app command");

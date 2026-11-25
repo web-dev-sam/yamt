@@ -7,6 +7,9 @@ import { headingLine, RANGE_HEADING_LABEL } from "./rangeText";
 
 const props = defineProps<{ start: RangeStart }>();
 
+const CHIP_CLASS =
+  "max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code";
+
 const line = computed(() => headingLine(props.start));
 const totals = computed((): RangeLineCounts => ({ kind: "counted", ...props.start.totals }));
 </script>
@@ -18,17 +21,11 @@ const totals = computed((): RangeLineCounts => ({ kind: "counted", ...props.star
     class="flex h-9 shrink-0 items-center gap-2 island bg-panel px-3"
   >
     <template v-if="line.kind === 'typed'">
-      <code
-        class="max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code"
-        :title="line.left"
-      >
+      <code :class="CHIP_CLASS" :title="line.left">
         {{ line.left }}
       </code>
       <span class="shrink-0 font-mono text-fg-muted">{{ line.dots }}</span>
-      <code
-        class="max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code"
-        :title="line.right"
-      >
+      <code :class="CHIP_CLASS" :title="line.right">
         {{ line.right }}
       </code>
     </template>
@@ -41,17 +38,11 @@ const totals = computed((): RangeLineCounts => ({ kind: "counted", ...props.star
       >
         {{ line.title }}
       </span>
-      <code
-        class="max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code"
-        :title="line.source"
-      >
+      <code :class="CHIP_CLASS" :title="line.source">
         {{ line.source }}
       </code>
       <span class="shrink-0 text-fg-muted">→</span>
-      <code
-        class="max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code"
-        :title="line.target"
-      >
+      <code :class="CHIP_CLASS" :title="line.target">
         {{ line.target }}
       </code>
     </template>

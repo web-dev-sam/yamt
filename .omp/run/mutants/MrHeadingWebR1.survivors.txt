@@ -1,0 +1,2 @@
+just mutants HEAD → reviewArgs.ts 100% (51 killed), startArgs.ts 316 killed / 8 survived, fixtureRange.ts 100 killed / 91 survived
+frontend/src/ipc/fixtureRange.ts:121:73 HEADINGS literal → {} — gate-covered: a static module-level mutant, not re-evaluated under vitest (#732). The ?heading=%s test asserts every entry. All other survivors are on unchanged lines.
