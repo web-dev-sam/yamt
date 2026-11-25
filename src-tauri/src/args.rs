@@ -103,17 +103,45 @@ impl RangeOf {
         }
     }
 
-    fn named(self, names: Option<MergeRequestNames>) -> Result<RangeOf, String> {
+    fn named(self, names: MergeRequestNames) -> Result<RangeOf, String> {
+        match self {
+            RangeOf::MergeRequest { project, iid, .. } => Ok(RangeOf::MergeRequest {
+                project,
+                iid,
+                names: Some(names),
+            }),
+            RangeOf::SideNames => Err(MR_NAMES_WITHOUT_REVIEW_OF.to_owned()),
+        }
+    }
+}
+
+impl Invocation {
+    fn named(self, names: Option<MergeRequestNames>) -> Result<Invocation, String> {
         match (self, names) {
-            (range_of, None) => Ok(range_of),
-            (RangeOf::MergeRequest { project, iid, .. }, Some(names)) => {
-                Ok(RangeOf::MergeRequest {
-                    project,
-                    iid,
-                    names: Some(names),
-                })
-            }
-            (RangeOf::SideNames, Some(_)) => Err(MR_NAMES_WITHOUT_REVIEW_OF.to_owned()),
+            (invocation, None) => Ok(invocation),
+            (
+                Invocation::Range {
+                    spec,
+                    repo,
+                    ai,
+                    start,
+                    range_of,
+                },
+                Some(names),
+            ) => Ok(Invocation::Range {
+                spec,
+                repo,
+                ai,
+                start,
+                range_of: range_of.named(names)?,
+            }),
+            (
+                Invocation::Merge { .. }
+                | Invocation::Compare { .. }
+                | Invocation::Help
+                | Invocation::Version,
+                Some(_),
+            ) => Err(MR_NAMES_WITHOUT_REVIEW_OF.to_owned()),
         }
     }
 }
@@ -267,8 +295,8 @@ pub(crate) fn parse(
             _ => return Err(format!("unknown argument {}", arg.to_string_lossy())),
         }
     }
-    let range_of = range_of?.named(names?.names()?)?;
-    invocation(window?.started_on(start), repo, range_of, ai, start)
+    let invocation = invocation(window?.started_on(start), repo, range_of?, ai, start)?;
+    invocation.named(names?.names()?)
 }
 
 fn invocation(

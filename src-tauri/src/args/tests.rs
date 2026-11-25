@@ -381,6 +381,51 @@ fn mr_names_without_review_of_partial_or_twice_are_refused() {
 }
 
 #[test]
+fn window_and_review_of_refusals_come_before_the_mr_names_refusals() {
+    assert_eq!(
+        parsed(&["--diff", "--diff=a..b", "--review-of=g/p"]),
+        Err(DIFF_TWICE.to_owned())
+    );
+    assert_eq!(
+        parsed(&["--diff", "--review-of=g/p!1", "--mr-title=x"]),
+        Err(REVIEW_OF_WITHOUT_RANGE.to_owned())
+    );
+    assert_eq!(
+        parsed(&["--diff", "--diff=a..b", "--mr-title=x"]),
+        Err(DIFF_TWICE.to_owned())
+    );
+    assert_eq!(
+        parsed(&[
+            "--diff=a..b",
+            "--review-of=g/p!1",
+            "--review-of=g/p!2",
+            "--mr-title=x"
+        ]),
+        Err(REVIEW_OF_TWICE.to_owned())
+    );
+    assert_eq!(
+        parsed(&["--diff", "--repo", "r", "--mr-title=x"]),
+        Err(DIFF_WITH_REPO.to_owned())
+    );
+}
+
+#[test]
+fn mr_names_without_a_range_or_review_of_are_refused() {
+    let names = ["--mr-title=x", "--mr-source=s", "--mr-target=t"];
+    for window in [&[][..], &["--diff"][..], &["--mr"][..]] {
+        let mut args = window.to_vec();
+        args.extend_from_slice(&names);
+        assert_eq!(
+            parsed(&args),
+            Err(MR_NAMES_WITHOUT_REVIEW_OF.to_owned()),
+            "{window:?}"
+        );
+        args.pop();
+        assert_eq!(parsed(&args), Err(MR_NAMES_APART.to_owned()), "{window:?}");
+    }
+}
+
+#[test]
 fn a_title_holding_quotes_equals_newlines_and_a_leading_dash_is_one_value() {
     let title = format!("--mr-title={NASTY_TITLE}");
     let args = [
