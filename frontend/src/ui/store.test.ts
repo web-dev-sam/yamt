@@ -2257,6 +2257,18 @@ test("the file list is shown at start, and Ctrl+B on Linux hides and shows it, t
   expect(show.prevents()).toBe(1);
 });
 
+test("Ctrl+B on the settings screen leaves the list; back on files it toggles", () => {
+  const store = createAppStore(handSource([]).source);
+  store.openSettings();
+  const offFiles = press("b", { ctrl: true });
+  store.fileListKey(offFiles, LINUX);
+  expect([store.fileListShown.value, offFiles.prevents()]).toEqual([true, 0]);
+
+  store.closeSettings();
+  store.fileListKey(press("b", { ctrl: true }), LINUX);
+  expect(store.fileListShown.value).toBe(false);
+});
+
 test("⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone", () => {
   const store = createAppStore(handSource([]).source);
   const others: [FakePress, string][] = [

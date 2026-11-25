@@ -827,3 +827,28 @@ test("the bound key toggles the tab panel through the shared rule, never while a
   store.fileListKey(ctrlB, LINUX);
   expect([store.fileListShown.value, prevents]).toEqual([true, 2]);
 });
+
+test("the bound key on the settings screen leaves the tab panel; back on files it toggles", async () => {
+  const store = await started();
+  let prevents = 0;
+  const ctrlB: KeyPress = {
+    key: "b",
+    code: "KeyB",
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+    shiftKey: false,
+    defaultPrevented: false,
+    preventDefault: () => {
+      prevents += 1;
+    },
+  };
+
+  store.openSettings();
+  store.fileListKey(ctrlB, LINUX);
+  expect([store.fileListShown.value, prevents]).toEqual([true, 0]);
+
+  store.closeSettings();
+  store.fileListKey(ctrlB, LINUX);
+  expect([store.fileListShown.value, prevents]).toEqual([false, 1]);
+});

@@ -2,6 +2,7 @@ import type { ShallowRef } from "vue";
 
 import { pressesKey } from "../ipc";
 import type { Asking } from "./asking";
+import type { Screen } from "./screen";
 import type { SettingsInUse } from "./settings";
 
 export type KeyPress = Parameters<typeof pressesKey>[0] &
@@ -10,6 +11,7 @@ export type KeyPress = Parameters<typeof pressesKey>[0] &
 export type WindowKeyTarget = {
   readonly asking: Asking;
   readonly settings: Readonly<ShallowRef<SettingsInUse>>;
+  readonly screen: Readonly<ShallowRef<Screen>>;
 };
 
 type FileListToggle = WindowKeyTarget & { readonly fileListShown: ShallowRef<boolean> };
@@ -21,6 +23,7 @@ export function windowKey(
   platform: string,
 ): boolean {
   if (
+    target.screen.value.kind !== "files" ||
     event.defaultPrevented ||
     target.asking.question.value !== null ||
     !pressesKey(event, target.settings.value.keys.bindings[action], platform)

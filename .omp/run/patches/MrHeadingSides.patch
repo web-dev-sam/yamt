@@ -1,0 +1,391 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 778ec33..2a06d43 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -4,6 +4,8 @@ Compare window (plan §2 #93–#97, #101): a second root, `CompareApp.vue` over
+ 
+ Range window (plan §2 #103–#106): a third root, `RangeApp.vue` over `rangeStore.ts`, mounted by `main.ts` when `<html data-window="range">` (app, `yamt --diff=<range>`) or `?range` / `?range=<case>` (fixture mode). Every range-only file carries the prefix — `Range*.vue`, `range*.ts`, `useRange*.ts` — and none imports `store.ts`, `App.vue`, `compareStore.ts`, `CompareApp.vue` or `lsp/` (fence PM9; PM7 keeps the compare root from `rangeStore.ts`/`RangeApp.vue`). The panel is the shared `FileList.vue` with `RangeFileRow.vue` in its `#file` slot (coloured A/M/D/R with its word as title, the old path of a renamed file muted, `+n −m`). `start` mirrors `openRange`'s reply; `shown` is written only by `showFile` and `startUp` (the first file at start); `visited` keeps first-visit order, at most `MOUNTED_FILES` (16) views mounted, the least recently shown dropped when another file is shown. A failed `loadFile` reports `open` with the path and drops the file from `visited`, so selecting it again retries; that file's later success clears the problem. `RangeView.vue` (one per visited file, `PaneFrame`) shows the header (icon, path or "old → new", the mode note, ↑/↓, gear), the column headers (side and short id, the subject as title) and either the two read-only columns or one sentence. `useRangeController` (`followRange`) keeps a texts reply in a non-reactive slot until the hosts exist, builds `RangeController` once, follows preferences, and drops a reply that lands after unmount; a sentence kind builds nothing. Every range word is in `rangeText.ts`. No close guard: the window closes at once.
+ 
++Side column (request `docs/slices/request-mr-heading.md` rule 7): in all three roots the side column (`SideColumn.vue` with the file list and search, the compare root's `CompareTabList.vue`) shows only on the files screen, hidden with `v-show` (`onFiles`) so it comes back as it was; its two toggle keys act only there (`fileListKey.ts` `windowKey` answers false off `files`, before the key match).
++
+ Folder sums (plan §2 #125): `rangeFolderSums.ts` `folderSums` (once per file list in `RangeApp.vue`) keys each folder's `+a −r` by the path its tree row carries; `RangeApp.vue` fills the tree's optional `folder` slot (`FileTree.vue`, forwarded by `FileList.vue`; the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair `RangeFileRow.vue` uses too, and, when every file below the folder is reviewed (`reviewedFolders`, same keys), the reviewed file row's muted Lucide `check` after it, titled `FOLDER_REVIEWED_WORD` ("every file reviewed"); the folder's name stays unmuted.
+ 
+ Collapse toggle (plan §2 #126): `RangeView.vue`'s header button after Previous/Next reads and writes the merge window's stored choice through `createCollapsing` in the range store; its words are `collapsing.ts` `COLLAPSE_LABEL`, which the merge toolbar's `LABELS` uses too.
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 2bceaba..1eb32e5 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -69,7 +69,11 @@ onMounted(() => {
+ 
+ <template>
+   <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
+-    <SideColumn :search-shown="search.shown.value" :files-shown="fileListShown">
++    <SideColumn
++      :search-shown="search.shown.value"
++      :files-shown="fileListShown"
++      :on-files="screen.kind === 'files'"
++    >
+       <template #search>
+         <SearchPanel
+           :search="search"
+diff --git a/frontend/src/ui/CompareApp.vue b/frontend/src/ui/CompareApp.vue
+index b62f9ea..4c262b2 100644
+--- a/frontend/src/ui/CompareApp.vue
++++ b/frontend/src/ui/CompareApp.vue
+@@ -69,7 +69,7 @@ async function watchWindowClose(): Promise<void> {
+ <template>
+   <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
+     <CompareTabList
+-      v-show="fileListShown"
++      v-show="fileListShown && screen.kind === 'files'"
+       :tabs="tabs"
+       :shown="shown"
+       :detected="detected"
+diff --git a/frontend/src/ui/RangeApp.vue b/frontend/src/ui/RangeApp.vue
+index ccc33b4..7c0b221 100644
+--- a/frontend/src/ui/RangeApp.vue
++++ b/frontend/src/ui/RangeApp.vue
+@@ -103,7 +103,11 @@ function viewOf(file: RangeEntry): RangeViewKind {
+ 
+ <template>
+   <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
+-    <SideColumn :search-shown="search.shown.value" :files-shown="fileListShown">
++    <SideColumn
++      :search-shown="search.shown.value"
++      :files-shown="fileListShown"
++      :on-files="screen.kind === 'files'"
++    >
+       <template #search>
+         <SearchPanel
+           :search="search"
+diff --git a/frontend/src/ui/SideColumn.vue b/frontend/src/ui/SideColumn.vue
+index 20c55c7..dda0677 100644
+--- a/frontend/src/ui/SideColumn.vue
++++ b/frontend/src/ui/SideColumn.vue
+@@ -4,7 +4,7 @@ import { useTemplateRef } from "vue";
+ import PanelWidthHandle from "./PanelWidthHandle.vue";
+ import { usePanelWidth } from "./usePanelWidth";
+ 
+-defineProps<{ searchShown: boolean; filesShown: boolean }>();
++defineProps<{ searchShown: boolean; filesShown: boolean; onFiles: boolean }>();
+ defineSlots<{ search(): unknown; default(): unknown }>();
+ 
+ const column = useTemplateRef<HTMLElement>("column");
+@@ -13,7 +13,7 @@ const { widthStyle, resize } = usePanelWidth(column);
+ 
+ <template>
+   <div
+-    v-show="searchShown || filesShown"
++    v-show="onFiles && (searchShown || filesShown)"
+     ref="column"
+     class="relative mr-(--island-overlap) flex w-60 shrink-0 flex-col gap-island"
+     :class="{ '*:nth-2:mt-(--island-overlap)': searchShown && filesShown }"
+diff --git a/frontend/src/ui/compareStore.test.ts b/frontend/src/ui/compareStore.test.ts
+index 42ed73d..5e41c1a 100644
+--- a/frontend/src/ui/compareStore.test.ts
++++ b/frontend/src/ui/compareStore.test.ts
+@@ -827,3 +827,28 @@ test("the bound key toggles the tab panel through the shared rule, never while a
+   store.fileListKey(ctrlB, LINUX);
+   expect([store.fileListShown.value, prevents]).toEqual([true, 2]);
+ });
++
++test("the bound key on the settings screen leaves the tab panel; back on files it toggles", async () => {
++  const store = await started();
++  let prevents = 0;
++  const ctrlB: KeyPress = {
++    key: "b",
++    code: "KeyB",
++    ctrlKey: true,
++    metaKey: false,
++    altKey: false,
++    shiftKey: false,
++    defaultPrevented: false,
++    preventDefault: () => {
++      prevents += 1;
++    },
++  };
++
++  store.openSettings();
++  store.fileListKey(ctrlB, LINUX);
++  expect([store.fileListShown.value, prevents]).toEqual([true, 0]);
++
++  store.closeSettings();
++  store.fileListKey(ctrlB, LINUX);
++  expect([store.fileListShown.value, prevents]).toEqual([false, 1]);
++});
+diff --git a/frontend/src/ui/diskChanges.test.ts b/frontend/src/ui/diskChanges.test.ts
+index 34aac08..a00965e 100644
+--- a/frontend/src/ui/diskChanges.test.ts
++++ b/frontend/src/ui/diskChanges.test.ts
+@@ -7,6 +7,7 @@ import { createAsking } from "./asking";
+ import { applyDiskChanges } from "./diskChanges";
+ import type { Notice } from "./noticeText";
+ import type { Problem } from "./problem";
++import type { Screen } from "./screen";
+ import { createSearching, type Searching } from "./searching";
+ import { SEARCH_PAUSE_MS } from "./searchRun";
+ import { startSettings } from "./settings";
+@@ -70,7 +71,11 @@ function searchOver(files: Files): Searching<Pane> {
+     panes: () => [],
+     open: () => undefined,
+     shownPath: () => null,
+-    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")) },
++    keys: {
++      asking: createAsking(),
++      settings: shallowRef(startSettings("dark")),
++      screen: shallowRef<Screen>({ kind: "files" }),
++    },
+   });
+ }
+ 
+diff --git a/frontend/src/ui/fileListKey.test.ts b/frontend/src/ui/fileListKey.test.ts
+index be68de5..064c864 100644
+--- a/frontend/src/ui/fileListKey.test.ts
++++ b/frontend/src/ui/fileListKey.test.ts
+@@ -4,6 +4,7 @@ import { shallowRef } from "vue";
+ import { bindingsOf, DEFAULT_KEYS, pressesKey } from "../ipc";
+ import { createAsking } from "./asking";
+ import { fileListKey, windowKey, type KeyPress } from "./fileListKey";
++import type { Screen } from "./screen";
+ import { startSettings } from "./settings";
+ 
+ const LINUX = "Linux x86_64";
+@@ -39,6 +40,7 @@ function target(keys: Parameters<typeof bindingsOf>[0] = {}) {
+   return {
+     asking: createAsking(),
+     settings: shallowRef({ ...startSettings("dark"), keys: bindingsOf(keys) }),
++    screen: shallowRef<Screen>({ kind: "files" }),
+   };
+ }
+ 
+@@ -117,3 +119,27 @@ test("fileListKey flips the list only when the guard takes the press", () => {
+   fileListKey(keys, press("b", { ctrl: true }), LINUX);
+   expect(keys.fileListShown.value).toBe(false);
+ });
++
++test("the_list_and_search_keys_do_nothing_off_the_files_screen", () => {
++  const offFiles: readonly Screen[] = [
++    { kind: "settings" },
++    { kind: "serverLog", name: "rust-analyzer" },
++    { kind: "mergeRequests" },
++  ];
++  for (const screen of offFiles) {
++    const keys = { ...target(), screen: shallowRef(screen), fileListShown: shallowRef(true) };
++    const search = press("S", { ctrl: true, shift: true });
++    const list = press("b", { ctrl: true });
++
++    expect(windowKey(keys, "toggle-search", search, LINUX)).toBe(false);
++    expect(windowKey(keys, "toggle-file-list", list, LINUX)).toBe(false);
++    fileListKey(keys, list, LINUX);
++    expect([search.prevents(), list.prevents(), keys.fileListShown.value]).toEqual([0, 0, true]);
++  }
++
++  const onFiles = { ...target(), fileListShown: shallowRef(true) };
++  const search = press("S", { ctrl: true, shift: true });
++  expect(windowKey(onFiles, "toggle-search", search, LINUX)).toBe(true);
++  fileListKey(onFiles, press("b", { ctrl: true }), LINUX);
++  expect([search.prevents(), onFiles.fileListShown.value]).toEqual([1, false]);
++});
+diff --git a/frontend/src/ui/fileListKey.ts b/frontend/src/ui/fileListKey.ts
+index 4b6154b..9328a67 100644
+--- a/frontend/src/ui/fileListKey.ts
++++ b/frontend/src/ui/fileListKey.ts
+@@ -2,6 +2,7 @@ import type { ShallowRef } from "vue";
+ 
+ import { pressesKey } from "../ipc";
+ import type { Asking } from "./asking";
++import type { Screen } from "./screen";
+ import type { SettingsInUse } from "./settings";
+ 
+ export type KeyPress = Parameters<typeof pressesKey>[0] &
+@@ -10,6 +11,7 @@ export type KeyPress = Parameters<typeof pressesKey>[0] &
+ export type WindowKeyTarget = {
+   readonly asking: Asking;
+   readonly settings: Readonly<ShallowRef<SettingsInUse>>;
++  readonly screen: Readonly<ShallowRef<Screen>>;
+ };
+ 
+ type FileListToggle = WindowKeyTarget & { readonly fileListShown: ShallowRef<boolean> };
+@@ -21,6 +23,7 @@ export function windowKey(
+   platform: string,
+ ): boolean {
+   if (
++    target.screen.value.kind !== "files" ||
+     event.defaultPrevented ||
+     target.asking.question.value !== null ||
+     !pressesKey(event, target.settings.value.keys.bindings[action], platform)
+diff --git a/frontend/src/ui/mergeSearch.test.ts b/frontend/src/ui/mergeSearch.test.ts
+index 25c37b4..20ff3b2 100644
+--- a/frontend/src/ui/mergeSearch.test.ts
++++ b/frontend/src/ui/mergeSearch.test.ts
+@@ -19,6 +19,7 @@ import {
+   type MergeSearchTarget,
+ } from "./mergeSearch";
+ import type { Problem } from "./problem";
++import type { Screen } from "./screen";
+ import { startSettings } from "./settings";
+ import type { ResultLineUp } from "./useMergeController";
+ 
+@@ -87,6 +88,7 @@ function harness(
+     problem,
+     asking: createAsking(),
+     settings: shallowRef(startSettings("dark")),
++    screen: shallowRef<Screen>({ kind: "files" }),
+     currentStop: () => stop,
+     nextStop: async () => {
+       stops.push(stops.length);
+diff --git a/frontend/src/ui/rangeStore.test.ts b/frontend/src/ui/rangeStore.test.ts
+index 46059f9..3fe9583 100644
+--- a/frontend/src/ui/rangeStore.test.ts
++++ b/frontend/src/ui/rangeStore.test.ts
+@@ -566,6 +566,31 @@ test("the bound key toggles the file list, never while a question waits", async
+   expect([store.fileListShown.value, prevents]).toEqual([true, 2]);
+ });
+ 
++test("the bound key on the settings screen leaves the file list; back on files it toggles", async () => {
++  const store = await started(2);
++  let prevents = 0;
++  const ctrlB: KeyPress = {
++    key: "b",
++    code: "KeyB",
++    ctrlKey: true,
++    metaKey: false,
++    altKey: false,
++    shiftKey: false,
++    defaultPrevented: false,
++    preventDefault: () => {
++      prevents += 1;
++    },
++  };
++
++  store.openSettings();
++  store.fileListKey(ctrlB, LINUX);
++  expect([store.fileListShown.value, prevents]).toEqual([true, 0]);
++
++  store.closeSettings();
++  store.fileListKey(ctrlB, LINUX);
++  expect([store.fileListShown.value, prevents]).toEqual([false, 1]);
++});
++
+ test("answer settles the waiting question", async () => {
+   const store = await started(1);
+   const key = parseKey("Mod-f");
+diff --git a/frontend/src/ui/searching.test.ts b/frontend/src/ui/searching.test.ts
+index abf5ce4..af13410 100644
+--- a/frontend/src/ui/searching.test.ts
++++ b/frontend/src/ui/searching.test.ts
+@@ -4,6 +4,7 @@ import { shallowRef, watch } from "vue";
+ import { MAX_ROWS, type SearchedFile } from "../search";
+ import { createAsking } from "./asking";
+ import type { KeyPress } from "./fileListKey";
++import type { Screen } from "./screen";
+ import { createSearching, type GoToRequest, type Searching, type SearchSource } from "./searching";
+ import { SEARCH_PAUSE_MS } from "./searchRun";
+ import { startSettings } from "./settings";
+@@ -96,7 +97,11 @@ function searching(
+       opened.push(path);
+     },
+     shownPath: () => shown,
+-    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")) },
++    keys: {
++      asking: createAsking(),
++      settings: shallowRef(startSettings("dark")),
++      screen: shallowRef<Screen>({ kind: "files" }),
++    },
+   });
+ }
+ 
+@@ -385,7 +390,11 @@ test("toggleKey leaves a press another handler took and one made while a questio
+     panes: () => [],
+     open: () => undefined,
+     shownPath: () => null,
+-    keys: { asking, settings: shallowRef(startSettings("dark")) },
++    keys: {
++      asking,
++      settings: shallowRef(startSettings("dark")),
++      screen: shallowRef<Screen>({ kind: "files" }),
++    },
+   });
+   const waiting = asking.ask({ kind: "deleteNote" });
+   guarded.toggleKey(press(), LINUX);
+@@ -396,6 +405,27 @@ test("toggleKey leaves a press another handler took and one made while a questio
+   expect(guarded.shown.value).toBe(true);
+ });
+ 
++test("toggle-search off the files screen leaves the panel as it is", () => {
++  const screen = shallowRef<Screen>({ kind: "settings" });
++  const search = createSearching<Pane>({
++    source: fakeSource({}).source,
++    panes: () => [],
++    open: () => undefined,
++    shownPath: () => null,
++    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")), screen },
++  });
++  search.toggleKey(press(), LINUX);
++  expect(search.shown.value).toBe(false);
++
++  screen.value = { kind: "files" };
++  search.toggleKey(press(), LINUX);
++  expect(search.shown.value).toBe(true);
++
++  screen.value = { kind: "mergeRequests" };
++  search.toggleKey(press(), LINUX);
++  expect(search.shown.value).toBe(true);
++});
++
+ test("go asks for the lead pane when it is on, else the leftmost on pane, then opens the file", async () => {
+   const opened: string[] = [];
+   const fake = fakeSource({ "a.ts": "foo" });
+@@ -441,7 +471,11 @@ test("go keeps its request while the open runs and when it shows the file; one t
+         opens.push(resolve);
+       }),
+     shownPath: () => shown.path,
+-    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")) },
++    keys: {
++      asking: createAsking(),
++      settings: shallowRef(startSettings("dark")),
++      screen: shallowRef<Screen>({ kind: "files" }),
++    },
+   });
+   await ran(search, "foo");
+   const place = search.results.value?.groups[0]?.places[0];
+diff --git a/frontend/src/ui/stops.test.ts b/frontend/src/ui/stops.test.ts
+index 9f52208..9408974 100644
+--- a/frontend/src/ui/stops.test.ts
++++ b/frontend/src/ui/stops.test.ts
+@@ -128,7 +128,11 @@ function searchOver(stop: () => Stop): Searching<Pane> {
+     panes: () => [],
+     open: () => undefined,
+     shownPath: () => null,
+-    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")) },
++    keys: {
++      asking: createAsking(),
++      settings: shallowRef(startSettings("dark")),
++      screen: shallowRef<Screen>({ kind: "files" }),
++    },
+   });
+ }
+ 
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 4637c76..f389e83 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -2257,6 +2257,18 @@ test("the file list is shown at start, and Ctrl+B on Linux hides and shows it, t
+   expect(show.prevents()).toBe(1);
+ });
+ 
++test("Ctrl+B on the settings screen leaves the list; back on files it toggles", () => {
++  const store = createAppStore(handSource([]).source);
++  store.openSettings();
++  const offFiles = press("b", { ctrl: true });
++  store.fileListKey(offFiles, LINUX);
++  expect([store.fileListShown.value, offFiles.prevents()]).toEqual([true, 0]);
++
++  store.closeSettings();
++  store.fileListKey(press("b", { ctrl: true }), LINUX);
++  expect(store.fileListShown.value).toBe(false);
++});
++
+ test("⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone", () => {
+   const store = createAppStore(handSource([]).source);
+   const others: [FakePress, string][] = [

@@ -69,7 +69,7 @@ async function watchWindowClose(): Promise<void> {
 <template>
   <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
     <CompareTabList
-      v-show="fileListShown"
+      v-show="fileListShown && screen.kind === 'files'"
       :tabs="tabs"
       :shown="shown"
       :detected="detected"

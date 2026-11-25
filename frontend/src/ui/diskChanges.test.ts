@@ -7,6 +7,7 @@ import { createAsking } from "./asking";
 import { applyDiskChanges } from "./diskChanges";
 import type { Notice } from "./noticeText";
 import type { Problem } from "./problem";
+import type { Screen } from "./screen";
 import { createSearching, type Searching } from "./searching";
 import { SEARCH_PAUSE_MS } from "./searchRun";
 import { startSettings } from "./settings";
@@ -70,7 +71,11 @@ function searchOver(files: Files): Searching<Pane> {
     panes: () => [],
     open: () => undefined,
     shownPath: () => null,
-    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")) },
+    keys: {
+      asking: createAsking(),
+      settings: shallowRef(startSettings("dark")),
+      screen: shallowRef<Screen>({ kind: "files" }),
+    },
   });
 }
 

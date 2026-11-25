@@ -4,6 +4,7 @@ import { shallowRef, watch } from "vue";
 import { MAX_ROWS, type SearchedFile } from "../search";
 import { createAsking } from "./asking";
 import type { KeyPress } from "./fileListKey";
+import type { Screen } from "./screen";
 import { createSearching, type GoToRequest, type Searching, type SearchSource } from "./searching";
 import { SEARCH_PAUSE_MS } from "./searchRun";
 import { startSettings } from "./settings";
@@ -96,7 +97,11 @@ function searching(
       opened.push(path);
     },
     shownPath: () => shown,
-    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")) },
+    keys: {
+      asking: createAsking(),
+      settings: shallowRef(startSettings("dark")),
+      screen: shallowRef<Screen>({ kind: "files" }),
+    },
   });
 }
 
@@ -385,7 +390,11 @@ test("toggleKey leaves a press another handler took and one made while a questio
     panes: () => [],
     open: () => undefined,
     shownPath: () => null,
-    keys: { asking, settings: shallowRef(startSettings("dark")) },
+    keys: {
+      asking,
+      settings: shallowRef(startSettings("dark")),
+      screen: shallowRef<Screen>({ kind: "files" }),
+    },
   });
   const waiting = asking.ask({ kind: "deleteNote" });
   guarded.toggleKey(press(), LINUX);
@@ -394,6 +403,27 @@ test("toggleKey leaves a press another handler took and one made while a questio
   await waiting;
   guarded.toggleKey(press(), LINUX);
   expect(guarded.shown.value).toBe(true);
+});
+
+test("toggle-search off the files screen leaves the panel as it is", () => {
+  const screen = shallowRef<Screen>({ kind: "settings" });
+  const search = createSearching<Pane>({
+    source: fakeSource({}).source,
+    panes: () => [],
+    open: () => undefined,
+    shownPath: () => null,
+    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")), screen },
+  });
+  search.toggleKey(press(), LINUX);
+  expect(search.shown.value).toBe(false);
+
+  screen.value = { kind: "files" };
+  search.toggleKey(press(), LINUX);
+  expect(search.shown.value).toBe(true);
+
+  screen.value = { kind: "mergeRequests" };
+  search.toggleKey(press(), LINUX);
+  expect(search.shown.value).toBe(true);
 });
 
 test("go asks for the lead pane when it is on, else the leftmost on pane, then opens the file", async () => {
@@ -441,7 +471,11 @@ test("go keeps its request while the open runs and when it shows the file; one t
         opens.push(resolve);
       }),
     shownPath: () => shown.path,
-    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")) },
+    keys: {
+      asking: createAsking(),
+      settings: shallowRef(startSettings("dark")),
+      screen: shallowRef<Screen>({ kind: "files" }),
+    },
   });
   await ran(search, "foo");
   const place = search.results.value?.groups[0]?.places[0];

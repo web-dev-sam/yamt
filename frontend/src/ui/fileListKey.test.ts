@@ -4,6 +4,7 @@ import { shallowRef } from "vue";
 import { bindingsOf, DEFAULT_KEYS, pressesKey } from "../ipc";
 import { createAsking } from "./asking";
 import { fileListKey, windowKey, type KeyPress } from "./fileListKey";
+import type { Screen } from "./screen";
 import { startSettings } from "./settings";
 
 const LINUX = "Linux x86_64";
@@ -39,6 +40,7 @@ function target(keys: Parameters<typeof bindingsOf>[0] = {}) {
   return {
     asking: createAsking(),
     settings: shallowRef({ ...startSettings("dark"), keys: bindingsOf(keys) }),
+    screen: shallowRef<Screen>({ kind: "files" }),
   };
 }
 
@@ -116,4 +118,28 @@ test("fileListKey flips the list only when the guard takes the press", () => {
 
   fileListKey(keys, press("b", { ctrl: true }), LINUX);
   expect(keys.fileListShown.value).toBe(false);
+});
+
+test("the_list_and_search_keys_do_nothing_off_the_files_screen", () => {
+  const offFiles: readonly Screen[] = [
+    { kind: "settings" },
+    { kind: "serverLog", name: "rust-analyzer" },
+    { kind: "mergeRequests" },
+  ];
+  for (const screen of offFiles) {
+    const keys = { ...target(), screen: shallowRef(screen), fileListShown: shallowRef(true) };
+    const search = press("S", { ctrl: true, shift: true });
+    const list = press("b", { ctrl: true });
+
+    expect(windowKey(keys, "toggle-search", search, LINUX)).toBe(false);
+    expect(windowKey(keys, "toggle-file-list", list, LINUX)).toBe(false);
+    fileListKey(keys, list, LINUX);
+    expect([search.prevents(), list.prevents(), keys.fileListShown.value]).toEqual([0, 0, true]);
+  }
+
+  const onFiles = { ...target(), fileListShown: shallowRef(true) };
+  const search = press("S", { ctrl: true, shift: true });
+  expect(windowKey(onFiles, "toggle-search", search, LINUX)).toBe(true);
+  fileListKey(onFiles, press("b", { ctrl: true }), LINUX);
+  expect([search.prevents(), onFiles.fileListShown.value]).toEqual([1, false]);
 });

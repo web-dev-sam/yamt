@@ -1,0 +1,2 @@
+just mutants HEAD: fileListKey.ts 24 mutants, 24 killed, 0 survived, 0 no coverage, 100% (.vue files are not mutated)
+

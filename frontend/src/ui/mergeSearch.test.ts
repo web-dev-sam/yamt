@@ -19,6 +19,7 @@ import {
   type MergeSearchTarget,
 } from "./mergeSearch";
 import type { Problem } from "./problem";
+import type { Screen } from "./screen";
 import { startSettings } from "./settings";
 import type { ResultLineUp } from "./useMergeController";
 
@@ -87,6 +88,7 @@ function harness(
     problem,
     asking: createAsking(),
     settings: shallowRef(startSettings("dark")),
+    screen: shallowRef<Screen>({ kind: "files" }),
     currentStop: () => stop,
     nextStop: async () => {
       stops.push(stops.length);

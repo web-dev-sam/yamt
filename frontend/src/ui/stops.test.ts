@@ -128,7 +128,11 @@ function searchOver(stop: () => Stop): Searching<Pane> {
     panes: () => [],
     open: () => undefined,
     shownPath: () => null,
-    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")) },
+    keys: {
+      asking: createAsking(),
+      settings: shallowRef(startSettings("dark")),
+      screen: shallowRef<Screen>({ kind: "files" }),
+    },
   });
 }
 

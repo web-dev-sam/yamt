@@ -566,6 +566,31 @@ test("the bound key toggles the file list, never while a question waits", async 
   expect([store.fileListShown.value, prevents]).toEqual([true, 2]);
 });
 
+test("the bound key on the settings screen leaves the file list; back on files it toggles", async () => {
+  const store = await started(2);
+  let prevents = 0;
+  const ctrlB: KeyPress = {
+    key: "b",
+    code: "KeyB",
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+    shiftKey: false,
+    defaultPrevented: false,
+    preventDefault: () => {
+      prevents += 1;
+    },
+  };
+
+  store.openSettings();
+  store.fileListKey(ctrlB, LINUX);
+  expect([store.fileListShown.value, prevents]).toEqual([true, 0]);
+
+  store.closeSettings();
+  store.fileListKey(ctrlB, LINUX);
+  expect([store.fileListShown.value, prevents]).toEqual([false, 1]);
+});
+
 test("answer settles the waiting question", async () => {
   const store = await started(1);
   const key = parseKey("Mod-f");
