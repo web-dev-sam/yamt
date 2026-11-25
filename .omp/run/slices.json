@@ -1,1 +1,3 @@
-{}
+{
+  "SidebarNextFileWeb": { "owned": ["frontend/src/ui/nextFile.ts", "frontend/src/ui/nextFile.test.ts", "frontend/src/ui/fileTree.ts", "frontend/src/ui/fileTree.test.ts", "frontend/src/ui/fileListMode.ts", "frontend/src/ui/fileListMode.test.ts", "frontend/src/ui/rangeReviewed.ts", "frontend/src/ui/rangeReviewed.test.ts", "frontend/src/ui/opening.ts", "frontend/src/ui/opening.test.ts", "frontend/src/ui/rangeStore.ts", "frontend/src/ui/rangeStore.test.ts", "frontend/src/ui/store.ts", "frontend/src/ui/store.test.ts", "frontend/src/ui/rangeFolderSums.ts", "frontend/src/ui/rangeFolderSums.test.ts", "frontend/src/ui/rangeText.ts", "frontend/src/ui/rangeText.test.ts", "frontend/src/ui/FileList.vue", "frontend/src/ui/App.vue", "frontend/src/ui/RangeApp.vue", "frontend/src/ui/RangeCounts.vue", "frontend/src/ui/RangeCounts.test.ts", "frontend/src/ui/FileList.test.ts", "frontend/src/ui/AGENTS.md"] }
+}

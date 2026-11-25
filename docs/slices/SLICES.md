@@ -6,6 +6,20 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Next file in the sidebar's order (session 60; owner: "when I press "reviewed" it jumps to a random file sometimes …")
+
+Request `docs/slices/request-sidebar-next-file.md` (rules 1–5); plan #201 (amends #48, #196); base `868bd1a8`.
+Owner's answers: a next file in a closed folder is still next (the folder opens); the merge window follows the same
+rule. Orchestrator's details: total muted, titled "left to review", absent when nothing counted is left; "changed
+since review" counts its whole change. Shape given, no design round.
+
+| row | slice                                                | owner    | status  | evidence |
+| --- | ---------------------------------------------------- | -------- | ------- | -------- |
+| 1   | web (`briefs/sidebar-next-file-web.md`)              | web-impl | running |          |
+| 2   | reviews; smoke (`briefs/sidebar-next-file-smoke.md`) | mixed    | todo    |          |
+| 3   | docs keeper; final `just check` + smoke              | mixed    | todo    |          |
+| 4   | owner check                                          | human    | todo    |          |
+
 ## Folder sums only with Shift (session 59; owner: "make the folder additions/deletions in the sidebar only visible while shift is being pressed")
 
 Request `docs/slices/request-folder-sums-shift.md` (rules 1–3); base `eb2c9f12`; amends #125. Orchestrator's details:
