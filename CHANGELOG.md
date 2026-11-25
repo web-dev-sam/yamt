@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-11-25
+
 ### Added
 
 - In the diff window, a comment or reply box's main button is now Queue: one press adds the comment and queues it
@@ -32,6 +34,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   theirs.
 - After Reviewed in the diff window, or Mark resolved, Keep, Delete or Take in the merge window, the next file is the
   next one in the order the file list shows: the list's order in list view, top to bottom in tree view.
+
+### Fixed
+
+- Two libraries yamt uses, for web addresses and for cookies, are updated to versions that close two published
+  security advisories.
 
 ## [0.7.3] - 2026-11-20
 
@@ -654,7 +661,8 @@ The 0.6 line as a release: everything in 0.6.0-beta.1 and 0.6.0-beta.2 below, wi
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.7.3...HEAD
+[Unreleased]: ../../compare/v0.7.4...HEAD
+[0.7.4]: ../../compare/v0.7.3...v0.7.4
 [0.7.3]: ../../compare/v0.7.2...v0.7.3
 [0.7.2]: ../../compare/v0.7.1...v0.7.2
 [0.7.1]: ../../compare/v0.7.0...v0.7.1
