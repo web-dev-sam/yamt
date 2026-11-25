@@ -28,6 +28,7 @@ import { useThemeAttribute } from "./settingsStore";
 import SettingsView from "./SettingsView.vue";
 import SideColumn from "./SideColumn.vue";
 import { viewKind, type RangeViewKind } from "./useRangeController";
+import { useShiftHeld } from "./useShiftHeld";
 
 const {
   start,
@@ -55,6 +56,7 @@ const { counts } = threads;
 const { marks } = reviewed;
 
 const focused = useWindowFocus();
+const shift = useShiftHeld();
 useThemeAttribute();
 useEventListener(window, "keydown", (event) => {
   fileListKey(event, navigator.platform);
@@ -133,7 +135,7 @@ function viewOf(file: RangeEntry): RangeViewKind {
           />
         </template>
         <template #folder="{ path }">
-          <RangeCounts :lines="folderLines(path)" class="ml-auto" />
+          <RangeCounts :lines="folderLines(path)" class="ml-auto" :class="{ invisible: !shift }" />
           <span
             v-if="doneFolders.has(path)"
             role="img"

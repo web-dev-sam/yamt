@@ -1,0 +1,42 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 7cd17a7..c4581c9 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -6,7 +6,7 @@ Range window (plan §2 #103–#106): a third root, `RangeApp.vue` over `rangeSto
+ 
+ Side column (request `docs/slices/request-mr-heading.md` rule 7): in all three roots the side column (`SideColumn.vue` with the file list and search, the compare root's `CompareTabList.vue`) shows only on the files screen, hidden with `v-show` (`onFiles`) so it comes back as it was; its two toggle keys act only there (`fileListKey.ts` `windowKey` answers false off `files`, before the key match).
+ 
+-Folder sums (plan §2 #125): `rangeFolderSums.ts` `folderSums` (once per file list in `RangeApp.vue`) keys each folder's `+a −r` by the path its tree row carries; `RangeApp.vue` fills the tree's optional `folder` slot (`FileTree.vue`, forwarded by `FileList.vue`; the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair `RangeFileRow.vue` uses too, and, when every file below the folder is reviewed (`reviewedFolders`, same keys), the reviewed file row's muted Lucide `check` after it, titled `FOLDER_REVIEWED_WORD` ("every file reviewed"); the folder's name stays unmuted.
++Folder sums (plan §2 #125, request `docs/slices/request-folder-sums-shift.md`): `rangeFolderSums.ts` `folderSums` (once per file list in `RangeApp.vue`) keys each folder's `+a −r` by the path its tree row carries; `RangeApp.vue` fills the tree's optional `folder` slot (`FileTree.vue`, forwarded by `FileList.vue`; the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair `RangeFileRow.vue` uses too, shown only while Shift is held (`useShiftHeld`; otherwise `invisible`, keeping its place so the name and check do not move; file rows' counts always show), and, when every file below the folder is reviewed (`reviewedFolders`, same keys), the reviewed file row's muted Lucide `check` after it, titled `FOLDER_REVIEWED_WORD` ("every file reviewed"); the folder's name stays unmuted.
+ 
+ What the range window compares (request `docs/slices/request-mr-heading.md` rules 2–4, design `docs/slices/briefs/mr-heading-design.md` option A): `rangeText.ts` `columnNames` is the one rule naming a side (a merge request: the target "where <source> branched off", then the source; `a...b`: `a` "where `b` branched off", then `b`; `a..b`: each name; a merge request started without names: the short ids), read by `RangeColumnHeading.vue` (both `RangeView` headers but the since view's "As you reviewed it"), the search's pane titles and `emptyRangeText` through `columnText`. `RangeHeadingLine.vue` (`headingLine`: `!iid`, title, source chip `→` target chip; a typed range's two names around its own dots; then `RangeCounts.vue` with `start.totals` at the right end) is the first row of `RangeApp.vue`'s bar stack, on the files screen only, its parts set apart by gap alone (VU18).
+ 
+diff --git a/frontend/src/ui/RangeApp.vue b/frontend/src/ui/RangeApp.vue
+index d847dce..c595a85 100644
+--- a/frontend/src/ui/RangeApp.vue
++++ b/frontend/src/ui/RangeApp.vue
+@@ -28,6 +28,7 @@ import { useThemeAttribute } from "./settingsStore";
+ import SettingsView from "./SettingsView.vue";
+ import SideColumn from "./SideColumn.vue";
+ import { viewKind, type RangeViewKind } from "./useRangeController";
++import { useShiftHeld } from "./useShiftHeld";
+ 
+ const {
+   start,
+@@ -55,6 +56,7 @@ const { counts } = threads;
+ const { marks } = reviewed;
+ 
+ const focused = useWindowFocus();
++const shift = useShiftHeld();
+ useThemeAttribute();
+ useEventListener(window, "keydown", (event) => {
+   fileListKey(event, navigator.platform);
+@@ -133,7 +135,7 @@ function viewOf(file: RangeEntry): RangeViewKind {
+           />
+         </template>
+         <template #folder="{ path }">
+-          <RangeCounts :lines="folderLines(path)" class="ml-auto" />
++          <RangeCounts :lines="folderLines(path)" class="ml-auto" :class="{ invisible: !shift }" />
+           <span
+             v-if="doneFolders.has(path)"
+             role="img"
