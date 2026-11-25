@@ -106,7 +106,7 @@ fn range_on(text: &str, repo: &str, start: StartScreen) -> Invocation {
         repo: PathBuf::from(repo),
         ai: Ai::Off,
         start,
-        marks: MarksOf::SideNames,
+        range_of: RangeOf::SideNames,
     }
 }
 
@@ -132,7 +132,7 @@ fn ai_is_accepted_with_every_mode_and_reaches_the_range_and_compare_windows() {
         repo: PathBuf::from("."),
         ai: Ai::On,
         start: StartScreen::Files,
-        marks: MarksOf::SideNames,
+        range_of: RangeOf::SideNames,
     };
     assert_eq!(parsed(&["--diff=a...b", "--ai"]), Ok(with_ai));
     assert_eq!(parsed(&["--diff=a...b"]), Ok(range("a...b", ".")));
@@ -249,9 +249,10 @@ fn review_of_with_a_range_names_the_merge_request_s_marks() {
         repo: PathBuf::from("."),
         ai: Ai::Off,
         start: StartScreen::Files,
-        marks: MarksOf::MergeRequest {
+        range_of: RangeOf::MergeRequest {
             project: project.to_owned(),
             iid,
+            names: None,
         },
     };
     assert_eq!(
@@ -301,6 +302,121 @@ fn the_usage_names_review_of() {
         USAGE.contains("  --review-of=<project>!<iid>  with --diff=<range>: "),
         "{USAGE}"
     );
+}
+
+const NASTY_TITLE: &str = "--diff=x \"it's\" = −\n!7 é";
+
+fn named_range(title: &str) -> Invocation {
+    Invocation::Range {
+        spec: RangeSpec::parse("a..b").unwrap(),
+        repo: PathBuf::from("."),
+        ai: Ai::Off,
+        start: StartScreen::Files,
+        range_of: RangeOf::MergeRequest {
+            project: "g/p".to_owned(),
+            iid: 13,
+            names: Some(MergeRequestNames {
+                title: title.to_owned(),
+                source: "snooze".to_owned(),
+                target: "main".to_owned(),
+            }),
+        },
+    }
+}
+
+#[test]
+fn mr_names_with_review_of_name_the_merge_request() {
+    let title = "--mr-title=Snooze a reminder";
+    let (source, target) = ("--mr-source=snooze", "--mr-target=main");
+    let review_of = "--review-of=g/p!13";
+    let wanted = Ok(named_range("Snooze a reminder"));
+    assert_eq!(
+        parsed(&["--diff=a..b", review_of, title, source, target]),
+        wanted
+    );
+    assert_eq!(
+        parsed(&[target, title, "--diff=a..b", source, review_of]),
+        wanted
+    );
+}
+
+#[test]
+fn mr_names_without_review_of_partial_or_twice_are_refused() {
+    let apart = Err(MR_NAMES_APART.to_owned());
+    let title = "--mr-title=Snooze a reminder";
+    let (source, target) = ("--mr-source=snooze", "--mr-target=main");
+    let review_of = "--review-of=g/p!13";
+    let partial: [&[&str]; 4] = [&[title], &[source], &[target, source], &[title, target]];
+    for names in partial {
+        let mut args = vec!["--diff=a..b", review_of];
+        args.extend_from_slice(names);
+        assert_eq!(parsed(&args), apart, "{names:?}");
+    }
+    let twice = ["--diff=a..b", review_of, title, source, target, source];
+    assert_eq!(parsed(&twice), apart);
+    assert_eq!(
+        parsed(&["--diff=a..b", title, source, target]),
+        Err(MR_NAMES_WITHOUT_REVIEW_OF.to_owned())
+    );
+    assert_eq!(
+        parsed(&["--diff", review_of, title, source, target]),
+        Err(REVIEW_OF_WITHOUT_RANGE.to_owned())
+    );
+    assert_eq!(
+        parsed(&["--diff=a..b", review_of, title, "--help"]),
+        Ok(Invocation::Help)
+    );
+    assert_eq!(
+        parsed(&["--diff=a..b", title, title, "--help"]),
+        Ok(Invocation::Help)
+    );
+    assert_eq!(
+        MR_NAMES_APART,
+        "give --mr-title, --mr-source and --mr-target together, each once"
+    );
+    assert_eq!(
+        MR_NAMES_WITHOUT_REVIEW_OF,
+        "--mr-title, --mr-source and --mr-target go with --review-of=<project>!<iid>"
+    );
+}
+
+#[test]
+fn a_title_holding_quotes_equals_newlines_and_a_leading_dash_is_one_value() {
+    let title = format!("--mr-title={NASTY_TITLE}");
+    let args = [
+        "--diff=a..b",
+        "--review-of=g/p!13",
+        &title,
+        "--mr-source=snooze",
+        "--mr-target=main",
+    ];
+    assert_eq!(parsed(&args), Ok(named_range(NASTY_TITLE)));
+}
+
+#[test]
+fn review_of_without_names_names_no_names() {
+    let Ok(Invocation::Range { range_of, .. }) = parsed(&["--diff=a..b", "--review-of=g/p!13"])
+    else {
+        panic!("not a range window");
+    };
+    let names_none = RangeOf::MergeRequest {
+        project: "g/p".to_owned(),
+        iid: 13,
+        names: None,
+    };
+    assert_eq!(range_of, names_none);
+}
+
+#[test]
+fn the_usage_names_the_mr_names() {
+    let after_review_of = [
+        "                    (the merge-request page passes it)\n",
+        "  --mr-title=<text> --mr-source=<branch> --mr-target=<branch>\n",
+        "                    with --review-of: the merge request's title and branches the window shows\n",
+        "                    (the merge-request page passes them)\n",
+    ]
+    .concat();
+    assert!(USAGE.contains(&after_review_of), "{USAGE}");
 }
 
 #[test]

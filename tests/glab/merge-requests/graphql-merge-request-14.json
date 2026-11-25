@@ -1,1 +1,1 @@
-{"data":{"project":{"mergeRequest":{"state":"opened","targetBranch":"main","diffRefs":null}}}}
+{"data":{"project":{"mergeRequest":{"state":"opened","title":"Card colours","sourceBranch":"colours","targetBranch":"main","sourceProjectId":7,"targetProjectId":7,"sourceProject":{"namespace":{"fullPath":"taskboard"}},"diffRefs":null}}}}

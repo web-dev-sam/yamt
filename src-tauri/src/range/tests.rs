@@ -2,7 +2,7 @@ use serde_json::json;
 use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo};
-use yamt_range::pair_folders;
+use yamt_range::{MergeRequestNames, pair_folders};
 
 use super::*;
 use crate::commands::with_commands;
@@ -91,19 +91,19 @@ pub(crate) fn open_range_window_on(repo: TempDir, range: &str) -> RangeWindow {
         TempDir::new().unwrap(),
         resolved,
         Ai::Off,
-        MarksOf::SideNames,
+        RangeOf::SideNames,
     )
 }
 
 pub(crate) fn open_range_window_in(repo: TempDir, data: TempDir, ai: Ai) -> RangeWindow {
     let resolved = resolved(repo.path());
-    open_resolved_window(repo, data, resolved, ai, MarksOf::SideNames)
+    open_resolved_window(repo, data, resolved, ai, RangeOf::SideNames)
 }
 
-/// A window on `main...remote` whose Reviewed marks belong to `marks`.
-pub(crate) fn open_marked_window(repo: TempDir, data: TempDir, marks: MarksOf) -> RangeWindow {
+/// A window on `main...remote` of a merge request's changes or of its sides by name, as `range_of` says.
+pub(crate) fn open_marked_window(repo: TempDir, data: TempDir, range_of: RangeOf) -> RangeWindow {
     let resolved = resolved(repo.path());
-    open_resolved_window(repo, data, resolved, Ai::Off, marks)
+    open_resolved_window(repo, data, resolved, Ai::Off, range_of)
 }
 
 fn open_resolved_window(
@@ -111,10 +111,10 @@ fn open_resolved_window(
     data: TempDir,
     resolved: Resolved,
     ai: Ai,
-    marks: MarksOf,
+    range_of: RangeOf,
 ) -> RangeWindow {
     let app = range_app();
-    manage_range_in(&app, &app_folder(data.path()), resolved, ai, marks).unwrap();
+    manage_range_in(&app, &app_folder(data.path()), resolved, ai, range_of).unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
         .build()
         .unwrap();
@@ -147,7 +147,7 @@ fn a_broken_threads_file_is_refused_before_the_range_state_and_left_unchanged() 
         &app_folder(data.path()),
         resolved(repo.path()),
         Ai::Off,
-        MarksOf::SideNames,
+        RangeOf::SideNames,
     );
 
     let line = refused.unwrap_err();
@@ -179,7 +179,7 @@ fn a_newer_reviewed_file_refuses_the_range_before_any_window() {
         &app_folder(data.path()),
         resolved(repo.path()),
         Ai::Off,
-        MarksOf::SideNames,
+        RangeOf::SideNames,
     );
 
     let named = format!(
@@ -213,7 +213,7 @@ fn a_broken_threads_file_leaves_reviewed_json_unwritten() {
         &app_folder(data.path()),
         resolved(repo.path()),
         Ai::Off,
-        MarksOf::SideNames,
+        RangeOf::SideNames,
     );
 
     let line = refused.unwrap_err();
@@ -260,7 +260,10 @@ fn a_range_whose_threads_are_all_listed_logs_no_warning() {
 #[test]
 fn open_range_answers_the_range_s_start() {
     let window = open_range_window();
-    let start = resolved(window.repo.path()).list().unwrap().start();
+    let start = resolved(window.repo.path())
+        .list()
+        .unwrap()
+        .start(RangeHeading::Typed);
     assert_eq!(
         invoke_on(&window.webview, "open_range", json!({})),
         Ok(serde_json::to_value(start).unwrap())
@@ -318,9 +321,12 @@ fn a_second_window_on_the_same_pair_is_refused_naming_both_short_ids() {
         &app_folder(window.data.path()),
         resolved(window.repo.path()),
         Ai::Off,
-        MarksOf::SideNames,
+        RangeOf::SideNames,
     );
-    let start = resolved(window.repo.path()).list().unwrap().start();
+    let start = resolved(window.repo.path())
+        .list()
+        .unwrap()
+        .start(RangeHeading::Typed);
     assert_eq!(
         refused,
         Err(format!(
@@ -332,11 +338,96 @@ fn a_second_window_on_the_same_pair_is_refused_naming_both_short_ids() {
     );
 }
 
-#[test]
-fn the_title_is_the_range_as_typed_then_the_repository_folder() {
-    let spec = RangeSpec::parse("main...feature").unwrap();
-    assert_eq!(
-        range_title(&spec, Path::new("/home/me/proj")),
-        "main...feature — proj — yamt"
+fn snooze(title: &str) -> RangeOf {
+    RangeOf::MergeRequest {
+        project: "taskboard/taskboard".to_owned(),
+        iid: 13,
+        names: Some(MergeRequestNames {
+            title: title.to_owned(),
+            source: "snooze".to_owned(),
+            target: "main".to_owned(),
+        }),
+    }
+}
+
+/// The title `manage_range_in` answers for a window on `main...remote` of `repo()`, the repository's folder name and
+/// the range's start.
+fn title_of(range_of: RangeOf) -> (String, String, RangeStart) {
+    let (repo, data) = (repo(), TempDir::new().unwrap());
+    let title = manage_range_in(
+        &range_app(),
+        &app_folder(data.path()),
+        resolved(repo.path()),
+        Ai::Off,
+        range_of,
     );
+    let folder = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let start = resolved(repo.path())
+        .list()
+        .unwrap()
+        .start(RangeHeading::Typed);
+    (title.unwrap(), folder, start)
+}
+
+fn assert_no_separator(title: &str) {
+    for separator in ['·', '|', '•'] {
+        assert!(!title.contains(separator), "{title}");
+    }
+}
+
+#[test]
+fn a_typed_window_s_title_is_the_range_its_totals_and_folder() {
+    let (title, folder, _) = title_of(RangeOf::SideNames);
+
+    assert_eq!(title, format!("main...remote  +1 −1 — {folder} — yamt"));
+    assert_no_separator(&title);
+}
+
+#[test]
+fn a_merge_request_window_s_title_names_it_its_branches_and_totals() {
+    let (title, folder, _) = title_of(snooze("Snooze a reminder"));
+
+    let wanted = format!("!13 Snooze a reminder  snooze → main  +1 −1 — {folder} — yamt");
+    assert_eq!(title, wanted);
+    assert_no_separator(&title);
+}
+
+#[test]
+fn an_unnamed_merge_request_s_title_names_its_short_ids() {
+    let unnamed = RangeOf::MergeRequest {
+        project: "taskboard/taskboard".to_owned(),
+        iid: 13,
+        names: None,
+    };
+    let (title, folder, start) = title_of(unnamed);
+
+    let (left, right) = (start.left.short_id, start.right.short_id);
+    let wanted = format!("!13  {left}..{right}  +1 −1 — {folder} — yamt");
+    assert_eq!(title, wanted);
+    assert_no_separator(&title);
+}
+
+#[test]
+fn a_control_character_in_the_title_is_a_space_in_the_title_bar() {
+    let (title, folder, _) = title_of(snooze("Snooze\na\treminder"));
+
+    let wanted = format!("!13 Snooze a reminder  snooze → main  +1 −1 — {folder} — yamt");
+    assert_eq!(title, wanted);
+}
+
+#[test]
+fn open_range_answers_the_heading_and_totals() {
+    let window = open_marked_window(repo(), TempDir::new().unwrap(), snooze("Snooze a reminder"));
+
+    let start = invoke_on(&window.webview, "open_range", json!({})).unwrap();
+
+    let names = json!({ "title": "Snooze a reminder", "source": "snooze", "target": "main" });
+    let heading = json!({ "kind": "mergeRequest", "iid": 13, "names": names });
+    assert_eq!(start["heading"], heading);
+    assert_eq!(start["totals"], json!({ "added": 1, "removed": 1 }));
 }

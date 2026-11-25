@@ -7,8 +7,8 @@ use yamt_merge_requests::{OpenReply, RangeToOpen};
 
 use crate::args::Ai;
 
-/// Starts a second yamt on the range, `yamt --diff=<spec> --repo <root> --review-of=<project>!<iid>`, with `--ai`
-/// when `ai` is on.
+/// Starts a second yamt on the range, `yamt --diff=<spec> --repo <root> --review-of=<project>!<iid>
+/// --mr-title=<title> --mr-source=<source> --mr-target=<target>`, with `--ai` when `ai` is on.
 pub(crate) fn start_range(range: &RangeToOpen, ai: Ai) -> OpenReply {
     match spawn(range_arguments(range, ai), &range.root) {
         Ok(()) => OpenReply::Opened,
@@ -48,6 +48,9 @@ fn range_arguments(range: &RangeToOpen, ai: Ai) -> Vec<OsString> {
         "--repo".into(),
         range.root.clone().into(),
         format!("--review-of={}!{}", range.project, range.iid.0).into(),
+        format!("--mr-title={}", range.names.title).into(),
+        format!("--mr-source={}", range.names.source).into(),
+        format!("--mr-target={}", range.names.target).into(),
     ];
     match ai {
         Ai::Off => {}
@@ -106,10 +109,10 @@ fn reap(mut child: Child) {
 #[cfg(test)]
 mod tests {
     use yamt_merge_requests::MergeRequestIid;
-    use yamt_range::RangeSpec;
+    use yamt_range::{MergeRequestNames, RangeSpec};
 
     use super::*;
-    use crate::args::{Invocation, MarksOf, StartScreen};
+    use crate::args::{Invocation, RangeOf, StartScreen};
 
     const EXE: &str = "/tmp/.mount_yamtAbC/usr/bin/yamt";
     const APPIMAGE: &str = "/home/sam/yamt.AppImage";
@@ -118,14 +121,25 @@ mod tests {
         "531ea52dfb892e20206010fb6cd6161d9c88964a..6ea97d8eee3a6a962d0411a0ed0f8d28ac90fc19";
     const PROJECT: &str = "taskboard/taskboard";
     const IID: u32 = 13;
+    const NASTY_TITLE: &str = "--diff=x \"it's\" = −\n!7 é";
+
+    fn names() -> MergeRequestNames {
+        MergeRequestNames {
+            title: NASTY_TITLE.to_owned(),
+            source: "sam:feature".to_owned(),
+            target: "main".to_owned(),
+        }
+    }
 
     #[test]
-    fn the_second_yamt_is_asked_for_the_range_in_its_repository_with_the_windows_ai_and_marks() {
+    fn the_second_yamt_is_asked_for_the_range_in_its_repository_with_the_windows_ai_marks_and_names()
+     {
         let range = RangeToOpen {
             root: ROOT.into(),
             spec: SPEC.to_owned(),
             project: PROJECT.to_owned(),
             iid: MergeRequestIid(IID),
+            names: names(),
         };
         for ai in [Ai::Off, Ai::On] {
             let invocation = crate::args::parse(range_arguments(&range, ai), None);
@@ -135,9 +149,10 @@ mod tests {
                 repo: ROOT.into(),
                 ai,
                 start: StartScreen::Files,
-                marks: MarksOf::MergeRequest {
+                range_of: RangeOf::MergeRequest {
                     project: PROJECT.to_owned(),
                     iid: IID,
+                    names: Some(names()),
                 },
             };
             assert_eq!(invocation, Ok(wanted), "{ai:?}");

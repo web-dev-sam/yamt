@@ -78,9 +78,41 @@ pub struct Compared {
     pub right_label: RangeSideLabel,
 }
 
+/// A merge request's title and branches as GitLab named them when its changes were opened (plan §2 #199): `source`
+/// as GitLab's merge-request page names it, `<namespace full path>:<branch>` for a fork, `(fork) <branch>` for a fork
+/// GitLab does not show the reader.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+pub struct MergeRequestNames {
+    pub title: String,
+    pub source: String,
+    pub target: String,
+}
+
+/// What the window's line and title bar name (plan §2 #199).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RangeHeading {
+    /// A range typed by hand: its sides' labels.
+    Typed,
+    /// A merge request's changes, with its names at the click.
+    MergeRequest { iid: u32, names: MergeRequestNames },
+    /// A merge request's changes started without its names (an older yamt's arguments).
+    UnnamedMergeRequest { iid: u32 },
+}
+
+/// The whole range's line counts: every listed file's `Counted` lines summed, saturating at `u32::MAX`; a
+/// `NotCounted` file adds nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+pub struct RangeTotals {
+    pub added: u32,
+    pub removed: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 pub struct RangeStart {
     pub range: String,
+    pub heading: RangeHeading,
+    pub totals: RangeTotals,
     pub left: RangeSide,
     pub right: RangeSide,
     pub files: Vec<RangeEntry>,

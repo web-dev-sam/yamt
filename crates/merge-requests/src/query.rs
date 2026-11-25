@@ -12,11 +12,12 @@ pub(crate) use rest::{
 
 mod rest;
 
-/// A merge request's state, target branch and the two commits of its diff, asked afresh on each open so a push
-/// since the list loaded counts.
+/// A merge request's state, title, branches, source project and the two commits of its diff, asked afresh on each
+/// open so a push since the list loaded counts.
 const DETAILS_QUERY: &str = "query MergeRequestDetails($fullPath: ID!, $iid: String!) { \
      project(fullPath: $fullPath) { mergeRequest(iid: $iid) { \
-     state targetBranch diffRefs { baseSha headSha } } } }";
+     state title sourceBranch targetBranch sourceProjectId targetProjectId \
+     sourceProject { namespace { fullPath } } diffRefs { baseSha headSha } } } }";
 
 /// What resolving a merge request's conflicts needs, asked afresh on each click: its state, its two branches and
 /// whether the source branch lives in the target's project.

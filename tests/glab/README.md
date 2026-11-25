@@ -134,10 +134,15 @@ answered: <address or endpoint>            (a picture or a job's log, after its 
   user `sam`. Page 1: !13 (failed pipeline, two failed jobs, `lint` allowed to fail; `CI_MUST_PASS`), !12 (passed, 2
   approvals, 1 open discussion; `MERGEABLE`), !11 (a draft, "Draft: …", running; `DRAFT_STATUS` and conflicts), more
   to come (`page-2`); page 2: !9 (no pipeline; `NEED_REBASE`, no diff stats), !8 (manual; no merge status, from a
-  fork), the last. Details over GraphQL, all from `scripts/range-repo.sh`'s merge base `531ea52` and, but for !17, into
-  `main`: !12 ends at `feature` (`9c1ba3f`), !13 at `6ea97d8` ("Snooze a reminder", only in range-repo's fake
-  GitLab), !14 has no diff yet (`diffRefs` null), !15 is merged, !16 starts from `deadbee`, a commit no repository
-  has, !17 is !13's diff into a branch named `main:refs/heads/x`, which a fetch refspec would read as a ref to write.
+  fork), the last. Details over GraphQL (`graphql-merge-request-<iid>.json`: `state`, `title`, `sourceBranch`,
+  `targetBranch`, `sourceProjectId`, `targetProjectId`, `sourceProject { namespace { fullPath } }`, `diffRefs`), all
+  from `scripts/range-repo.sh`'s merge base `531ea52` and, but for !17, into `main`, every one but !18 and !19 from
+  project 7 itself: !12 ("Reminders before a card is due", `feature`) ends at `feature` (`9c1ba3f`), !13 ("Snooze a
+  reminder", `snooze`) at `6ea97d8` (only in range-repo's fake GitLab), !14 has no diff yet (`diffRefs` null), !15 is
+  merged, !16 starts from `deadbee`, a commit no repository has, !17 is !13's diff into a branch named
+  `main:refs/heads/x`, which a fetch refspec would read as a ref to write; !18 ("Remind by e-mail") is !12's diff from
+  `feature` of a fork, project 12 in namespace `sam`, and !19 the same from a fork GitLab does not show
+  (`sourceProject` null).
   Over REST, as a window on one of those ranges checks it (#119): `merge-requests.json` lists !13 and !12,
   `merge-request-12.json` and `merge-request-13.json` hold their diffs.
 - `merge-requests-timeout/` — `merge-requests/`'s project and first page, which waits 25 s: a list past glab's

@@ -1,7 +1,7 @@
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
-use yamt_range::RangeSpec;
+use yamt_range::{MergeRequestNames, RangeSpec};
 
 pub(crate) const USAGE: &str = "\
 usage: yamt [--repo <path>]
@@ -24,6 +24,9 @@ name git knows (branch, tag, commit id, HEAD~3); an empty side is HEAD.
                     --diff=<range>: the changes windows its merge-request page opens get it too
   --review-of=<project>!<iid>  with --diff=<range>: remember Reviewed marks for this merge request
                     (the merge-request page passes it)
+  --mr-title=<text> --mr-source=<branch> --mr-target=<branch>
+                    with --review-of: the merge request's title and branches the window shows
+                    (the merge-request page passes them)
   YAMT_AI=1         in the environment: every start behaves as with --ai (unset, empty or 0: off)
   --help            print this help
   --version         print the version
@@ -35,6 +38,12 @@ const RANGE_FLAG: &str = "--diff=";
 const REVIEW_OF_FLAG: &str = "--review-of=";
 const REVIEW_OF_WITHOUT_RANGE: &str = "--review-of goes with --diff=<range>";
 const REVIEW_OF_TWICE: &str = "give one --review-of=<project>!<iid>";
+const MR_TITLE_FLAG: &str = "--mr-title=";
+const MR_SOURCE_FLAG: &str = "--mr-source=";
+const MR_TARGET_FLAG: &str = "--mr-target=";
+const MR_NAMES_APART: &str = "give --mr-title, --mr-source and --mr-target together, each once";
+const MR_NAMES_WITHOUT_REVIEW_OF: &str =
+    "--mr-title, --mr-source and --mr-target go with --review-of=<project>!<iid>";
 /// The folder yamt was started in: a merge's or range's repository unless `--repo` names one, and where the
 /// compare window's merge-request page looks for a repository (plan §2 #94 as amended for #128–#135).
 pub(crate) const START_FOLDER: &str = ".";
@@ -53,7 +62,7 @@ pub(crate) enum Invocation {
         repo: PathBuf,
         ai: Ai,
         start: StartScreen,
-        marks: MarksOf,
+        range_of: RangeOf,
     },
     Help,
     Version,
@@ -74,21 +83,94 @@ pub(crate) enum StartScreen {
     MergeRequests,
 }
 
-/// What a range window's Reviewed marks belong to: its two sides by name, or the merge request `--review-of` names
-/// (plan §2 #195).
+/// What a range window is of: its two sides by name, or a merge request's changes (`--review-of`), which its Reviewed
+/// marks and its heading follow (plan §2 #195, #199).
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum MarksOf {
+pub(crate) enum RangeOf {
     SideNames,
-    MergeRequest { project: String, iid: u32 },
+    MergeRequest {
+        project: String,
+        iid: u32,
+        names: Option<MergeRequestNames>,
+    },
 }
 
-impl MarksOf {
-    fn with_review_of(self, text: &str) -> Result<MarksOf, String> {
+impl RangeOf {
+    fn with_review_of(self, text: &str) -> Result<RangeOf, String> {
         match self {
-            MarksOf::SideNames => merge_request_marks(text),
-            MarksOf::MergeRequest { .. } => Err(REVIEW_OF_TWICE.to_owned()),
+            RangeOf::SideNames => merge_request_of(text),
+            RangeOf::MergeRequest { .. } => Err(REVIEW_OF_TWICE.to_owned()),
         }
     }
+
+    fn named(self, names: Option<MergeRequestNames>) -> Result<RangeOf, String> {
+        match (self, names) {
+            (range_of, None) => Ok(range_of),
+            (RangeOf::MergeRequest { project, iid, .. }, Some(names)) => {
+                Ok(RangeOf::MergeRequest {
+                    project,
+                    iid,
+                    names: Some(names),
+                })
+            }
+            (RangeOf::SideNames, Some(_)) => Err(MR_NAMES_WITHOUT_REVIEW_OF.to_owned()),
+        }
+    }
+}
+
+/// Which of the three `--mr-*` flags an argument is.
+#[derive(Clone, Copy)]
+enum NameFlag {
+    Title,
+    Source,
+    Target,
+}
+
+/// The `--mr-*` flags seen so far, each at most once.
+#[derive(Default)]
+struct NameFlags {
+    title: Option<String>,
+    source: Option<String>,
+    target: Option<String>,
+}
+
+impl NameFlags {
+    fn with(mut self, flag: NameFlag, value: &str) -> Result<NameFlags, String> {
+        let held = match flag {
+            NameFlag::Title => &mut self.title,
+            NameFlag::Source => &mut self.source,
+            NameFlag::Target => &mut self.target,
+        };
+        if held.is_some() {
+            return Err(MR_NAMES_APART.to_owned());
+        }
+        *held = Some(value.to_owned());
+        Ok(self)
+    }
+
+    fn names(self) -> Result<Option<MergeRequestNames>, String> {
+        match (self.title, self.source, self.target) {
+            (Some(title), Some(source), Some(target)) => Ok(Some(MergeRequestNames {
+                title,
+                source,
+                target,
+            })),
+            (None, None, None) => Ok(None),
+            _ => Err(MR_NAMES_APART.to_owned()),
+        }
+    }
+}
+
+/// The flag `arg` is, and its value: everything after the prefix.
+fn name_flag(arg: &str) -> Option<(NameFlag, &str)> {
+    let flags = [
+        (MR_TITLE_FLAG, NameFlag::Title),
+        (MR_SOURCE_FLAG, NameFlag::Source),
+        (MR_TARGET_FLAG, NameFlag::Target),
+    ];
+    flags
+        .into_iter()
+        .find_map(|(prefix, flag)| Some((flag, arg.strip_prefix(prefix)?)))
 }
 
 /// What the `--diff` flags seen so far ask for.
@@ -131,15 +213,16 @@ fn ai_from_variable(value: Option<&OsStr>) -> Ai {
     }
 }
 
-fn merge_request_marks(text: &str) -> Result<MarksOf, String> {
+fn merge_request_of(text: &str) -> Result<RangeOf, String> {
     if let Some((project, iid)) = text.rsplit_once('!')
         && !project.is_empty()
         && let Ok(iid) = iid.parse::<u32>()
         && iid > 0
     {
-        return Ok(MarksOf::MergeRequest {
+        return Ok(RangeOf::MergeRequest {
             project: project.to_owned(),
             iid,
+            names: None,
         });
     }
     Err(format!(
@@ -156,7 +239,8 @@ pub(crate) fn parse(
     let mut ai = ai_from_variable(ai_variable);
     let mut start = StartScreen::Files;
     let mut window = Ok(Window::Merge);
-    let mut marks = Ok(MarksOf::SideNames);
+    let mut range_of = Ok(RangeOf::SideNames);
+    let mut names = Ok(NameFlags::default());
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--help") => return Ok(Invocation::Help),
@@ -175,35 +259,39 @@ pub(crate) fn parse(
                 window = window.and_then(|window| window.with_range(range));
             }
             Some(text) if let Some(review) = text.strip_prefix(REVIEW_OF_FLAG) => {
-                marks = marks.and_then(|marks| marks.with_review_of(review));
+                range_of = range_of.and_then(|range_of| range_of.with_review_of(review));
+            }
+            Some(text) if let Some((flag, value)) = name_flag(text) => {
+                names = names.and_then(|names| names.with(flag, value));
             }
             _ => return Err(format!("unknown argument {}", arg.to_string_lossy())),
         }
     }
-    invocation(window?.started_on(start), repo, marks?, ai, start)
+    let range_of = range_of?.named(names?.names()?)?;
+    invocation(window?.started_on(start), repo, range_of, ai, start)
 }
 
 fn invocation(
     window: Window,
     repo: Option<PathBuf>,
-    marks: MarksOf,
+    range_of: RangeOf,
     ai: Ai,
     start: StartScreen,
 ) -> Result<Invocation, String> {
-    match (window, repo, marks) {
-        (Window::Compare | Window::Merge, _, MarksOf::MergeRequest { .. }) => {
+    match (window, repo, range_of) {
+        (Window::Compare | Window::Merge, _, RangeOf::MergeRequest { .. }) => {
             Err(REVIEW_OF_WITHOUT_RANGE.to_owned())
         }
-        (Window::Compare, Some(_), MarksOf::SideNames) => Err(DIFF_WITH_REPO.to_owned()),
-        (Window::Compare, None, MarksOf::SideNames) => Ok(Invocation::Compare { ai, start }),
-        (Window::Range(spec), repo, marks) => Ok(Invocation::Range {
+        (Window::Compare, Some(_), RangeOf::SideNames) => Err(DIFF_WITH_REPO.to_owned()),
+        (Window::Compare, None, RangeOf::SideNames) => Ok(Invocation::Compare { ai, start }),
+        (Window::Range(spec), repo, range_of) => Ok(Invocation::Range {
             spec,
             repo: repo.unwrap_or_else(|| PathBuf::from(START_FOLDER)),
             ai,
             start,
-            marks,
+            range_of,
         }),
-        (Window::Merge, repo, MarksOf::SideNames) => Ok(Invocation::Merge {
+        (Window::Merge, repo, RangeOf::SideNames) => Ok(Invocation::Merge {
             repo: repo.unwrap_or_else(|| PathBuf::from(START_FOLDER)),
         }),
     }

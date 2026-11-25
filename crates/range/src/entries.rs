@@ -3,7 +3,8 @@ use std::path::Path;
 use yamt_gitio::{Changed, ChangedFile, Numstat, Oid, TreeSide};
 
 use crate::{
-    FileSides, RangeChange, RangeEntry, RangeEntryKind, RangeFileId, RangeLineCounts, SideObject,
+    FileSides, RangeChange, RangeEntry, RangeEntryKind, RangeFileId, RangeLineCounts, RangeTotals,
+    SideObject,
 };
 
 const EXECUTABLE_MODE: u32 = 0o100_755;
@@ -86,6 +87,23 @@ pub(crate) fn entries_at(changed: &[ChangedFile]) -> Vec<RangeEntry> {
             lines: line_counts(file.numstat),
         })
         .collect()
+}
+
+pub(crate) fn totals(entries: &[RangeEntry]) -> RangeTotals {
+    let mut totals = RangeTotals {
+        added: 0,
+        removed: 0,
+    };
+    for entry in entries {
+        match entry.lines {
+            RangeLineCounts::Counted { added, removed } => {
+                totals.added = totals.added.saturating_add(added);
+                totals.removed = totals.removed.saturating_add(removed);
+            }
+            RangeLineCounts::NotCounted => {}
+        }
+    }
+    totals
 }
 
 /// One `FileAt` per changed file, in list order; `sizes` answer `blob_ids(&changed)` in its order.
@@ -300,5 +318,69 @@ mod tests {
         assert_eq!(kind(EXECUTABLE_MODE), RangeEntryKind::Executable);
         assert_eq!(kind(LINK_MODE), RangeEntryKind::Link);
         assert_eq!(kind(GITLINK_MODE), RangeEntryKind::Submodule);
+    }
+
+    fn counted_entry(id: u32, lines: RangeLineCounts) -> RangeEntry {
+        RangeEntry {
+            id: RangeFileId(id),
+            path: format!("{id}.txt"),
+            change: RangeChange::Modified,
+            lines,
+        }
+    }
+
+    #[test]
+    fn totals_sum_every_counted_file_and_skip_not_counted() {
+        let entries = [
+            counted_entry(
+                0,
+                RangeLineCounts::Counted {
+                    added: 3,
+                    removed: 2,
+                },
+            ),
+            counted_entry(1, RangeLineCounts::NotCounted),
+            counted_entry(
+                2,
+                RangeLineCounts::Counted {
+                    added: 5,
+                    removed: 7,
+                },
+            ),
+        ];
+        assert_eq!(
+            totals(&entries),
+            RangeTotals {
+                added: 8,
+                removed: 9
+            }
+        );
+    }
+
+    #[test]
+    fn totals_saturate_at_u32_max() {
+        let entries = [
+            counted_entry(
+                0,
+                RangeLineCounts::Counted {
+                    added: u32::MAX,
+                    removed: u32::MAX,
+                },
+            ),
+            counted_entry(
+                1,
+                RangeLineCounts::Counted {
+                    added: 1,
+                    removed: 1,
+                },
+            ),
+        ];
+        assert_eq!(
+            totals(&entries),
+            RangeTotals {
+                added: u32::MAX,
+                removed: u32::MAX
+            }
+        );
     }
 }

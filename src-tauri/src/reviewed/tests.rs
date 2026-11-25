@@ -3,7 +3,7 @@ use std::fs;
 use serde_json::{Value, json};
 use yamt_conflict_repo::{TempDir, git_ok};
 
-use crate::args::{Ai, MarksOf};
+use crate::args::{Ai, RangeOf};
 use crate::mock_window::invoke_on;
 use crate::range::tests::{
     RangeWindow, open_marked_window, open_range_window, open_range_window_in, repo,
@@ -43,14 +43,15 @@ fn after_a_mark() -> (TempDir, TempDir) {
     window.with_marks_copied()
 }
 
-fn merge_request(iid: u32) -> MarksOf {
+fn merge_request(iid: u32) -> RangeOf {
     merge_request_of(PROJECT, iid)
 }
 
-fn merge_request_of(project: &str, iid: u32) -> MarksOf {
-    MarksOf::MergeRequest {
+fn merge_request_of(project: &str, iid: u32) -> RangeOf {
+    RangeOf::MergeRequest {
         project: project.to_owned(),
         iid,
+        names: None,
     }
 }
 

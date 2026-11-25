@@ -2,6 +2,9 @@
   "files": [],
   "start": {
     "files": [],
+    "heading": {
+      "kind": "typed"
+    },
     "left": {
       "label": {
         "kind": "named",
@@ -18,6 +21,10 @@
       },
       "short_id": "9c1ba3f",
       "subject": "New logo, staging config and release tools"
+    },
+    "totals": {
+      "added": 0,
+      "removed": 0
     }
   }
 }

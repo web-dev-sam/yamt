@@ -70,8 +70,8 @@ pub fn run() -> ExitCode {
             repo,
             ai,
             start,
-            marks,
-        }) => range::run_range(&from_start_dir(repo), &spec, ai, start, marks).report(),
+            range_of,
+        }) => range::run_range(&from_start_dir(repo), &spec, ai, start, range_of).report(),
         Err(problem) => Ending::failure(format!("{problem}\n{USAGE}")).report(),
     }
 }

@@ -12,7 +12,7 @@ use yamt_conflict_repo::{TempDir, git_ok};
 use yamt_merge_requests::{
     GitLabRepository, MergeRequestIid, OpenReply, RangeToOpen, gitlab_repository, prepare_open,
 };
-use yamt_range::{PairLock, RangeSpec, Resolved};
+use yamt_range::{MergeRequestNames, PairLock, RangeSpec, Resolved};
 use yamt_review::{GitLabCheck, check_gitlab};
 
 use fake_glab::{Fake, in_this_repository};
@@ -108,6 +108,52 @@ fn an_opened_merge_request_names_the_logged_in_project_and_its_iid() {
 
     assert_eq!(opened.project, "taskboard/taskboard");
     assert_eq!(opened.iid, MergeRequestIid(12));
+}
+
+fn names(title: &str, source: &str, target: &str) -> MergeRequestNames {
+    MergeRequestNames {
+        title: title.to_owned(),
+        source: source.to_owned(),
+        target: target.to_owned(),
+    }
+}
+
+#[test]
+fn an_opened_merge_request_carries_its_title_and_branches() {
+    let setup = Setup::new();
+
+    let opened = setup.open(13).unwrap();
+
+    assert_eq!(opened.names, names("Snooze a reminder", "snooze", "main"));
+}
+
+#[test]
+fn a_fork_s_source_is_its_namespace_then_its_branch() {
+    let setup = Setup::new();
+
+    let opened = setup.open(18).unwrap();
+
+    assert_eq!(
+        opened.names,
+        names("Remind by e-mail", "sam:feature", "main")
+    );
+}
+
+#[test]
+fn a_fork_gitlab_does_not_show_is_marked_as_a_fork() {
+    let setup = Setup::new();
+
+    let opened = setup.open(19).unwrap();
+
+    assert_eq!(
+        opened.names,
+        names(
+            "Remind by e-mail from a hidden fork",
+            "(fork) feature",
+            "main"
+        )
+    );
+    assert_ne!(opened.names.source, "feature");
 }
 
 #[test]

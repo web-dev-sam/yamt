@@ -6,8 +6,9 @@ use std::path::Path;
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
 use yamt_merge_core::compare;
 use yamt_range::{
-    Error, Range, RangeChange, RangeEntryKind, RangeFile, RangeFileId, RangeModeChange, RangeSide,
-    RangeSideLabel, RangeSides, RangeSpec, Resolved,
+    Error, MergeRequestNames, Range, RangeChange, RangeEntry, RangeEntryKind, RangeFile,
+    RangeFileId, RangeHeading, RangeLineCounts, RangeModeChange, RangeSide, RangeSideLabel,
+    RangeSides, RangeSpec, RangeTotals, Resolved,
 };
 
 const LINK_MODE: &str = "120000";
@@ -64,7 +65,7 @@ fn refusal(root: &Path, text: &str) -> Error {
 
 fn paths(range: &Range) -> Vec<String> {
     range
-        .start()
+        .start(RangeHeading::Typed)
         .files
         .into_iter()
         .map(|entry| entry.path)
@@ -72,7 +73,7 @@ fn paths(range: &Range) -> Vec<String> {
 }
 
 fn load(range: &Range, path: &str) -> RangeFile {
-    let start = range.start();
+    let start = range.start(RangeHeading::Typed);
     let entry = start.files.iter().find(|entry| entry.path == path).unwrap();
     range.load(entry.id).unwrap()
 }
@@ -136,13 +137,13 @@ fn three_dots_compares_the_merge_base_and_two_dots_the_tips() {
         left: "remote".to_owned(),
         right: "local".to_owned(),
     };
-    let start = three.start();
+    let start = three.start(RangeHeading::Typed);
     assert_eq!(start.range, "remote...local");
     assert_eq!(start.left, side(root, base_label, "main", "base"));
     assert_eq!(start.right, side(root, named("local"), "local", "local"));
 
     assert_eq!(paths(&two), ["a.txt", "b.txt"]);
-    let start = two.start();
+    let start = two.start(RangeHeading::Typed);
     assert_eq!(start.range, "remote..local");
     assert_eq!(start.left, side(root, named("remote"), "remote", "remote"));
     assert_eq!(start.right, side(root, named("local"), "local", "local"));
@@ -196,12 +197,12 @@ fn an_empty_side_is_head() {
     assert_eq!(paths(&to_head), paths(&range(root, "main..local")));
     assert_eq!(paths(&to_head), ["a.txt"]);
     assert_eq!(
-        to_head.start().right,
+        to_head.start(RangeHeading::Typed).right,
         side(root, named("HEAD"), "local", "local")
     );
     assert_eq!(paths(&nothing), Vec::<String>::new());
     assert_eq!(
-        nothing.start().left,
+        nothing.start(RangeHeading::Typed).left,
         side(root, named("HEAD"), "local", "local")
     );
 }
@@ -252,7 +253,7 @@ fn added_has_an_empty_left_and_deleted_an_empty_right() {
     let range = range(dir.path(), "main..local");
 
     let changes: Vec<RangeChange> = range
-        .start()
+        .start(RangeHeading::Typed)
         .files
         .into_iter()
         .map(|entry| entry.change)
@@ -278,7 +279,7 @@ fn renamed_shows_the_old_text_left() {
     ]);
     let range = range(dir.path(), "main..local");
 
-    let start = range.start();
+    let start = range.start(RangeHeading::Typed);
     assert_eq!(paths(&range), ["new/name.txt"]);
     let renamed = RangeChange::Renamed {
         old_path: "old/name.txt".to_owned(),
@@ -371,4 +372,54 @@ fn an_unknown_id_is_unknown_file() {
 fn a_range_is_shared_between_threads() {
     fn require_send_and_sync<T: Send + Sync>() {}
     require_send_and_sync::<Range>();
+}
+
+fn counted_sum(files: &[RangeEntry]) -> (RangeTotals, usize) {
+    let mut summed = RangeTotals {
+        added: 0,
+        removed: 0,
+    };
+    let mut not_counted = 0;
+    for entry in files {
+        match entry.lines {
+            RangeLineCounts::Counted { added, removed } => {
+                summed.added += added;
+                summed.removed += removed;
+            }
+            RangeLineCounts::NotCounted => not_counted += 1,
+        }
+    }
+    (summed, not_counted)
+}
+
+#[test]
+fn start_carries_the_heading_it_is_given_and_the_listed_files_totals() {
+    let dir = repo_with(&[
+        changed("a.txt", Some(b"a\n"), Some(b"a local\nmore\n")),
+        changed("b.txt", Some(b"one\ntwo\n"), Some(b"one\n")),
+        changed("bin", Some(b"\0old"), Some(b"\0new")),
+    ]);
+    let range = range(dir.path(), "main..local");
+    let names = MergeRequestNames {
+        title: "Snooze a reminder".to_owned(),
+        source: "snooze".to_owned(),
+        target: "main".to_owned(),
+    };
+    let headings = [
+        RangeHeading::Typed,
+        RangeHeading::MergeRequest { iid: 13, names },
+        RangeHeading::UnnamedMergeRequest { iid: 13 },
+    ];
+
+    for heading in headings {
+        let start = range.start(heading.clone());
+
+        assert_eq!(start.heading, heading);
+        let two_each = RangeTotals {
+            added: 2,
+            removed: 2,
+        };
+        assert_eq!(counted_sum(&start.files), (two_each, 1));
+        assert_eq!(start.totals, two_each);
+    }
 }

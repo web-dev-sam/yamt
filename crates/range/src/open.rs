@@ -3,15 +3,15 @@ use std::path::Path;
 
 use yamt_gitio::{Oid, Repo};
 
-use crate::entries::{FileAt, blob_ids, entries_at, files_at, sort_by_display_path};
+use crate::entries::{FileAt, blob_ids, entries_at, files_at, sort_by_display_path, totals};
 use crate::load::{load_file, right_text};
 use crate::lock::repo_key;
 use crate::search::search_page;
 use crate::side_names::{SideNames, side_names};
 use crate::spec::Dots;
 use crate::{
-    Compared, Error, FileSides, RangeEntry, RangeFile, RangeFileId, RangeSide, RangeSideLabel,
-    RangeSpec, RangeStart, Result, SearchTexts,
+    Compared, Error, FileSides, RangeEntry, RangeFile, RangeFileId, RangeHeading, RangeSide,
+    RangeSideLabel, RangeSpec, RangeStart, Result, SearchTexts,
 };
 
 /// A range whose two commits git has named: built before any window opens.
@@ -87,9 +87,11 @@ impl Resolved {
 
 impl Range {
     #[must_use]
-    pub fn start(&self) -> RangeStart {
+    pub fn start(&self, heading: RangeHeading) -> RangeStart {
         RangeStart {
             range: self.resolved.spec.text().to_owned(),
+            heading,
+            totals: totals(&self.entries),
             left: self.resolved.left.side.clone(),
             right: self.resolved.right.side.clone(),
             files: self.entries.clone(),
@@ -237,7 +239,10 @@ mod tests {
         let spec = RangeSpec::parse("main..local").unwrap();
         let range = Resolved::resolve(root, &spec).unwrap().list().unwrap();
 
-        assert_eq!(range.entries(), range.start().files.as_slice());
+        assert_eq!(
+            range.entries(),
+            range.start(RangeHeading::Typed).files.as_slice()
+        );
         let paths: Vec<&str> = range
             .entries()
             .iter()

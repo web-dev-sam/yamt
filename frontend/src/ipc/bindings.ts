@@ -1094,6 +1094,17 @@ export type MergeChunk = {
 /**  A merge request's number within its project, "!12" without the "!". */
 export type MergeRequestIid = number;
 
+/**
+ *  A merge request's title and branches as GitLab named them when its changes were opened (plan §2 #199): `source`
+ *  as GitLab's merge-request page names it, `<namespace full path>:<branch>` for a fork, `(fork) <branch>` for a fork
+ *  GitLab does not show the reader.
+ */
+export type MergeRequestNames = {
+	title: string,
+	source: string,
+	target: string,
+};
+
 /**  One page of the list, sent as soon as it arrives. */
 export type MergeRequestPage = {
 	/**  The logged-in user's username. */
@@ -1501,6 +1512,15 @@ export type RangeFile = { kind: "texts"; left: string; right: string; difference
 /**  A changed file's place in the range's list: 0.. in list order, fixed for the window's life. */
 export type RangeFileId = number;
 
+/**  What the window's line and title bar name (plan §2 #199). */
+export type RangeHeading = 
+/**  A range typed by hand: its sides' labels. */
+{ kind: "typed" } | 
+/**  A merge request's changes, with its names at the click. */
+{ kind: "mergeRequest"; iid: number; names: MergeRequestNames } | 
+/**  A merge request's changes started without its names (an older yamt's arguments). */
+{ kind: "unnamedMergeRequest"; iid: number };
+
 export type RangeLineCounts = { kind: "counted"; added: number; removed: number } | { kind: "notCounted" };
 
 export type RangeModeChange = { kind: "same" } | { kind: "changed"; old: RangeEntryKind; new: RangeEntryKind };
@@ -1522,9 +1542,20 @@ export type RangeSides = "left" | "right" | "both";
 
 export type RangeStart = {
 	range: string,
+	heading: RangeHeading,
+	totals: RangeTotals,
 	left: RangeSide,
 	right: RangeSide,
 	files: RangeEntry[],
+};
+
+/**
+ *  The whole range's line counts: every listed file's `Counted` lines summed, saturating at `u32::MAX`; a
+ *  `NotCounted` file adds nothing.
+ */
+export type RangeTotals = {
+	added: number,
+	removed: number,
 };
 
 /**

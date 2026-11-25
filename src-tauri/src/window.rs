@@ -96,17 +96,16 @@ fn open_compare(folder: &Path, ai: Ai, start: StartScreen) -> tauri::Result<Endi
     let manage = |app: &App, app_folder: &Path| {
         compare::manage_store_in(app, app_folder)?;
         merge_requests::manage(app, folder, app_folder, ai);
-        Ok(())
+        Ok(COMPARE_TITLE.to_owned())
     };
-    open_with_data_folder(COMPARE_TITLE, WindowKind::Compare { start }, manage, |_| {})
+    open_with_data_folder(WindowKind::Compare { start }, manage, |_| {})
 }
 
-/// Builds a window whose state `manage` sets up in `<data_dir>/yamt` before the window opens;
-/// its refusal is the one line the run ends with, a closed window is exit 0 after `at_exit`.
+/// Builds a window whose state `manage` sets up in `<data_dir>/yamt` before the window opens, `manage` answering the
+/// window's title; its refusal is the one line the run ends with, a closed window is exit 0 after `at_exit`.
 pub(crate) fn open_with_data_folder(
-    title: &str,
     kind: WindowKind,
-    manage: impl FnOnce(&App, &Path) -> Result<(), String>,
+    manage: impl FnOnce(&App, &Path) -> Result<String, String>,
     at_exit: impl FnOnce(&AppHandle),
 ) -> tauri::Result<Ending> {
     let app = with_commands(tauri::Builder::default()).build(context())?;
@@ -115,10 +114,11 @@ pub(crate) fn open_with_data_folder(
         .data_dir()
         .map_err(|error| format!("no data folder: {error}"))
         .and_then(|data_dir| manage(&app, &app_folder(&data_dir)));
-    if let Err(problem) = managed {
-        return Ok(Ending::failure(problem));
-    }
-    let handle = open_and_wait(app, title, kind)?;
+    let title = match managed {
+        Ok(title) => title,
+        Err(problem) => return Ok(Ending::failure(problem)),
+    };
+    let handle = open_and_wait(app, &title, kind)?;
     at_exit(&handle);
     Ok(Ending {
         exit: Exit::Success,

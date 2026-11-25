@@ -6,7 +6,8 @@ use std::path::Path;
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
 use yamt_merge_core::{MAX_TEXT_BYTES, line_changes};
 use yamt_range::{
-    Error, Range, RangeEntryKind, RangeFile, RangeFileId, RangeSpec, Resolved, SearchTexts,
+    Error, Range, RangeEntryKind, RangeFile, RangeFileId, RangeHeading, RangeSpec, Resolved,
+    SearchTexts,
 };
 
 const FIRST_COMMIT: &str = "1111111111111111111111111111111111111111";
@@ -50,7 +51,7 @@ fn range(root: &Path, text: &str) -> Range {
 }
 
 fn id_of(range: &Range, path: &str) -> RangeFileId {
-    let start = range.start();
+    let start = range.start(RangeHeading::Typed);
     start
         .files
         .iter()

@@ -210,6 +210,8 @@ pub struct RangeToOpen {
     pub project: String,
     /// The merge request within `project`.
     pub iid: MergeRequestIid,
+    /// The merge request's title and branches from the details query, as the window shows them (plan §2 #199).
+    pub names: yamt_range::MergeRequestNames,
 }
 
 /// The branches of merge request `iid` and the remote holding them, asked afresh (plan §2 #139).

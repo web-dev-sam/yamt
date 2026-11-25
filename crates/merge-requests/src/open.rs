@@ -2,9 +2,9 @@ use std::path::Path;
 
 use serde::Deserialize;
 use yamt_gitio::{FETCH_TIMEOUT, Glab, Oid, Repo};
-use yamt_range::{PairLock, RangeSpec, Resolved};
+use yamt_range::{MergeRequestNames, PairLock, RangeSpec, Resolved};
 
-use crate::page::{NO_PROJECT, graphql_data};
+use crate::page::{NO_PROJECT, graphql_data, is_from_fork};
 use crate::query::details_args;
 use crate::remote::remote_for;
 use crate::{GitLabRepository, MergeRequestIid, OpenReply, RangeToOpen};
@@ -12,6 +12,7 @@ use crate::{GitLabRepository, MergeRequestIid, OpenReply, RangeToOpen};
 pub(crate) const OPENED: &str = "opened";
 const SHORT_ID_CHARS: usize = 7;
 const REFSPEC_SEPARATOR: char = ':';
+const HIDDEN_FORK: &str = "(fork) ";
 
 #[derive(Deserialize)]
 struct DetailsData {
@@ -28,8 +29,24 @@ struct DetailsProject {
 #[serde(rename_all = "camelCase")]
 struct Details {
     state: String,
+    title: String,
+    source_branch: String,
     target_branch: String,
+    source_project_id: Option<i64>,
+    target_project_id: i64,
+    source_project: Option<SourceProject>,
     diff_refs: Option<DiffRefs>,
+}
+
+#[derive(Deserialize)]
+struct SourceProject {
+    namespace: Option<SourceNamespace>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceNamespace {
+    full_path: String,
 }
 
 #[derive(Deserialize)]
@@ -39,9 +56,9 @@ struct DiffRefs {
     head_sha: String,
 }
 
-/// An open merge request's diff as GitLab has it now: the branch it goes into and its two commits.
+/// An open merge request's diff as GitLab has it now: its title and branches, and its two commits.
 struct OpenDiff {
-    target_branch: String,
+    names: MergeRequestNames,
     base: Oid,
     head: Oid,
 }
@@ -69,11 +86,12 @@ pub fn prepare_open(
         spec,
         project: full_path,
         iid,
+        names: diff.names,
     })
 }
 
-/// The merge request's diff refs as GitLab has them now; the call's failure, GraphQL's errors and `NO_PROJECT`
-/// through `refusal`.
+/// The merge request's names and diff refs as GitLab has them now; the call's failure, GraphQL's errors and
+/// `NO_PROJECT` through `refusal`.
 fn open_diff(
     repository: &GitLabRepository,
     glab: &Glab,
@@ -92,14 +110,37 @@ fn open_diff(
     if details.state != OPENED {
         return Err(OpenReply::NotOpen);
     }
+    let source = shown_source(&details);
+    let names = MergeRequestNames {
+        title: details.title,
+        source,
+        target: details.target_branch,
+    };
     let Some(diff_refs) = details.diff_refs else {
         return Err(OpenReply::Preparing);
     };
     Ok(OpenDiff {
-        target_branch: details.target_branch,
+        names,
         base: commit_id(&diff_refs.base_sha)?,
         head: commit_id(&diff_refs.head_sha)?,
     })
+}
+
+/// The source branch as GitLab's merge-request page names it: a fork's as `<namespace full path>:<branch>`
+/// (`app/presenters/merge_request_presenter.rb:118-126`, v19.3.2-ee); a fork whose `sourceProject` GitLab does not
+/// send is marked as a fork, never shown as a branch of the target's project.
+fn shown_source(details: &Details) -> String {
+    if !is_from_fork(details.source_project_id, details.target_project_id) {
+        return details.source_branch.clone();
+    }
+    let namespace = details
+        .source_project
+        .as_ref()
+        .and_then(|project| project.namespace.as_ref());
+    match namespace {
+        Some(namespace) => format!("{}:{}", namespace.full_path, details.source_branch),
+        None => format!("{HIDDEN_FORK}{}", details.source_branch),
+    }
 }
 
 fn commit_id(sent: &str) -> Result<Oid, OpenReply> {
@@ -141,7 +182,7 @@ fn fetch_unless_local(
             project: full_path.to_owned(),
         });
     };
-    let target_ref = branch_ref(&diff.target_branch).map_err(failed)?;
+    let target_ref = branch_ref(&diff.names.target).map_err(failed)?;
     let head_ref = head_ref(iid);
     let refspecs = [head_ref.as_str(), target_ref.as_str()];
     repo.fetch_without_refs(&remote.name, &refspecs, FETCH_TIMEOUT)

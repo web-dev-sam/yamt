@@ -110,16 +110,27 @@ fn the_rerequest_body_names_the_rereview_mutation_and_carries_the_id_as_a_variab
 }
 
 #[test]
-fn the_details_query_is_one_line_with_balanced_braces() {
+fn the_details_query_is_one_line_with_balanced_braces_and_its_argv_is_exact() {
     assert!(!DETAILS_QUERY.contains('\n'), "{DETAILS_QUERY}");
     let braces = DETAILS_QUERY.matches('{').count();
     assert_eq!(braces, DETAILS_QUERY.matches('}').count());
+    let query = "query=query MergeRequestDetails($fullPath: ID!, $iid: String!) { project(fullPath: $fullPath) { \
+         mergeRequest(iid: $iid) { state title sourceBranch targetBranch sourceProjectId targetProjectId \
+         sourceProject { namespace { fullPath } } diffRefs { baseSha headSha } } } }";
+
     let args = details_args("taskboard/taskboard", MergeRequestIid(13));
-    assert_eq!(
-        args[4..],
-        ["-f", "fullPath=taskboard/taskboard", "-f", "iid=13"]
-    );
-    assert!(args[3].starts_with("query=query MergeRequestDetails("));
+
+    let expected = [
+        "api",
+        "graphql",
+        "-f",
+        query,
+        "-f",
+        "fullPath=taskboard/taskboard",
+        "-f",
+        "iid=13",
+    ];
+    assert_eq!(args, expected);
 }
 
 #[test]
