@@ -57,3 +57,11 @@ and `references/create-adaptable-composable.md`. House rules win on conflict.
   component needs a one-line reason in `deviations_from_brief`. Detector:
   `vue/multi-word-component-names` (`App` exempt).
 - [VU16] `App.vue` is a composition surface: layout + `useAppStore()` wiring, no feature logic.
+
+## Looks
+
+- [VU18] Parts of one line are set apart by spacing and alignment (gap, columns, chips, colour), never by a
+  text separator character (`·`, `|`, `•`, `-`) — in the window, in window titles built in Rust, and in any
+  design or proposal shown to the owner (owner, 2026-11-25). Plain-text places (the OS title bar) use spacing.
+  An arrow that means direction (`source → target`) is content, not a separator. Existing separators change only
+  when a request touches their text. Detector: review.

@@ -12,12 +12,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - In the diff window, a comment or reply box's main button is now Queue: one press adds the comment and queues it
   as a GitLab draft, ready for Send to GitLab. Holding Shift turns the button into Send, which adds, queues and sends
   that one comment right away, leaving the rest of the queue as it is.
+- A merge request's changes window names what it shows: its title bar reads `!13 Fix login  feature → dev  +120 −34`,
+  and a line above the files shows the number, the title, the source and target branches as labels and the whole
+  diff's added and removed lines in green and red. Diff windows started by hand show their two names and totals too.
 
 ### Changed
 
 - The box's former Comment button is now Note: it keeps the comment in yamt only (Ctrl/Cmd+Enter, as before).
 - Post on one of your notes queues it at once instead of opening a box; only an AI answer opens the "Text to post"
   box, whose button is Queue too (Send with Shift held).
+- The diff window's column headers name the branches instead of full commit ids: the left reads "dev where feature
+  branched off" with its short id, the right "feature" with its short id. A merge request from a fork shows
+  `namespace:branch`, or "(fork) branch" when GitLab does not show the fork.
+- The file or tab list and search hide on Settings, the merge request list and the server log, in every window, and
+  come back as they were on the files screen.
 
 ## [0.7.3] - 2026-11-20
 

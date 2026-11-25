@@ -6,6 +6,22 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Merge-request heading (session 59; owner: "make the titles show the MR information like source and target branches and fully diff additions/deletions")
+
+Request `docs/slices/request-mr-heading.md` (rules 1–7, acceptance, non-goals); base `f1ebd454`. Owner's answers
+(request "Owner's answers" 1–6): title bar and column headers both, structured and coloured; totals summed from the
+window's own list, plain diff windows too; no separator characters (new rule VU18); side column and the line only on
+the files screen, all three windows (rule 7); plain windows take the "branched off" wording; an unseen fork is
+"(fork) <branch>". Comparison stays `<base_sha>..<head_sha>` (#119/#132).
+
+| row | slice                                                               | owner     | status  | evidence                                                                                                                                                                                                                                                                                                                                                                                             |
+| --- | ------------------------------------------------------------------- | --------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | design (`briefs/mr-heading-design-brief.md`)                        | designer  | done    | option A: names as child arguments, Rust sums totals into `RangeStart`; briefs rust, sides, web, verify. Notes `MrHeadingDesign.md`                                                                                                                                                                                                                                                                  |
+| 2   | rust (`briefs/mr-heading-rust.md`); then `just bindings`/`fixtures` | rust-impl | done    | `136d6234` (+ bindings, fixtures): `RangeHeading`/`RangeTotals` in `RangeStart`, `--mr-title/-source/-target`, `MarksOf`→`RangeOf`, title two-space parts, hidden fork `(fork) branch`; mutants 41: 19 caught, 22 unviable. Reviews pass; #2592 dropped. R1 `96029c86` (#2591 refusal order, 2 tests); re-review pass. Stale `MarksOf` in docs → docs keeper. Notes `MrHeadingRust*.md`              |
+| 3   | sides (`briefs/mr-heading-sides.md`): rule 7, all three windows     | web-impl  | done    | `1310902e`: `onFiles` + screen-aware `windowKey`; 4739 TS tests; mutants 24/24; restore proven in WebKit (range, compare, merge). Reviews pass (#2590 dropped). NOT RUN: server log screen, merge list scroll → verify step E. Notes `MrHeadingSides*.md`                                                                                                                                            |
+| 4   | web (`briefs/mr-heading-web.md`): the line, structured headers      | web-impl  | review  | `874138ea`: `RangeHeadingLine.vue`, `RangeColumnHeading.vue`, `rangeText.columnNames` one naming rule (headers, search panes, empty text); fixture `?heading=`; 4790 TS tests; mutants 87.5 %; WebKit 1280/900 dark+light. Reviews pass; promoted #2593 (chip look ×4), #2594 (fixture lookup convention), #2595 (argv from field names) → R1 running; #2596–#2598 dropped. Notes `MrHeadingWeb*.md` |
+| 5   | docs keeper; verify (`briefs/mr-heading-verify.md`): smoke, final   | mixed     | running | Smoke `MrHeadingSmoke` at `874138ea`: B1–B6, C1–C6, E1–E4 pass dark+light (titles by `xprop`+`od`; real-app server log and list scroll restored; refs untouched). #2599/#2600 (no `xdotool`, no window manager) dropped, verify brief corrected. Notes `MrHeadingSmoke.md`                                                                                                                           |
+
 ## Release 0.7.3 (session 58, owner: "release patch")
 
 0.7.3 = 0.7.2 plus folder rows showing the reviewed check when every file below is reviewed (`1ed48f9e`). The owner
