@@ -510,7 +510,8 @@ the people work (it edits only its briefs); its implementers wait for the people
 8. `request-mr-review-fixes.md` (session 52 request, owner #2425–#2428; owner #2436): done in session 51 right after
    fast-preview (section above); every open decision taken by the orchestrator; owner check handed over.
 9. `request-table-alignment.md` (session 51, owner #2424): table columns aligned as GitLab aligns them, in every
-   rendering and the local preview together. Todo.
+   rendering and the local preview together. Done (section above, final `TableAlignmentFinal`); owner check handed
+   over. (This line said "Todo" until session 60, OR8.)
 
 ## Open product questions
 
