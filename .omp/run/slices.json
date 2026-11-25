@@ -1,1 +1,11 @@
-{}
+{
+  "FolderSumsShiftBoundary": { "owned": [] },
+  "FolderSumsShiftCorrectness": { "owned": [] },
+  "FolderSumsShiftDocs": {
+    "owned": [
+      "docs/architecture.md",
+      ".omp/skills/project-map/**",
+      ".omp/skills/ipc-contract/SKILL.md"
+    ]
+  }
+}

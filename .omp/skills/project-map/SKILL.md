@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `874138ea` (A merge request's changes window names it, plan §2 #199: `RangeStart` gains `heading` (`RangeHeading`) and `totals` (`RangeTotals`); `--mr-title`/`--mr-source`/`--mr-target` beside `--review-of` into `RangeOf`; `range_title`; `RangeHeadingLine.vue`, `RangeColumnHeading.vue`, `rangeText.ts` `columnNames`; the side column only on the files screen). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `9638696e` (A folder's `+a −r` in the range window's tree shows only while Shift is held, plan §2 #200: `RangeApp.vue` reads `useShiftHeld()` and gives the folder slot's `RangeCounts` `invisible` while Shift is up; file rows' counts unchanged). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 

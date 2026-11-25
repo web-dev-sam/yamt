@@ -26,6 +26,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `namespace:branch`, or "(fork) branch" when GitLab does not show the fork.
 - The file or tab list and search hide on Settings, the merge request list and the server log, in every window, and
   come back as they were on the files screen.
+- A folder's added and removed line counts in the diff window's tree show only while Shift is held; file rows keep
+  theirs.
 
 ## [0.7.3] - 2026-11-20
 

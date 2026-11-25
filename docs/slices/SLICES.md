@@ -6,6 +6,17 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Folder sums only with Shift (session 59; owner: "make the folder additions/deletions in the sidebar only visible while shift is being pressed")
+
+Request `docs/slices/request-folder-sums-shift.md` (rules 1–3); base `eb2c9f12`; amends #125. Orchestrator's details:
+counts keep their place while hidden (no jump); the app's one held-Shift rule (`useShiftHeld`); Shift typed in a text
+field counts too. Shape given, no design round.
+
+| row | slice                                                            | owner    | status  | evidence                                                                                                                                                                                                                                                                                                      |
+| --- | ---------------------------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | web (`briefs/folder-sums-shift.md`)                              | web-impl | done    | `9638696e`: `useShiftHeld` + `invisible` on the folder slot's `RangeCounts`; 4790 TS tests; real WebDriver Shift: hidden → visible → hidden, blur hides; boxes equal in all states, dark+light; held text equals base. No mutants (.vue only). Reviews pass; #2601 → docs keeper. Notes `FolderSumsShift*.md` |
+| 2   | plan #200, CHANGELOG; docs keeper; final `just check` + real app | mixed    | running | plan #200, CHANGELOG; docs keeper: architecture §3.8 and Shift row, state.md, tree.md (#2601 fixed), map-check ok. Final running. Notes `FolderSumsShiftDocs.md`                                                                                                                                              |
+
 ## Merge-request heading (session 59; owner: "make the titles show the MR information like source and target branches and fully diff additions/deletions")
 
 Request `docs/slices/request-mr-heading.md` (rules 1–7, acceptance, non-goals); base `f1ebd454`. Owner's answers
