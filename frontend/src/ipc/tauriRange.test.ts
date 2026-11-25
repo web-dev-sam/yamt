@@ -18,6 +18,8 @@ vi.mock("@tauri-apps/api/core", () => ({ Channel: class {} }));
 
 const START: Generated.RangeStart = {
   range: "main...feature",
+  heading: { kind: "typed" },
+  totals: { added: 2, removed: 0 },
   left: {
     label: { kind: "mergeBase", left: "main", right: "feature" },
     short_id: "1b2cfed",
@@ -71,6 +73,8 @@ test("openRange and loadRangeFile turn the app's replies into domain data", asyn
     ok: true,
     value: {
       range: "main...feature",
+      heading: { kind: "typed" },
+      totals: { added: 2, removed: 0 },
       left: {
         label: { kind: "mergeBase", left: "main", right: "feature" },
         shortId: "1b2cfed",

@@ -1,17 +1,29 @@
 import { expect, test } from "vitest";
 
-import type { RangeEntry, RangeSide, RangeStart } from "../ipc";
 import {
+  isMergeRequestIid,
+  type MergeRequestIid,
+  type RangeEntry,
+  type RangeSide,
+  type RangeStart,
+} from "../ipc";
+import {
+  branchedOffNote,
   changeMark,
+  columnNames,
+  columnText,
   emptyRangeText,
   fileHeading,
   fileSentence,
+  headingLine,
   lineCounts,
   modeNote,
   REVIEW_MARK_WORDS,
   reviewedCount,
-  sideHeading,
   sideLabel,
+  type ColumnName,
+  type ColumnNames,
+  type HeadingLine,
   type SentenceFile,
 } from "./rangeText";
 
@@ -31,6 +43,49 @@ const BASE: RangeSide = {
   subject: "Fork",
 };
 const HEAD: RangeSide = { label: { kind: "named", name: "HEAD" }, shortId: "9f8e7d6", subject: "" };
+const FEATURE: RangeSide = {
+  label: { kind: "named", name: "feature" },
+  shortId: "9c1ba3f",
+  subject: "Remind",
+};
+const BASE_ID = "531ea52f0c2b6a7d9e8f1a2b3c4d5e6f7a8b9c0d";
+const HEAD_ID = "9c1ba3f7e6d5c4b3a2918f7e6d5c4b3a2918f7e6";
+const MR_BASE: RangeSide = {
+  label: { kind: "named", name: BASE_ID },
+  shortId: "531ea52",
+  subject: "Base",
+};
+const MR_HEAD: RangeSide = {
+  label: { kind: "named", name: HEAD_ID },
+  shortId: "9c1ba3f",
+  subject: "Remind",
+};
+
+function iid(value: number): MergeRequestIid {
+  if (!isMergeRequestIid(value)) {
+    throw new Error(`${value} is no merge-request iid`);
+  }
+  return value;
+}
+
+type Sides = Pick<RangeStart, "heading" | "left" | "right">;
+
+const TWO_DOTS: Sides = { heading: { kind: "typed" }, left: MAIN, right: DEV };
+const THREE_DOTS: Sides = { heading: { kind: "typed" }, left: BASE, right: FEATURE };
+const MERGE_REQUEST: Sides = {
+  heading: {
+    kind: "mergeRequest",
+    iid: iid(12),
+    names: { title: "Reminders before a card is due", source: "feature", target: "main" },
+  },
+  left: MR_BASE,
+  right: MR_HEAD,
+};
+const UNNAMED: Sides = {
+  heading: { kind: "unnamedMergeRequest", iid: iid(12) },
+  left: MR_BASE,
+  right: MR_HEAD,
+};
 
 function entry(change: RangeEntry["change"]): Pick<RangeEntry, "path" | "change"> {
   return { path: "src/keys.md", change };
@@ -42,15 +97,154 @@ test("a named side is its name, the left of three dots the merge base of both na
   expect(sideLabel(HEAD)).toBe("HEAD");
 });
 
-test("a column header names the side and its short id", () => {
-  expect(sideHeading(MAIN)).toBe("main (1b2cfed)");
-  expect(sideHeading(BASE)).toBe("merge base of main and feature (0a1b2c3)");
-  expect(sideHeading(HEAD)).toBe("HEAD (9f8e7d6)");
+test.each<[string, Sides, ColumnNames]>([
+  [
+    "two typed names: each side its name",
+    TWO_DOTS,
+    {
+      left: {
+        kind: "named",
+        name: "main",
+        branchedOff: null,
+        shortId: "1b2cfed",
+        subject: "Start",
+      },
+      right: { kind: "named", name: "dev", branchedOff: null, shortId: "2b3b4b5", subject: "Dev" },
+    },
+  ],
+  [
+    "three dots: the left is the left name, where the right one branched off",
+    THREE_DOTS,
+    {
+      left: {
+        kind: "named",
+        name: "main",
+        branchedOff: "feature",
+        shortId: "0a1b2c3",
+        subject: "Fork",
+      },
+      right: {
+        kind: "named",
+        name: "feature",
+        branchedOff: null,
+        shortId: "9c1ba3f",
+        subject: "Remind",
+      },
+    },
+  ],
+  [
+    "a merge request: the target where the source branched off, then the source",
+    MERGE_REQUEST,
+    {
+      left: {
+        kind: "named",
+        name: "main",
+        branchedOff: "feature",
+        shortId: "531ea52",
+        subject: "Base",
+      },
+      right: {
+        kind: "named",
+        name: "feature",
+        branchedOff: null,
+        shortId: "9c1ba3f",
+        subject: "Remind",
+      },
+    },
+  ],
+  [
+    "a merge request without names: the commits",
+    UNNAMED,
+    {
+      left: { kind: "commit", shortId: "531ea52", subject: "Base" },
+      right: { kind: "commit", shortId: "9c1ba3f", subject: "Remind" },
+    },
+  ],
+])("columnNames of %s", (_case, sides, columns) => {
+  expect(columnNames(sides)).toEqual(columns);
 });
 
-test("an empty range names both sides with their short ids", () => {
-  const start: RangeStart = { range: "main..dev", left: MAIN, right: DEV, files: [] };
-  expect(emptyRangeText(start)).toBe("main (1b2cfed) and dev (2b3b4b5) have the same files.");
+test("a merge-base label on the right is named by its left name, where its right one branched off", () => {
+  expect(columnNames({ heading: { kind: "typed" }, left: MAIN, right: BASE }).right).toEqual({
+    kind: "named",
+    name: "main",
+    branchedOff: "feature",
+    shortId: "0a1b2c3",
+    subject: "Fork",
+  });
+});
+
+test.each<[ColumnName, string]>([
+  [
+    { kind: "named", name: "main", branchedOff: "feature", shortId: "531ea52", subject: "s" },
+    "main, where feature branched off (531ea52)",
+  ],
+  [
+    { kind: "named", name: "feature", branchedOff: null, shortId: "9c1ba3f", subject: "s" },
+    "feature (9c1ba3f)",
+  ],
+  [{ kind: "commit", shortId: "9c1ba3f", subject: "s" }, "9c1ba3f"],
+])("columnText of %o is %s", (column, text) => {
+  expect(columnText(column)).toBe(text);
+});
+
+test("the branched-off note names the branch", () => {
+  expect(branchedOffNote("feature")).toBe("where feature branched off");
+});
+
+test.each<[Sides, string]>([
+  [TWO_DOTS, "main (1b2cfed) and dev (2b3b4b5) have the same files."],
+  [
+    THREE_DOTS,
+    "main, where feature branched off (0a1b2c3) and feature (9c1ba3f) have the same files.",
+  ],
+  [
+    MERGE_REQUEST,
+    "main, where feature branched off (531ea52) and feature (9c1ba3f) have the same files.",
+  ],
+])("an empty range names both columns as their headers do: %s", (sides, text) => {
+  expect(emptyRangeText(sides)).toBe(text);
+});
+
+test.each<[string, Sides, HeadingLine]>([
+  [
+    "a merge request: reference, title, source and target",
+    MERGE_REQUEST,
+    {
+      kind: "mergeRequest",
+      reference: "!12",
+      title: "Reminders before a card is due",
+      source: "feature",
+      target: "main",
+    },
+  ],
+  [
+    "a merge request without names: reference, the right commit as source, the left as target",
+    UNNAMED,
+    { kind: "unnamedMergeRequest", reference: "!12", source: "9c1ba3f", target: "531ea52" },
+  ],
+  ["two dots", TWO_DOTS, { kind: "typed", left: "main", dots: "..", right: "dev" }],
+  ["three dots", THREE_DOTS, { kind: "typed", left: "main", dots: "...", right: "feature" }],
+  [
+    "a merge-base label on the right: its right name",
+    { heading: { kind: "typed" }, left: MAIN, right: BASE },
+    { kind: "typed", left: "main", dots: "..", right: "feature" },
+  ],
+])("headingLine of %s", (_case, sides, line) => {
+  expect(headingLine(sides)).toEqual(line);
+});
+
+test("no header text of a merge request without names holds a 40-character name", () => {
+  const { left, right } = columnNames(UNNAMED);
+  const texts = [
+    columnText(left),
+    columnText(right),
+    emptyRangeText(UNNAMED),
+    ...Object.values(headingLine(UNNAMED)),
+  ];
+
+  expect(texts.filter((text) => text.includes(BASE_ID) || text.includes(HEAD_ID))).toEqual([]);
+  expect(texts.slice(0, 2)).toEqual(["531ea52", "9c1ba3f"]);
 });
 
 test("a renamed file's header is old → new; every other change shows its path", () => {

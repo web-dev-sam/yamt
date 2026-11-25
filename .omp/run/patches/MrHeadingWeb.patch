@@ -1,0 +1,1686 @@
+diff --git a/frontend/scripts/app-session/args.test.ts b/frontend/scripts/app-session/args.test.ts
+index 9862fad..9c5d0d6 100644
+--- a/frontend/scripts/app-session/args.test.ts
++++ b/frontend/scripts/app-session/args.test.ts
+@@ -80,7 +80,7 @@ test("start-app --range opens the range window on the --repo folder", () => {
+     parseCommand(["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"]),
+   ).toMatchObject({
+     kind: "start-app",
+-    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr", reviewOf: null },
++    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr", reviewOf: null, names: null },
+   });
+ });
+ 
+@@ -95,7 +95,13 @@ test("start-app --range needs --repo and takes neither --fresh-repo nor --diff",
+ 
+ test("the app opens the range window with --diff=<range> and --repo, the compare window with --diff alone, a folder with --repo", () => {
+   const off = { ai: false, mr: false };
+-  const range = { kind: "range", range: "main...feature", dir: "rr", reviewOf: null } as const;
++  const range = {
++    kind: "range",
++    range: "main...feature",
++    dir: "rr",
++    reviewOf: null,
++    names: null,
++  } as const;
+   expect(appArgs(range, "/tmp/rr", off)).toEqual(["--diff=main...feature", "--repo", "/tmp/rr"]);
+   expect(appArgs({ kind: "diff", startDir: "rr" }, null, off)).toEqual(["--diff"]);
+   expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r", off)).toEqual(["--repo", "/tmp/r"]);
+@@ -107,7 +113,7 @@ test("start-app --ai reaches the app as its own --ai after the repository", () =
+   expect(parseCommand([...range, "--ai"])).toMatchObject({ ai: true });
+   expect(parseCommand(range)).toMatchObject({ ai: false });
+   const on = { ai: true, mr: false };
+-  const opens = { kind: "range", range: "a...b", dir: "rr", reviewOf: null } as const;
++  const opens = { kind: "range", range: "a...b", dir: "rr", reviewOf: null, names: null } as const;
+   expect(appArgs(opens, "/tmp/rr", on)).toEqual(["--diff=a...b", "--repo", "/tmp/rr", "--ai"]);
+   expect(appArgs({ kind: "diff", startDir: null }, null, on)).toEqual(["--diff", "--ai"]);
+   expect(() => parseCommand([...range, "--ai-case", "crash"])).toThrow(/unknown option --ai-case/);
+@@ -126,7 +132,7 @@ test("start-app --mr reaches the app as its own --mr, only for the compare and r
+     needsWindow,
+   );
+   const both = { ai: true, mr: true };
+-  const opens = { kind: "range", range: "a...b", dir: "rr", reviewOf: null } as const;
++  const opens = { kind: "range", range: "a...b", dir: "rr", reviewOf: null, names: null } as const;
+   expect(appArgs(opens, "/tmp/rr", both)).toEqual([
+     "--diff=a...b",
+     "--repo",
+@@ -233,7 +239,7 @@ test("start-fixture --threads and --gitlab pick the review scripts of a range fi
+   expect(parseCommand([...ranged, "--threads", "seeded"])).toMatchObject({
+     search: "?range=review&threads=seeded",
+   });
+-  const onlyRange = /--threads, --gitlab, --reviewed and --ai only with --range-case/;
++  const onlyRange = /--threads, --gitlab, --reviewed, --heading and --ai only with --range-case/;
+   expect(() => parseCommand(["start-fixture", "--name", "fx", "--gitlab", "moved"])).toThrow(
+     onlyRange,
+   );
+@@ -254,7 +260,7 @@ test("start-fixture --ai turns the range fixture's AI on, --ai-case picks its ag
+   expect(() => parseCommand([...ranged, "--ai-case", "crash"])).toThrow(needsAi);
+   expect(() => parseCommand([...ranged, "--ai-changes"])).toThrow(needsAi);
+   expect(() => parseCommand(["start-fixture", "--name", "fx", "--ai"])).toThrow(
+-    /--threads, --gitlab, --reviewed and --ai only with --range-case/,
++    /--threads, --gitlab, --reviewed, --heading and --ai only with --range-case/,
+   );
+ });
+ 
+diff --git a/frontend/scripts/app-session/args.ts b/frontend/scripts/app-session/args.ts
+index f078229..ccb0c2f 100644
+--- a/frontend/scripts/app-session/args.ts
++++ b/frontend/scripts/app-session/args.ts
+@@ -18,7 +18,8 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
+   start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo
+                 | --diff [--dir <start folder>] [--glab <tests/glab scenario>]
+                 | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]
+-                  [--review-of <project!iid>]] [--ai]
++                  [--review-of <project!iid> [--mr-title <text> --mr-source <branch> --mr-target <branch>]]]
++                [--ai]
+                 [--mr]   (with --diff or --range: the window opens on its merge-request page)
+                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
+                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
+@@ -27,6 +28,7 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
+                 <folder>/glab/scenario, opened addresses go to <folder>/glab/opened.log
+   start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>
+                 | --range-case <range fixture> [--threads seeded] [--gitlab <script>] [--reviewed seeded]
++                  [--heading <mergeRequest|fork|hiddenFork|unnamed>]
+                   [--ai [--ai-case <agent fixture: crash, checkout-fails, cancelled, …>] [--ai-changes]]]
+                 [--mr <merge-request script: list, slow, many, …> [--open-mr]]
+                   (with --diff, --diff-case or --range-case; --open-mr: on the merge-request page)
+@@ -100,6 +102,9 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
+       "home",
+       "glab",
+       "review-of",
++      "mr-title",
++      "mr-source",
++      "mr-target",
+     ],
+     flags: ["fresh-repo", "diff", "ai", "mr"],
+   },
+@@ -112,6 +117,7 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
+       "threads",
+       "gitlab",
+       "reviewed",
++      "heading",
+       "ai-case",
+       "mr",
+     ],
+diff --git a/frontend/scripts/app-session/startArgs.test.ts b/frontend/scripts/app-session/startArgs.test.ts
+index a9e5b8a..2e2d712 100644
+--- a/frontend/scripts/app-session/startArgs.test.ts
++++ b/frontend/scripts/app-session/startArgs.test.ts
+@@ -137,7 +137,7 @@ test("start-fixture --reviewed seeded adds &reviewed=seeded to a range fixture p
+     ]),
+   ).toMatchObject({ search: "?range=review&threads=seeded&reviewed=seeded" });
+   const onlyRange =
+-    "start-fixture takes --threads, --gitlab, --reviewed and --ai only with --range-case";
++    "start-fixture takes --threads, --gitlab, --reviewed, --heading and --ai only with --range-case";
+   expect(() => parseCommand([...fixture, "--reviewed", "seeded"])).toThrow(onlyRange);
+   expect(() => parseCommand([...fixture, "--diff", "--reviewed", "seeded"])).toThrow(onlyRange);
+   expect(() =>
+@@ -149,7 +149,13 @@ test("start-app --review-of passes --review-of=<project!iid> after the range, on
+   const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
+   const command = parseCommand([...range, "--review-of", "group/app!12", "--mr"]);
+   expect(command).toMatchObject({
+-    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr", reviewOf: "group/app!12" },
++    opens: {
++      kind: "range",
++      range: "main...feature",
++      dir: "/tmp/rr",
++      reviewOf: "group/app!12",
++      names: null,
++    },
+   });
+   if (command.kind !== "start-app") {
+     throw new Error("not a start-app command");
+@@ -173,3 +179,94 @@ test("start-app --review-of passes --review-of=<project!iid> after the range, on
+     parseCommand(["start-fixture", "--name", "fx", "--range-case", "review", "--review-of", "a!1"]),
+   ).toThrow(/unknown option --review-of/);
+ });
++
++test("start-fixture --heading adds &heading=<value> after --reviewed's, only with --range-case", () => {
++  const fixture = ["start-fixture", "--name", "fx"];
++  expect(
++    parseCommand([...fixture, "--range-case", "review", "--heading", "mergeRequest"]),
++  ).toMatchObject({ search: "?range=review&heading=mergeRequest" });
++  expect(
++    parseCommand([
++      ...fixture,
++      "--range-case",
++      "review",
++      "--heading",
++      "fork",
++      "--reviewed",
++      "seeded",
++      "--gitlab",
++      "moved",
++      "--threads",
++      "seeded",
++    ]),
++  ).toMatchObject({
++    search: "?range=review&threads=seeded&gitlab=moved&reviewed=seeded&heading=fork",
++  });
++  const onlyRange =
++    "start-fixture takes --threads, --gitlab, --reviewed, --heading and --ai only with --range-case";
++  expect(() => parseCommand([...fixture, "--heading", "unnamed"])).toThrow(onlyRange);
++  expect(() => parseCommand([...fixture, "--diff", "--heading", "unnamed"])).toThrow(onlyRange);
++});
++
++test("start-app --mr-title, --mr-source and --mr-target reach the app right after --review-of=…", () => {
++  const reviewed = [
++    "start-app",
++    "--name",
++    "r",
++    "--range",
++    "531ea52..9c1ba3f",
++    "--repo",
++    "/tmp/rr",
++    "--review-of",
++    "group/app!12",
++  ];
++  const named = [
++    "--mr-title",
++    'Say "due" = soon',
++    "--mr-source",
++    "sam:feature",
++    "--mr-target",
++    "main",
++  ];
++  const command = parseCommand([...reviewed, ...named, "--ai"]);
++  expect(command).toMatchObject({
++    opens: { names: { title: 'Say "due" = soon', source: "sam:feature", target: "main" } },
++  });
++  if (command.kind !== "start-app") {
++    throw new Error("not a start-app command");
++  }
++  expect(appArgs(command.opens, "/tmp/rr", command)).toEqual([
++    "--diff=531ea52..9c1ba3f",
++    "--review-of=group/app!12",
++    '--mr-title=Say "due" = soon',
++    "--mr-source=sam:feature",
++    "--mr-target=main",
++    "--repo",
++    "/tmp/rr",
++    "--ai",
++  ]);
++});
++
++test.each([
++  ["only a title", ["--mr-title", "t"]],
++  ["only a source", ["--mr-source", "s"]],
++  ["only a target", ["--mr-target", "m"]],
++  ["no target", ["--mr-title", "t", "--mr-source", "s"]],
++  ["no title", ["--mr-source", "s", "--mr-target", "m"]],
++  ["no source", ["--mr-title", "t", "--mr-target", "m"]],
++])("start-app with %s of the --mr-* names is refused", (_case, names) => {
++  const reviewed = ["start-app", "--name", "r", "--range", "a..b", "--repo", "/r"];
++  const together =
++    "start-app --mr-title, --mr-source and --mr-target go together, with --review-of";
++  expect(() => parseCommand([...reviewed, "--review-of", "g/a!1", ...names])).toThrow(together);
++});
++
++test("start-app --mr-* names without --review-of are refused, on a range or a compare window", () => {
++  const names = ["--mr-title", "t", "--mr-source", "s", "--mr-target", "m"];
++  const together =
++    "start-app --mr-title, --mr-source and --mr-target go together, with --review-of";
++  expect(() =>
++    parseCommand(["start-app", "--name", "r", "--range", "a..b", "--repo", "/r", ...names]),
++  ).toThrow(together);
++  expect(() => parseCommand(["start-app", "--name", "c", "--diff", ...names])).toThrow(together);
++});
+diff --git a/frontend/scripts/app-session/startArgs.ts b/frontend/scripts/app-session/startArgs.ts
+index f62cf9a..4e4220e 100644
+--- a/frontend/scripts/app-session/startArgs.ts
++++ b/frontend/scripts/app-session/startArgs.ts
+@@ -4,6 +4,7 @@ import { noPositionals, sessionName, wholeNumber, type Parsed } from "./argv";
+ import { fromRoot } from "./session";
+ import type { Size } from "./state";
+ 
++type MergeRequestNames = Readonly<Record<"title" | "source" | "target", string>>;
+ type Opening =
+   | { readonly kind: "dir"; readonly dir: string }
+   | {
+@@ -11,6 +12,7 @@ type Opening =
+       readonly range: string;
+       readonly dir: string;
+       readonly reviewOf: string | null;
++      readonly names: MergeRequestNames | null;
+     }
+   | { readonly kind: "diff"; readonly startDir: string | null }
+   | { readonly kind: "fresh" };
+@@ -43,6 +45,7 @@ type AppFlags = { readonly ai: boolean; readonly mr: boolean };
+ const DEFAULT_SIZE: Size = { width: 1600, height: 1000 };
+ const DEFAULT_BINARY = "target/debug/yamt";
+ const SIZE = /^([1-9][0-9]*)x([1-9][0-9]*)$/;
++const NAME_FLAGS = ["mr-title", "mr-source", "mr-target"];
+ 
+ function size(parsed: Parsed): Size {
+   const text = parsed.values.get("size");
+@@ -56,6 +59,17 @@ function size(parsed: Parsed): Size {
+   return { width: Number(width), height: Number(height) };
+ }
+ 
++function mergeRequestNames(parsed: Parsed, review: string | undefined): MergeRequestNames | null {
++  const [title, source, target] = NAME_FLAGS.map((flag) => parsed.values.get(flag));
++  if (title === undefined && source === undefined && target === undefined) return null;
++  if (title === undefined || source === undefined || target === undefined || review === undefined) {
++    throw new Error(
++      "start-app --mr-title, --mr-source and --mr-target go together, with --review-of",
++    );
++  }
++  return { title, source, target };
++}
++
+ function opening(parsed: Parsed): Opening {
+   const dir = parsed.values.get("repo");
+   const range = parsed.values.get("range");
+@@ -63,6 +77,7 @@ function opening(parsed: Parsed): Opening {
+   const diff = parsed.flags.has("diff");
+   const fresh = parsed.flags.has("fresh-repo");
+   const reviewOf = parsed.values.get("review-of");
++  const names = mergeRequestNames(parsed, reviewOf);
+   if (startDir !== undefined && !diff) {
+     throw new Error("start-app --dir <folder> goes with --diff: the compare window's start folder");
+   }
+@@ -75,7 +90,7 @@ function opening(parsed: Parsed): Opening {
+     if (dir === undefined || diff || fresh) {
+       throw new Error("start-app --range needs --repo <dir>, and neither --fresh-repo nor --diff");
+     }
+-    return { kind: "range", range, dir, reviewOf: reviewOf ?? null };
++    return { kind: "range", range, dir, reviewOf: reviewOf ?? null, names };
+   }
+   if ([dir !== undefined, fresh, diff].filter(Boolean).length !== 1) {
+     throw new Error("start-app needs one of --repo <dir>, --fresh-repo and --diff");
+@@ -103,7 +118,7 @@ function addAiSearch(parsed: Parsed, review: URLSearchParams): void {
+ 
+ function reviewSearch(parsed: Parsed): string {
+   const review = new URLSearchParams();
+-  for (const name of ["threads", "gitlab", "reviewed"]) {
++  for (const name of ["threads", "gitlab", "reviewed", "heading"]) {
+     const value = parsed.values.get(name);
+     if (value !== undefined) {
+       review.set(name, value);
+@@ -127,7 +142,7 @@ function windowSearch(parsed: Parsed): string {
+   }
+   if (review !== "") {
+     throw new Error(
+-      "start-fixture takes --threads, --gitlab, --reviewed and --ai only with --range-case",
++      "start-fixture takes --threads, --gitlab, --reviewed, --heading and --ai only with --range-case",
+     );
+   }
+   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
+@@ -252,6 +267,7 @@ export function appArgs(
+       return [
+         `--diff=${opens.range}`,
+         ...(opens.reviewOf === null ? [] : [`--review-of=${opens.reviewOf}`]),
++        ...Object.entries(opens.names ?? {}).map(([name, value]) => `--mr-${name}=${value}`),
+         ...options,
+       ];
+     case "dir":
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index ef1360b..d8d46c3 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -2,6 +2,8 @@ Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. `bindings.ts` is
+ 
+ The range window (`yamt --diff=<range>`, plan §2 #103–#107) has its own `RangeSource` (`RangeSource.ts`, read-only: `openRange`, `loadRangeFile`): the `RangeFileId` brand in `domain.ts`, camelCase shapes and their conversions in `rangeDomain.ts` (a texts reply's differences through `compareDomain.ts` `toDifferences`), the app's in `tauriRange.ts`, fixture mode's in `fixtureRange.ts` (`fixtures/range/<case>.json` = `{ start, files }`, a file's id its index; `?range` loads `review`, `?range=<case>` that case, an unknown case logs `range.fixture_miss` and lists nothing).
+ 
++`RangeStart` carries `heading` and `totals` as Rust computed them (request `docs/slices/request-mr-heading.md`, plan §2 proposed #199): `heading` is `typed`, `mergeRequest { iid, names: { title, source, target } }` or `unnamedMergeRequest { iid }`, `toRangeStart` brands `iid` naming `heading.iid`; `totals` is the listed files' counted lines summed, never recomputed here. Fixture mode's `?heading=mergeRequest|fork|hiddenFork|unnamed` replaces the shown case's heading only (its totals, sides and files stay, and the review fixtures see the replaced start); empty or absent keeps the case's, an unknown value logs `range.fixture_heading_miss` and keeps it.
++
+ The range window's threads and GitLab (plan §2 #116–#120) come through `ReviewSource` (`ReviewSource.ts`: `listThreads`, `addThread`, `addNote`, `queueMessage`, `unqueueMessage`, `checkGitLab`, `sendQueue` and `sendMessage(message)` (plan §2 #198: the queue's send for that one message) with a progress callback over a `Channel`), which `RangeSource` extends: the `ThreadId`/`MessageId` brands in `domain.ts`, a thread's `ThreadPlace` in `threadLine.ts` (plan §2 #145–#148: `start` a `DiffLine` in GitLab's one-column order, `end` the `ThreadLine` whose column shows the box; `toThreadPlace` brands every number naming `….place.start.left`/`….place.end.right`, `fromThreadPlace` hands it back as is; `diffLineOf`, `onePlace`, `sameDiffLine`, `isOneLine`), camelCase shapes and their conversions in `reviewDomain.ts`, the app's in `tauriReview.ts`, fixture mode's in memory in `fixtureReview.ts` (`?threads=seeded`: one one-line thread of each line kind on the review case's `src/board/board.ts` with a queued, a refused, a pending and an `aiAnswer` message, then two range threads with a `notQueued` note each: unchanged 400/388 to added 405 and removed 254 to added 259; the store's refusals as Rust's: `EmptyMessage`, `UnknownRangeFile`, `UnknownThread`, `UnknownMessage`, `MessagePending`, `SendRunning`; each post after a 300 ms pause, progress per message; `sendMessage` is `sendQueue`'s path narrowed to that message: `SendRunning` first, then `UnknownMessage`, then the check, a message that does not wait `sent` 0 of 0 at once, and a script's outcome keyed by the message's place in the whole queue) over `fixtureGitLab.ts` (`?gitlab=<script>`: `linedUp` by default, `checking` answers after 3 s, one not-lined-up answer per script, `refusal` refuses and `stopped` times out at the second queued message; an unknown script logs `review.fixture_miss`).
+ 
+ `?gitlab=listed` lines up like `linedUp`, but with `?mr=list`'s newest row, !640 (`fixtureGitLab.ts` `mergeRequestOf`: its reference, title and `page` as `web_url`; every other script lines up with !12), so the Post box's mention list knows !640's people once the merge-request page loaded its rows (plan §2 #191, #192). A send's pending posting names the script's merge request; the seeded pending note names !12 (`mergeRequestOf("linedUp")`, sent before).
+diff --git a/frontend/src/ipc/fixtureGitLab.test.ts b/frontend/src/ipc/fixtureGitLab.test.ts
+index 17a6868..6dafe3a 100644
+--- a/frontend/src/ipc/fixtureGitLab.test.ts
++++ b/frontend/src/ipc/fixtureGitLab.test.ts
+@@ -12,6 +12,8 @@ import type { RangeStart } from "./rangeDomain";
+ 
+ const COMMIT_ID_RIGHT: RangeStart = {
+   range: "1a2b3c4..5d6e7f8",
++  heading: { kind: "typed" },
++  totals: { added: 0, removed: 0 },
+   left: { label: { kind: "named", name: "1a2b3c4" }, shortId: "1a2b3c4", subject: "Old" },
+   right: { label: { kind: "named", name: "5d6e7f8" }, shortId: "5d6e7f8", subject: "New" },
+   files: [],
+diff --git a/frontend/src/ipc/fixtureRange.test.ts b/frontend/src/ipc/fixtureRange.test.ts
+index e4e46e0..77b149b 100644
+--- a/frontend/src/ipc/fixtureRange.test.ts
++++ b/frontend/src/ipc/fixtureRange.test.ts
+@@ -10,6 +10,8 @@ import type { DiffLine, ThreadLine } from "./threadLine";
+ const REVIEW: { start: Generated.RangeStart; files: Generated.RangeFile[] } = {
+   start: {
+     range: "main...feature",
++    heading: { kind: "typed" },
++    totals: { added: 1, removed: 1 },
+     left: {
+       label: { kind: "mergeBase", left: "main", right: "feature" },
+       short_id: "1b2cfed",
+@@ -47,6 +49,8 @@ const REVIEW: { start: Generated.RangeStart; files: Generated.RangeFile[] } = {
+ const EMPTY: { start: Generated.RangeStart; files: Generated.RangeFile[] } = {
+   start: {
+     range: "feature..feature",
++    heading: { kind: "typed" },
++    totals: { added: 0, removed: 0 },
+     left: { label: { kind: "named", name: "feature" }, short_id: "2b3b4b5", subject: "Remind" },
+     right: { label: { kind: "named", name: "feature" }, short_id: "2b3b4b5", subject: "Remind" },
+     files: [],
+@@ -61,6 +65,8 @@ const FILES: Readonly<Record<string, unknown>> = {
+ 
+ const REVIEW_START = {
+   range: "main...feature",
++  heading: { kind: "typed" },
++  totals: { added: 1, removed: 1 },
+   left: {
+     label: { kind: "mergeBase", left: "main", right: "feature" },
+     shortId: "1b2cfed",
+@@ -121,6 +127,81 @@ test.each(["", "?range", "?range="])("'%s' without a case loads review", async (
+   expect(valueOf(await source.openRange())).toEqual(REVIEW_START);
+ });
+ 
++const FORK_TITLE =
++  "Show every reminder of a board in one list, grouped by the day it is due, with a count per day and a link to each card";
++
++test.each<[string, Generated.RangeHeading]>([
++  [
++    "mergeRequest",
++    {
++      kind: "mergeRequest",
++      iid: 12,
++      names: { title: "Reminders before a card is due", source: "feature", target: "main" },
++    },
++  ],
++  [
++    "fork",
++    {
++      kind: "mergeRequest",
++      iid: 8,
++      names: {
++        title: FORK_TITLE,
++        source: "sam:feature/reminders-grouped-by-due-day",
++        target: "main",
++      },
++    },
++  ],
++  [
++    "hiddenFork",
++    {
++      kind: "mergeRequest",
++      iid: 8,
++      names: {
++        title: FORK_TITLE,
++        source: "(fork) feature/reminders-grouped-by-due-day",
++        target: "main",
++      },
++    },
++  ],
++  ["unnamed", { kind: "unnamedMergeRequest", iid: 12 }],
++])(
++  "?heading=%s answers that heading with the case's totals, sides and files",
++  async (name, heading) => {
++    const { log, entries } = quietLog();
++    const source = createFixtureRangeSource(log, `?range=review&heading=${name}`, FILES);
++
++    expect(valueOf(await source.openRange())).toEqual({ ...REVIEW_START, heading });
++    expect(entries).toEqual([]);
++  },
++);
++
++test("an unknown heading logs range.fixture_heading_miss naming the known ones and keeps the case's", async () => {
++  const { log, entries } = quietLog();
++  const source = createFixtureRangeSource(log, "?range=review&heading=nosuch", FILES);
++
++  expect(valueOf(await source.openRange())).toEqual(REVIEW_START);
++  expect(entries).toEqual([
++    {
++      level: "info",
++      event: "range.fixture_heading_miss",
++      fields: { heading: "nosuch", known: "mergeRequest, fork, hiddenFork, unnamed" },
++    },
++  ]);
++});
++
++test.each([
++  ["?range=review", 0],
++  ["?range=review&heading", 0],
++  ["?range=review&heading=", 0],
++  ["?range=review&heading=toString", 1],
++])("'%s' keeps the case's typed heading, logging %i misses", async (search, misses) => {
++  const { log, entries } = quietLog();
++  const source = createFixtureRangeSource(log, search, FILES);
++
++  expect(valueOf(await source.openRange()).heading).toEqual({ kind: "typed" });
++  expect(entries).toHaveLength(misses);
++});
++
+ test("?range=empty loads that case, not review (catches a case name ignored)", async () => {
+   const source = createFixtureRangeSource(quietLog().log, "?range=empty", FILES);
+ 
+@@ -136,6 +217,8 @@ test("an unknown case logs range.fixture_miss naming the known ones and lists no
+ 
+   expect(valueOf(await source.openRange())).toEqual({
+     range: "nope",
++    heading: { kind: "typed" },
++    totals: { added: 0, removed: 0 },
+     left: { label: { kind: "named", name: "HEAD" }, shortId: "0000000", subject: "" },
+     right: { label: { kind: "named", name: "HEAD" }, shortId: "0000000", subject: "" },
+     files: [],
+@@ -190,6 +273,16 @@ test("the committed cases parse: review lists 13 files of every kind, empty none
+   );
+ 
+   expect(start.files).toHaveLength(13);
++  expect(start.heading).toEqual({ kind: "typed" });
++  expect(start.totals).toEqual(
++    start.files.reduce(
++      (sum, { lines }) =>
++        lines.kind === "counted"
++          ? { added: sum.added + lines.added, removed: sum.removed + lines.removed }
++          : sum,
++      { added: 0, removed: 0 },
++    ),
++  );
+   expect(start.files[3]).toMatchObject({
+     path: "docs/keys.md",
+     change: { kind: "renamed", oldPath: "docs/shortcuts.md" },
+@@ -319,6 +412,26 @@ test.each([
+     { start: { ...EMPTY.start, files: [{ ...REVIEW.start.files[0], id: -1 }] }, files: [] },
+     "files[0].id must be a non-negative safe integer, got -1",
+   ],
++  [
++    "an unknown heading kind",
++    { start: { ...EMPTY.start, heading: { kind: "nope" } }, files: [] },
++    "kind",
++  ],
++  [
++    "a merge request heading without names",
++    { start: { ...EMPTY.start, heading: { kind: "mergeRequest", iid: 3 } }, files: [] },
++    "names",
++  ],
++  [
++    "a negative heading iid",
++    { start: { ...EMPTY.start, heading: { kind: "unnamedMergeRequest", iid: -1 } }, files: [] },
++    "heading.iid must be a non-negative safe integer, got -1",
++  ],
++  [
++    "totals without removed lines",
++    { start: { ...EMPTY.start, totals: { added: 1 } }, files: [] },
++    "removed",
++  ],
+ ])("a case file with %s fails the parse, naming the file", (_case, json, detail) => {
+   const files = { "bad.json": json };
+ 
+diff --git a/frontend/src/ipc/fixtureRange.ts b/frontend/src/ipc/fixtureRange.ts
+index f268127..4b61211 100644
+--- a/frontend/src/ipc/fixtureRange.ts
++++ b/frontend/src/ipc/fixtureRange.ts
+@@ -95,6 +95,16 @@ const RANGE_FILE: v.GenericSchema<Generated.RangeFile> = v.variant("kind", [
+ const CASE = v.object({
+   start: v.object({
+     range: v.string(),
++    heading: v.variant("kind", [
++      v.object({ kind: v.literal("typed") }),
++      v.object({
++        kind: v.literal("mergeRequest"),
++        iid: v.number(),
++        names: v.object({ title: v.string(), source: v.string(), target: v.string() }),
++      }),
++      v.object({ kind: v.literal("unnamedMergeRequest"), iid: v.number() }),
++    ]),
++    totals: v.object({ added: v.number(), removed: v.number() }),
+     left: RANGE_SIDE,
+     right: RANGE_SIDE,
+     files: v.array(RANGE_ENTRY),
+@@ -102,13 +112,62 @@ const CASE = v.object({
+   files: v.array(RANGE_FILE),
+ });
+ 
++const FORK_TITLE =
++  "Show every reminder of a board in one list, grouped by the day it is due, with a count per day and a link to each card";
++const FORK_BRANCH = "feature/reminders-grouped-by-due-day";
++
++const HEADINGS: Readonly<Record<string, Generated.RangeHeading>> = {
++  mergeRequest: {
++    kind: "mergeRequest",
++    iid: 12,
++    names: { title: "Reminders before a card is due", source: "feature", target: "main" },
++  },
++  fork: {
++    kind: "mergeRequest",
++    iid: 8,
++    names: { title: FORK_TITLE, source: `sam:${FORK_BRANCH}`, target: "main" },
++  },
++  hiddenFork: {
++    kind: "mergeRequest",
++    iid: 8,
++    names: { title: FORK_TITLE, source: `(fork) ${FORK_BRANCH}`, target: "main" },
++  },
++  unnamed: { kind: "unnamedMergeRequest", iid: 12 },
++};
++
+ function missingCase(name: string): Case {
+   const side: RangeSide = {
+     label: { kind: "named", name: "HEAD" },
+     shortId: NULL_SHORT_ID,
+     subject: "",
+   };
+-  return { start: { range: name, left: side, right: side, files: [] }, files: [] };
++  return {
++    start: {
++      range: name,
++      heading: { kind: "typed" },
++      totals: { added: 0, removed: 0 },
++      left: side,
++      right: side,
++      files: [],
++    },
++    files: [],
++  };
++}
++
++function askedHeading(log: Log, search: string): Generated.RangeHeading | null {
++  const asked = new URLSearchParams(search).get("heading");
++  if (asked === null || asked === "") {
++    return null;
++  }
++  const heading = Object.hasOwn(HEADINGS, asked) ? HEADINGS[asked] : undefined;
++  if (heading === undefined) {
++    log.info("range.fixture_heading_miss", {
++      heading: asked,
++      known: Object.keys(HEADINGS).join(", "),
++    });
++    return null;
++  }
++  return heading;
+ }
+ 
+ function shownCase(log: Log, search: string, cases: ReadonlyMap<string, Case>): Case {
+@@ -142,8 +201,9 @@ export function createFixtureRangeSource(
+   search: string,
+   files: Readonly<Record<string, unknown>> = CASE_FILES,
+ ): RangeSource {
++  const heading = askedHeading(log, search);
+   const cases = parsedCases(CASE, "range fixture", files, ({ start, files: loaded }) => ({
+-    start: toRangeStart(start),
++    start: toRangeStart({ ...start, heading: heading ?? start.heading }),
+     files: loaded.map(toRangeFile),
+   }));
+   const shown = shownCase(log, search, cases);
+diff --git a/frontend/src/ipc/fixtureReview.test.ts b/frontend/src/ipc/fixtureReview.test.ts
+index a33b210..0ca18b2 100644
+--- a/frontend/src/ipc/fixtureReview.test.ts
++++ b/frontend/src/ipc/fixtureReview.test.ts
+@@ -68,6 +68,8 @@ function entry(id: number, path: string): RangeEntry {
+ 
+ const START: RangeStart = {
+   range: "main...feature",
++  heading: { kind: "typed" },
++  totals: { added: 0, removed: 0 },
+   left: {
+     label: { kind: "mergeBase", left: "main", right: "feature" },
+     shortId: "531ea52",
+diff --git a/frontend/src/ipc/fixtureReviewed.test.ts b/frontend/src/ipc/fixtureReviewed.test.ts
+index 0a4ef83..022957e 100644
+--- a/frontend/src/ipc/fixtureReviewed.test.ts
++++ b/frontend/src/ipc/fixtureReviewed.test.ts
+@@ -160,6 +160,8 @@ test("a listed file the case has no reply for answers noText", async () => {
+   const listed = {
+     start: {
+       range: "main...feature",
++      heading: { kind: "typed" },
++      totals: { added: 2, removed: 0 },
+       left: side,
+       right: side,
+       files: [
+diff --git a/frontend/src/ipc/rangeDomain.test.ts b/frontend/src/ipc/rangeDomain.test.ts
+index 6acc75a..f41bbb9 100644
+--- a/frontend/src/ipc/rangeDomain.test.ts
++++ b/frontend/src/ipc/rangeDomain.test.ts
+@@ -15,6 +15,8 @@ const DIFFERENCE: Generated.Difference = {
+ 
+ const START: Generated.RangeStart = {
+   range: "main...feature",
++  heading: { kind: "typed" },
++  totals: { added: 4, removed: 2 },
+   left: {
+     label: { kind: "mergeBase", left: "main", right: "feature" },
+     short_id: "1b2cfed",
+@@ -47,6 +49,8 @@ const START: Generated.RangeStart = {
+ test("a start converts both sides and every change, camelCased, keeping the merge-base label", () => {
+   expect(toRangeStart(START)).toEqual({
+     range: "main...feature",
++    heading: { kind: "typed" },
++    totals: { added: 4, removed: 2 },
+     left: {
+       label: { kind: "mergeBase", left: "main", right: "feature" },
+       shortId: "1b2cfed",
+@@ -90,6 +94,31 @@ test.each([-1, 0.5])("a file id of %s is refused by the brand, naming the field"
+   );
+ });
+ 
++test.each<Generated.RangeHeading>([
++  {
++    kind: "mergeRequest",
++    iid: 12,
++    names: { title: "Reminders", source: "sam:feature", target: "main" },
++  },
++  { kind: "unnamedMergeRequest", iid: 13 },
++])("a $kind heading and the totals are kept as the app sent them", (heading) => {
++  const start = toRangeStart({ ...START, heading, totals: { added: 7, removed: 9 } });
++
++  expect(start.heading).toEqual(heading);
++  expect(start.totals).toEqual({ added: 7, removed: 9 });
++});
++
++test.each([-1, 1.5])("a heading iid of %s is refused by the brand, naming heading.iid", (bad) => {
++  const names = { title: "t", source: "s", target: "m" };
++
++  expect(() =>
++    toRangeStart({ ...START, heading: { kind: "mergeRequest", iid: bad, names } }),
++  ).toThrow(`heading.iid must be a non-negative safe integer, got ${bad}`);
++  expect(() =>
++    toRangeStart({ ...START, heading: { kind: "unnamedMergeRequest", iid: bad } }),
++  ).toThrow(`heading.iid must be a non-negative safe integer, got ${bad}`);
++});
++
+ test("a texts reply converts its differences with both columns' words and keeps the mode", () => {
+   const mode = { kind: "changed", old: "file", new: "executable" } as const;
+ 
+diff --git a/frontend/src/ipc/rangeDomain.ts b/frontend/src/ipc/rangeDomain.ts
+index e1069cf..af7df62 100644
+--- a/frontend/src/ipc/rangeDomain.ts
++++ b/frontend/src/ipc/rangeDomain.ts
+@@ -1,6 +1,6 @@
+ import type * as Generated from "./bindings";
+ import { toDifferences, toLineChange, type Difference, type LineChange } from "./compareDomain";
+-import { isRangeFileId, type RangeFileId } from "./domain";
++import { isMergeRequestIid, isRangeFileId, type MergeRequestIid, type RangeFileId } from "./domain";
+ import { branded } from "./validate";
+ 
+ type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
+@@ -19,8 +19,20 @@ export type RangeEntry = {
+   readonly change: RangeChange;
+   readonly lines: RangeLineCounts;
+ };
++type MergeRequestNames = Readonly<Generated.MergeRequestNames>;
++type RangeHeading =
++  | { readonly kind: "typed" }
++  | {
++      readonly kind: "mergeRequest";
++      readonly iid: MergeRequestIid;
++      readonly names: MergeRequestNames;
++    }
++  | { readonly kind: "unnamedMergeRequest"; readonly iid: MergeRequestIid };
++type RangeTotals = Readonly<Generated.RangeTotals>;
+ export type RangeStart = {
+   readonly range: string;
++  readonly heading: RangeHeading;
++  readonly totals: RangeTotals;
+   readonly left: RangeSide;
+   readonly right: RangeSide;
+   readonly files: readonly RangeEntry[];
+@@ -68,9 +80,33 @@ function toRangeEntry(
+   };
+ }
+ 
++function toRangeHeading(heading: Generated.RangeHeading): RangeHeading {
++  switch (heading.kind) {
++    case "typed":
++      return heading;
++    case "mergeRequest":
++      return {
++        kind: "mergeRequest",
++        iid: branded(heading.iid, isMergeRequestIid, "heading.iid"),
++        names: heading.names,
++      };
++    case "unnamedMergeRequest":
++      return {
++        kind: "unnamedMergeRequest",
++        iid: branded(heading.iid, isMergeRequestIid, "heading.iid"),
++      };
++    default: {
++      const _exhaustive: never = heading;
++      return _exhaustive;
++    }
++  }
++}
++
+ export function toRangeStart(raw: Generated.RangeStart): RangeStart {
+   return {
+     range: raw.range,
++    heading: toRangeHeading(raw.heading),
++    totals: raw.totals,
+     left: toRangeSide(raw.left),
+     right: toRangeSide(raw.right),
+     files: raw.files.map(toRangeEntry),
+diff --git a/frontend/src/ipc/tauriRange.test.ts b/frontend/src/ipc/tauriRange.test.ts
+index 9e6aaf4..4268f2b 100644
+--- a/frontend/src/ipc/tauriRange.test.ts
++++ b/frontend/src/ipc/tauriRange.test.ts
+@@ -18,6 +18,8 @@ vi.mock("@tauri-apps/api/core", () => ({ Channel: class {} }));
+ 
+ const START: Generated.RangeStart = {
+   range: "main...feature",
++  heading: { kind: "typed" },
++  totals: { added: 2, removed: 0 },
+   left: {
+     label: { kind: "mergeBase", left: "main", right: "feature" },
+     short_id: "1b2cfed",
+@@ -71,6 +73,8 @@ test("openRange and loadRangeFile turn the app's replies into domain data", asyn
+     ok: true,
+     value: {
+       range: "main...feature",
++      heading: { kind: "typed" },
++      totals: { added: 2, removed: 0 },
+       left: {
+         label: { kind: "mergeBase", left: "main", right: "feature" },
+         shortId: "1b2cfed",
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 2a06d43..7cd17a7 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -8,6 +8,8 @@ Side column (request `docs/slices/request-mr-heading.md` rule 7): in all three r
+ 
+ Folder sums (plan §2 #125): `rangeFolderSums.ts` `folderSums` (once per file list in `RangeApp.vue`) keys each folder's `+a −r` by the path its tree row carries; `RangeApp.vue` fills the tree's optional `folder` slot (`FileTree.vue`, forwarded by `FileList.vue`; the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair `RangeFileRow.vue` uses too, and, when every file below the folder is reviewed (`reviewedFolders`, same keys), the reviewed file row's muted Lucide `check` after it, titled `FOLDER_REVIEWED_WORD` ("every file reviewed"); the folder's name stays unmuted.
+ 
++What the range window compares (request `docs/slices/request-mr-heading.md` rules 2–4, design `docs/slices/briefs/mr-heading-design.md` option A): `rangeText.ts` `columnNames` is the one rule naming a side (a merge request: the target "where <source> branched off", then the source; `a...b`: `a` "where `b` branched off", then `b`; `a..b`: each name; a merge request started without names: the short ids), read by `RangeColumnHeading.vue` (both `RangeView` headers but the since view's "As you reviewed it"), the search's pane titles and `emptyRangeText` through `columnText`. `RangeHeadingLine.vue` (`headingLine`: `!iid`, title, source chip `→` target chip; a typed range's two names around its own dots; then `RangeCounts.vue` with `start.totals` at the right end) is the first row of `RangeApp.vue`'s bar stack, on the files screen only, its parts set apart by gap alone (VU18).
++
+ Collapse toggle (plan §2 #126): `RangeView.vue`'s header button after Previous/Next reads and writes the merge window's stored choice through `createCollapsing` in the range store; its words are `collapsing.ts` `COLLAPSE_LABEL`, which the merge toolbar's `LABELS` uses too.
+ 
+ Reviewed marks (request `docs/slices/request-range-reviewed.md`, design `docs/slices/briefs/range-reviewed-design.md` option A, plan §2 #196): `rangeReviewed.ts` owns `marks` (written only after Rust answered), `counted`, `busy`, `toggle` (next file via `nextFile.ts` `nextOpen`), `reviewFromStart`, `loadSince` (a failure forgets the view). The mounted list (`MOUNTED_FILES`, `markShown`, `forget`) is in `rangeVisited.ts`. `RangeView.vue`'s header starts with the Reviewed button (Mark resolved's look: filled and `aria-pressed` when the file is reviewed, disabled while `busy` — also while the first list failed, which the problem bar names) and shows `reviewedCount` after the collapse toggle. `RangeApp.vue` keys each view by file and `useRangeController.ts` `viewKind` (a `changedSinceReview` mark → `"sinceReview"`, else `"whole"`), so a mark change remounts the view; `viewParts` gives the since view `loadSince` → `sinceShown` (reviewed text left under `SINCE_REVIEW_HEADING`, current right), no threads, `startsThreads: false` (a number press starts no drag), and the header note with Review from start. A search hit on the since view's left column opens the file without moving. `RangeFileRow.vue` ends with the mark: lucide `check` and a muted name, or `refresh-ccw-dot` in warning colour; every word is in `rangeText.ts`.
+diff --git a/frontend/src/ui/RangeApp.vue b/frontend/src/ui/RangeApp.vue
+index 7c0b221..d847dce 100644
+--- a/frontend/src/ui/RangeApp.vue
++++ b/frontend/src/ui/RangeApp.vue
+@@ -17,8 +17,9 @@ import QuestionDialog from "./QuestionDialog.vue";
+ import RangeCounts from "./RangeCounts.vue";
+ import RangeFileRow from "./RangeFileRow.vue";
+ import { folderSums, reviewedFolders } from "./rangeFolderSums";
++import RangeHeadingLine from "./RangeHeadingLine.vue";
+ import { useRangeStore } from "./rangeStore";
+-import { emptyRangeText, FOLDER_REVIEWED_WORD, RANGE_LIST_LABEL } from "./rangeText";
++import { columnNames, emptyRangeText, FOLDER_REVIEWED_WORD, RANGE_LIST_LABEL } from "./rangeText";
+ import { sendNoticeRow } from "./rangeThreadText";
+ import RangeView from "./RangeView.vue";
+ import SearchPanel from "./SearchPanel.vue";
+@@ -66,6 +67,7 @@ const doneFolders = computed(() => reviewedFolders(files.value, marks.value));
+ const emptyText = computed(() =>
+   start.value !== null && start.value.files.length === 0 ? emptyRangeText(start.value) : null,
+ );
++const columns = computed(() => (start.value === null ? null : columnNames(start.value)));
+ const sendNotice = computed((): readonly NoticeRow[] => {
+   const result = gitlab.result.value;
+   return result === null ? [] : [sendNoticeRow(result)];
+@@ -146,17 +148,17 @@ function viewOf(file: RangeEntry): RangeViewKind {
+     </SideColumn>
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+       <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
++        <RangeHeadingLine v-if="start !== null && screen.kind === 'files'" :start="start" />
+         <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+         <NoticeBar v-if="sendNotice.length > 0" :rows="sendNotice" @close="gitlab.dismissResult" />
+       </div>
+       <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
+-        <template v-if="start !== null">
++        <template v-if="columns !== null">
+           <RangeView
+             v-for="file in visited"
+             :key="`${file.id}:${viewOf(file)}`"
+             :file="file"
+-            :left-side="start.left"
+-            :right-side="start.right"
++            :columns="columns"
+             :shown="file.id === shown && screen.kind === 'files'"
+             :view="viewOf(file)"
+           />
+diff --git a/frontend/src/ui/RangeColumnHeading.test.ts b/frontend/src/ui/RangeColumnHeading.test.ts
+new file mode 100644
+index 0000000..98a4f17
+--- /dev/null
++++ b/frontend/src/ui/RangeColumnHeading.test.ts
+@@ -0,0 +1,39 @@
++import { expect, test } from "vitest";
++import { createSSRApp, h } from "vue";
++import { renderToString } from "vue/server-renderer";
++
++import RangeColumnHeading from "./RangeColumnHeading.vue";
++import type { ColumnName } from "./rangeText";
++
++async function heading(column: ColumnName): Promise<string> {
++  return renderToString(createSSRApp({ render: () => h(RangeColumnHeading, { column }) }));
++}
++
++test.each<[ColumnName, string]>([
++  [
++    { kind: "named", name: "main", branchedOff: "feature", shortId: "531ea52", subject: "Base" },
++    "main where feature branched off 531ea52",
++  ],
++  [
++    { kind: "named", name: "feature", branchedOff: null, shortId: "9c1ba3f", subject: "Remind" },
++    "feature 9c1ba3f",
++  ],
++  [{ kind: "commit", shortId: "9c1ba3f", subject: "Remind" }, "9c1ba3f"],
++])("a header of %o reads %s, words one space apart", async (column, words) => {
++  expect((await heading(column)).replace(/<[^>]*>/gu, "")).toBe(words);
++});
++
++test("the name is emphasised, the note muted, the short id muted monospace, the subject the hover title", async () => {
++  const html = await heading({
++    kind: "named",
++    name: "main",
++    branchedOff: "feature",
++    shortId: "531ea52",
++    subject: "Base of it all",
++  });
++
++  expect(html).toContain('title="Base of it all"');
++  expect(html).toContain('<span class="font-semibold text-fg">main </span>');
++  expect(html).toContain('<span class="text-fg-muted">where feature branched off </span>');
++  expect(html).toContain('<span class="font-mono text-fg-muted">531ea52</span>');
++});
+diff --git a/frontend/src/ui/RangeColumnHeading.vue b/frontend/src/ui/RangeColumnHeading.vue
+new file mode 100644
+index 0000000..d6fa08c
+--- /dev/null
++++ b/frontend/src/ui/RangeColumnHeading.vue
+@@ -0,0 +1,17 @@
++<script setup lang="ts">
++import { branchedOffNote, type ColumnName } from "./rangeText";
++
++defineProps<{ column: ColumnName }>();
++</script>
++
++<template>
++  <h3 class="truncate border-b border-separator px-3 py-1.5" :title="column.subject">
++    <template v-if="column.kind === 'named'">
++      <span class="font-semibold text-fg">{{ `${column.name} ` }}</span>
++      <span v-if="column.branchedOff !== null" class="text-fg-muted">
++        {{ `${branchedOffNote(column.branchedOff)} ` }}
++      </span>
++    </template>
++    <span class="font-mono text-fg-muted">{{ column.shortId }}</span>
++  </h3>
++</template>
+diff --git a/frontend/src/ui/RangeHeadingLine.test.ts b/frontend/src/ui/RangeHeadingLine.test.ts
+new file mode 100644
+index 0000000..c72ef91
+--- /dev/null
++++ b/frontend/src/ui/RangeHeadingLine.test.ts
+@@ -0,0 +1,81 @@
++import { expect, test } from "vitest";
++import { createSSRApp, h } from "vue";
++import { renderToString } from "vue/server-renderer";
++
++import { isMergeRequestIid, type MergeRequestIid, type RangeSide, type RangeStart } from "../ipc";
++import RangeHeadingLine from "./RangeHeadingLine.vue";
++
++const BASE: RangeSide = {
++  label: { kind: "mergeBase", left: "main", right: "feature" },
++  shortId: "531ea52",
++  subject: "Base",
++};
++const HEAD: RangeSide = {
++  label: { kind: "named", name: "feature" },
++  shortId: "9c1ba3f",
++  subject: "Head",
++};
++const START: RangeStart = {
++  range: "main...feature",
++  heading: { kind: "typed" },
++  totals: { added: 40, removed: 7 },
++  left: BASE,
++  right: HEAD,
++  files: [],
++};
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is no merge-request iid`);
++  }
++  return value;
++}
++
++async function parts(start: RangeStart): Promise<string[]> {
++  const html = await renderToString(createSSRApp({ render: () => h(RangeHeadingLine, { start }) }));
++  return html
++    .split(/<[^>]*>/u)
++    .map((part) => part.trim())
++    .filter((part) => part !== "");
++}
++
++test("a merge request's line is its reference, title, source → target and the totals, no separator between", async () => {
++  const start: RangeStart = {
++    ...START,
++    heading: {
++      kind: "mergeRequest",
++      iid: iid(12),
++      names: { title: "Reminders before a card is due", source: "sam:feature", target: "main" },
++    },
++  };
++
++  expect(await parts(start)).toEqual([
++    "!12",
++    "Reminders before a card is due",
++    "sam:feature",
++    "→",
++    "main",
++    "+40",
++    "−7",
++  ]);
++});
++
++test("a merge request without names shows its two short ids, the head's first", async () => {
++  const start: RangeStart = { ...START, heading: { kind: "unnamedMergeRequest", iid: iid(12) } };
++
++  expect(await parts(start)).toEqual(["!12", "9c1ba3f", "→", "531ea52", "+40", "−7"]);
++});
++
++test("a typed range shows its two names around its own dots, then the totals", async () => {
++  expect(await parts(START)).toEqual(["main", "...", "feature", "+40", "−7"]);
++});
++
++test("the line is a labelled group and each chip carries its full name as its title", async () => {
++  const html = await renderToString(
++    createSSRApp({ render: () => h(RangeHeadingLine, { start: START }) }),
++  );
++
++  expect(html).toContain('role="group" aria-label="What this window compares"');
++  expect(html).toContain('title="main"');
++  expect(html).toContain('title="feature"');
++});
+diff --git a/frontend/src/ui/RangeHeadingLine.vue b/frontend/src/ui/RangeHeadingLine.vue
+new file mode 100644
+index 0000000..dd4a90b
+--- /dev/null
++++ b/frontend/src/ui/RangeHeadingLine.vue
+@@ -0,0 +1,60 @@
++<script setup lang="ts">
++import { computed } from "vue";
++
++import type { RangeLineCounts, RangeStart } from "../ipc";
++import RangeCounts from "./RangeCounts.vue";
++import { headingLine, RANGE_HEADING_LABEL } from "./rangeText";
++
++const props = defineProps<{ start: RangeStart }>();
++
++const line = computed(() => headingLine(props.start));
++const totals = computed((): RangeLineCounts => ({ kind: "counted", ...props.start.totals }));
++</script>
++
++<template>
++  <div
++    role="group"
++    :aria-label="RANGE_HEADING_LABEL"
++    class="flex h-9 shrink-0 items-center gap-2 island bg-panel px-3"
++  >
++    <template v-if="line.kind === 'typed'">
++      <code
++        class="max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code"
++        :title="line.left"
++      >
++        {{ line.left }}
++      </code>
++      <span class="shrink-0 font-mono text-fg-muted">{{ line.dots }}</span>
++      <code
++        class="max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code"
++        :title="line.right"
++      >
++        {{ line.right }}
++      </code>
++    </template>
++    <template v-else>
++      <span class="shrink-0 text-fg-muted">{{ line.reference }}</span>
++      <span
++        v-if="line.kind === 'mergeRequest'"
++        class="min-w-0 flex-1 truncate font-semibold"
++        :title="line.title"
++      >
++        {{ line.title }}
++      </span>
++      <code
++        class="max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code"
++        :title="line.source"
++      >
++        {{ line.source }}
++      </code>
++      <span class="shrink-0 text-fg-muted">→</span>
++      <code
++        class="max-w-64 min-w-0 truncate rounded border border-control-border bg-panel-inline px-1.5 font-mono text-code"
++        :title="line.target"
++      >
++        {{ line.target }}
++      </code>
++    </template>
++    <RangeCounts :lines="totals" class="ml-auto" />
++  </div>
++</template>
+diff --git a/frontend/src/ui/RangeView.vue b/frontend/src/ui/RangeView.vue
+index 29f5a9b..685f31d 100644
+--- a/frontend/src/ui/RangeView.vue
++++ b/frontend/src/ui/RangeView.vue
+@@ -4,13 +4,14 @@ import ArrowDown from "~icons/lucide/arrow-down";
+ import ArrowUp from "~icons/lucide/arrow-up";
+ import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
+ 
+-import type { RangeEntry, RangeSide } from "../ipc";
++import type { RangeEntry } from "../ipc";
+ import { COLLAPSE_LABEL } from "./collapsing";
+ import { fileIcon } from "./fileIcon";
+ import { ACTION_NAMES } from "./keyText";
+ import MergeRequestsButton from "./MergeRequestsButton.vue";
+ import PaneFrame from "./PaneFrame.vue";
+ import { compareColumns } from "./paneSplit";
++import RangeColumnHeading from "./RangeColumnHeading.vue";
+ import RangeSendButton from "./RangeSendButton.vue";
+ import { useRangeStore } from "./rangeStore";
+ import {
+@@ -20,7 +21,7 @@ import {
+   reviewedCount,
+   SINCE_REVIEW_HEADING,
+   SINCE_REVIEW_NOTE,
+-  sideHeading,
++  type ColumnNames,
+ } from "./rangeText";
+ import RangeThreadLayer from "./RangeThreadLayer.vue";
+ import SettingsButton from "./SettingsButton.vue";
+@@ -29,8 +30,7 @@ import { useSearchGoTo } from "./useSearchGoTo";
+ 
+ const props = defineProps<{
+   file: RangeEntry;
+-  leftSide: RangeSide;
+-  rightSide: RangeSide;
++  columns: ColumnNames;
+   shown: boolean;
+   view: RangeViewKind;
+ }>();
+@@ -60,12 +60,7 @@ useSearchGoTo(
+ const icon = computed(() => fileIcon(props.file.path));
+ const heading = computed(() => fileHeading(props.file));
+ const since = computed(() => props.view === "sinceReview");
+-const leftHeading = computed(() =>
+-  since.value ? SINCE_REVIEW_HEADING : sideHeading(props.leftSide),
+-);
+-const leftTitle = computed(() => (since.value ? undefined : props.leftSide.subject));
+-const rightHeading = computed(() => sideHeading(props.rightSide));
+-const columns = computed(() => content.value.kind === "columns");
++const isColumns = computed(() => content.value.kind === "columns");
+ const note = computed(() => (content.value.kind === "columns" ? content.value.note : null));
+ const sentence = computed(() => (content.value.kind === "sentence" ? content.value.text : null));
+ const isReviewed = computed(() => marks.value.get(props.file.id) === "reviewed");
+@@ -133,7 +128,7 @@ function reviewFromStart(): void {
+           type="button"
+           :title="PREVIOUS"
+           :aria-label="PREVIOUS"
+-          :disabled="!columns"
++          :disabled="!isColumns"
+           class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+           @mousedown.prevent
+           @click="moveToChange('up')"
+@@ -144,7 +139,7 @@ function reviewFromStart(): void {
+           type="button"
+           :title="NEXT"
+           :aria-label="NEXT"
+-          :disabled="!columns"
++          :disabled="!isColumns"
+           class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+           @mousedown.prevent
+           @click="moveToChange('down')"
+@@ -156,7 +151,7 @@ function reviewFromStart(): void {
+           :title="COLLAPSE_LABEL"
+           :aria-label="COLLAPSE_LABEL"
+           :aria-pressed="collapsing"
+-          :disabled="!columns"
++          :disabled="!isColumns"
+           class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
+           @mousedown.prevent
+           @click="toggleCollapsing"
+@@ -171,19 +166,15 @@ function reviewFromStart(): void {
+     </template>
+     <template #default="{ stripLayer }">
+       <h3
++        v-if="since"
+         class="col-start-1 row-start-1 truncate border-b border-separator px-3 py-1.5 text-fg-muted"
+-        :title="leftTitle"
+       >
+-        {{ leftHeading }}
++        {{ SINCE_REVIEW_HEADING }}
+       </h3>
++      <RangeColumnHeading v-else :column="columns.left" class="col-start-1 row-start-1" />
+       <div class="col-start-2 row-start-1 border-b border-separator" />
+-      <h3
+-        class="col-start-3 row-start-1 truncate border-b border-separator px-3 py-1.5 text-fg-muted"
+-        :title="rightSide.subject"
+-      >
+-        {{ rightHeading }}
+-      </h3>
+-      <template v-if="columns">
++      <RangeColumnHeading :column="columns.right" class="col-start-3 row-start-1" />
++      <template v-if="isColumns">
+         <div ref="left" class="col-start-1 row-start-2 min-h-0 min-w-0" />
+         <div class="col-start-2 row-start-2" :class="stripLayer">
+           <svg ref="strip" aria-hidden="true" class="block h-full w-full" />
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index 543480c..570a9e3 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -72,6 +72,8 @@ import { notLinedUpText } from "./rangeThreadText";
+ 
+ const START: RangeStart = {
+   range: "main..feature",
++  heading: { kind: "typed" },
++  totals: { added: 0, removed: 0 },
+   left: { label: { kind: "named", name: "main" }, shortId: "1b2cfed", subject: "Start" },
+   right: { label: { kind: "named", name: "feature" }, shortId: "2b3b4b5", subject: "Next" },
+   files: [],
+diff --git a/frontend/src/ui/rangeSearch.test.ts b/frontend/src/ui/rangeSearch.test.ts
+index 3435e70..f444f93 100644
+--- a/frontend/src/ui/rangeSearch.test.ts
++++ b/frontend/src/ui/rangeSearch.test.ts
+@@ -20,6 +20,8 @@ function rangeCase(count = FILE_COUNT): unknown {
+   return {
+     start: {
+       range: "main...feature",
++      heading: { kind: "typed" },
++      totals: { added: count, removed: count },
+       left: SIDE,
+       right: { ...SIDE, label: { kind: "named", name: "feature" }, short_id: "2b3b4b5" },
+       files: paths.map((path, id) => ({
+@@ -204,6 +206,29 @@ test("the range's panes are the old side then the new one, titled with their com
+   ]);
+ });
+ 
++test("a merge request's panes are titled as its column headers: target where source branched off, then source", async () => {
++  const raw = {
++    start: {
++      range: "531ea52..9c1ba3f",
++      heading: { kind: "typed" },
++      totals: { added: 0, removed: 0 },
++      left: { label: { kind: "named", name: "531ea52" }, short_id: "531ea52", subject: "Base" },
++      right: { label: { kind: "named", name: "9c1ba3f" }, short_id: "9c1ba3f", subject: "Head" },
++      files: [],
++    },
++    files: [],
++  };
++  const fixture = createFixtureRangeSource(log, "?range=review&heading=mergeRequest", {
++    "../../fixtures/range/review.json": raw,
++  });
++  const opened = await fixture.openRange();
++
++  expect(rangePanes(opened.ok ? opened.value : null)).toEqual([
++    { pane: "left", icon: "panel-left", title: "main, where feature branched off (531ea52)" },
++    { pane: "right", icon: "panel-right", title: "feature (9c1ba3f)" },
++  ]);
++});
++
+ test("an empty range asks Rust nothing and finds nothing", async () => {
+   const paged = pagedSource({ count: 0 });
+   const store = await started(paged);
+diff --git a/frontend/src/ui/rangeSearch.ts b/frontend/src/ui/rangeSearch.ts
+index a303b48..6d6ac64 100644
+--- a/frontend/src/ui/rangeSearch.ts
++++ b/frontend/src/ui/rangeSearch.ts
+@@ -4,7 +4,7 @@ import type { Column, RangeFileId, RangeSource, RangeStart, SearchText } from ".
+ import type { Layout, SearchedFile } from "../search";
+ import type { WindowKeyTarget } from "./fileListKey";
+ import { attempt, report, type Problem } from "./problem";
+-import { sideHeading } from "./rangeText";
++import { columnNames, columnText } from "./rangeText";
+ import {
+   createSearching,
+   type SearchPaneInfo,
+@@ -28,9 +28,10 @@ export function rangePanes(start: RangeStart | null): readonly SearchPaneInfo<Co
+   if (start === null) {
+     return [];
+   }
++  const { left, right } = columnNames(start);
+   return [
+-    { pane: "left", icon: "panel-left", title: sideHeading(start.left) },
+-    { pane: "right", icon: "panel-right", title: sideHeading(start.right) },
++    { pane: "left", icon: "panel-left", title: columnText(left) },
++    { pane: "right", icon: "panel-right", title: columnText(right) },
+   ];
+ }
+ 
+diff --git a/frontend/src/ui/rangeStore.test.ts b/frontend/src/ui/rangeStore.test.ts
+index 3fe9583..09c0cfc 100644
+--- a/frontend/src/ui/rangeStore.test.ts
++++ b/frontend/src/ui/rangeStore.test.ts
+@@ -55,6 +55,8 @@ function rangeCase(count: number): unknown {
+   return {
+     start: {
+       range: "main...feature",
++      heading: { kind: "typed" },
++      totals: { added: 0, removed: 0 },
+       left: SIDE,
+       right: { ...SIDE, label: { kind: "named", name: "feature" }, short_id: "2b3b4b5" },
+       files: paths.map((path, id) => ({
+diff --git a/frontend/src/ui/rangeText.test.ts b/frontend/src/ui/rangeText.test.ts
+index 902e731..8715d41 100644
+--- a/frontend/src/ui/rangeText.test.ts
++++ b/frontend/src/ui/rangeText.test.ts
+@@ -1,17 +1,29 @@
+ import { expect, test } from "vitest";
+ 
+-import type { RangeEntry, RangeSide, RangeStart } from "../ipc";
+ import {
++  isMergeRequestIid,
++  type MergeRequestIid,
++  type RangeEntry,
++  type RangeSide,
++  type RangeStart,
++} from "../ipc";
++import {
++  branchedOffNote,
+   changeMark,
++  columnNames,
++  columnText,
+   emptyRangeText,
+   fileHeading,
+   fileSentence,
++  headingLine,
+   lineCounts,
+   modeNote,
+   REVIEW_MARK_WORDS,
+   reviewedCount,
+-  sideHeading,
+   sideLabel,
++  type ColumnName,
++  type ColumnNames,
++  type HeadingLine,
+   type SentenceFile,
+ } from "./rangeText";
+ 
+@@ -31,6 +43,49 @@ const BASE: RangeSide = {
+   subject: "Fork",
+ };
+ const HEAD: RangeSide = { label: { kind: "named", name: "HEAD" }, shortId: "9f8e7d6", subject: "" };
++const FEATURE: RangeSide = {
++  label: { kind: "named", name: "feature" },
++  shortId: "9c1ba3f",
++  subject: "Remind",
++};
++const BASE_ID = "531ea52f0c2b6a7d9e8f1a2b3c4d5e6f7a8b9c0d";
++const HEAD_ID = "9c1ba3f7e6d5c4b3a2918f7e6d5c4b3a2918f7e6";
++const MR_BASE: RangeSide = {
++  label: { kind: "named", name: BASE_ID },
++  shortId: "531ea52",
++  subject: "Base",
++};
++const MR_HEAD: RangeSide = {
++  label: { kind: "named", name: HEAD_ID },
++  shortId: "9c1ba3f",
++  subject: "Remind",
++};
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`${value} is no merge-request iid`);
++  }
++  return value;
++}
++
++type Sides = Pick<RangeStart, "heading" | "left" | "right">;
++
++const TWO_DOTS: Sides = { heading: { kind: "typed" }, left: MAIN, right: DEV };
++const THREE_DOTS: Sides = { heading: { kind: "typed" }, left: BASE, right: FEATURE };
++const MERGE_REQUEST: Sides = {
++  heading: {
++    kind: "mergeRequest",
++    iid: iid(12),
++    names: { title: "Reminders before a card is due", source: "feature", target: "main" },
++  },
++  left: MR_BASE,
++  right: MR_HEAD,
++};
++const UNNAMED: Sides = {
++  heading: { kind: "unnamedMergeRequest", iid: iid(12) },
++  left: MR_BASE,
++  right: MR_HEAD,
++};
+ 
+ function entry(change: RangeEntry["change"]): Pick<RangeEntry, "path" | "change"> {
+   return { path: "src/keys.md", change };
+@@ -42,15 +97,154 @@ test("a named side is its name, the left of three dots the merge base of both na
+   expect(sideLabel(HEAD)).toBe("HEAD");
+ });
+ 
+-test("a column header names the side and its short id", () => {
+-  expect(sideHeading(MAIN)).toBe("main (1b2cfed)");
+-  expect(sideHeading(BASE)).toBe("merge base of main and feature (0a1b2c3)");
+-  expect(sideHeading(HEAD)).toBe("HEAD (9f8e7d6)");
++test.each<[string, Sides, ColumnNames]>([
++  [
++    "two typed names: each side its name",
++    TWO_DOTS,
++    {
++      left: {
++        kind: "named",
++        name: "main",
++        branchedOff: null,
++        shortId: "1b2cfed",
++        subject: "Start",
++      },
++      right: { kind: "named", name: "dev", branchedOff: null, shortId: "2b3b4b5", subject: "Dev" },
++    },
++  ],
++  [
++    "three dots: the left is the left name, where the right one branched off",
++    THREE_DOTS,
++    {
++      left: {
++        kind: "named",
++        name: "main",
++        branchedOff: "feature",
++        shortId: "0a1b2c3",
++        subject: "Fork",
++      },
++      right: {
++        kind: "named",
++        name: "feature",
++        branchedOff: null,
++        shortId: "9c1ba3f",
++        subject: "Remind",
++      },
++    },
++  ],
++  [
++    "a merge request: the target where the source branched off, then the source",
++    MERGE_REQUEST,
++    {
++      left: {
++        kind: "named",
++        name: "main",
++        branchedOff: "feature",
++        shortId: "531ea52",
++        subject: "Base",
++      },
++      right: {
++        kind: "named",
++        name: "feature",
++        branchedOff: null,
++        shortId: "9c1ba3f",
++        subject: "Remind",
++      },
++    },
++  ],
++  [
++    "a merge request without names: the commits",
++    UNNAMED,
++    {
++      left: { kind: "commit", shortId: "531ea52", subject: "Base" },
++      right: { kind: "commit", shortId: "9c1ba3f", subject: "Remind" },
++    },
++  ],
++])("columnNames of %s", (_case, sides, columns) => {
++  expect(columnNames(sides)).toEqual(columns);
+ });
+ 
+-test("an empty range names both sides with their short ids", () => {
+-  const start: RangeStart = { range: "main..dev", left: MAIN, right: DEV, files: [] };
+-  expect(emptyRangeText(start)).toBe("main (1b2cfed) and dev (2b3b4b5) have the same files.");
++test("a merge-base label on the right is named by its left name, where its right one branched off", () => {
++  expect(columnNames({ heading: { kind: "typed" }, left: MAIN, right: BASE }).right).toEqual({
++    kind: "named",
++    name: "main",
++    branchedOff: "feature",
++    shortId: "0a1b2c3",
++    subject: "Fork",
++  });
++});
++
++test.each<[ColumnName, string]>([
++  [
++    { kind: "named", name: "main", branchedOff: "feature", shortId: "531ea52", subject: "s" },
++    "main, where feature branched off (531ea52)",
++  ],
++  [
++    { kind: "named", name: "feature", branchedOff: null, shortId: "9c1ba3f", subject: "s" },
++    "feature (9c1ba3f)",
++  ],
++  [{ kind: "commit", shortId: "9c1ba3f", subject: "s" }, "9c1ba3f"],
++])("columnText of %o is %s", (column, text) => {
++  expect(columnText(column)).toBe(text);
++});
++
++test("the branched-off note names the branch", () => {
++  expect(branchedOffNote("feature")).toBe("where feature branched off");
++});
++
++test.each<[Sides, string]>([
++  [TWO_DOTS, "main (1b2cfed) and dev (2b3b4b5) have the same files."],
++  [
++    THREE_DOTS,
++    "main, where feature branched off (0a1b2c3) and feature (9c1ba3f) have the same files.",
++  ],
++  [
++    MERGE_REQUEST,
++    "main, where feature branched off (531ea52) and feature (9c1ba3f) have the same files.",
++  ],
++])("an empty range names both columns as their headers do: %s", (sides, text) => {
++  expect(emptyRangeText(sides)).toBe(text);
++});
++
++test.each<[string, Sides, HeadingLine]>([
++  [
++    "a merge request: reference, title, source and target",
++    MERGE_REQUEST,
++    {
++      kind: "mergeRequest",
++      reference: "!12",
++      title: "Reminders before a card is due",
++      source: "feature",
++      target: "main",
++    },
++  ],
++  [
++    "a merge request without names: reference, the right commit as source, the left as target",
++    UNNAMED,
++    { kind: "unnamedMergeRequest", reference: "!12", source: "9c1ba3f", target: "531ea52" },
++  ],
++  ["two dots", TWO_DOTS, { kind: "typed", left: "main", dots: "..", right: "dev" }],
++  ["three dots", THREE_DOTS, { kind: "typed", left: "main", dots: "...", right: "feature" }],
++  [
++    "a merge-base label on the right: its right name",
++    { heading: { kind: "typed" }, left: MAIN, right: BASE },
++    { kind: "typed", left: "main", dots: "..", right: "feature" },
++  ],
++])("headingLine of %s", (_case, sides, line) => {
++  expect(headingLine(sides)).toEqual(line);
++});
++
++test("no header text of a merge request without names holds a 40-character name", () => {
++  const { left, right } = columnNames(UNNAMED);
++  const texts = [
++    columnText(left),
++    columnText(right),
++    emptyRangeText(UNNAMED),
++    ...Object.values(headingLine(UNNAMED)),
++  ];
++
++  expect(texts.filter((text) => text.includes(BASE_ID) || text.includes(HEAD_ID))).toEqual([]);
++  expect(texts.slice(0, 2)).toEqual(["531ea52", "9c1ba3f"]);
+ });
+ 
+ test("a renamed file's header is old → new; every other change shows its path", () => {
+diff --git a/frontend/src/ui/rangeText.ts b/frontend/src/ui/rangeText.ts
+index 1cde553..b392d6d 100644
+--- a/frontend/src/ui/rangeText.ts
++++ b/frontend/src/ui/rangeText.ts
+@@ -10,6 +10,7 @@ import type {
+   RangeStart,
+   ReviewMark,
+ } from "../ipc";
++import { mergeRequestReference } from "./mergeRequestsText";
+ 
+ export type SentenceFile = Exclude<RangeFile, { readonly kind: "texts" }>;
+ 
+@@ -17,10 +18,47 @@ export type ChangeMark = { readonly letter: string; readonly word: string };
+ 
+ export type LineCounts = { readonly added: string; readonly removed: string };
+ 
++export type ColumnName =
++  | {
++      readonly kind: "named";
++      readonly name: string;
++      readonly branchedOff: string | null;
++      readonly shortId: string;
++      readonly subject: string;
++    }
++  | { readonly kind: "commit"; readonly shortId: string; readonly subject: string };
++
++export type ColumnNames = { readonly left: ColumnName; readonly right: ColumnName };
++
++export type HeadingLine =
++  | {
++      readonly kind: "mergeRequest";
++      readonly reference: string;
++      readonly title: string;
++      readonly source: string;
++      readonly target: string;
++    }
++  | {
++      readonly kind: "unnamedMergeRequest";
++      readonly reference: string;
++      readonly source: string;
++      readonly target: string;
++    }
++  | {
++      readonly kind: "typed";
++      readonly left: string;
++      readonly dots: ".." | "...";
++      readonly right: string;
++    };
++
++type Sides = Pick<RangeStart, "heading" | "left" | "right">;
++
+ const BYTES_PER_MIB = 1_048_576;
+ 
+ export const RANGE_LIST_LABEL = "Changed files";
+ 
++export const RANGE_HEADING_LABEL = "What this window compares";
++
+ export const REVIEWED_LABEL = "Reviewed";
+ export const REVIEW_FROM_START_LABEL = "Review from start";
+ export const SINCE_REVIEW_NOTE = "Changed since you reviewed it";
+@@ -67,12 +105,96 @@ export function sideLabel({ label }: RangeSide): string {
+   return label.kind === "named" ? label.name : `merge base of ${label.left} and ${label.right}`;
+ }
+ 
+-export function sideHeading(side: RangeSide): string {
+-  return `${sideLabel(side)} (${side.shortId})`;
++function namedColumn(
++  { shortId, subject }: RangeSide,
++  { name, branchedOff }: { readonly name: string; readonly branchedOff: string | null },
++): ColumnName {
++  return { kind: "named", name, branchedOff, shortId, subject };
+ }
+ 
+-export function emptyRangeText({ left, right }: RangeStart): string {
+-  return `${sideHeading(left)} and ${sideHeading(right)} have the same files.`;
++function typedColumn(side: RangeSide): ColumnName {
++  const { label } = side;
++  return label.kind === "named"
++    ? namedColumn(side, { name: label.name, branchedOff: null })
++    : namedColumn(side, { name: label.left, branchedOff: label.right });
++}
++
++function commitColumn({ shortId, subject }: RangeSide): ColumnName {
++  return { kind: "commit", shortId, subject };
++}
++
++export function columnNames({ heading, left, right }: Sides): ColumnNames {
++  switch (heading.kind) {
++    case "typed":
++      return { left: typedColumn(left), right: typedColumn(right) };
++    case "mergeRequest": {
++      const { source, target } = heading.names;
++      return {
++        left: namedColumn(left, { name: target, branchedOff: source }),
++        right: namedColumn(right, { name: source, branchedOff: null }),
++      };
++    }
++    case "unnamedMergeRequest":
++      return { left: commitColumn(left), right: commitColumn(right) };
++    default: {
++      const _exhaustive: never = heading;
++      return _exhaustive;
++    }
++  }
++}
++
++export function branchedOffNote(branch: string): string {
++  return `where ${branch} branched off`;
++}
++
++export function columnText(column: ColumnName): string {
++  if (column.kind === "commit") {
++    return column.shortId;
++  }
++  const { name, branchedOff, shortId } = column;
++  return branchedOff === null
++    ? `${name} (${shortId})`
++    : `${name}, ${branchedOffNote(branchedOff)} (${shortId})`;
++}
++
++function typedLine({ left, right }: Pick<RangeStart, "left" | "right">): HeadingLine {
++  const { label } = left;
++  return {
++    kind: "typed",
++    left: label.kind === "named" ? label.name : label.left,
++    dots: label.kind === "named" ? ".." : "...",
++    right: right.label.kind === "named" ? right.label.name : right.label.right,
++  };
++}
++
++export function headingLine(start: Sides): HeadingLine {
++  const { heading, left, right } = start;
++  switch (heading.kind) {
++    case "typed":
++      return typedLine(start);
++    case "mergeRequest":
++      return {
++        kind: "mergeRequest",
++        reference: mergeRequestReference(heading.iid),
++        ...heading.names,
++      };
++    case "unnamedMergeRequest":
++      return {
++        kind: "unnamedMergeRequest",
++        reference: mergeRequestReference(heading.iid),
++        source: right.shortId,
++        target: left.shortId,
++      };
++    default: {
++      const _exhaustive: never = heading;
++      return _exhaustive;
++    }
++  }
++}
++
++export function emptyRangeText(start: Sides): string {
++  const { left, right } = columnNames(start);
++  return `${columnText(left)} and ${columnText(right)} have the same files.`;
+ }
+ 
+ export function fileHeading({ path, change }: Pick<RangeEntry, "path" | "change">): string {
+diff --git a/frontend/src/ui/rangeThreadText.test.ts b/frontend/src/ui/rangeThreadText.test.ts
+index 1f51fed..d92bded 100644
+--- a/frontend/src/ui/rangeThreadText.test.ts
++++ b/frontend/src/ui/rangeThreadText.test.ts
+@@ -25,6 +25,8 @@ import {
+ const MERGE_REQUEST = { reference: "!12", title: "Reminders", webUrl: "https://gl/x/-/mr/12" };
+ const THREE_DOTS: RangeStart = {
+   range: "main...dev",
++  heading: { kind: "typed" },
++  totals: { added: 0, removed: 0 },
+   left: {
+     label: { kind: "mergeBase", left: "main", right: "dev" },
+     shortId: "5d6e7f8",
+diff --git a/frontend/src/ui/rangeThreads.test.ts b/frontend/src/ui/rangeThreads.test.ts
+index f6c1c20..d8bd0f6 100644
+--- a/frontend/src/ui/rangeThreads.test.ts
++++ b/frontend/src/ui/rangeThreads.test.ts
+@@ -81,6 +81,8 @@ function manyFiles(count: number): unknown {
+   return {
+     start: {
+       range: "main...feature",
++      heading: { kind: "typed" },
++      totals: { added: 0, removed: 0 },
+       left: side,
+       right: { ...side, label: { kind: "named", name: "feature" }, short_id: "2b3b4b5" },
+       files: paths.map((path, id) => ({

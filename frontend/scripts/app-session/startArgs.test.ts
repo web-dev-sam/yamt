@@ -137,7 +137,7 @@ test("start-fixture --reviewed seeded adds &reviewed=seeded to a range fixture p
     ]),
   ).toMatchObject({ search: "?range=review&threads=seeded&reviewed=seeded" });
   const onlyRange =
-    "start-fixture takes --threads, --gitlab, --reviewed and --ai only with --range-case";
+    "start-fixture takes --threads, --gitlab, --reviewed, --heading and --ai only with --range-case";
   expect(() => parseCommand([...fixture, "--reviewed", "seeded"])).toThrow(onlyRange);
   expect(() => parseCommand([...fixture, "--diff", "--reviewed", "seeded"])).toThrow(onlyRange);
   expect(() =>
@@ -149,7 +149,13 @@ test("start-app --review-of passes --review-of=<project!iid> after the range, on
   const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
   const command = parseCommand([...range, "--review-of", "group/app!12", "--mr"]);
   expect(command).toMatchObject({
-    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr", reviewOf: "group/app!12" },
+    opens: {
+      kind: "range",
+      range: "main...feature",
+      dir: "/tmp/rr",
+      reviewOf: "group/app!12",
+      names: null,
+    },
   });
   if (command.kind !== "start-app") {
     throw new Error("not a start-app command");
@@ -172,4 +178,95 @@ test("start-app --review-of passes --review-of=<project!iid> after the range, on
   expect(() =>
     parseCommand(["start-fixture", "--name", "fx", "--range-case", "review", "--review-of", "a!1"]),
   ).toThrow(/unknown option --review-of/);
+});
+
+test("start-fixture --heading adds &heading=<value> after --reviewed's, only with --range-case", () => {
+  const fixture = ["start-fixture", "--name", "fx"];
+  expect(
+    parseCommand([...fixture, "--range-case", "review", "--heading", "mergeRequest"]),
+  ).toMatchObject({ search: "?range=review&heading=mergeRequest" });
+  expect(
+    parseCommand([
+      ...fixture,
+      "--range-case",
+      "review",
+      "--heading",
+      "fork",
+      "--reviewed",
+      "seeded",
+      "--gitlab",
+      "moved",
+      "--threads",
+      "seeded",
+    ]),
+  ).toMatchObject({
+    search: "?range=review&threads=seeded&gitlab=moved&reviewed=seeded&heading=fork",
+  });
+  const onlyRange =
+    "start-fixture takes --threads, --gitlab, --reviewed, --heading and --ai only with --range-case";
+  expect(() => parseCommand([...fixture, "--heading", "unnamed"])).toThrow(onlyRange);
+  expect(() => parseCommand([...fixture, "--diff", "--heading", "unnamed"])).toThrow(onlyRange);
+});
+
+test("start-app --mr-title, --mr-source and --mr-target reach the app right after --review-of=…", () => {
+  const reviewed = [
+    "start-app",
+    "--name",
+    "r",
+    "--range",
+    "531ea52..9c1ba3f",
+    "--repo",
+    "/tmp/rr",
+    "--review-of",
+    "group/app!12",
+  ];
+  const named = [
+    "--mr-title",
+    'Say "due" = soon',
+    "--mr-source",
+    "sam:feature",
+    "--mr-target",
+    "main",
+  ];
+  const command = parseCommand([...reviewed, ...named, "--ai"]);
+  expect(command).toMatchObject({
+    opens: { names: { title: 'Say "due" = soon', source: "sam:feature", target: "main" } },
+  });
+  if (command.kind !== "start-app") {
+    throw new Error("not a start-app command");
+  }
+  expect(appArgs(command.opens, "/tmp/rr", command)).toEqual([
+    "--diff=531ea52..9c1ba3f",
+    "--review-of=group/app!12",
+    '--mr-title=Say "due" = soon',
+    "--mr-source=sam:feature",
+    "--mr-target=main",
+    "--repo",
+    "/tmp/rr",
+    "--ai",
+  ]);
+});
+
+test.each([
+  ["only a title", ["--mr-title", "t"]],
+  ["only a source", ["--mr-source", "s"]],
+  ["only a target", ["--mr-target", "m"]],
+  ["no target", ["--mr-title", "t", "--mr-source", "s"]],
+  ["no title", ["--mr-source", "s", "--mr-target", "m"]],
+  ["no source", ["--mr-title", "t", "--mr-target", "m"]],
+])("start-app with %s of the --mr-* names is refused", (_case, names) => {
+  const reviewed = ["start-app", "--name", "r", "--range", "a..b", "--repo", "/r"];
+  const together =
+    "start-app --mr-title, --mr-source and --mr-target go together, with --review-of";
+  expect(() => parseCommand([...reviewed, "--review-of", "g/a!1", ...names])).toThrow(together);
+});
+
+test("start-app --mr-* names without --review-of are refused, on a range or a compare window", () => {
+  const names = ["--mr-title", "t", "--mr-source", "s", "--mr-target", "m"];
+  const together =
+    "start-app --mr-title, --mr-source and --mr-target go together, with --review-of";
+  expect(() =>
+    parseCommand(["start-app", "--name", "r", "--range", "a..b", "--repo", "/r", ...names]),
+  ).toThrow(together);
+  expect(() => parseCommand(["start-app", "--name", "c", "--diff", ...names])).toThrow(together);
 });

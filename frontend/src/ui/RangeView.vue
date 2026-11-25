@@ -4,13 +4,14 @@ import ArrowDown from "~icons/lucide/arrow-down";
 import ArrowUp from "~icons/lucide/arrow-up";
 import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
 
-import type { RangeEntry, RangeSide } from "../ipc";
+import type { RangeEntry } from "../ipc";
 import { COLLAPSE_LABEL } from "./collapsing";
 import { fileIcon } from "./fileIcon";
 import { ACTION_NAMES } from "./keyText";
 import MergeRequestsButton from "./MergeRequestsButton.vue";
 import PaneFrame from "./PaneFrame.vue";
 import { compareColumns } from "./paneSplit";
+import RangeColumnHeading from "./RangeColumnHeading.vue";
 import RangeSendButton from "./RangeSendButton.vue";
 import { useRangeStore } from "./rangeStore";
 import {
@@ -20,7 +21,7 @@ import {
   reviewedCount,
   SINCE_REVIEW_HEADING,
   SINCE_REVIEW_NOTE,
-  sideHeading,
+  type ColumnNames,
 } from "./rangeText";
 import RangeThreadLayer from "./RangeThreadLayer.vue";
 import SettingsButton from "./SettingsButton.vue";
@@ -29,8 +30,7 @@ import { useSearchGoTo } from "./useSearchGoTo";
 
 const props = defineProps<{
   file: RangeEntry;
-  leftSide: RangeSide;
-  rightSide: RangeSide;
+  columns: ColumnNames;
   shown: boolean;
   view: RangeViewKind;
 }>();
@@ -60,12 +60,7 @@ useSearchGoTo(
 const icon = computed(() => fileIcon(props.file.path));
 const heading = computed(() => fileHeading(props.file));
 const since = computed(() => props.view === "sinceReview");
-const leftHeading = computed(() =>
-  since.value ? SINCE_REVIEW_HEADING : sideHeading(props.leftSide),
-);
-const leftTitle = computed(() => (since.value ? undefined : props.leftSide.subject));
-const rightHeading = computed(() => sideHeading(props.rightSide));
-const columns = computed(() => content.value.kind === "columns");
+const isColumns = computed(() => content.value.kind === "columns");
 const note = computed(() => (content.value.kind === "columns" ? content.value.note : null));
 const sentence = computed(() => (content.value.kind === "sentence" ? content.value.text : null));
 const isReviewed = computed(() => marks.value.get(props.file.id) === "reviewed");
@@ -133,7 +128,7 @@ function reviewFromStart(): void {
           type="button"
           :title="PREVIOUS"
           :aria-label="PREVIOUS"
-          :disabled="!columns"
+          :disabled="!isColumns"
           class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
           @mousedown.prevent
           @click="moveToChange('up')"
@@ -144,7 +139,7 @@ function reviewFromStart(): void {
           type="button"
           :title="NEXT"
           :aria-label="NEXT"
-          :disabled="!columns"
+          :disabled="!isColumns"
           class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
           @mousedown.prevent
           @click="moveToChange('down')"
@@ -156,7 +151,7 @@ function reviewFromStart(): void {
           :title="COLLAPSE_LABEL"
           :aria-label="COLLAPSE_LABEL"
           :aria-pressed="collapsing"
-          :disabled="!columns"
+          :disabled="!isColumns"
           class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
           @mousedown.prevent
           @click="toggleCollapsing"
@@ -171,19 +166,15 @@ function reviewFromStart(): void {
     </template>
     <template #default="{ stripLayer }">
       <h3
+        v-if="since"
         class="col-start-1 row-start-1 truncate border-b border-separator px-3 py-1.5 text-fg-muted"
-        :title="leftTitle"
       >
-        {{ leftHeading }}
+        {{ SINCE_REVIEW_HEADING }}
       </h3>
+      <RangeColumnHeading v-else :column="columns.left" class="col-start-1 row-start-1" />
       <div class="col-start-2 row-start-1 border-b border-separator" />
-      <h3
-        class="col-start-3 row-start-1 truncate border-b border-separator px-3 py-1.5 text-fg-muted"
-        :title="rightSide.subject"
-      >
-        {{ rightHeading }}
-      </h3>
-      <template v-if="columns">
+      <RangeColumnHeading :column="columns.right" class="col-start-3 row-start-1" />
+      <template v-if="isColumns">
         <div ref="left" class="col-start-1 row-start-2 min-h-0 min-w-0" />
         <div class="col-start-2 row-start-2" :class="stripLayer">
           <svg ref="strip" aria-hidden="true" class="block h-full w-full" />

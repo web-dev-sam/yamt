@@ -15,6 +15,8 @@ const DIFFERENCE: Generated.Difference = {
 
 const START: Generated.RangeStart = {
   range: "main...feature",
+  heading: { kind: "typed" },
+  totals: { added: 4, removed: 2 },
   left: {
     label: { kind: "mergeBase", left: "main", right: "feature" },
     short_id: "1b2cfed",
@@ -47,6 +49,8 @@ const START: Generated.RangeStart = {
 test("a start converts both sides and every change, camelCased, keeping the merge-base label", () => {
   expect(toRangeStart(START)).toEqual({
     range: "main...feature",
+    heading: { kind: "typed" },
+    totals: { added: 4, removed: 2 },
     left: {
       label: { kind: "mergeBase", left: "main", right: "feature" },
       shortId: "1b2cfed",
@@ -88,6 +92,31 @@ test.each([-1, 0.5])("a file id of %s is refused by the brand, naming the field"
   expect(() => toRangeStart({ ...START, files: [first, { ...first, id: bad }] })).toThrow(
     `files[1].id must be a non-negative safe integer, got ${bad}`,
   );
+});
+
+test.each<Generated.RangeHeading>([
+  {
+    kind: "mergeRequest",
+    iid: 12,
+    names: { title: "Reminders", source: "sam:feature", target: "main" },
+  },
+  { kind: "unnamedMergeRequest", iid: 13 },
+])("a $kind heading and the totals are kept as the app sent them", (heading) => {
+  const start = toRangeStart({ ...START, heading, totals: { added: 7, removed: 9 } });
+
+  expect(start.heading).toEqual(heading);
+  expect(start.totals).toEqual({ added: 7, removed: 9 });
+});
+
+test.each([-1, 1.5])("a heading iid of %s is refused by the brand, naming heading.iid", (bad) => {
+  const names = { title: "t", source: "s", target: "m" };
+
+  expect(() =>
+    toRangeStart({ ...START, heading: { kind: "mergeRequest", iid: bad, names } }),
+  ).toThrow(`heading.iid must be a non-negative safe integer, got ${bad}`);
+  expect(() =>
+    toRangeStart({ ...START, heading: { kind: "unnamedMergeRequest", iid: bad } }),
+  ).toThrow(`heading.iid must be a non-negative safe integer, got ${bad}`);
 });
 
 test("a texts reply converts its differences with both columns' words and keeps the mode", () => {

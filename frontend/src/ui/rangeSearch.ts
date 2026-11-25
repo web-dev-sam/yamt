@@ -4,7 +4,7 @@ import type { Column, RangeFileId, RangeSource, RangeStart, SearchText } from ".
 import type { Layout, SearchedFile } from "../search";
 import type { WindowKeyTarget } from "./fileListKey";
 import { attempt, report, type Problem } from "./problem";
-import { sideHeading } from "./rangeText";
+import { columnNames, columnText } from "./rangeText";
 import {
   createSearching,
   type SearchPaneInfo,
@@ -28,9 +28,10 @@ export function rangePanes(start: RangeStart | null): readonly SearchPaneInfo<Co
   if (start === null) {
     return [];
   }
+  const { left, right } = columnNames(start);
   return [
-    { pane: "left", icon: "panel-left", title: sideHeading(start.left) },
-    { pane: "right", icon: "panel-right", title: sideHeading(start.right) },
+    { pane: "left", icon: "panel-left", title: columnText(left) },
+    { pane: "right", icon: "panel-right", title: columnText(right) },
   ];
 }
 

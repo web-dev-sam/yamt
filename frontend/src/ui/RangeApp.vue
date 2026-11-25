@@ -17,8 +17,9 @@ import QuestionDialog from "./QuestionDialog.vue";
 import RangeCounts from "./RangeCounts.vue";
 import RangeFileRow from "./RangeFileRow.vue";
 import { folderSums, reviewedFolders } from "./rangeFolderSums";
+import RangeHeadingLine from "./RangeHeadingLine.vue";
 import { useRangeStore } from "./rangeStore";
-import { emptyRangeText, FOLDER_REVIEWED_WORD, RANGE_LIST_LABEL } from "./rangeText";
+import { columnNames, emptyRangeText, FOLDER_REVIEWED_WORD, RANGE_LIST_LABEL } from "./rangeText";
 import { sendNoticeRow } from "./rangeThreadText";
 import RangeView from "./RangeView.vue";
 import SearchPanel from "./SearchPanel.vue";
@@ -66,6 +67,7 @@ const doneFolders = computed(() => reviewedFolders(files.value, marks.value));
 const emptyText = computed(() =>
   start.value !== null && start.value.files.length === 0 ? emptyRangeText(start.value) : null,
 );
+const columns = computed(() => (start.value === null ? null : columnNames(start.value)));
 const sendNotice = computed((): readonly NoticeRow[] => {
   const result = gitlab.result.value;
   return result === null ? [] : [sendNoticeRow(result)];
@@ -146,17 +148,17 @@ function viewOf(file: RangeEntry): RangeViewKind {
     </SideColumn>
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
+        <RangeHeadingLine v-if="start !== null && screen.kind === 'files'" :start="start" />
         <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
         <NoticeBar v-if="sendNotice.length > 0" :rows="sendNotice" @close="gitlab.dismissResult" />
       </div>
       <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
-        <template v-if="start !== null">
+        <template v-if="columns !== null">
           <RangeView
             v-for="file in visited"
             :key="`${file.id}:${viewOf(file)}`"
             :file="file"
-            :left-side="start.left"
-            :right-side="start.right"
+            :columns="columns"
             :shown="file.id === shown && screen.kind === 'files'"
             :view="viewOf(file)"
           />

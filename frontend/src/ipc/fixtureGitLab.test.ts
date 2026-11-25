@@ -12,6 +12,8 @@ import type { RangeStart } from "./rangeDomain";
 
 const COMMIT_ID_RIGHT: RangeStart = {
   range: "1a2b3c4..5d6e7f8",
+  heading: { kind: "typed" },
+  totals: { added: 0, removed: 0 },
   left: { label: { kind: "named", name: "1a2b3c4" }, shortId: "1a2b3c4", subject: "Old" },
   right: { label: { kind: "named", name: "5d6e7f8" }, shortId: "5d6e7f8", subject: "New" },
   files: [],

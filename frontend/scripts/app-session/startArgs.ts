@@ -4,6 +4,7 @@ import { noPositionals, sessionName, wholeNumber, type Parsed } from "./argv";
 import { fromRoot } from "./session";
 import type { Size } from "./state";
 
+type MergeRequestNames = Readonly<Record<"title" | "source" | "target", string>>;
 type Opening =
   | { readonly kind: "dir"; readonly dir: string }
   | {
@@ -11,6 +12,7 @@ type Opening =
       readonly range: string;
       readonly dir: string;
       readonly reviewOf: string | null;
+      readonly names: MergeRequestNames | null;
     }
   | { readonly kind: "diff"; readonly startDir: string | null }
   | { readonly kind: "fresh" };
@@ -43,6 +45,7 @@ type AppFlags = { readonly ai: boolean; readonly mr: boolean };
 const DEFAULT_SIZE: Size = { width: 1600, height: 1000 };
 const DEFAULT_BINARY = "target/debug/yamt";
 const SIZE = /^([1-9][0-9]*)x([1-9][0-9]*)$/;
+const NAME_FLAGS = ["mr-title", "mr-source", "mr-target"];
 
 function size(parsed: Parsed): Size {
   const text = parsed.values.get("size");
@@ -56,6 +59,17 @@ function size(parsed: Parsed): Size {
   return { width: Number(width), height: Number(height) };
 }
 
+function mergeRequestNames(parsed: Parsed, review: string | undefined): MergeRequestNames | null {
+  const [title, source, target] = NAME_FLAGS.map((flag) => parsed.values.get(flag));
+  if (title === undefined && source === undefined && target === undefined) return null;
+  if (title === undefined || source === undefined || target === undefined || review === undefined) {
+    throw new Error(
+      "start-app --mr-title, --mr-source and --mr-target go together, with --review-of",
+    );
+  }
+  return { title, source, target };
+}
+
 function opening(parsed: Parsed): Opening {
   const dir = parsed.values.get("repo");
   const range = parsed.values.get("range");
@@ -63,6 +77,7 @@ function opening(parsed: Parsed): Opening {
   const diff = parsed.flags.has("diff");
   const fresh = parsed.flags.has("fresh-repo");
   const reviewOf = parsed.values.get("review-of");
+  const names = mergeRequestNames(parsed, reviewOf);
   if (startDir !== undefined && !diff) {
     throw new Error("start-app --dir <folder> goes with --diff: the compare window's start folder");
   }
@@ -75,7 +90,7 @@ function opening(parsed: Parsed): Opening {
     if (dir === undefined || diff || fresh) {
       throw new Error("start-app --range needs --repo <dir>, and neither --fresh-repo nor --diff");
     }
-    return { kind: "range", range, dir, reviewOf: reviewOf ?? null };
+    return { kind: "range", range, dir, reviewOf: reviewOf ?? null, names };
   }
   if ([dir !== undefined, fresh, diff].filter(Boolean).length !== 1) {
     throw new Error("start-app needs one of --repo <dir>, --fresh-repo and --diff");
@@ -103,7 +118,7 @@ function addAiSearch(parsed: Parsed, review: URLSearchParams): void {
 
 function reviewSearch(parsed: Parsed): string {
   const review = new URLSearchParams();
-  for (const name of ["threads", "gitlab", "reviewed"]) {
+  for (const name of ["threads", "gitlab", "reviewed", "heading"]) {
     const value = parsed.values.get(name);
     if (value !== undefined) {
       review.set(name, value);
@@ -127,7 +142,7 @@ function windowSearch(parsed: Parsed): string {
   }
   if (review !== "") {
     throw new Error(
-      "start-fixture takes --threads, --gitlab, --reviewed and --ai only with --range-case",
+      "start-fixture takes --threads, --gitlab, --reviewed, --heading and --ai only with --range-case",
     );
   }
   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
@@ -252,6 +267,7 @@ export function appArgs(
       return [
         `--diff=${opens.range}`,
         ...(opens.reviewOf === null ? [] : [`--review-of=${opens.reviewOf}`]),
+        ...Object.entries(opens.names ?? {}).map(([name, value]) => `--mr-${name}=${value}`),
         ...options,
       ];
     case "dir":

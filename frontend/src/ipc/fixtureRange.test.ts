@@ -10,6 +10,8 @@ import type { DiffLine, ThreadLine } from "./threadLine";
 const REVIEW: { start: Generated.RangeStart; files: Generated.RangeFile[] } = {
   start: {
     range: "main...feature",
+    heading: { kind: "typed" },
+    totals: { added: 1, removed: 1 },
     left: {
       label: { kind: "mergeBase", left: "main", right: "feature" },
       short_id: "1b2cfed",
@@ -47,6 +49,8 @@ const REVIEW: { start: Generated.RangeStart; files: Generated.RangeFile[] } = {
 const EMPTY: { start: Generated.RangeStart; files: Generated.RangeFile[] } = {
   start: {
     range: "feature..feature",
+    heading: { kind: "typed" },
+    totals: { added: 0, removed: 0 },
     left: { label: { kind: "named", name: "feature" }, short_id: "2b3b4b5", subject: "Remind" },
     right: { label: { kind: "named", name: "feature" }, short_id: "2b3b4b5", subject: "Remind" },
     files: [],
@@ -61,6 +65,8 @@ const FILES: Readonly<Record<string, unknown>> = {
 
 const REVIEW_START = {
   range: "main...feature",
+  heading: { kind: "typed" },
+  totals: { added: 1, removed: 1 },
   left: {
     label: { kind: "mergeBase", left: "main", right: "feature" },
     shortId: "1b2cfed",
@@ -121,6 +127,81 @@ test.each(["", "?range", "?range="])("'%s' without a case loads review", async (
   expect(valueOf(await source.openRange())).toEqual(REVIEW_START);
 });
 
+const FORK_TITLE =
+  "Show every reminder of a board in one list, grouped by the day it is due, with a count per day and a link to each card";
+
+test.each<[string, Generated.RangeHeading]>([
+  [
+    "mergeRequest",
+    {
+      kind: "mergeRequest",
+      iid: 12,
+      names: { title: "Reminders before a card is due", source: "feature", target: "main" },
+    },
+  ],
+  [
+    "fork",
+    {
+      kind: "mergeRequest",
+      iid: 8,
+      names: {
+        title: FORK_TITLE,
+        source: "sam:feature/reminders-grouped-by-due-day",
+        target: "main",
+      },
+    },
+  ],
+  [
+    "hiddenFork",
+    {
+      kind: "mergeRequest",
+      iid: 8,
+      names: {
+        title: FORK_TITLE,
+        source: "(fork) feature/reminders-grouped-by-due-day",
+        target: "main",
+      },
+    },
+  ],
+  ["unnamed", { kind: "unnamedMergeRequest", iid: 12 }],
+])(
+  "?heading=%s answers that heading with the case's totals, sides and files",
+  async (name, heading) => {
+    const { log, entries } = quietLog();
+    const source = createFixtureRangeSource(log, `?range=review&heading=${name}`, FILES);
+
+    expect(valueOf(await source.openRange())).toEqual({ ...REVIEW_START, heading });
+    expect(entries).toEqual([]);
+  },
+);
+
+test("an unknown heading logs range.fixture_heading_miss naming the known ones and keeps the case's", async () => {
+  const { log, entries } = quietLog();
+  const source = createFixtureRangeSource(log, "?range=review&heading=nosuch", FILES);
+
+  expect(valueOf(await source.openRange())).toEqual(REVIEW_START);
+  expect(entries).toEqual([
+    {
+      level: "info",
+      event: "range.fixture_heading_miss",
+      fields: { heading: "nosuch", known: "mergeRequest, fork, hiddenFork, unnamed" },
+    },
+  ]);
+});
+
+test.each([
+  ["?range=review", 0],
+  ["?range=review&heading", 0],
+  ["?range=review&heading=", 0],
+  ["?range=review&heading=toString", 1],
+])("'%s' keeps the case's typed heading, logging %i misses", async (search, misses) => {
+  const { log, entries } = quietLog();
+  const source = createFixtureRangeSource(log, search, FILES);
+
+  expect(valueOf(await source.openRange()).heading).toEqual({ kind: "typed" });
+  expect(entries).toHaveLength(misses);
+});
+
 test("?range=empty loads that case, not review (catches a case name ignored)", async () => {
   const source = createFixtureRangeSource(quietLog().log, "?range=empty", FILES);
 
@@ -136,6 +217,8 @@ test("an unknown case logs range.fixture_miss naming the known ones and lists no
 
   expect(valueOf(await source.openRange())).toEqual({
     range: "nope",
+    heading: { kind: "typed" },
+    totals: { added: 0, removed: 0 },
     left: { label: { kind: "named", name: "HEAD" }, shortId: "0000000", subject: "" },
     right: { label: { kind: "named", name: "HEAD" }, shortId: "0000000", subject: "" },
     files: [],
@@ -190,6 +273,16 @@ test("the committed cases parse: review lists 13 files of every kind, empty none
   );
 
   expect(start.files).toHaveLength(13);
+  expect(start.heading).toEqual({ kind: "typed" });
+  expect(start.totals).toEqual(
+    start.files.reduce(
+      (sum, { lines }) =>
+        lines.kind === "counted"
+          ? { added: sum.added + lines.added, removed: sum.removed + lines.removed }
+          : sum,
+      { added: 0, removed: 0 },
+    ),
+  );
   expect(start.files[3]).toMatchObject({
     path: "docs/keys.md",
     change: { kind: "renamed", oldPath: "docs/shortcuts.md" },
@@ -318,6 +411,26 @@ test.each([
     "a negative file id",
     { start: { ...EMPTY.start, files: [{ ...REVIEW.start.files[0], id: -1 }] }, files: [] },
     "files[0].id must be a non-negative safe integer, got -1",
+  ],
+  [
+    "an unknown heading kind",
+    { start: { ...EMPTY.start, heading: { kind: "nope" } }, files: [] },
+    "kind",
+  ],
+  [
+    "a merge request heading without names",
+    { start: { ...EMPTY.start, heading: { kind: "mergeRequest", iid: 3 } }, files: [] },
+    "names",
+  ],
+  [
+    "a negative heading iid",
+    { start: { ...EMPTY.start, heading: { kind: "unnamedMergeRequest", iid: -1 } }, files: [] },
+    "heading.iid must be a non-negative safe integer, got -1",
+  ],
+  [
+    "totals without removed lines",
+    { start: { ...EMPTY.start, totals: { added: 1 } }, files: [] },
+    "removed",
   ],
 ])("a case file with %s fails the parse, naming the file", (_case, json, detail) => {
   const files = { "bad.json": json };

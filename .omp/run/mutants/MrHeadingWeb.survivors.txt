@@ -1,0 +1,4 @@
+just mutants HEAD (2nd run, after the survivor tests): 808 killed, 17 timeout, 110 survived, 8 no-cov, 3 errors over 5 web files (score 87.49)
+src/ipc/fixtureRange.ts:98-135 CASE schema, FORK_*, HEADINGS literals — gate-covered: static mutants the vitest runner never re-evaluates (#732); the ?heading= tests assert these values
+src/ipc/rangeDomain.ts:85 case "typed"→"" — equivalent: the default arm returns the same heading value
+src/ipc/rangeDomain.ts:98, src/ui/rangeText.ts:139,188 default {never} → {} (NoCoverage) — equivalent: unreachable exhaustive arms (TS3)

@@ -1,6 +1,6 @@
 import type * as Generated from "./bindings";
 import { toDifferences, toLineChange, type Difference, type LineChange } from "./compareDomain";
-import { isRangeFileId, type RangeFileId } from "./domain";
+import { isMergeRequestIid, isRangeFileId, type MergeRequestIid, type RangeFileId } from "./domain";
 import { branded } from "./validate";
 
 type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
@@ -19,8 +19,20 @@ export type RangeEntry = {
   readonly change: RangeChange;
   readonly lines: RangeLineCounts;
 };
+type MergeRequestNames = Readonly<Generated.MergeRequestNames>;
+type RangeHeading =
+  | { readonly kind: "typed" }
+  | {
+      readonly kind: "mergeRequest";
+      readonly iid: MergeRequestIid;
+      readonly names: MergeRequestNames;
+    }
+  | { readonly kind: "unnamedMergeRequest"; readonly iid: MergeRequestIid };
+type RangeTotals = Readonly<Generated.RangeTotals>;
 export type RangeStart = {
   readonly range: string;
+  readonly heading: RangeHeading;
+  readonly totals: RangeTotals;
   readonly left: RangeSide;
   readonly right: RangeSide;
   readonly files: readonly RangeEntry[];
@@ -68,9 +80,33 @@ function toRangeEntry(
   };
 }
 
+function toRangeHeading(heading: Generated.RangeHeading): RangeHeading {
+  switch (heading.kind) {
+    case "typed":
+      return heading;
+    case "mergeRequest":
+      return {
+        kind: "mergeRequest",
+        iid: branded(heading.iid, isMergeRequestIid, "heading.iid"),
+        names: heading.names,
+      };
+    case "unnamedMergeRequest":
+      return {
+        kind: "unnamedMergeRequest",
+        iid: branded(heading.iid, isMergeRequestIid, "heading.iid"),
+      };
+    default: {
+      const _exhaustive: never = heading;
+      return _exhaustive;
+    }
+  }
+}
+
 export function toRangeStart(raw: Generated.RangeStart): RangeStart {
   return {
     range: raw.range,
+    heading: toRangeHeading(raw.heading),
+    totals: raw.totals,
     left: toRangeSide(raw.left),
     right: toRangeSide(raw.right),
     files: raw.files.map(toRangeEntry),

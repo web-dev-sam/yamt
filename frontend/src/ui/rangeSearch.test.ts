@@ -20,6 +20,8 @@ function rangeCase(count = FILE_COUNT): unknown {
   return {
     start: {
       range: "main...feature",
+      heading: { kind: "typed" },
+      totals: { added: count, removed: count },
       left: SIDE,
       right: { ...SIDE, label: { kind: "named", name: "feature" }, short_id: "2b3b4b5" },
       files: paths.map((path, id) => ({
@@ -201,6 +203,29 @@ test("the range's panes are the old side then the new one, titled with their com
   expect(store.search.panes.value).toEqual([
     { pane: "left", icon: "panel-left", title: "main (1b2cfed)" },
     { pane: "right", icon: "panel-right", title: "feature (2b3b4b5)" },
+  ]);
+});
+
+test("a merge request's panes are titled as its column headers: target where source branched off, then source", async () => {
+  const raw = {
+    start: {
+      range: "531ea52..9c1ba3f",
+      heading: { kind: "typed" },
+      totals: { added: 0, removed: 0 },
+      left: { label: { kind: "named", name: "531ea52" }, short_id: "531ea52", subject: "Base" },
+      right: { label: { kind: "named", name: "9c1ba3f" }, short_id: "9c1ba3f", subject: "Head" },
+      files: [],
+    },
+    files: [],
+  };
+  const fixture = createFixtureRangeSource(log, "?range=review&heading=mergeRequest", {
+    "../../fixtures/range/review.json": raw,
+  });
+  const opened = await fixture.openRange();
+
+  expect(rangePanes(opened.ok ? opened.value : null)).toEqual([
+    { pane: "left", icon: "panel-left", title: "main, where feature branched off (531ea52)" },
+    { pane: "right", icon: "panel-right", title: "feature (9c1ba3f)" },
   ]);
 });
 

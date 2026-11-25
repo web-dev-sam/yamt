@@ -72,6 +72,8 @@ import { notLinedUpText } from "./rangeThreadText";
 
 const START: RangeStart = {
   range: "main..feature",
+  heading: { kind: "typed" },
+  totals: { added: 0, removed: 0 },
   left: { label: { kind: "named", name: "main" }, shortId: "1b2cfed", subject: "Start" },
   right: { label: { kind: "named", name: "feature" }, shortId: "2b3b4b5", subject: "Next" },
   files: [],

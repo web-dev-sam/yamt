@@ -10,6 +10,7 @@ import type {
   RangeStart,
   ReviewMark,
 } from "../ipc";
+import { mergeRequestReference } from "./mergeRequestsText";
 
 export type SentenceFile = Exclude<RangeFile, { readonly kind: "texts" }>;
 
@@ -17,9 +18,46 @@ export type ChangeMark = { readonly letter: string; readonly word: string };
 
 export type LineCounts = { readonly added: string; readonly removed: string };
 
+export type ColumnName =
+  | {
+      readonly kind: "named";
+      readonly name: string;
+      readonly branchedOff: string | null;
+      readonly shortId: string;
+      readonly subject: string;
+    }
+  | { readonly kind: "commit"; readonly shortId: string; readonly subject: string };
+
+export type ColumnNames = { readonly left: ColumnName; readonly right: ColumnName };
+
+export type HeadingLine =
+  | {
+      readonly kind: "mergeRequest";
+      readonly reference: string;
+      readonly title: string;
+      readonly source: string;
+      readonly target: string;
+    }
+  | {
+      readonly kind: "unnamedMergeRequest";
+      readonly reference: string;
+      readonly source: string;
+      readonly target: string;
+    }
+  | {
+      readonly kind: "typed";
+      readonly left: string;
+      readonly dots: ".." | "...";
+      readonly right: string;
+    };
+
+type Sides = Pick<RangeStart, "heading" | "left" | "right">;
+
 const BYTES_PER_MIB = 1_048_576;
 
 export const RANGE_LIST_LABEL = "Changed files";
+
+export const RANGE_HEADING_LABEL = "What this window compares";
 
 export const REVIEWED_LABEL = "Reviewed";
 export const REVIEW_FROM_START_LABEL = "Review from start";
@@ -67,12 +105,96 @@ export function sideLabel({ label }: RangeSide): string {
   return label.kind === "named" ? label.name : `merge base of ${label.left} and ${label.right}`;
 }
 
-export function sideHeading(side: RangeSide): string {
-  return `${sideLabel(side)} (${side.shortId})`;
+function namedColumn(
+  { shortId, subject }: RangeSide,
+  { name, branchedOff }: { readonly name: string; readonly branchedOff: string | null },
+): ColumnName {
+  return { kind: "named", name, branchedOff, shortId, subject };
 }
 
-export function emptyRangeText({ left, right }: RangeStart): string {
-  return `${sideHeading(left)} and ${sideHeading(right)} have the same files.`;
+function typedColumn(side: RangeSide): ColumnName {
+  const { label } = side;
+  return label.kind === "named"
+    ? namedColumn(side, { name: label.name, branchedOff: null })
+    : namedColumn(side, { name: label.left, branchedOff: label.right });
+}
+
+function commitColumn({ shortId, subject }: RangeSide): ColumnName {
+  return { kind: "commit", shortId, subject };
+}
+
+export function columnNames({ heading, left, right }: Sides): ColumnNames {
+  switch (heading.kind) {
+    case "typed":
+      return { left: typedColumn(left), right: typedColumn(right) };
+    case "mergeRequest": {
+      const { source, target } = heading.names;
+      return {
+        left: namedColumn(left, { name: target, branchedOff: source }),
+        right: namedColumn(right, { name: source, branchedOff: null }),
+      };
+    }
+    case "unnamedMergeRequest":
+      return { left: commitColumn(left), right: commitColumn(right) };
+    default: {
+      const _exhaustive: never = heading;
+      return _exhaustive;
+    }
+  }
+}
+
+export function branchedOffNote(branch: string): string {
+  return `where ${branch} branched off`;
+}
+
+export function columnText(column: ColumnName): string {
+  if (column.kind === "commit") {
+    return column.shortId;
+  }
+  const { name, branchedOff, shortId } = column;
+  return branchedOff === null
+    ? `${name} (${shortId})`
+    : `${name}, ${branchedOffNote(branchedOff)} (${shortId})`;
+}
+
+function typedLine({ left, right }: Pick<RangeStart, "left" | "right">): HeadingLine {
+  const { label } = left;
+  return {
+    kind: "typed",
+    left: label.kind === "named" ? label.name : label.left,
+    dots: label.kind === "named" ? ".." : "...",
+    right: right.label.kind === "named" ? right.label.name : right.label.right,
+  };
+}
+
+export function headingLine(start: Sides): HeadingLine {
+  const { heading, left, right } = start;
+  switch (heading.kind) {
+    case "typed":
+      return typedLine(start);
+    case "mergeRequest":
+      return {
+        kind: "mergeRequest",
+        reference: mergeRequestReference(heading.iid),
+        ...heading.names,
+      };
+    case "unnamedMergeRequest":
+      return {
+        kind: "unnamedMergeRequest",
+        reference: mergeRequestReference(heading.iid),
+        source: right.shortId,
+        target: left.shortId,
+      };
+    default: {
+      const _exhaustive: never = heading;
+      return _exhaustive;
+    }
+  }
+}
+
+export function emptyRangeText(start: Sides): string {
+  const { left, right } = columnNames(start);
+  return `${columnText(left)} and ${columnText(right)} have the same files.`;
 }
 
 export function fileHeading({ path, change }: Pick<RangeEntry, "path" | "change">): string {

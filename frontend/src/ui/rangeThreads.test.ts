@@ -81,6 +81,8 @@ function manyFiles(count: number): unknown {
   return {
     start: {
       range: "main...feature",
+      heading: { kind: "typed" },
+      totals: { added: 0, removed: 0 },
       left: side,
       right: { ...side, label: { kind: "named", name: "feature" }, short_id: "2b3b4b5" },
       files: paths.map((path, id) => ({

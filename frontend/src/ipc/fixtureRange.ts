@@ -95,6 +95,16 @@ const RANGE_FILE: v.GenericSchema<Generated.RangeFile> = v.variant("kind", [
 const CASE = v.object({
   start: v.object({
     range: v.string(),
+    heading: v.variant("kind", [
+      v.object({ kind: v.literal("typed") }),
+      v.object({
+        kind: v.literal("mergeRequest"),
+        iid: v.number(),
+        names: v.object({ title: v.string(), source: v.string(), target: v.string() }),
+      }),
+      v.object({ kind: v.literal("unnamedMergeRequest"), iid: v.number() }),
+    ]),
+    totals: v.object({ added: v.number(), removed: v.number() }),
     left: RANGE_SIDE,
     right: RANGE_SIDE,
     files: v.array(RANGE_ENTRY),
@@ -102,13 +112,62 @@ const CASE = v.object({
   files: v.array(RANGE_FILE),
 });
 
+const FORK_TITLE =
+  "Show every reminder of a board in one list, grouped by the day it is due, with a count per day and a link to each card";
+const FORK_BRANCH = "feature/reminders-grouped-by-due-day";
+
+const HEADINGS: Readonly<Record<string, Generated.RangeHeading>> = {
+  mergeRequest: {
+    kind: "mergeRequest",
+    iid: 12,
+    names: { title: "Reminders before a card is due", source: "feature", target: "main" },
+  },
+  fork: {
+    kind: "mergeRequest",
+    iid: 8,
+    names: { title: FORK_TITLE, source: `sam:${FORK_BRANCH}`, target: "main" },
+  },
+  hiddenFork: {
+    kind: "mergeRequest",
+    iid: 8,
+    names: { title: FORK_TITLE, source: `(fork) ${FORK_BRANCH}`, target: "main" },
+  },
+  unnamed: { kind: "unnamedMergeRequest", iid: 12 },
+};
+
 function missingCase(name: string): Case {
   const side: RangeSide = {
     label: { kind: "named", name: "HEAD" },
     shortId: NULL_SHORT_ID,
     subject: "",
   };
-  return { start: { range: name, left: side, right: side, files: [] }, files: [] };
+  return {
+    start: {
+      range: name,
+      heading: { kind: "typed" },
+      totals: { added: 0, removed: 0 },
+      left: side,
+      right: side,
+      files: [],
+    },
+    files: [],
+  };
+}
+
+function askedHeading(log: Log, search: string): Generated.RangeHeading | null {
+  const asked = new URLSearchParams(search).get("heading");
+  if (asked === null || asked === "") {
+    return null;
+  }
+  const heading = Object.hasOwn(HEADINGS, asked) ? HEADINGS[asked] : undefined;
+  if (heading === undefined) {
+    log.info("range.fixture_heading_miss", {
+      heading: asked,
+      known: Object.keys(HEADINGS).join(", "),
+    });
+    return null;
+  }
+  return heading;
 }
 
 function shownCase(log: Log, search: string, cases: ReadonlyMap<string, Case>): Case {
@@ -142,8 +201,9 @@ export function createFixtureRangeSource(
   search: string,
   files: Readonly<Record<string, unknown>> = CASE_FILES,
 ): RangeSource {
+  const heading = askedHeading(log, search);
   const cases = parsedCases(CASE, "range fixture", files, ({ start, files: loaded }) => ({
-    start: toRangeStart(start),
+    start: toRangeStart({ ...start, heading: heading ?? start.heading }),
     files: loaded.map(toRangeFile),
   }));
   const shown = shownCase(log, search, cases);

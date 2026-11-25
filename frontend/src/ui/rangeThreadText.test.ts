@@ -25,6 +25,8 @@ import {
 const MERGE_REQUEST = { reference: "!12", title: "Reminders", webUrl: "https://gl/x/-/mr/12" };
 const THREE_DOTS: RangeStart = {
   range: "main...dev",
+  heading: { kind: "typed" },
+  totals: { added: 0, removed: 0 },
   left: {
     label: { kind: "mergeBase", left: "main", right: "dev" },
     shortId: "5d6e7f8",

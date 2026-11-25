@@ -68,6 +68,8 @@ function entry(id: number, path: string): RangeEntry {
 
 const START: RangeStart = {
   range: "main...feature",
+  heading: { kind: "typed" },
+  totals: { added: 0, removed: 0 },
   left: {
     label: { kind: "mergeBase", left: "main", right: "feature" },
     shortId: "531ea52",

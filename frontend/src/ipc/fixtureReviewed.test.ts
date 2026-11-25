@@ -160,6 +160,8 @@ test("a listed file the case has no reply for answers noText", async () => {
   const listed = {
     start: {
       range: "main...feature",
+      heading: { kind: "typed" },
+      totals: { added: 2, removed: 0 },
       left: side,
       right: side,
       files: [
