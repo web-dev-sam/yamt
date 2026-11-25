@@ -6,6 +6,18 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Release 0.7.4 (session 60, owner: "release next patch version, and give the commands to push the tag")
+
+0.7.4 = 0.7.3 plus Queue/Note and Shift+Send, the merge-request heading, folder sums only with Shift, the next file in
+the sidebar's order with the "left to review" total, and url 2.5.9 / cookie 0.18.3. The owner pushes `main`, waits
+for green ci, then tags.
+
+| row | slice                                                                                            | owner        | status      | evidence                                                                                                                                                                                                                                                                                                      |
+| --- | ------------------------------------------------------------------------------------------------ | ------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | release commit 0.7.4: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer` + `readmer`) | orchestrator | done        | `ca2ef557` (`readmer check` exit 0)                                                                                                                                                                                                                                                                           |
+| 2   | final run 0.7.4 before tagging (`briefs/release-0.7.4-verify.md`)                                | verifier     | done        | `Release074Verify` at `ca2ef557`: `just check` pass (79 s, 1588 Rust + 4803 TS tests, hooks 18/18), readmer, licences pass; `yamt_0.7.4_amd64.deb` Version `0.7.4`, `yamt 0.7.4`; release binary: tree next file b/y→z/w with total drop; Shift+Send one POST, Queue stays queued. Note `Release074Verify.md` |
+| 3   | push `main`, ci green on all four jobs, tag `v0.7.4`, publish                                    | human        | handed over |                                                                                                                                                                                                                                                                                                               |
+
 ## Folder sums only with Shift (session 59; owner: "make the folder additions/deletions in the sidebar only visible while shift is being pressed")
 
 Request `docs/slices/request-folder-sums-shift.md` (rules 1–3); base `eb2c9f12`; amends #125. Orchestrator's details:
