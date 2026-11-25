@@ -15,6 +15,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A merge request's changes window names what it shows: its title bar reads `!13 Fix login  feature → dev  +120 −34`,
   and a line above the files shows the number, the title, the source and target branches as labels and the whole
   diff's added and removed lines in green and red. Diff windows started by hand show their two names and totals too.
+- The diff window's file list heading shows the added and removed lines still left to review, in grey, next to the
+  list/tree button; files marked Reviewed drop out of it.
 
 ### Changed
 
@@ -28,6 +30,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   come back as they were on the files screen.
 - A folder's added and removed line counts in the diff window's tree show only while Shift is held; file rows keep
   theirs.
+- After Reviewed in the diff window, or Mark resolved, Keep, Delete or Take in the merge window, the next file is the
+  next one in the order the file list shows: the list's order in list view, top to bottom in tree view.
 
 ## [0.7.3] - 2026-11-20
 

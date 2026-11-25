@@ -13,12 +13,12 @@ Owner's answers: a next file in a closed folder is still next (the folder opens)
 rule. Orchestrator's details: total muted, titled "left to review", absent when nothing counted is left; "changed
 since review" counts its whole change. Shape given, no design round.
 
-| row | slice                                                | owner    | status  | evidence |
-| --- | ---------------------------------------------------- | -------- | ------- | -------- |
-| 1   | web (`briefs/sidebar-next-file-web.md`)              | web-impl | running |          |
-| 2   | reviews; smoke (`briefs/sidebar-next-file-smoke.md`) | mixed    | todo    |          |
-| 3   | docs keeper; final `just check` + smoke              | mixed    | todo    |          |
-| 4   | owner check                                          | human    | todo    |          |
+| row | slice                                                | owner    | status  | evidence                                                                                                                                                                                                                                                                                            |
+| --- | ---------------------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | web (`briefs/sidebar-next-file-web.md`)              | web-impl | done    | `5cdb2228`: `fileTree.sidebarOrder` one order rule; one `listMode` per window store, `FileList` prop + `toggleMode`; `leftToReview` muted total (`role=group`, "left to review"); 4803 TS tests; mutants 95.85%, new files 100%; fixture total dark/light. Note `SidebarNextFileWeb.md`             |
+| 2   | reviews; smoke (`briefs/sidebar-next-file-smoke.md`) | mixed    | done    | Boundary + correctness pass (#2604, #2605 nits dropped). Smoke `SidebarNextFileSmoke` all pass: real app tree b/y→z/w (not c), closed `z` opens, wrap c→b/x, list a→b/x, total sums/unmark/absent, muted dark+light; merge tree b/x→a (not c), list a→b/x, no total. Note `SidebarNextFileSmoke.md` |
+| 3   | docs keeper; final `just check` + smoke              | mixed    | running |                                                                                                                                                                                                                                                                                                     |
+| 4   | owner check                                          | human    | todo    |                                                                                                                                                                                                                                                                                                     |
 
 ## Folder sums only with Shift (session 59; owner: "make the folder additions/deletions in the sidebar only visible while shift is being pressed")
 
