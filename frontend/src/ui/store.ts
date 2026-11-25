@@ -21,6 +21,7 @@ import { createCollapsing, type Collapsing } from "./collapsing";
 import { createContinuing, type Continuing } from "./continuing";
 import { emptyStop, type EmptyStop } from "./emptyStop";
 import { fileListKey, type KeyPress } from "./fileListKey";
+import { createFileListMode, type FileListView } from "./fileListMode";
 import { createGitRun, type GitRun } from "./gitRun";
 import { refreshFiles } from "./listing";
 import { createMergeSearch, type MergeSearch } from "./mergeSearch";
@@ -68,6 +69,7 @@ type State = Refs &
     readonly guard: CloseGuard;
     readonly gitRun: GitRun;
     readonly stopMessage: ShallowRef<string | null>;
+    readonly listMode: FileListView;
     latestOpen: number;
     searchWaitsForList: boolean;
     latestSettings: number;
@@ -94,6 +96,7 @@ type Actions = CloseGuard &
     dismissQuestion(): void;
     toggleButton(id: ToolbarButtonId): void;
     fileListKey(event: KeyPress, platform: string): void;
+    readonly listMode: FileListView;
   };
 
 export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
@@ -144,6 +147,7 @@ function createState(refs: Refs, source: ChunkSource): State {
     stopMessage: shallowRef(null),
     writing: shallowReactive(new Map()),
     stop: { dropped: false },
+    listMode: createFileListMode(),
     latestOpen: 0,
     searchWaitsForList: false,
     latestSettings: 0,
@@ -234,6 +238,7 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
     },
     ...state.guard,
     search: state.search,
+    listMode: state.listMode,
     liveResults: state.liveResults,
     ...settings,
     ...settingsScreen(state.screen),

@@ -13,6 +13,7 @@ import {
   type RangeSource,
   type RangeStart,
 } from "../ipc";
+import { createFileListMode } from "./fileListMode";
 import type { Problem } from "./problem";
 import { createRangeReviewed } from "./rangeReviewed";
 import { SINCE_NO_TEXT } from "./rangeText";
@@ -577,6 +578,7 @@ async function viewWindow(search: string, edit: Partial<RangeSource> = {}): Prom
     threads: createRangeThreads(source, report),
     reviewed: createRangeReviewed(source, {
       start,
+      listMode: createFileListMode(),
       show: () => {},
       problems: report,
       loadView: async (_view, call, problem) => {

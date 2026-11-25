@@ -1,0 +1,769 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index c4581c9..1841c5a 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -14,6 +14,8 @@ Collapse toggle (plan §2 #126): `RangeView.vue`'s header button after Previous/
+ 
+ Reviewed marks (request `docs/slices/request-range-reviewed.md`, design `docs/slices/briefs/range-reviewed-design.md` option A, plan §2 #196): `rangeReviewed.ts` owns `marks` (written only after Rust answered), `counted`, `busy`, `toggle` (next file via `nextFile.ts` `nextOpen`), `reviewFromStart`, `loadSince` (a failure forgets the view). The mounted list (`MOUNTED_FILES`, `markShown`, `forget`) is in `rangeVisited.ts`. `RangeView.vue`'s header starts with the Reviewed button (Mark resolved's look: filled and `aria-pressed` when the file is reviewed, disabled while `busy` — also while the first list failed, which the problem bar names) and shows `reviewedCount` after the collapse toggle. `RangeApp.vue` keys each view by file and `useRangeController.ts` `viewKind` (a `changedSinceReview` mark → `"sinceReview"`, else `"whole"`), so a mark change remounts the view; `viewParts` gives the since view `loadSince` → `sinceShown` (reviewed text left under `SINCE_REVIEW_HEADING`, current right), no threads, `startsThreads: false` (a number press starts no drag), and the header note with Review from start. A search hit on the since view's left column opens the file without moving. `RangeFileRow.vue` ends with the mark: lucide `check` and a muted name, or `refresh-ccw-dot` in warning colour; every word is in `rangeText.ts`.
+ 
++The sidebar's next file (request `docs/slices/request-sidebar-next-file.md`, plan §2 #201): `fileTree.ts` `sidebarOrder(files, mode)` is the one order rule — the list view's order in list view, the tree's file rows with every folder counted as open in tree view (`treeRows`, no second sort). Each window store calls `createFileListMode()` once and exposes it as `listMode` (`store.ts` for the merge window, `rangeStore.ts` for the range window); `FileList.vue` gets `mode` as a prop and emits `toggleMode`, and the window's next-file rule reads the same `listMode`: `opening.ts` `moveOn` (Mark resolved, Keep, Delete, Take) walks `nextUnresolved` and `rangeReviewed.ts` `mark` walks `nextOpen`, both over `sidebarOrder`; a target inside a closed folder opens it through `FileList.vue`'s `revealed`. The range window's heading total: `rangeFolderSums.ts` `leftToReview(files, marks)` sums git's counts of every file not marked "reviewed" (`notCounted` when none counts); `RangeApp.vue` puts it in `FileList.vue`'s optional `total` slot, left of the view toggle, as a `muted` `RangeCounts.vue` (`text-fg-muted`), a `role="group"` with title and accessible name `LEFT_TO_REVIEW_WORD` ("left to review"), nothing for `notCounted`; the merge window fills no slot.
++
+ Range threads (plan §2 #116–#120): `rangeThreads.ts` (list, open set, drafts through `rangeDrafts.ts`, counts, `boxOf`) and `rangeGitLab.ts` (the check, Send, `postButton`/`sendButton`/`queueButton`, the send result) are held by `rangeStore`; every thread word is in `rangeThreadText.ts` (labels, prompts, `threadCountText`, `sendNoticeRow`; Copy/Copied are `serverText.ts`'s). `RangeView` renders `RangeThreadLayer.vue`, which teleports one `RangeThreadBox.vue` per key of `useRangeController`'s `threadHosts` into the host the editor keeps for that thread, so a box keeps its DOM, focus and typed text across CodeMirror redraws. A box is a draft (place, text, Queue/Note/Cancel) or an open thread (place, collapse, one `RangeMessage.vue` per message, the reply field); a collapsed thread has no host and so no box. A thread's place is a `ThreadPlace` (plan §2 #145–#148): a drag over the line numbers reaches `startThread(file, place)` through `rangeThreadParts`' `events`; it focuses the open draft of the same file whose place has the same `start` (`sameDiffLine`) and an `end` in the same column on the same line (`rangeDrafts.ts` `samePlace`), and any other place is a new draft, even one ending on the same line. `threadPlaceText(entry, place)` is the box header, its `aria-label` and the AI's `RELATIVE_FILE_PATH_WITH_LINE`: each end is a removed line's old path (renamed) and old number, or any other line's path and new number; one line reads `path:204`, both ends removed or neither `path:201-204`, one of each `path:-200 to +204`, and one of each in a renamed file `old.md:-3 to new.md:+4`. `RangeMessage` shows a note's text or the one `aiAnswer` line (an exhaustive switch C replaces), or in its place the message's open `RangeMessageEditor.vue`; the `postButton` (disabled ones keep their sentence as title on a wrapper), the posting label, and for a pending message the link as selectable text with Copy (a failed clipboard write selects the link). `postButton` returns the label, the title and the press action (`queue` | `write` | `unqueue` | null); `queue` (a note, plan §2 #198) queues its text at once; `write` (an AI answer) opens `RangeMessageEditor.vue` (`box="post"`, label "Text to post", Queue) in the message's place by writing a `post` draft (`rangeDrafts.ts`, keyed by `MessageId`: `postDraft`/`writePost`/`dropPost`), so a half-edited Post text survives a collapse and the 16-view eviction; a queue that lands drops it, and focus moves to the message's Post/Unqueue button after a queue or a Cancel. `RangeMessageEditor.vue` is the one in-place message editor for Post and Edit: it shows the `text` and the `button` (`rangeGitLab.ts` `ButtonView`) `RangeMessage` passes and writes the draft its `box` names, focuses its field on mount, keeps focus in the field on a submit press (`@mousedown.prevent`) and emits `submit(text, sendNow)`/`cancel` unless the button is off; Edit's Save is off while the text is blank or a block is set (its text the title), Post's button is `queueButton`'s (below). A failed clipboard write selects the link (`copyOrSelect.ts`, shared with `ServerMenu`). Keys in every box field (the range boxes and the merge-request reply field `MergeRequestReplyField.vue`) go through the window-neutral `boxKeys.ts` `boxKeydown`: `Mod-Enter` submits and `Escape` cancels (built with `keys.ts` `keyList`, matched by `pressesKey`; only the composing check is its own) (a draft is dropped, a reply cleared), both `preventDefault` and `stopPropagation`; every other key stays the field's. `RangeApp` calls `fileListKey(event, navigator.platform)` as the other roots do; the box's Queue and Note keep focus in the field (`@mousedown.prevent`). `RangeSendButton.vue` sits left of the gear in each `RangeView` header; `RangeApp` shows the last send's result (`sendNoticeRow`) as a closable `NoticeBar` row and passes each file's thread count to `RangeFileRow` (a muted speech bubble, none at 0).
+ 
+ Queue and Note (request `docs/slices/request-comment-queue.md`, plan §2 #198): the thread box's buttons are Queue (primary, first) and Note (outlined, today's add through `rangeThreads.ts` `addTyped`; Ctrl/Cmd+Enter), then Ask AI / Stop and Cancel. `rangeGitLab.ts` `queueButton(text, sendNow)` is the one rule for the box's Queue and the Post box's Queue: label Queue, or Send while `useShiftHeld()` is true; off with the gate's sentence while not lined up (Checking GitLab… before the first answer), Send also off while a send runs (`SEND_RUNNING_TITLE`), else off only for a blank text, its title `queueTitle`/`sendOneTitle`. The click's own `shiftKey` is `sendNow`. `RangeMessage.vue` computes each box's `ButtonView` (the Post box's `queueButton`, the Edit box's Save) and hands it with the draft's text to `RangeMessageEditor.vue`, which shows them and knows no button rule. `queueTyped(to, text, sendNow)` (the box) and `queuePost(message, text, sendNow)` (the Post box) re-check that rule, then add (`addTyped` names the new message), `queue` and, with `sendNow`, run the one send routine (`send(state, of, call)`, shared with Send to GitLab: its progress, result notice and `notLinedUp` check) over `sendMessage`; each step stops the chain on a failure, which goes through the problem path, so the message stays a note or queued. A send that finds another one running reports `SendRunning` under the send step, so a Shift+Send that loses that race leaves its message queued with a problem shown.
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 1eb32e5..b2018fc 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -43,6 +43,7 @@ const {
+   watchWindowClose,
+   fileListKey,
+   search,
++  listMode,
+ } = useAppStore();
+ 
+ const focused = useWindowFocus();
+@@ -86,7 +87,9 @@ onMounted(() => {
+         :files="files"
+         :active="active"
+         label="Conflicted files"
++        :mode="listMode.mode.value"
+         @select="pick"
++        @toggle-mode="listMode.toggle"
+       >
+         <template #file="{ file, label }">
+           <FileMark :status="file.status" :label="label" />
+diff --git a/frontend/src/ui/FileList.vue b/frontend/src/ui/FileList.vue
+index 4d8c368..e54d412 100644
+--- a/frontend/src/ui/FileList.vue
++++ b/frontend/src/ui/FileList.vue
+@@ -4,24 +4,29 @@ import ListIcon from "~icons/lucide/list";
+ import ListTree from "~icons/lucide/list-tree";
+ 
+ import { fileIcon } from "./fileIcon";
+-import { createFileListMode } from "./fileListMode";
++import type { FileListMode } from "./fileListMode";
+ import { revealed, treeRows, type ListedFile } from "./fileTree";
+ import FileTree from "./FileTree.vue";
+ 
+-const props = defineProps<{ files: readonly F[]; active: string | null; label: string }>();
+-const emit = defineEmits<{ select: [path: string] }>();
++const props = defineProps<{
++  files: readonly F[];
++  active: string | null;
++  label: string;
++  mode: FileListMode;
++}>();
++const emit = defineEmits<{ select: [path: string]; toggleMode: [] }>();
+ defineSlots<{
+   file(props: { file: F; label: string }): unknown;
+   folder?(props: { path: string }): unknown;
++  total?(): unknown;
+   footer(): unknown;
+ }>();
+ 
+-const { mode, toggle } = createFileListMode();
+ const closed = shallowRef<ReadonlySet<string>>(new Set());
+ 
+ const rows = computed(() => treeRows(props.files, closed.value));
+ const viewButton = computed(() =>
+-  mode.value === "list"
++  props.mode === "list"
+     ? { icon: ListIcon, label: "View as tree" }
+     : { icon: ListTree, label: "View as list" },
+ );
+@@ -47,15 +52,16 @@ function toggleFolder(path: string): void {
+ 
+ <template>
+   <aside class="flex min-h-0 flex-1 flex-col island bg-sidebar pb-1">
+-    <div class="flex h-10 shrink-0 items-center justify-between pr-2 pl-3">
+-      <h2 class="font-semibold">Files</h2>
++    <div class="flex h-10 shrink-0 items-center gap-1.5 pr-2 pl-3">
++      <h2 class="mr-auto font-semibold">Files</h2>
++      <slot name="total" />
+       <button
+         type="button"
+         :title="viewButton.label"
+         :aria-label="viewButton.label"
+         class="rounded p-1.5 hover:bg-hover"
+         @mousedown.prevent
+-        @click="toggle"
++        @click="emit('toggleMode')"
+       >
+         <component :is="viewButton.icon" class="size-4" aria-hidden="true" />
+       </button>
+diff --git a/frontend/src/ui/RangeApp.vue b/frontend/src/ui/RangeApp.vue
+index c595a85..4a1cadd 100644
+--- a/frontend/src/ui/RangeApp.vue
++++ b/frontend/src/ui/RangeApp.vue
+@@ -16,10 +16,16 @@ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
+ import RangeCounts from "./RangeCounts.vue";
+ import RangeFileRow from "./RangeFileRow.vue";
+-import { folderSums, reviewedFolders } from "./rangeFolderSums";
++import { folderSums, leftToReview, reviewedFolders } from "./rangeFolderSums";
+ import RangeHeadingLine from "./RangeHeadingLine.vue";
+ import { useRangeStore } from "./rangeStore";
+-import { columnNames, emptyRangeText, FOLDER_REVIEWED_WORD, RANGE_LIST_LABEL } from "./rangeText";
++import {
++  columnNames,
++  emptyRangeText,
++  FOLDER_REVIEWED_WORD,
++  LEFT_TO_REVIEW_WORD,
++  RANGE_LIST_LABEL,
++} from "./rangeText";
+ import { sendNoticeRow } from "./rangeThreadText";
+ import RangeView from "./RangeView.vue";
+ import SearchPanel from "./SearchPanel.vue";
+@@ -51,6 +57,7 @@ const {
+   mayClose,
+   search,
+   reviewed,
++  listMode,
+ } = useRangeStore();
+ const { counts } = threads;
+ const { marks } = reviewed;
+@@ -66,6 +73,7 @@ useEventListener(window, "keydown", (event) => {
+ const files = computed(() => start.value?.files ?? []);
+ const sums = computed(() => folderSums(files.value));
+ const doneFolders = computed(() => reviewedFolders(files.value, marks.value));
++const leftLines = computed(() => leftToReview(files.value, marks.value));
+ const emptyText = computed(() =>
+   start.value !== null && start.value.files.length === 0 ? emptyRangeText(start.value) : null,
+ );
+@@ -124,8 +132,19 @@ function viewOf(file: RangeEntry): RangeViewKind {
+         :files="files"
+         :active="shownPath"
+         :label="RANGE_LIST_LABEL"
++        :mode="listMode.mode.value"
+         @select="showFile"
++        @toggle-mode="listMode.toggle"
+       >
++        <template #total>
++          <RangeCounts
++            :lines="leftLines"
++            muted
++            role="group"
++            :title="LEFT_TO_REVIEW_WORD"
++            :aria-label="LEFT_TO_REVIEW_WORD"
++          />
++        </template>
+         <template #file="{ file, label }">
+           <RangeFileRow
+             :file="file"
+diff --git a/frontend/src/ui/RangeCounts.vue b/frontend/src/ui/RangeCounts.vue
+index ed86c57..ed7a1c5 100644
+--- a/frontend/src/ui/RangeCounts.vue
++++ b/frontend/src/ui/RangeCounts.vue
+@@ -4,14 +4,19 @@ import { computed } from "vue";
+ import type { RangeLineCounts } from "../ipc";
+ import { lineCounts } from "./rangeText";
+ 
+-const props = defineProps<{ lines: RangeLineCounts }>();
++const props = defineProps<{ lines: RangeLineCounts; muted?: boolean }>();
+ 
+ const counts = computed(() => lineCounts(props.lines));
++const tones = computed(() =>
++  props.muted
++    ? { added: "text-fg-muted", removed: "text-fg-muted" }
++    : { added: "text-success-signal", removed: "text-problem-error" },
++);
+ </script>
+ 
+ <template>
+   <span v-if="counts !== null" class="flex shrink-0 gap-1.5 tabular-nums">
+-    <span class="text-success-signal">{{ counts.added }}</span>
+-    <span class="text-problem-error">{{ counts.removed }}</span>
++    <span :class="tones.added">{{ counts.added }}</span>
++    <span :class="tones.removed">{{ counts.removed }}</span>
+   </span>
+ </template>
+diff --git a/frontend/src/ui/fileListMode.ts b/frontend/src/ui/fileListMode.ts
+index 114e386..2f325a9 100644
+--- a/frontend/src/ui/fileListMode.ts
++++ b/frontend/src/ui/fileListMode.ts
+@@ -7,10 +7,12 @@ export type FileListMode = "list" | "tree";
+ 
+ const STORAGE_KEY = "yamt.files.view";
+ 
+-export function createFileListMode(storage?: StorageLike): {
++export type FileListView = {
+   readonly mode: Readonly<Ref<FileListMode>>;
+   toggle(): void;
+-} {
++};
++
++export function createFileListMode(storage?: StorageLike): FileListView {
+   const mode = storedValue<FileListMode>(
+     STORAGE_KEY,
+     "list",
+diff --git a/frontend/src/ui/fileTree.test.ts b/frontend/src/ui/fileTree.test.ts
+index bbecb8f..633ffdc 100644
+--- a/frontend/src/ui/fileTree.test.ts
++++ b/frontend/src/ui/fileTree.test.ts
+@@ -1,7 +1,14 @@
+ import { expect, test } from "vitest";
+ 
+ import type { FileEntry } from "../ipc";
+-import { folderPaths, revealed, treeRows, type ListedFile, type TreeRow } from "./fileTree";
++import {
++  folderPaths,
++  revealed,
++  sidebarOrder,
++  treeRows,
++  type ListedFile,
++  type TreeRow,
++} from "./fileTree";
+ 
+ function entry(path: string): FileEntry {
+   return { path, status: "Unresolved", unsupported: null };
+@@ -189,3 +196,30 @@ test("revealed: changes nothing for a top-level file", () => {
+   expect(revealed(closed, "top.ts")).toBe(closed);
+   expect([...closed]).toEqual(["top.ts", "a"]);
+ });
++
++function order(paths: readonly string[], mode: "list" | "tree"): string[] {
++  return sidebarOrder(paths.map(entry), mode).map((file) => file.path);
++}
++
++test("sidebarOrder: the list keeps the given order; the tree puts folders first and root files after them", () => {
++  const paths = ["a.txt", "b/x.txt", "c.txt"];
++
++  expect(order(paths, "list")).toEqual(["a.txt", "b/x.txt", "c.txt"]);
++  expect(order(paths, "tree")).toEqual(["b/x.txt", "a.txt", "c.txt"]);
++});
++
++test("sidebarOrder: the tree walks a joined chain's files at its place, sorted by name", () => {
++  expect(order(["z.ts", "a/b/c/y.ts", "m/n.ts", "a/b/c/x.ts"], "tree")).toEqual([
++    "a/b/c/x.ts",
++    "a/b/c/y.ts",
++    "m/n.ts",
++    "z.ts",
++  ]);
++});
++
++test("sidebarOrder: the list returns the very same files, the tree only file rows", () => {
++  const files = ["b/x.txt", "a.txt"].map(entry);
++
++  expect(sidebarOrder(files, "list")).toBe(files);
++  expect(sidebarOrder(files, "tree")).toEqual([files[0], files[1]]);
++});
+diff --git a/frontend/src/ui/fileTree.ts b/frontend/src/ui/fileTree.ts
+index c7623e7..3b0f367 100644
+--- a/frontend/src/ui/fileTree.ts
++++ b/frontend/src/ui/fileTree.ts
+@@ -1,3 +1,5 @@
++import type { FileListMode } from "./fileListMode";
++
+ export type ListedFile = { readonly path: string };
+ 
+ export type TreeRow<F extends ListedFile> =
+@@ -103,6 +105,18 @@ export function treeRows<F extends ListedFile>(
+   return rows;
+ }
+ 
++const NOTHING_CLOSED: ReadonlySet<string> = new Set();
++
++export function sidebarOrder<F extends ListedFile>(
++  files: readonly F[],
++  mode: FileListMode,
++): readonly F[] {
++  if (mode === "list") {
++    return files;
++  }
++  return treeRows(files, NOTHING_CLOSED).flatMap((row) => (row.kind === "file" ? [row.file] : []));
++}
++
+ export function folderPaths(path: string): readonly string[] {
+   const names = path.split("/").slice(0, -1);
+   return names.map((_, index) => names.slice(0, index + 1).join("/"));
+diff --git a/frontend/src/ui/opening.ts b/frontend/src/ui/opening.ts
+index 7f1f366..baa872c 100644
+--- a/frontend/src/ui/opening.ts
++++ b/frontend/src/ui/opening.ts
+@@ -1,5 +1,7 @@
+ import type { ShallowRef } from "vue";
+ 
++import type { FileListView } from "./fileListMode";
++import { sidebarOrder } from "./fileTree";
+ import { nextUnresolved } from "./nextFile";
+ import { logProblem, reportFailure, type EndsStop, type Problem } from "./problem";
+ import type { Screen } from "./screen";
+@@ -9,6 +11,7 @@ export type Opening = Shown &
+   EndsStop & {
+     readonly active: ShallowRef<string | null>;
+     readonly screen: ShallowRef<Screen>;
++    readonly listMode: Pick<FileListView, "mode">;
+     latestOpen: number;
+   };
+ 
+@@ -64,7 +67,8 @@ async function load(state: Opening, path: string): Promise<void> {
+ 
+ async function moveOn(state: Opening, path: string, opensBefore: number): Promise<void> {
+   const untouched = state.active.value === path && state.latestOpen === opensBefore;
+-  const next = untouched ? nextUnresolved(state.files.value, path) : null;
++  const files = sidebarOrder(state.files.value, state.listMode.mode.value);
++  const next = untouched ? nextUnresolved(files, path) : null;
+   if (next !== null) {
+     await open(state, next);
+   }
+diff --git a/frontend/src/ui/rangeFolderSums.test.ts b/frontend/src/ui/rangeFolderSums.test.ts
+index 232a9e0..974cd6e 100644
+--- a/frontend/src/ui/rangeFolderSums.test.ts
++++ b/frontend/src/ui/rangeFolderSums.test.ts
+@@ -7,7 +7,7 @@ import {
+   type RangeLineCounts,
+   type ReviewMark,
+ } from "../ipc";
+-import { folderSums, reviewedFolders } from "./rangeFolderSums";
++import { folderSums, leftToReview, reviewedFolders } from "./rangeFolderSums";
+ 
+ function counted(path: string, added: number, removed: number) {
+   return { path, lines: { kind: "counted", added, removed } satisfies RangeLineCounts };
+@@ -101,3 +101,65 @@ test("reviewedFolders: only folders whose every file at any depth is reviewed; c
+   );
+   expect([...reviewedFolders(files, marks)].toSorted()).toEqual(["src/board", "src/board/parts"]);
+ });
++
++async function fixtureIds(count: number): Promise<readonly RangeFileId[]> {
++  const start = await createFixtureRangeSource(log, "?range=review").openRange();
++  if (!start.ok || start.value.files.length < count) {
++    throw new Error("the fixture did not open");
++  }
++  return start.value.files.slice(0, count).map(({ id }) => id);
++}
++
++async function left(
++  listed: readonly [RangeLineCounts, ReviewMark | null][],
++): Promise<RangeLineCounts> {
++  const ids = await fixtureIds(listed.length);
++  const files = ids.map((id, index): { id: RangeFileId; lines: RangeLineCounts } => ({
++    id,
++    lines: listed[index]?.[0] ?? { kind: "notCounted" },
++  }));
++  const marks = new Map<RangeFileId, ReviewMark>(
++    ids.flatMap((id, index): [RangeFileId, ReviewMark][] => {
++      const mark = listed[index]?.[1] ?? null;
++      return mark === null ? [] : [[id, mark]];
++    }),
++  );
++  return leftToReview(files, marks);
++}
++
++test("leftToReview: skips reviewed files, counts changedSinceReview and unmarked ones whole, ignores notCounted", async () => {
++  expect(
++    await left([
++      [{ kind: "counted", added: 5, removed: 2 }, "reviewed"],
++      [{ kind: "counted", added: 3, removed: 1 }, "changedSinceReview"],
++      [{ kind: "counted", added: 10, removed: 20 }, null],
++      [{ kind: "notCounted" }, null],
++    ]),
++  ).toEqual({ kind: "counted", added: 13, removed: 21 });
++});
++
++test("leftToReview: one unreviewed counted file is its own counts, zeros included", async () => {
++  expect(await left([[{ kind: "counted", added: 0, removed: 4 }, null]])).toEqual({
++    kind: "counted",
++    added: 0,
++    removed: 4,
++  });
++});
++
++test("leftToReview: every file reviewed is notCounted", async () => {
++  expect(
++    await left([
++      [{ kind: "counted", added: 5, removed: 2 }, "reviewed"],
++      [{ kind: "counted", added: 1, removed: 1 }, "reviewed"],
++    ]),
++  ).toEqual({ kind: "notCounted" });
++});
++
++test("leftToReview: only notCounted files left unreviewed is notCounted", async () => {
++  expect(
++    await left([
++      [{ kind: "counted", added: 5, removed: 2 }, "reviewed"],
++      [{ kind: "notCounted" }, "changedSinceReview"],
++    ]),
++  ).toEqual({ kind: "notCounted" });
++});
+diff --git a/frontend/src/ui/rangeFolderSums.ts b/frontend/src/ui/rangeFolderSums.ts
+index d51f0a8..1a904ed 100644
+--- a/frontend/src/ui/rangeFolderSums.ts
++++ b/frontend/src/ui/rangeFolderSums.ts
+@@ -47,3 +47,20 @@ export function reviewedFolders(
+   }
+   return reviewed;
+ }
++
++export function leftToReview(
++  files: readonly Pick<RangeEntry, "id" | "lines">[],
++  marks: ReviewMarks,
++): RangeLineCounts {
++  const left = files.flatMap(({ id, lines }) =>
++    lines.kind === "counted" && marks.get(id) !== "reviewed" ? [lines] : [],
++  );
++  if (left.length === 0) {
++    return { kind: "notCounted" };
++  }
++  return {
++    kind: "counted",
++    added: left.reduce((sum, { added }) => sum + added, 0),
++    removed: left.reduce((sum, { removed }) => sum + removed, 0),
++  };
++}
+diff --git a/frontend/src/ui/rangeReviewed.test.ts b/frontend/src/ui/rangeReviewed.test.ts
+index 314c59a..b5a7667 100644
+--- a/frontend/src/ui/rangeReviewed.test.ts
++++ b/frontend/src/ui/rangeReviewed.test.ts
+@@ -12,6 +12,7 @@ import {
+   type SourceFailure,
+   type SourceResult,
+ } from "../ipc";
++import { createFileListMode, type FileListView } from "./fileListMode";
+ import type { Problem } from "./problem";
+ import { createRangeReviewed, type RangeReviewed } from "./rangeReviewed";
+ 
+@@ -21,6 +22,7 @@ type Opened = {
+   readonly reviewed: RangeReviewed;
+   readonly source: RangeSource;
+   readonly files: readonly RangeEntry[];
++  readonly listMode: FileListView;
+   readonly shown: string[];
+   readonly forgotten: RangeFileId[];
+   readonly problems: Problem[];
+@@ -51,8 +53,10 @@ function created(
+   const shown: string[] = [];
+   const forgotten: RangeFileId[] = [];
+   const problems: Problem[] = [];
++  const listMode = createFileListMode();
+   const reviewed = createRangeReviewed(source, {
+     start,
++    listMode,
+     show: (path) => shown.push(path),
+     problems: (problem) => problems.push(problem),
+     loadView: async (view, call, problem) => {
+@@ -65,7 +69,7 @@ function created(
+       return null;
+     },
+   });
+-  return { reviewed, source, start, shown, forgotten, problems };
++  return { reviewed, source, listMode, start, shown, forgotten, problems };
+ }
+ 
+ async function opened(search: string = SEEDED, edit: Edit = () => ({})): Promise<Opened> {
+@@ -75,6 +79,14 @@ async function opened(search: string = SEEDED, edit: Edit = () => ({})): Promise
+   return { ...made, files: made.start.value.files };
+ }
+ 
++async function openedBackwards(): Promise<Opened> {
++  const made = created(SEEDED);
++  const start = valueOf(await made.source.openRange());
++  made.start.value = { ...start, files: [...start.files].reverse() };
++  await made.reviewed.load();
++  return { ...made, files: start.files };
++}
++
+ function entry({ files }: Opened, path: string): RangeEntry {
+   const found = files.find((each) => each.path === path);
+   if (found === undefined) {
+@@ -113,6 +125,26 @@ test("marking_an_unreviewed_file_opens_the_next_not_reviewed_file_in_list_order_
+   expect(window.shown).toEqual(["config"]);
+ });
+ 
++test("in tree mode Reviewed opens the next not-reviewed tree row, not the list's next; the list mode follows the list", async () => {
++  const window = await openedBackwards();
++  window.listMode.toggle();
++
++  await window.reviewed.toggle(entry(window, "docs/current.md"));
++  window.listMode.toggle();
++  await window.reviewed.toggle(entry(window, "docs/legacy.txt"));
++
++  expect(window.shown).toEqual(["docs/legacy.txt", "data/big.txt"]);
++});
++
++test("in tree mode Reviewed on the last tree row wraps to the first tree row", async () => {
++  const window = await openedBackwards();
++  window.listMode.toggle();
++
++  await window.reviewed.toggle(entry(window, "config"));
++
++  expect(window.shown).toEqual(["data/big.txt"]);
++});
++
+ test("marking_the_last_unreviewed_file_stays", async () => {
+   const window = await opened(SEEDED, (fixture) => ({
+     listReviewed: async () => {
+@@ -136,17 +168,23 @@ test("marking_the_last_unreviewed_file_stays", async () => {
+   expect(window.shown).toEqual([]);
+ });
+ 
+-test("a mark before the window knows its files is stored and shows nothing next", async () => {
+-  const window = await opened();
+-  const early = created(SEEDED);
+-  await early.reviewed.load();
++test.each([["list"], ["tree"]])(
++  "a mark before the window knows its files is stored and shows nothing next (%s view)",
++  async (mode) => {
++    const window = await opened();
++    const early = created(SEEDED);
++    if (mode === "tree") {
++      early.listMode.toggle();
++    }
++    await early.reviewed.load();
+ 
+-  await early.reviewed.toggle(entry(window, "config"));
++    await early.reviewed.toggle(entry(window, "config"));
+ 
+-  expect(early.reviewed.marks.value.get(entry(window, "config").id)).toBe("reviewed");
+-  expect(early.shown).toEqual([]);
+-  expect(early.problems).toEqual([]);
+-});
++    expect(early.reviewed.marks.value.get(entry(window, "config").id)).toBe("reviewed");
++    expect(early.shown).toEqual([]);
++    expect(early.problems).toEqual([]);
++  },
++);
+ 
+ test("a_changed_since_review_file_counts_as_not_reviewed_for_the_next_file", async () => {
+   const window = await opened();
+diff --git a/frontend/src/ui/rangeReviewed.ts b/frontend/src/ui/rangeReviewed.ts
+index 98c683a..5d4ab3d 100644
+--- a/frontend/src/ui/rangeReviewed.ts
++++ b/frontend/src/ui/rangeReviewed.ts
+@@ -9,6 +9,8 @@ import type {
+   SinceReview,
+   SourceResult,
+ } from "../ipc";
++import type { FileListView } from "./fileListMode";
++import { sidebarOrder } from "./fileTree";
+ import { nextOpen } from "./nextFile";
+ import { attempt, type Problem, type ProblemCause, type ReviewedStep } from "./problem";
+ 
+@@ -19,8 +21,9 @@ export type RangeReviewed = {
+   /** True until the first list answers ok, and while a mark/unmark runs (one write at a time). */
+   readonly busy: Readonly<ShallowRef<boolean>>;
+   load(): Promise<void>;
+-  /** Rule 2: "reviewed" → unmark, stay; otherwise → mark, then show the next file in `start.files` order whose mark is
+-   *  not "reviewed" (wrapping, never itself; none → stay). Ignored while busy. */
++  /** Rule 2: "reviewed" → unmark, stay; otherwise → mark, then show the next file in the sidebar's order
++   *  (`sidebarOrder` in the window's list mode) whose mark is not "reviewed" (wrapping, never itself; none → stay).
++   *  Ignored while busy. */
+   toggle(entry: RangeEntry): Promise<void>;
+   /** Rule 6: forgets a mark; the file shows its whole change (the view derives it from `marks`). Ignored while busy. */
+   reviewFromStart(entry: RangeEntry): Promise<void>;
+@@ -30,6 +33,7 @@ export type RangeReviewed = {
+ 
+ type ReviewedWindow = {
+   readonly start: Readonly<ShallowRef<RangeStart | null>>;
++  readonly listMode: Pick<FileListView, "mode">;
+   show(path: string): void;
+   problems(problem: Problem): void;
+   loadView<T>(
+@@ -91,7 +95,10 @@ async function mark(state: State, entry: RangeEntry): Promise<void> {
+     return;
+   }
+   state.marks.value = new Map(state.marks.value).set(entry.id, "reviewed");
+-  const files = state.window.start.value?.files ?? [];
++  const files = sidebarOrder(
++    state.window.start.value?.files ?? [],
++    state.window.listMode.mode.value,
++  );
+   const next = nextOpen(files, entry.path, (file) => isReviewed(state.marks.value, file.id));
+   if (next !== null) {
+     state.window.show(next);
+diff --git a/frontend/src/ui/rangeStore.test.ts b/frontend/src/ui/rangeStore.test.ts
+index 09c0cfc..45498af 100644
+--- a/frontend/src/ui/rangeStore.test.ts
++++ b/frontend/src/ui/rangeStore.test.ts
+@@ -342,6 +342,24 @@ test("a Reviewed click shows the next file in the window; a failed since load dr
+   ]);
+ });
+ 
++test("the store's one list mode drives Reviewed's next file: the tree row below, not the list's", async () => {
++  quiet();
++  const store = await started(3, (fixture) => ({
++    openRange: async () => {
++      const opened = await fixture.openRange();
++      return opened.ok
++        ? { ok: true, value: { ...opened.value, files: [...opened.value.files].reverse() } }
++        : opened;
++    },
++  }));
++  store.listMode.toggle();
++
++  await store.reviewed.toggle(fileAt(store, 2));
++
++  expect(fileAt(store, 2).path).toBe("src/f00.ts");
++  expect(store.shownPath.value).toBe("src/f01.ts");
++});
++
+ test("a since load that failed and later succeeds for the same file clears its problem", async () => {
+   const errors = quiet();
+   let refusing = true;
+diff --git a/frontend/src/ui/rangeStore.ts b/frontend/src/ui/rangeStore.ts
+index 5b3ea58..b119284 100644
+--- a/frontend/src/ui/rangeStore.ts
++++ b/frontend/src/ui/rangeStore.ts
+@@ -19,6 +19,7 @@ import { aiMayClose } from "./aiClose";
+ import { createAsking, type Asking } from "./asking";
+ import { createCollapsing, type Collapsing } from "./collapsing";
+ import { fileListKey, type KeyPress } from "./fileListKey";
++import { createFileListMode, type FileListView } from "./fileListMode";
+ import type { MergeRequests } from "./mergeRequests";
+ import { windowMergeRequests } from "./mergeRequestsStore";
+ import { attempt, report, type Problem } from "./problem";
+@@ -57,6 +58,7 @@ export type RangeStore = SettingsStore &
+     readonly preferences: ComputedRef<Preferences>;
+     readonly threads: RangeThreads;
+     readonly reviewed: RangeReviewed;
++    readonly listMode: FileListView;
+     readonly gitlab: GitLabState;
+     readonly ai: RangeStoreAi | null;
+     readonly search: Searching<Column>;
+@@ -89,6 +91,7 @@ type State = Refs & {
+   readonly asking: Asking;
+   readonly threads: RangeThreads;
+   readonly reviewed: RangeReviewed;
++  readonly listMode: FileListView;
+   readonly gitlab: GitLabState;
+   readonly agent: RangeAgent | null;
+   recent: readonly RangeFileId[];
+@@ -159,6 +162,7 @@ function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null):
+     report(refs, problem);
+   }
+   const threads = createRangeThreads(source, problems);
++  const listMode = createFileListMode();
+   const state: State = {
+     ...refs,
+     source,
+@@ -167,6 +171,7 @@ function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null):
+     gitlab: createGitLabCheck(source, threads, problems, refs.start),
+     reviewed: createRangeReviewed(source, {
+       start: refs.start,
++      listMode,
+       show: (path) => {
+         showPath(state, path);
+       },
+@@ -174,6 +179,7 @@ function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null):
+       loadView: (entry, call, problem) => loadView(state, entry, call, problem),
+     }),
+     agent,
++    listMode,
+     recent: [],
+     latestSettings: 0,
+   };
+@@ -198,6 +204,7 @@ export function createRangeStore(
+     preferences: computed(() => preferencesOf(refs.settings.value)),
+     threads: state.threads,
+     reviewed: state.reviewed,
++    listMode: state.listMode,
+     gitlab: state.gitlab,
+     ai: storeAi(state),
+     search: createRangeSearch(state, {
+diff --git a/frontend/src/ui/rangeText.ts b/frontend/src/ui/rangeText.ts
+index b392d6d..f2e7ec5 100644
+--- a/frontend/src/ui/rangeText.ts
++++ b/frontend/src/ui/rangeText.ts
+@@ -73,6 +73,8 @@ export const REVIEW_MARK_WORDS: Readonly<Record<ReviewMark, string>> = {
+ 
+ export const FOLDER_REVIEWED_WORD = "every file reviewed";
+ 
++export const LEFT_TO_REVIEW_WORD = "left to review";
++
+ const CHANGE_MARKS: Readonly<Record<RangeChange["kind"], ChangeMark>> = {
+   added: { letter: "A", word: "added" },
+   modified: { letter: "M", word: "modified" },
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index f389e83..dda9687 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -1359,6 +1359,25 @@ test("a take on the shown file opens the next unresolved file, wrapping to the t
+   expect(store.taken.value).toEqual(new Map([[LOGO, { by: "side", side: "local" }]]));
+ });
+ 
++test.each([
++  ["list", "z.ts"],
++  ["tree", "b/c.ts"],
++] as const)("a take in %s view opens the next unresolved row of that view", async (mode, next) => {
++  spyConsole();
++  const { source } = choiceSource({}, [LOGO_ENTRY, entry("z.ts"), entry("b/c.ts")]);
++  const store = createAppStore(source);
++  await store.loadFiles();
++  await store.open(LOGO);
++  if (mode === "tree") {
++    store.listMode.toggle();
++  }
++
++  await store.takeSide(LOGO, "local", LOGO_SIDES.diskVersion);
++
++  expect(store.listMode.mode.value).toBe(mode);
++  expect(store.active.value).toBe(next);
++});
++
+ const REMOVED_TEXT = "docs/removed-text.md";
+ 
+ test("a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each", async () => {
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index 8cfa545..bbc6e78 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -21,6 +21,7 @@ import { createCollapsing, type Collapsing } from "./collapsing";
+ import { createContinuing, type Continuing } from "./continuing";
+ import { emptyStop, type EmptyStop } from "./emptyStop";
+ import { fileListKey, type KeyPress } from "./fileListKey";
++import { createFileListMode, type FileListView } from "./fileListMode";
+ import { createGitRun, type GitRun } from "./gitRun";
+ import { refreshFiles } from "./listing";
+ import { createMergeSearch, type MergeSearch } from "./mergeSearch";
+@@ -68,6 +69,7 @@ type State = Refs &
+     readonly guard: CloseGuard;
+     readonly gitRun: GitRun;
+     readonly stopMessage: ShallowRef<string | null>;
++    readonly listMode: FileListView;
+     latestOpen: number;
+     searchWaitsForList: boolean;
+     latestSettings: number;
+@@ -94,6 +96,7 @@ type Actions = CloseGuard &
+     dismissQuestion(): void;
+     toggleButton(id: ToolbarButtonId): void;
+     fileListKey(event: KeyPress, platform: string): void;
++    readonly listMode: FileListView;
+   };
+ 
+ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
+@@ -144,6 +147,7 @@ function createState(refs: Refs, source: ChunkSource): State {
+     stopMessage: shallowRef(null),
+     writing: shallowReactive(new Map()),
+     stop: { dropped: false },
++    listMode: createFileListMode(),
+     latestOpen: 0,
+     searchWaitsForList: false,
+     latestSettings: 0,
+@@ -234,6 +238,7 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
+     },
+     ...state.guard,
+     search: state.search,
++    listMode: state.listMode,
+     liveResults: state.liveResults,
+     ...settings,
+     ...settingsScreen(state.screen),
+diff --git a/frontend/src/ui/useRangeController.test.ts b/frontend/src/ui/useRangeController.test.ts
+index c56b4f8..c426ad7 100644
+--- a/frontend/src/ui/useRangeController.test.ts
++++ b/frontend/src/ui/useRangeController.test.ts
+@@ -13,6 +13,7 @@ import {
+   type RangeSource,
+   type RangeStart,
+ } from "../ipc";
++import { createFileListMode } from "./fileListMode";
+ import type { Problem } from "./problem";
+ import { createRangeReviewed } from "./rangeReviewed";
+ import { SINCE_NO_TEXT } from "./rangeText";
+@@ -577,6 +578,7 @@ async function viewWindow(search: string, edit: Partial<RangeSource> = {}): Prom
+     threads: createRangeThreads(source, report),
+     reviewed: createRangeReviewed(source, {
+       start,
++      listMode: createFileListMode(),
+       show: () => {},
+       problems: report,
+       loadView: async (_view, call, problem) => {

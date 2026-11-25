@@ -1,7 +1,14 @@
 import { expect, test } from "vitest";
 
 import type { FileEntry } from "../ipc";
-import { folderPaths, revealed, treeRows, type ListedFile, type TreeRow } from "./fileTree";
+import {
+  folderPaths,
+  revealed,
+  sidebarOrder,
+  treeRows,
+  type ListedFile,
+  type TreeRow,
+} from "./fileTree";
 
 function entry(path: string): FileEntry {
   return { path, status: "Unresolved", unsupported: null };
@@ -188,4 +195,31 @@ test("revealed: changes nothing for a top-level file", () => {
   const closed = new Set(["top.ts", "a"]);
   expect(revealed(closed, "top.ts")).toBe(closed);
   expect([...closed]).toEqual(["top.ts", "a"]);
+});
+
+function order(paths: readonly string[], mode: "list" | "tree"): string[] {
+  return sidebarOrder(paths.map(entry), mode).map((file) => file.path);
+}
+
+test("sidebarOrder: the list keeps the given order; the tree puts folders first and root files after them", () => {
+  const paths = ["a.txt", "b/x.txt", "c.txt"];
+
+  expect(order(paths, "list")).toEqual(["a.txt", "b/x.txt", "c.txt"]);
+  expect(order(paths, "tree")).toEqual(["b/x.txt", "a.txt", "c.txt"]);
+});
+
+test("sidebarOrder: the tree walks a joined chain's files at its place, sorted by name", () => {
+  expect(order(["z.ts", "a/b/c/y.ts", "m/n.ts", "a/b/c/x.ts"], "tree")).toEqual([
+    "a/b/c/x.ts",
+    "a/b/c/y.ts",
+    "m/n.ts",
+    "z.ts",
+  ]);
+});
+
+test("sidebarOrder: the list returns the very same files, the tree only file rows", () => {
+  const files = ["b/x.txt", "a.txt"].map(entry);
+
+  expect(sidebarOrder(files, "list")).toBe(files);
+  expect(sidebarOrder(files, "tree")).toEqual([files[0], files[1]]);
 });

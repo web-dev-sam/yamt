@@ -73,6 +73,8 @@ export const REVIEW_MARK_WORDS: Readonly<Record<ReviewMark, string>> = {
 
 export const FOLDER_REVIEWED_WORD = "every file reviewed";
 
+export const LEFT_TO_REVIEW_WORD = "left to review";
+
 const CHANGE_MARKS: Readonly<Record<RangeChange["kind"], ChangeMark>> = {
   added: { letter: "A", word: "added" },
   modified: { letter: "M", word: "modified" },

@@ -16,10 +16,16 @@ import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
 import RangeCounts from "./RangeCounts.vue";
 import RangeFileRow from "./RangeFileRow.vue";
-import { folderSums, reviewedFolders } from "./rangeFolderSums";
+import { folderSums, leftToReview, reviewedFolders } from "./rangeFolderSums";
 import RangeHeadingLine from "./RangeHeadingLine.vue";
 import { useRangeStore } from "./rangeStore";
-import { columnNames, emptyRangeText, FOLDER_REVIEWED_WORD, RANGE_LIST_LABEL } from "./rangeText";
+import {
+  columnNames,
+  emptyRangeText,
+  FOLDER_REVIEWED_WORD,
+  LEFT_TO_REVIEW_WORD,
+  RANGE_LIST_LABEL,
+} from "./rangeText";
 import { sendNoticeRow } from "./rangeThreadText";
 import RangeView from "./RangeView.vue";
 import SearchPanel from "./SearchPanel.vue";
@@ -51,6 +57,7 @@ const {
   mayClose,
   search,
   reviewed,
+  listMode,
 } = useRangeStore();
 const { counts } = threads;
 const { marks } = reviewed;
@@ -66,6 +73,7 @@ useEventListener(window, "keydown", (event) => {
 const files = computed(() => start.value?.files ?? []);
 const sums = computed(() => folderSums(files.value));
 const doneFolders = computed(() => reviewedFolders(files.value, marks.value));
+const leftLines = computed(() => leftToReview(files.value, marks.value));
 const emptyText = computed(() =>
   start.value !== null && start.value.files.length === 0 ? emptyRangeText(start.value) : null,
 );
@@ -124,8 +132,19 @@ function viewOf(file: RangeEntry): RangeViewKind {
         :files="files"
         :active="shownPath"
         :label="RANGE_LIST_LABEL"
+        :mode="listMode.mode.value"
         @select="showFile"
+        @toggle-mode="listMode.toggle"
       >
+        <template #total>
+          <RangeCounts
+            :lines="leftLines"
+            muted
+            role="group"
+            :title="LEFT_TO_REVIEW_WORD"
+            :aria-label="LEFT_TO_REVIEW_WORD"
+          />
+        </template>
         <template #file="{ file, label }">
           <RangeFileRow
             :file="file"

@@ -43,6 +43,7 @@ const {
   watchWindowClose,
   fileListKey,
   search,
+  listMode,
 } = useAppStore();
 
 const focused = useWindowFocus();
@@ -86,7 +87,9 @@ onMounted(() => {
         :files="files"
         :active="active"
         label="Conflicted files"
+        :mode="listMode.mode.value"
         @select="pick"
+        @toggle-mode="listMode.toggle"
       >
         <template #file="{ file, label }">
           <FileMark :status="file.status" :label="label" />

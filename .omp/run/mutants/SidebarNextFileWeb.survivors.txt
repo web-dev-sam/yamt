@@ -1,0 +1,2 @@
+just mutants HEAD → 622 killed, 1 timeout, 19 survived, 8 no coverage (95.85%); rangeReviewed.ts and rangeFolderSums.ts 100%
+

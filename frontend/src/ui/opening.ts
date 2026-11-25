@@ -1,5 +1,7 @@
 import type { ShallowRef } from "vue";
 
+import type { FileListView } from "./fileListMode";
+import { sidebarOrder } from "./fileTree";
 import { nextUnresolved } from "./nextFile";
 import { logProblem, reportFailure, type EndsStop, type Problem } from "./problem";
 import type { Screen } from "./screen";
@@ -9,6 +11,7 @@ export type Opening = Shown &
   EndsStop & {
     readonly active: ShallowRef<string | null>;
     readonly screen: ShallowRef<Screen>;
+    readonly listMode: Pick<FileListView, "mode">;
     latestOpen: number;
   };
 
@@ -64,7 +67,8 @@ async function load(state: Opening, path: string): Promise<void> {
 
 async function moveOn(state: Opening, path: string, opensBefore: number): Promise<void> {
   const untouched = state.active.value === path && state.latestOpen === opensBefore;
-  const next = untouched ? nextUnresolved(state.files.value, path) : null;
+  const files = sidebarOrder(state.files.value, state.listMode.mode.value);
+  const next = untouched ? nextUnresolved(files, path) : null;
   if (next !== null) {
     await open(state, next);
   }

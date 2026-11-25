@@ -7,10 +7,12 @@ export type FileListMode = "list" | "tree";
 
 const STORAGE_KEY = "yamt.files.view";
 
-export function createFileListMode(storage?: StorageLike): {
+export type FileListView = {
   readonly mode: Readonly<Ref<FileListMode>>;
   toggle(): void;
-} {
+};
+
+export function createFileListMode(storage?: StorageLike): FileListView {
   const mode = storedValue<FileListMode>(
     STORAGE_KEY,
     "list",

@@ -47,3 +47,20 @@ export function reviewedFolders(
   }
   return reviewed;
 }
+
+export function leftToReview(
+  files: readonly Pick<RangeEntry, "id" | "lines">[],
+  marks: ReviewMarks,
+): RangeLineCounts {
+  const left = files.flatMap(({ id, lines }) =>
+    lines.kind === "counted" && marks.get(id) !== "reviewed" ? [lines] : [],
+  );
+  if (left.length === 0) {
+    return { kind: "notCounted" };
+  }
+  return {
+    kind: "counted",
+    added: left.reduce((sum, { added }) => sum + added, 0),
+    removed: left.reduce((sum, { removed }) => sum + removed, 0),
+  };
+}

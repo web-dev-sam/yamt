@@ -7,7 +7,7 @@ import {
   type RangeLineCounts,
   type ReviewMark,
 } from "../ipc";
-import { folderSums, reviewedFolders } from "./rangeFolderSums";
+import { folderSums, leftToReview, reviewedFolders } from "./rangeFolderSums";
 
 function counted(path: string, added: number, removed: number) {
   return { path, lines: { kind: "counted", added, removed } satisfies RangeLineCounts };
@@ -100,4 +100,66 @@ test("reviewedFolders: only folders whose every file at any depth is reviewed; c
     }),
   );
   expect([...reviewedFolders(files, marks)].toSorted()).toEqual(["src/board", "src/board/parts"]);
+});
+
+async function fixtureIds(count: number): Promise<readonly RangeFileId[]> {
+  const start = await createFixtureRangeSource(log, "?range=review").openRange();
+  if (!start.ok || start.value.files.length < count) {
+    throw new Error("the fixture did not open");
+  }
+  return start.value.files.slice(0, count).map(({ id }) => id);
+}
+
+async function left(
+  listed: readonly [RangeLineCounts, ReviewMark | null][],
+): Promise<RangeLineCounts> {
+  const ids = await fixtureIds(listed.length);
+  const files = ids.map((id, index): { id: RangeFileId; lines: RangeLineCounts } => ({
+    id,
+    lines: listed[index]?.[0] ?? { kind: "notCounted" },
+  }));
+  const marks = new Map<RangeFileId, ReviewMark>(
+    ids.flatMap((id, index): [RangeFileId, ReviewMark][] => {
+      const mark = listed[index]?.[1] ?? null;
+      return mark === null ? [] : [[id, mark]];
+    }),
+  );
+  return leftToReview(files, marks);
+}
+
+test("leftToReview: skips reviewed files, counts changedSinceReview and unmarked ones whole, ignores notCounted", async () => {
+  expect(
+    await left([
+      [{ kind: "counted", added: 5, removed: 2 }, "reviewed"],
+      [{ kind: "counted", added: 3, removed: 1 }, "changedSinceReview"],
+      [{ kind: "counted", added: 10, removed: 20 }, null],
+      [{ kind: "notCounted" }, null],
+    ]),
+  ).toEqual({ kind: "counted", added: 13, removed: 21 });
+});
+
+test("leftToReview: one unreviewed counted file is its own counts, zeros included", async () => {
+  expect(await left([[{ kind: "counted", added: 0, removed: 4 }, null]])).toEqual({
+    kind: "counted",
+    added: 0,
+    removed: 4,
+  });
+});
+
+test("leftToReview: every file reviewed is notCounted", async () => {
+  expect(
+    await left([
+      [{ kind: "counted", added: 5, removed: 2 }, "reviewed"],
+      [{ kind: "counted", added: 1, removed: 1 }, "reviewed"],
+    ]),
+  ).toEqual({ kind: "notCounted" });
+});
+
+test("leftToReview: only notCounted files left unreviewed is notCounted", async () => {
+  expect(
+    await left([
+      [{ kind: "counted", added: 5, removed: 2 }, "reviewed"],
+      [{ kind: "notCounted" }, "changedSinceReview"],
+    ]),
+  ).toEqual({ kind: "notCounted" });
 });

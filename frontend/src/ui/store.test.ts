@@ -1359,6 +1359,25 @@ test("a take on the shown file opens the next unresolved file, wrapping to the t
   expect(store.taken.value).toEqual(new Map([[LOGO, { by: "side", side: "local" }]]));
 });
 
+test.each([
+  ["list", "z.ts"],
+  ["tree", "b/c.ts"],
+] as const)("a take in %s view opens the next unresolved row of that view", async (mode, next) => {
+  spyConsole();
+  const { source } = choiceSource({}, [LOGO_ENTRY, entry("z.ts"), entry("b/c.ts")]);
+  const store = createAppStore(source);
+  await store.loadFiles();
+  await store.open(LOGO);
+  if (mode === "tree") {
+    store.listMode.toggle();
+  }
+
+  await store.takeSide(LOGO, "local", LOGO_SIDES.diskVersion);
+
+  expect(store.listMode.mode.value).toBe(mode);
+  expect(store.active.value).toBe(next);
+});
+
 const REMOVED_TEXT = "docs/removed-text.md";
 
 test("a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each", async () => {

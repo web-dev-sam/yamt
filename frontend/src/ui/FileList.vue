@@ -4,24 +4,29 @@ import ListIcon from "~icons/lucide/list";
 import ListTree from "~icons/lucide/list-tree";
 
 import { fileIcon } from "./fileIcon";
-import { createFileListMode } from "./fileListMode";
+import type { FileListMode } from "./fileListMode";
 import { revealed, treeRows, type ListedFile } from "./fileTree";
 import FileTree from "./FileTree.vue";
 
-const props = defineProps<{ files: readonly F[]; active: string | null; label: string }>();
-const emit = defineEmits<{ select: [path: string] }>();
+const props = defineProps<{
+  files: readonly F[];
+  active: string | null;
+  label: string;
+  mode: FileListMode;
+}>();
+const emit = defineEmits<{ select: [path: string]; toggleMode: [] }>();
 defineSlots<{
   file(props: { file: F; label: string }): unknown;
   folder?(props: { path: string }): unknown;
+  total?(): unknown;
   footer(): unknown;
 }>();
 
-const { mode, toggle } = createFileListMode();
 const closed = shallowRef<ReadonlySet<string>>(new Set());
 
 const rows = computed(() => treeRows(props.files, closed.value));
 const viewButton = computed(() =>
-  mode.value === "list"
+  props.mode === "list"
     ? { icon: ListIcon, label: "View as tree" }
     : { icon: ListTree, label: "View as list" },
 );
@@ -47,15 +52,16 @@ function toggleFolder(path: string): void {
 
 <template>
   <aside class="flex min-h-0 flex-1 flex-col island bg-sidebar pb-1">
-    <div class="flex h-10 shrink-0 items-center justify-between pr-2 pl-3">
-      <h2 class="font-semibold">Files</h2>
+    <div class="flex h-10 shrink-0 items-center gap-1.5 pr-2 pl-3">
+      <h2 class="mr-auto font-semibold">Files</h2>
+      <slot name="total" />
       <button
         type="button"
         :title="viewButton.label"
         :aria-label="viewButton.label"
         class="rounded p-1.5 hover:bg-hover"
         @mousedown.prevent
-        @click="toggle"
+        @click="emit('toggleMode')"
       >
         <component :is="viewButton.icon" class="size-4" aria-hidden="true" />
       </button>

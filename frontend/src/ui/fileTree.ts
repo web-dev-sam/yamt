@@ -1,3 +1,5 @@
+import type { FileListMode } from "./fileListMode";
+
 export type ListedFile = { readonly path: string };
 
 export type TreeRow<F extends ListedFile> =
@@ -101,6 +103,18 @@ export function treeRows<F extends ListedFile>(
   const rows: TreeRow<F>[] = [];
   pushRows(rows, folderTree(files), { parent: "", depth: 0 }, closed);
   return rows;
+}
+
+const NOTHING_CLOSED: ReadonlySet<string> = new Set();
+
+export function sidebarOrder<F extends ListedFile>(
+  files: readonly F[],
+  mode: FileListMode,
+): readonly F[] {
+  if (mode === "list") {
+    return files;
+  }
+  return treeRows(files, NOTHING_CLOSED).flatMap((row) => (row.kind === "file" ? [row.file] : []));
 }
 
 export function folderPaths(path: string): readonly string[] {

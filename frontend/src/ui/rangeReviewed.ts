@@ -9,6 +9,8 @@ import type {
   SinceReview,
   SourceResult,
 } from "../ipc";
+import type { FileListView } from "./fileListMode";
+import { sidebarOrder } from "./fileTree";
 import { nextOpen } from "./nextFile";
 import { attempt, type Problem, type ProblemCause, type ReviewedStep } from "./problem";
 
@@ -19,8 +21,9 @@ export type RangeReviewed = {
   /** True until the first list answers ok, and while a mark/unmark runs (one write at a time). */
   readonly busy: Readonly<ShallowRef<boolean>>;
   load(): Promise<void>;
-  /** Rule 2: "reviewed" → unmark, stay; otherwise → mark, then show the next file in `start.files` order whose mark is
-   *  not "reviewed" (wrapping, never itself; none → stay). Ignored while busy. */
+  /** Rule 2: "reviewed" → unmark, stay; otherwise → mark, then show the next file in the sidebar's order
+   *  (`sidebarOrder` in the window's list mode) whose mark is not "reviewed" (wrapping, never itself; none → stay).
+   *  Ignored while busy. */
   toggle(entry: RangeEntry): Promise<void>;
   /** Rule 6: forgets a mark; the file shows its whole change (the view derives it from `marks`). Ignored while busy. */
   reviewFromStart(entry: RangeEntry): Promise<void>;
@@ -30,6 +33,7 @@ export type RangeReviewed = {
 
 type ReviewedWindow = {
   readonly start: Readonly<ShallowRef<RangeStart | null>>;
+  readonly listMode: Pick<FileListView, "mode">;
   show(path: string): void;
   problems(problem: Problem): void;
   loadView<T>(
@@ -91,7 +95,10 @@ async function mark(state: State, entry: RangeEntry): Promise<void> {
     return;
   }
   state.marks.value = new Map(state.marks.value).set(entry.id, "reviewed");
-  const files = state.window.start.value?.files ?? [];
+  const files = sidebarOrder(
+    state.window.start.value?.files ?? [],
+    state.window.listMode.mode.value,
+  );
   const next = nextOpen(files, entry.path, (file) => isReviewed(state.marks.value, file.id));
   if (next !== null) {
     state.window.show(next);

@@ -19,6 +19,7 @@ import { aiMayClose } from "./aiClose";
 import { createAsking, type Asking } from "./asking";
 import { createCollapsing, type Collapsing } from "./collapsing";
 import { fileListKey, type KeyPress } from "./fileListKey";
+import { createFileListMode, type FileListView } from "./fileListMode";
 import type { MergeRequests } from "./mergeRequests";
 import { windowMergeRequests } from "./mergeRequestsStore";
 import { attempt, report, type Problem } from "./problem";
@@ -57,6 +58,7 @@ export type RangeStore = SettingsStore &
     readonly preferences: ComputedRef<Preferences>;
     readonly threads: RangeThreads;
     readonly reviewed: RangeReviewed;
+    readonly listMode: FileListView;
     readonly gitlab: GitLabState;
     readonly ai: RangeStoreAi | null;
     readonly search: Searching<Column>;
@@ -89,6 +91,7 @@ type State = Refs & {
   readonly asking: Asking;
   readonly threads: RangeThreads;
   readonly reviewed: RangeReviewed;
+  readonly listMode: FileListView;
   readonly gitlab: GitLabState;
   readonly agent: RangeAgent | null;
   recent: readonly RangeFileId[];
@@ -159,6 +162,7 @@ function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null):
     report(refs, problem);
   }
   const threads = createRangeThreads(source, problems);
+  const listMode = createFileListMode();
   const state: State = {
     ...refs,
     source,
@@ -167,6 +171,7 @@ function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null):
     gitlab: createGitLabCheck(source, threads, problems, refs.start),
     reviewed: createRangeReviewed(source, {
       start: refs.start,
+      listMode,
       show: (path) => {
         showPath(state, path);
       },
@@ -174,6 +179,7 @@ function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null):
       loadView: (entry, call, problem) => loadView(state, entry, call, problem),
     }),
     agent,
+    listMode,
     recent: [],
     latestSettings: 0,
   };
@@ -198,6 +204,7 @@ export function createRangeStore(
     preferences: computed(() => preferencesOf(refs.settings.value)),
     threads: state.threads,
     reviewed: state.reviewed,
+    listMode: state.listMode,
     gitlab: state.gitlab,
     ai: storeAi(state),
     search: createRangeSearch(state, {

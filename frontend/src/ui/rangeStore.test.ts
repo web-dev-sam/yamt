@@ -342,6 +342,24 @@ test("a Reviewed click shows the next file in the window; a failed since load dr
   ]);
 });
 
+test("the store's one list mode drives Reviewed's next file: the tree row below, not the list's", async () => {
+  quiet();
+  const store = await started(3, (fixture) => ({
+    openRange: async () => {
+      const opened = await fixture.openRange();
+      return opened.ok
+        ? { ok: true, value: { ...opened.value, files: [...opened.value.files].reverse() } }
+        : opened;
+    },
+  }));
+  store.listMode.toggle();
+
+  await store.reviewed.toggle(fileAt(store, 2));
+
+  expect(fileAt(store, 2).path).toBe("src/f00.ts");
+  expect(store.shownPath.value).toBe("src/f01.ts");
+});
+
 test("a since load that failed and later succeeds for the same file clears its problem", async () => {
   const errors = quiet();
   let refusing = true;

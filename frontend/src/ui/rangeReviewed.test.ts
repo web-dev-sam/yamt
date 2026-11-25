@@ -12,6 +12,7 @@ import {
   type SourceFailure,
   type SourceResult,
 } from "../ipc";
+import { createFileListMode, type FileListView } from "./fileListMode";
 import type { Problem } from "./problem";
 import { createRangeReviewed, type RangeReviewed } from "./rangeReviewed";
 
@@ -21,6 +22,7 @@ type Opened = {
   readonly reviewed: RangeReviewed;
   readonly source: RangeSource;
   readonly files: readonly RangeEntry[];
+  readonly listMode: FileListView;
   readonly shown: string[];
   readonly forgotten: RangeFileId[];
   readonly problems: Problem[];
@@ -51,8 +53,10 @@ function created(
   const shown: string[] = [];
   const forgotten: RangeFileId[] = [];
   const problems: Problem[] = [];
+  const listMode = createFileListMode();
   const reviewed = createRangeReviewed(source, {
     start,
+    listMode,
     show: (path) => shown.push(path),
     problems: (problem) => problems.push(problem),
     loadView: async (view, call, problem) => {
@@ -65,7 +69,7 @@ function created(
       return null;
     },
   });
-  return { reviewed, source, start, shown, forgotten, problems };
+  return { reviewed, source, listMode, start, shown, forgotten, problems };
 }
 
 async function opened(search: string = SEEDED, edit: Edit = () => ({})): Promise<Opened> {
@@ -73,6 +77,14 @@ async function opened(search: string = SEEDED, edit: Edit = () => ({})): Promise
   made.start.value = valueOf(await made.source.openRange());
   await made.reviewed.load();
   return { ...made, files: made.start.value.files };
+}
+
+async function openedBackwards(): Promise<Opened> {
+  const made = created(SEEDED);
+  const start = valueOf(await made.source.openRange());
+  made.start.value = { ...start, files: [...start.files].reverse() };
+  await made.reviewed.load();
+  return { ...made, files: start.files };
 }
 
 function entry({ files }: Opened, path: string): RangeEntry {
@@ -113,6 +125,26 @@ test("marking_an_unreviewed_file_opens_the_next_not_reviewed_file_in_list_order_
   expect(window.shown).toEqual(["config"]);
 });
 
+test("in tree mode Reviewed opens the next not-reviewed tree row, not the list's next; the list mode follows the list", async () => {
+  const window = await openedBackwards();
+  window.listMode.toggle();
+
+  await window.reviewed.toggle(entry(window, "docs/current.md"));
+  window.listMode.toggle();
+  await window.reviewed.toggle(entry(window, "docs/legacy.txt"));
+
+  expect(window.shown).toEqual(["docs/legacy.txt", "data/big.txt"]);
+});
+
+test("in tree mode Reviewed on the last tree row wraps to the first tree row", async () => {
+  const window = await openedBackwards();
+  window.listMode.toggle();
+
+  await window.reviewed.toggle(entry(window, "config"));
+
+  expect(window.shown).toEqual(["data/big.txt"]);
+});
+
 test("marking_the_last_unreviewed_file_stays", async () => {
   const window = await opened(SEEDED, (fixture) => ({
     listReviewed: async () => {
@@ -136,17 +168,23 @@ test("marking_the_last_unreviewed_file_stays", async () => {
   expect(window.shown).toEqual([]);
 });
 
-test("a mark before the window knows its files is stored and shows nothing next", async () => {
-  const window = await opened();
-  const early = created(SEEDED);
-  await early.reviewed.load();
+test.each([["list"], ["tree"]])(
+  "a mark before the window knows its files is stored and shows nothing next (%s view)",
+  async (mode) => {
+    const window = await opened();
+    const early = created(SEEDED);
+    if (mode === "tree") {
+      early.listMode.toggle();
+    }
+    await early.reviewed.load();
 
-  await early.reviewed.toggle(entry(window, "config"));
+    await early.reviewed.toggle(entry(window, "config"));
 
-  expect(early.reviewed.marks.value.get(entry(window, "config").id)).toBe("reviewed");
-  expect(early.shown).toEqual([]);
-  expect(early.problems).toEqual([]);
-});
+    expect(early.reviewed.marks.value.get(entry(window, "config").id)).toBe("reviewed");
+    expect(early.shown).toEqual([]);
+    expect(early.problems).toEqual([]);
+  },
+);
 
 test("a_changed_since_review_file_counts_as_not_reviewed_for_the_next_file", async () => {
   const window = await opened();
